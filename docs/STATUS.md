@@ -1,6 +1,6 @@
 # yagura build status
 
-Updated 2026-09-26 (phase 2 done). Phases are from `DESIGN.md` §19.
+Updated 2026-09-26 (phase 3 done). Phases are from `DESIGN.md` §19.
 
 ## Phase 1 — Core: done
 
@@ -32,16 +32,33 @@ Proof: `discounts`/U1 on a bare test origin (`~/.yagura/test-origins/kuru-testbe
 
 Found and fixed during the proof: the verifier's shell (zsh) did not word-split `$YAGURA_CLI`, so yagura now installs a real `yagura` executable on the agent's PATH; a `repo set --url` did not reach the cached mirror; a verification retry had no verify unit to run.
 
-## Phase 3 — Planning + parallelism: next
+## Phase 3 — Planning + parallelism: done
 
-From DESIGN §8, §9: planner drains that return a plan delta (schema-validated), scope-overlap serialization, `git merge-tree` check after work, a rolling window of attempts up to the concurrency caps, retries by failure mode, and andon. This is also where yagura gets a long-running process that drives units on its own instead of one CLI command per step.
+- Plan deltas (`plan.ts`): strict schema, extracted from the planner's last ```json block, applied atomically (add/amend/retry/cancel/gates/done); `scope-overlap` deps serialize overlapping write scopes; cycles and unknown references reject the whole delta.
+- Planner sessions (`planner.ts`, `yagura-planner` overlay): read-only trunk checkouts of every project repo, a status generated from the store (`status.ts`), drains recorded in `drains`; three rejected deltas in a row raise andon.
+- Scheduling (`schedule.ts`): readiness from deps, failure policy by mode (retry network/tool/harness/unknown/scope; block timebox/context/oom for the planner to split; block when attempts run out), running-attempt counts for the caps.
+- `git merge-tree` check after a clean work handoff; a conflict rejects the attempt with a note and the retry starts from the new trunk.
+- Engine (`engine.ts`) and `yagura drive <project>`: settle failures, land (auto, or a `land` gate under `merge: human`), plan on meaningful events, run ready units in a rolling window under the global, per-harness, and per-project caps, close when the planner reports done. CLI also gained `andon`, `gates`, `gate answer`, and `project set --merge`.
+- Migration 3: `gates.kind`.
+
+Proof: project `orders` (PRD requirements 2 and 3), `merge: auto`, driven end to end by `yagura drive orders` with no human steps in 1m42s for $0.92: planner (one unit, reasonable since both requirements touch the same two files) → worker → verifier (scenario fails on base, passes on head) → landed `ff105b8` on the test origin → second planner run reported done → project closed. Trunk passes its tests from a fresh clone. Parallel execution and overlap serialization are proven by the engine test with fake agents; the real run had only one unit.
+
+Found and fixed during phase 3: a plan unit briefly in `ready` was picked up as work (the scheduler now only runs work and verify units); plan triggers were keyed to the end of the previous drain, which would miss events during a planner run; `applyDelta` returned pre-transition unit snapshots.
+
+## Phase 4 — Dashboard: next
+
+DESIGN §17. First a long-running daemon that owns the engine for all projects and serves the API + SSE (the CLI becomes a client), then the web UI. The visual style is chosen with the user from 2–3 prototypes of the core screens before building (projects overview, unit graph, live agent log).
+
+## Decisions waiting on the user
+
+- **Skipped required skills.** Workers skipped `pstack:poteto-mode` in 2 of 3 real attempts; it is recorded and shown, not enforced. Options: keep it as information; fail the attempt (retry with a note); or have the planner see it and add a note. Recommendation: fail the attempt once with a note naming the skill, then accept.
 
 ## Known gaps
 
 - A rebase that changes the patch blocks the unit; re-verifying a rebased head arrives with the babysit units (phase 5).
-- Landing does not yet void dependents' verdicts; dependencies between units arrive in phase 3.
+- Landing does not void dependents' verdicts, and `needs-source` behaves like `needs-landed` until read-only mounts arrive (phase 6).
 - Pack `doctor`/`deploy`/`teardown` are parsed but not run; deployed verification comes with the `kube-namespace` provider (phase 5).
-- METHOD compliance is recorded and shown, not enforced; the planner (phase 3) should act on it. U1's worker attempt 2 skipped `pstack:poteto-mode`.
 - `yagura evidence run` trusts `YAGURA_ATTEMPT` plus the attempt being in `running`; a per-attempt token arrives with the daemon API.
-- The CLI runs in-process; there is no daemon, API, or scheduler loop yet (phases 3–4).
+- `yagura drive` runs the engine in the foreground for one project; the always-on daemon and API arrive in phase 4.
+- No wall-clock budget or landing cutoff yet (DESIGN §6).
 - The user's SessionStart hook (codebase-memory-mcp indexing) runs in every agent session; suggested fix is to skip when `YAGURA_ATTEMPT` is set. Not yet applied.

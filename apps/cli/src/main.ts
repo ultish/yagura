@@ -5,6 +5,11 @@ import { parseArgs, type ParseArgsConfig } from "node:util";
 import {
   addEnvironment,
   addProject,
+  answerGate,
+  Engine,
+  listGates,
+  setAndon,
+  setMergePolicy,
   addRepo,
   addUnitNote,
   evidenceCli,
@@ -50,7 +55,11 @@ const USAGE = `yagura — agent orchestration
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
   yagura repo set <id> --url <url>
   yagura env add <id> --provider local-process [--capacity 2] [--name <text>]
-  yagura project set <id> --env <env id>
+  yagura project set <id> [--env <env id>] [--merge auto|human]
+  yagura drive <project>                 plan, run, verify, and land until nothing is left to do
+  yagura andon <project> --reason <text> | --clear
+  yagura gates [project]                 open questions for a human
+  yagura gate answer <id> <option>
   yagura unit reject|requeue <project> <unit#> [--note <text>]
   yagura run <project> <unit#>           run a ready work unit
   yagura verify <project> <unit#>        run the queued verify unit for a unit in verifying
@@ -131,11 +140,16 @@ async function main() {
         name: { type: "string" },
         "min-tier": { type: "string", default: "unit-verified" },
         env: { type: "string" },
+        merge: { type: "string" },
       });
       const id = positionals[1];
-      if (positionals[0] === "set" && id && values.env) {
-        setProjectEnvironment(db, id as ProjectId, values.env as EnvironmentId);
-        console.log(`project ${id} environment → ${values.env}`);
+      if (positionals[0] === "set" && id && (values.env || values.merge)) {
+        if (values.env) setProjectEnvironment(db, id as ProjectId, values.env as EnvironmentId);
+        if (values.merge) {
+          if (values.merge !== "auto" && values.merge !== "human") fail("--merge must be auto or human");
+          setMergePolicy(db, id as ProjectId, values.merge as "auto" | "human");
+        }
+        console.log(`project ${id}:${values.env ? ` environment → ${values.env}` : ""}${values.merge ? ` merge → ${values.merge}` : ""}`);
         return;
       }
       if (positionals[0] !== "new" || !id || !values.goal || !values.predicate || !many(values.repo).length) fail(USAGE);
@@ -238,6 +252,43 @@ async function main() {
           `\n  cited: ${result.decision.citedRunIds.map((id) => `run:${id}`).join(", ") || "none"}` +
           `\nU${after.seq} → ${after.state}${after.state === "verified" ? `\n  next: yagura land ${projectId} ${after.seq}` : ""}`,
       );
+      return;
+    }
+    case "drive": {
+      const [projectId] = rest;
+      if (!projectId) fail(USAGE);
+      const engine = new Engine(agentCtx(), {
+        projectId: projectId as ProjectId,
+        log: (line) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`),
+      });
+      await engine.runUntilIdle();
+      const project = getProject(db, projectId as ProjectId);
+      const open = listGates(db, project.id, "open");
+      console.log(
+        `\n${project.id} is ${project.state}${project.andonReason ? ` (andon: ${project.andonReason})` : ""}` +
+          (open.length ? `\nwaiting on ${open.length} gate(s):\n${open.map((g) => `  gate ${g.id}: ${g.question} [${g.options.join(" | ")}]`).join("\n")}` : ""),
+      );
+      return;
+    }
+    case "andon": {
+      const { positionals, values } = args({ reason: { type: "string" }, clear: { type: "boolean" } });
+      const [projectId] = positionals;
+      if (!projectId || (!values.reason && !values.clear)) fail(USAGE);
+      setAndon(db, projectId as ProjectId, values.clear ? null : values.reason!);
+      console.log(values.clear ? `andon cleared on ${projectId}` : `andon raised on ${projectId}: ${values.reason}`);
+      return;
+    }
+    case "gates": {
+      const [projectId] = rest;
+      for (const g of listGates(db, (projectId as ProjectId) ?? null, "open"))
+        console.log(`gate ${g.id} (${g.projectId}, ${g.kind}): ${g.question} [${g.options.join(" | ")}]${g.defaultOption ? ` default ${g.defaultOption}` : ""}`);
+      return;
+    }
+    case "gate": {
+      const [sub, id, answer] = rest;
+      if (sub !== "answer" || !id || !answer) fail(USAGE);
+      const g = answerGate(db, Number(id), answer!);
+      console.log(`gate ${g.id} answered: ${g.answer}`);
       return;
     }
     case "land": {

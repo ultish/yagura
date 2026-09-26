@@ -175,6 +175,8 @@ The planner is a fresh harness call, not a standing session.
 
 Parallelism is therefore dynamic (the planner proposes any shape at any drain) but safe (the daemon decides what actually runs together).
 
+**As built (phase 3).** The delta is the last fenced ```json block of the planner's final message, validated strictly (unknown fields are rejected): `add[]` (`key`, `repo`, `goal`, `write`, `forbid`, `accept`, `verify`, `context`, `playbook`, `timeboxMinutes`, `deps[{on, kind}]` where `on` is a key in the delta or `U<n>`), `amend[]` (units not started), `retry[]` (blocked/failed/rejected units, with a note carried into the next brief and one more attempt), `cancel[]` (idle units; running ones are reported, not killed), `gates[]` (question, options, default), `done`, `summary`. Scope overlap is decided on each glob's static base path, conservatively. A drain is triggered by the first run, a unit landing, blocking, or being abandoned (except by the planner itself), a rejected delta, an answered gate, or andon being cleared; the trigger window starts when the previous drain started, so nothing that happens while a planner runs is missed. Three rejected deltas in a row raise andon. The project closes when the latest applied delta says `done` and no unit is left except blocked ones.
+
 ## 9. Scheduler
 
 A unit is **ready** when: deps satisfied (`needs-source` → upstream has a verdict ≥ its required tier; `needs-landed` → upstream landed), no running unit overlaps its write scope in the same repo, project in-flight cap not hit, no andon on the project.
@@ -183,6 +185,8 @@ A unit is **ready** when: deps satisfied (`needs-source` → upstream has a verd
 - **Retries by failure mode** (orchestrate): `timebox | context-exhausted | oom` → planner must split or narrow; `network` → retry as-is; `tool-error | harness-error` → retry with another harness/model if configured; `unknown` → retry once. After 2 failed attempts the unit is `blocked` and surfaces to the planner, not retried blindly.
 - **Liveness** is the daemon's own knowledge: it owns the pid, the stream, and the exit code. No "is it alive" guessing. A unit that exceeds its timebox with no side effect (commit, artifact, stream progress) is killed and gets a synthetic handoff.
 - **Andon.** A project-level stop (dashboard button or planner gate) halts new spawns; in-flight attempts finish.
+
+**As built (phase 3).** `yagura drive <project>` runs the engine loop in the foreground until nothing is left to do: settle failed/rejected units by the failure policy, land verified units (`merge: auto`, or a `land` gate answered `land` under `merge: human`), plan when triggered, then start ready work and verify units in seq order (verify first) while the global (`max_parallel_agents`), per-harness, and per-project (`project.max_in_flight`) caps have room; leases add the per-environment cap. `needs-source` is treated like `needs-landed` until read-only mounts arrive (phase 6). After a clean work handoff, `git merge-tree --write-tree` against the current trunk rejects work that no longer merges (requires git ≥ 2.38; RHEL9 ships 2.39).
 
 ## 10. Harness adapters
 
