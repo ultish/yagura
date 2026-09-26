@@ -36,7 +36,8 @@ def tower(x, y, scale=1.0, lit=0, slots=3, ringing=False, planner=False, dim=Fal
         out.append(f'<rect{anim} x="{px:.1f}" y="-218" width="{pw}" height="26" fill="{fill}" stroke="{stroke}" stroke-width="1"/>')
         out.append(f'<path d="M{px + pw/2:.1f} -218 L{px + pw/2:.1f} -192 M{px:.1f} -209 L{px + pw:.1f} -209 M{px:.1f} -200 L{px + pw:.1f} -200" stroke="{"#b77a2e" if on else stroke}" stroke-width=".8"/>')
     roof = "#2b2533" if not dim else "#1e1c26"
-    out.append(f'<path d="M-52 -222 Q-36 -224 -26 -236 L-10 -252 L10 -252 L26 -236 Q36 -224 52 -222 Q30 -229 0 -229 Q-30 -229 -52 -222 Z" fill="{roof}" stroke="{t}" stroke-width="2" stroke-linejoin="round"/>')
+    out.append(f'<path d="M-48 -224 L-10 -252 L10 -252 L48 -224 Z" fill="{roof}" stroke="{t}" stroke-width="2" stroke-linejoin="miter"/>')
+    out.append(f'<path d="M-50 -224 L50 -224" stroke="{t}" stroke-width="3.2" stroke-linecap="butt"/>')
     out.append(f'<path d="M-10 -252 L10 -252" stroke="{AMBER if planner and not dim else t}" stroke-width="{3.5 if planner and not dim else 2.5}" stroke-linecap="round"/>')
     if planner and not dim:
         out.append(f'<circle class="pulse" cx="0" cy="-258" r="3.5" fill="{AMBER}"/>')
