@@ -546,7 +546,7 @@ The log view is a structured timeline, not a terminal dump:
 
 Controls on a running attempt: **stop**; **stop and respawn with a note** (the note is appended to the next attempt's brief); and, where the harness accepts streaming input (Claude's `--input-format stream-json`), **message the agent** mid-run.
 
-### Visual design: "the watch"
+### Visual design: "the watch" (option F on the design canvas)
 
 Chosen with the user from three rounds of mocks (canvas: https://claude.ai/artifact/AuLG6d7GiuQoSBFfdGeLS5, round 3). A yagura is a fire-watch tower, and the UI uses that literally but only for real state:
 
