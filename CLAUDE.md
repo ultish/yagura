@@ -10,7 +10,8 @@ Agent orchestration for long-running engineering projects: a deterministic daemo
 ## Layout
 
 - `packages/core` — domain types, SQLite schema, store, config, git, scope, brief/handoff, harness adapters, runner. Everything testable lives here.
-- `apps/cli` — the `yagura` CLI (in-process for now; the daemon/API arrives with the dashboard phase).
+- `apps/cli` — the `yagura` CLI; `yagura daemon` runs `apps/daemon` (engine + Hono API + SSE), which also serves `apps/web/dist`.
+- `apps/web` — the dashboard (Vite + React); pure logic in `src/lib` is unit-tested, pages in `src/pages`, the tower/beacon drawings in `src/scene`.
 - `plugins/yagura` — role overlay skills loaded into every agent session via `--plugin-dir` (`yagura-worker`, more per role later).
 - Runtime state lives in `~/.yagura` (override with `YAGURA_HOME`), never in the repo.
 
@@ -22,6 +23,7 @@ pnpm -r build                 # core copies schema.sql into dist
 pnpm -r test                  # vitest; real SQLite, real git, fake agent
 pnpm -r typecheck
 node apps/cli/dist/main.js    # the CLI (chmod +x dist/main.js after a build if needed)
+pnpm --filter @yagura/web dev # dashboard dev server, proxies /api to the daemon (YAGURA_PORT, default 7300)
 ```
 
 ## Conventions
@@ -31,7 +33,8 @@ node apps/cli/dist/main.js    # the CLI (chmod +x dist/main.js after a build if 
 - Unit state changes go through `transitionUnit` only (it checks `UNIT_TRANSITIONS` and writes an event).
 - No narrative comments; comment only a non-obvious why.
 - Commits: Conventional Commits, author Jimmy <ultish@gmail.com>, no attribution trailers. Push to `origin main` (github.com/ultish/yagura).
-- UI work: discuss subjective design choices with the user and prototype options before building.
+- UI work: discuss subjective design choices with the user and prototype options before building. Colors only through the CSS variables in `apps/web/src/theme.css` (amber = alive, vermilion = needs you, pine = landed); motion only for real state, off under reduced motion.
+- To try the whole system without spending money, point `harness.claude.bin` at a wrapper that runs `packages/core/src/harness/fixtures/fake-agent.mjs` with `FAKE_MODE=engine` (and `FAKE_DELAY_MS` to watch it) in a scratch `YAGURA_HOME`.
 
 ## Related repos
 

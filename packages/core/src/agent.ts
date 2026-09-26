@@ -6,6 +6,7 @@ import type { Bootstrap } from "./config.js";
 import type { Attempt, HarnessEvent, ProjectId, Role, Unit } from "./domain.js";
 import type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
 import { missingSkills } from "./pack.js";
+import { logTimesPath } from "./paths.js";
 import { getAttempt, getUnit, recordEvent, updateAttempt, type Db } from "./store.js";
 import type { AttemptId } from "./domain.js";
 
@@ -92,6 +93,7 @@ export async function runAgentSession(
   },
 ): Promise<SessionResult> {
   write(s.logPath, "");
+  write(logTimesPath(s.logPath), "");
   const bin = ctx.cli.length ? installCliShim(ctx) : null;
   const { argv, stdin } = s.adapter.command(s.run);
   const [cmd, ...args] = argv as [string, ...string[]];
@@ -136,6 +138,7 @@ export async function runAgentSession(
 
   for await (const line of createInterface({ input: child.stdout })) {
     appendFileSync(s.logPath, `${line}\n`);
+    appendFileSync(logTimesPath(s.logPath), `${Date.now()}\n`);
     let events: HarnessEvent[];
     try {
       events = s.adapter.parse(line);

@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { acquireDaemonLock, claudeAdapter, Engine, layout, loadBootstrap, openStore, type Bootstrap } from "@yagura/core";
 import { createApp } from "./server.js";
@@ -23,9 +25,10 @@ export async function startDaemon(cli: string[]): Promise<void> {
   const token = LOOPBACK.has(boot.bind) ? null : loadOrCreateToken(boot);
   const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
   const engine = new Engine({ db, boot, adapters: { claude: claudeAdapter }, cli }, { log });
-  const app = createApp({ db, boot, token, cli });
+  const webDir = fileURLToPath(new URL("../../web/dist", import.meta.url));
+  const app = createApp({ db, boot, token, cli, webDir: existsSync(join(webDir, "index.html")) ? webDir : null });
   const server = serve({ fetch: app.fetch, hostname: boot.bind, port: boot.port });
-  log(`yagura daemon on http://${boot.bind}:${boot.port}${token ? ` (token in ${boot.tokenFile})` : ""}, home ${boot.home}`);
+  log(`yagura daemon on http://${boot.bind}:${boot.port}${webDir && existsSync(join(webDir, "index.html")) ? "" : " (API only; build apps/web for the dashboard)"}${token ? ` (token in ${boot.tokenFile})` : ""}, home ${boot.home}`);
 
   const abort = new AbortController();
   const shutdown = () => {

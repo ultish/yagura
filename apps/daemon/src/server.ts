@@ -1,7 +1,13 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { extname, join, normalize } from "node:path";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
+  addUnitNote,
+  bumpMaxAttempts,
+  logTimesPath,
+  threadsForProject,
+  transitionUnit,
   messagesMentioning,
   suggestMentions,
   addMessage,
@@ -50,6 +56,7 @@ import {
   type ProjectId,
   type SettingScope,
 } from "@yagura/core";
+import { attemptDetail, bell, projectSummary, unitView } from "./views.js";
 
 export interface ServerOptions {
   db: Db;
@@ -58,7 +65,20 @@ export interface ServerOptions {
   adapters?: Record<string, HarnessAdapter>;
   cli?: string[];
   pollMs?: number;
+  webDir?: string | null;
 }
+
+const MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".woff2": "font/woff2",
+  ".woff": "font/woff",
+};
 
 type Row = Record<string, unknown>;
 
@@ -75,26 +95,20 @@ function readLog(opts: ServerOptions, attemptId: AttemptId, from: number) {
   const unit = getUnit(opts.db, attempt.unitId);
   const path = layout(opts.boot).log(unit.projectId, unit.seq, attempt.n);
   const adapter = (opts.adapters ?? { claude: claudeAdapter })[attempt.harness] ?? claudeAdapter;
-  if (!existsSync(path)) return { attempt, lines: [] as { line: number; raw: string; events: unknown[] }[], next: from };
+  if (!existsSync(path)) return { attempt, lines: [] as { line: number; at: number | null; raw: string; events: unknown[] }[], next: from };
   const complete = readFileSync(path, "utf8").split("\n").slice(0, -1);
+  const timesPath = logTimesPath(path);
+  const times = existsSync(timesPath) ? readFileSync(timesPath, "utf8").split("\n").map(Number) : [];
   const lines = complete.slice(from).map((raw, i) => {
     let events: unknown[] = [];
     try {
       events = adapter.parse(raw);
     } catch {}
-    return { line: from + i, raw, events };
+    return { line: from + i, at: times[from + i] || null, raw, events };
   });
   return { attempt, lines, next: from + lines.length };
 }
 
-function projectSummary(db: Db, projectId: ProjectId) {
-  const project = getProject(db, projectId);
-  const units = listUnits(db, projectId);
-  const counts: Record<string, number> = {};
-  for (const u of units.filter((x) => x.type === "work")) counts[u.state] = (counts[u.state] ?? 0) + 1;
-  const running = (db.prepare("SELECT COUNT(*) AS n FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.project_id = ? AND a.state = 'running'").get(projectId) as { n: number }).n;
-  return { project, workCounts: counts, running, openGates: listGates(db, projectId, "open").length };
-}
 
 export function createApp(opts: ServerOptions): Hono {
   const { db, boot } = opts;
@@ -121,7 +135,8 @@ export function createApp(opts: ServerOptions): Hono {
     return c.json({
       ...projectSummary(db, id),
       repos: projectRepos(db, id),
-      units: listUnits(db, id).map((u) => ({ ...u, attempts: listAttempts(db, u.id) })),
+      units: listUnits(db, id).map((u) => unitView(db, u)),
+      threads: threadsForProject(db, id),
       deps: listDeps(db, id),
       gates: listGates(db, id),
       waiting: r.waiting.map((w) => ({ unitId: w.unit.id, reason: w.reason })),
@@ -160,15 +175,33 @@ export function createApp(opts: ServerOptions): Hono {
     const attempt = getAttempt(db, Number(c.req.param("id")) as AttemptId);
     const unit = getUnit(db, attempt.unitId);
     const paths = layout(boot);
-    const read = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : null);
-    return c.json({
-      attempt,
-      unit,
-      brief: read(paths.brief(unit.projectId, unit.seq, attempt.n)),
-      handoff: read(paths.handoff(unit.projectId, unit.seq, attempt.n)),
-      leftovers: read(paths.leftovers(unit.projectId, unit.seq, attempt.n)),
-      runs: listEvidenceRuns(db, attempt.id),
-    });
+    return c.json(
+      attemptDetail(db, {
+        brief: paths.brief(unit.projectId, unit.seq, attempt.n),
+        handoff: paths.handoff(unit.projectId, unit.seq, attempt.n),
+        leftovers: paths.leftovers(unit.projectId, unit.seq, attempt.n),
+      }, attempt.id),
+    );
+  });
+
+  app.get("/api/bell", (c) => c.json(bell(db)));
+
+  app.post("/api/projects/:id/units/:seq/retry", async (c) => {
+    const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
+    const note = String(((await c.req.json().catch(() => ({}))) as { note?: unknown }).note ?? "").trim();
+    if (!["blocked", "failed", "rejected"].includes(unit.state)) return c.json({ error: `U${unit.seq} is ${unit.state}; only blocked, failed, or rejected units can be retried` }, 409);
+    if (note) addUnitNote(db, unit.id, `Operator: ${note}`);
+    bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).length + 1);
+    transitionUnit(db, unit.id, "ready", { by: "operator", note: note || null });
+    return c.json(unitView(db, getUnit(db, unit.id)));
+  });
+
+  app.post("/api/projects/:id/units/:seq/cancel", async (c) => {
+    const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
+    const reason = String(((await c.req.json().catch(() => ({}))) as { reason?: unknown }).reason ?? "cancelled by operator");
+    if (["running", "landed", "done", "abandoned", "landing"].includes(unit.state)) return c.json({ error: `U${unit.seq} is ${unit.state} and cannot be cancelled` }, 409);
+    transitionUnit(db, unit.id, "abandoned", { by: "operator", reason });
+    return c.json(unitView(db, getUnit(db, unit.id)));
   });
 
   app.get("/api/attempts/:id/log", (c) => {
@@ -236,6 +269,7 @@ export function createApp(opts: ServerOptions): Hono {
   };
   const threadView = (id: number) => ({
     thread: getThread(db, id),
+    projects: getThread(db, id).projects.map((p) => projectSummary(db, p)),
     busy: talking.has(id),
     messages: listMessages(db, id),
     decisions: listDecisions(db, id),
@@ -299,7 +333,8 @@ export function createApp(opts: ServerOptions): Hono {
 
   app.get("/api/stream", (c: Context) =>
     streamSSE(c, async (stream) => {
-      let since = Number(c.req.query("since") ?? c.req.header("last-event-id") ?? 0);
+      const from = c.req.query("since") ?? c.req.header("last-event-id") ?? "0";
+      let since = from === "latest" ? (db.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM events").get() as { id: number }).id : Number(from);
       const projectId = c.req.query("project") ?? null;
       while (!stream.aborted) {
         for (const e of eventsSince(db, since, projectId)) {
@@ -327,6 +362,19 @@ export function createApp(opts: ServerOptions): Hono {
       }
     }),
   );
+
+  if (opts.webDir) {
+    const webDir = opts.webDir;
+    app.get("*", (c) => {
+      if (c.req.path.startsWith("/api/")) return c.json({ error: "not found" }, 404);
+      const rel = normalize(decodeURIComponent(c.req.path)).replace(/^([/\\.])+/, "");
+      const file = join(webDir, rel);
+      const target = rel && file.startsWith(webDir) && existsSync(file) && statSync(file).isFile() ? file : join(webDir, "index.html");
+      const type = MIME[extname(target)] ?? "application/octet-stream";
+      const cache = target.includes(`${webDir}/assets/`) ? "public, max-age=31536000, immutable" : "no-cache";
+      return c.body(readFileSync(target), 200, { "content-type": type, "cache-control": cache });
+    });
+  }
 
   return app;
 }

@@ -51,6 +51,11 @@ function verify(mode) {
 }
 
 function finish(text) {
+  const delay = Number(process.env.FAKE_DELAY_MS ?? 0);
+  if (delay) {
+    emit({ type: "assistant", message: { content: [{ type: "text", text: "Working through the brief." }] } });
+    return setTimeout(() => emit({ type: "result", subtype: "success", is_error: false, result: text, terminal_reason: "completed", total_cost_usd: 0.01 }), delay);
+  }
   emit({ type: "result", subtype: "success", is_error: false, result: text, terminal_reason: "completed", total_cost_usd: 0.01 });
 }
 

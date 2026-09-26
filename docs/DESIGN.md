@@ -566,6 +566,14 @@ Chosen with the user from three rounds of mocks (canvas: https://claude.ai/artif
 
 Bind to localhost by default; token auth when exposed on the LAN.
 
+### As built (`apps/web`)
+
+Vite + React + TypeScript, built to `apps/web/dist` and served by the daemon on the API's port (any non-`/api` path falls back to `index.html`); `pnpm --filter @yagura/web dev` proxies `/api` to the daemon for development. Fonts are bundled from `@fontsource` (Latin subsets for body and mono; Shippori Mincho with full coverage for titles and 櫓), so nothing loads from the network. Every color is a CSS variable with night and daybreak values; the toggle is remembered per browser. Live updates: one SSE connection (`/api/stream?since=latest`) triggers refetches; agent logs stream from `/api/attempts/:id/stream`. A `?token=` in the URL is stored and sent as a bearer token.
+
+Pages: **The watch** (towers from `lib/scene.ts`: urgency order, ~6 on the ridge then "+N quiet", closed for a day then gone, arcs for open `after` chains; a sticky strip replaces the scene on scroll; bell inbox from `GET /api/bell` with the right actions per item; talk box; lanterns; conversations), **Talk** (round-4 option G1: threads | conversation | ledger of projects, decisions with superseded ones struck through, open questions; proposal cards with Go / Edit / Discard; autonomy toggle; `@` autocomplete), **Project** (beacons from `lib/units.ts`, grouped rows with Land / Hold / Retry with a note / Cancel / Watch / Stop, andon, "Add work" opens a conversation prefilled with `@project`), **Agent** (option H1: live timeline with per-step times, a rail with context and timebox meters, brief, trunk-vs-head grid from the verifier's runs, unit history), **Projects** and **Agents** lists. Environments, Repos, and Settings pages are not built yet.
+
+Supporting daemon changes: each agent log line's arrival time is appended to a sidecar `<log>.times` (the raw harness log stays verbatim) and returned as `at`; `GET /api/bell`; `POST /api/projects/:id/units/:seq/retry` (note, one more attempt) and `/cancel`; project summaries carry agent slots, planner state, blocked count, last landing; units carry their live verdict and blocked reason; attempt detail carries the unit's history and its verifications' runs.
+
 ## 18. Security and air-gap
 
 - Agents run with the harness's permission policy mapped from yagura's per-unit policy (write scope → allowed paths where the harness supports it; otherwise enforced post-hoc by the scope check).

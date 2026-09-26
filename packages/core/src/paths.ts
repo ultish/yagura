@@ -5,6 +5,8 @@ import type { ProjectId, RepoId } from "./domain.js";
 export const unitRef = (seq: number) => `u${seq}`;
 export const attemptRef = (seq: number, n: number) => `u${seq}.${n}`;
 
+export const logTimesPath = (logPath: string) => logPath.replace(/\.jsonl$/, "") + ".times";
+
 export function layout(boot: Bootstrap) {
   const project = (p: ProjectId) => join(boot.home, "projects", p);
   return {

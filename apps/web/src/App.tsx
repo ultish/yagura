@@ -1,0 +1,88 @@
+import { useEffect, useState } from "react";
+import { LiveContext, useApi, useLiveVersion, usePath } from "./api";
+import { Agent, UnitAgent } from "./pages/Agent";
+import { Agents } from "./pages/Agents";
+import { Home } from "./pages/Home";
+import { Project } from "./pages/Project";
+import { Projects } from "./pages/Projects";
+import { Talk } from "./pages/Talk";
+import { Link } from "./ui/Link";
+
+type Theme = "night" | "day";
+
+function useTheme(): [Theme, () => void] {
+  const [theme, setTheme] = useState<Theme>(() => (document.documentElement.dataset.theme === "day" ? "day" : "night"));
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try {
+      localStorage.setItem("yagura.theme", theme);
+    } catch {}
+  }, [theme]);
+  return [theme, () => setTheme((t) => (t === "night" ? "day" : "night"))];
+}
+
+const NAV = [
+  { to: "/", label: "The watch", match: (p: string) => p === "/" },
+  { to: "/talk", label: "Talk", match: (p: string) => p.startsWith("/talk") },
+  { to: "/projects", label: "Projects", match: (p: string) => p === "/projects" || p.startsWith("/p/") },
+  { to: "/agents", label: "Agents", match: (p: string) => p.startsWith("/agents") || p.startsWith("/a/") },
+];
+
+function Header() {
+  const path = usePath();
+  const [theme, toggle] = useTheme();
+  const health = useApi<{ ok: boolean; home: string }>("/api/health");
+  return (
+    <header style={{ minHeight: 60, display: "flex", alignItems: "center", gap: 36, padding: "0 36px", borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>
+      <Link to="/" style={{ display: "flex", alignItems: "baseline", gap: 10, color: "var(--text)", textDecoration: "none" }}>
+        <span className="serif" style={{ fontSize: 24, fontWeight: 700 }}>
+          櫓
+        </span>
+        <span className="serif" style={{ fontSize: 16, letterSpacing: ".12em" }}>
+          yagura
+        </span>
+      </Link>
+      <nav aria-label="Main" style={{ display: "flex", gap: 26 }}>
+        {NAV.map((n) => (
+          <Link key={n.to} to={n.to} aria-current={n.match(path) ? "page" : undefined} style={{ color: n.match(path) ? "var(--text)" : "var(--muted)", fontWeight: n.match(path) ? 700 : 400, textDecoration: "none", fontSize: 14.5 }}>
+            {n.label}
+          </Link>
+        ))}
+      </nav>
+      <div className="mono" style={{ marginLeft: "auto", fontSize: 12, color: health.error ? "var(--bell-text)" : "var(--muted)" }}>
+        {health.error ? "daemon unreachable" : `${location.host}`}
+      </div>
+      <button type="button" onClick={toggle} aria-label={theme === "night" ? "Switch to daybreak theme" : "Switch to night theme"} className="mono" style={{ fontSize: 12, border: "1px solid var(--btnline)", background: "transparent", borderRadius: 999, padding: "6px 12px", cursor: "pointer" }}>
+        {theme === "night" ? "☾ night · daybreak" : "☀ daybreak · night"}
+      </button>
+    </header>
+  );
+}
+
+function Routes() {
+  const path = usePath();
+  let m: RegExpExecArray | null;
+  if (path === "/") return <Home />;
+  if (path === "/projects") return <Projects />;
+  if (path === "/agents") return <Agents />;
+  if ((m = /^\/talk(?:\/(\d+))?\/?$/.exec(path))) return <Talk threadId={m[1] ? Number(m[1]) : null} />;
+  if ((m = /^\/a\/(\d+)\/?$/.exec(path))) return <Agent attemptId={Number(m[1])} />;
+  if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)(?:\/(\d+))?\/?$/.exec(path))) return <UnitAgent projectId={m[1]!} seq={Number(m[2])} n={m[3] ? Number(m[3]) : null} />;
+  if ((m = /^\/p\/([a-z][a-z0-9-]*)\/?$/.exec(path))) return <Project id={m[1]!} />;
+  return (
+    <main style={{ padding: 36 }}>
+      <h1 className="serif">Nothing here</h1>
+      <Link to="/">Back to the watch</Link>
+    </main>
+  );
+}
+
+export function App() {
+  const live = useLiveVersion();
+  return (
+    <LiveContext.Provider value={live}>
+      <Header />
+      <Routes />
+    </LiveContext.Provider>
+  );
+}
