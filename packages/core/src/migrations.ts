@@ -55,6 +55,63 @@ ALTER TABLE units ADD COLUMN landed_sha TEXT;
 CREATE INDEX units_landed_sha ON units (landed_sha);
 `,
   },
+  {
+    version: 5,
+    sql: `
+ALTER TABLE projects ADD COLUMN after_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE projects ADD COLUMN phase_gate INTEGER NOT NULL DEFAULT 0 CHECK (phase_gate IN (0, 1));
+CREATE TABLE threads (
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  autonomy TEXT NOT NULL DEFAULT 'propose' CHECK (autonomy IN ('propose', 'go')),
+  state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'closed')),
+  reported_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE thread_projects (
+  thread_id INTEGER NOT NULL REFERENCES threads (id),
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  PRIMARY KEY (thread_id, project_id)
+);
+CREATE TABLE thread_messages (
+  id INTEGER PRIMARY KEY,
+  thread_id INTEGER NOT NULL REFERENCES threads (id),
+  role TEXT NOT NULL CHECK (role IN ('human', 'watchman', 'system')),
+  body TEXT NOT NULL,
+  turn_log TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX thread_messages_thread ON thread_messages (thread_id, id);
+CREATE TABLE thread_decisions (
+  id INTEGER PRIMARY KEY,
+  thread_id INTEGER NOT NULL REFERENCES threads (id),
+  text TEXT NOT NULL,
+  source_message_id INTEGER REFERENCES thread_messages (id),
+  superseded_by INTEGER REFERENCES thread_decisions (id),
+  created_at TEXT NOT NULL
+);
+CREATE TABLE thread_questions (
+  id INTEGER PRIMARY KEY,
+  thread_id INTEGER NOT NULL REFERENCES threads (id),
+  text TEXT NOT NULL,
+  source_message_id INTEGER REFERENCES thread_messages (id),
+  answer TEXT,
+  resolved_message_id INTEGER REFERENCES thread_messages (id),
+  created_at TEXT NOT NULL
+);
+CREATE TABLE proposals (
+  id INTEGER PRIMARY KEY,
+  thread_id INTEGER NOT NULL REFERENCES threads (id),
+  message_id INTEGER REFERENCES thread_messages (id),
+  body_json TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'applied', 'discarded', 'failed')),
+  result_json TEXT,
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

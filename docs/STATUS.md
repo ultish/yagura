@@ -1,6 +1,6 @@
 # yagura build status
 
-Updated 2026-09-26 (phase 4 in progress). Phases are from `DESIGN.md` §19.
+Updated 2026-09-26 (phase 4 in progress; watchman started). Phases are from `DESIGN.md` §19.
 
 ## Phase 1 — Core: done
 
@@ -44,6 +44,20 @@ Found and fixed during the proof: the verifier's shell (zsh) did not word-split 
 Proof: project `orders` (PRD requirements 2 and 3), `merge: auto`, driven end to end by `yagura drive orders` with no human steps in 1m42s for $0.92: planner (one unit, reasonable since both requirements touch the same two files) → worker → verifier (scenario fails on base, passes on head) → landed `ff105b8` on the test origin → second planner run reported done → project closed. Trunk passes its tests from a fresh clone. Parallel execution and overlap serialization are proven by the engine test with fake agents; the real run had only one unit.
 
 Found and fixed during phase 3: a plan unit briefly in `ready` was picked up as work (the scheduler now only runs work and verify units); plan triggers were keyed to the end of the previous drain, which would miss events during a planner run; `applyDelta` returned pre-transition unit snapshots.
+
+## Watchman: in progress (resume here)
+
+Done: DESIGN §8a (flow, autonomy, DB-backed memory, per-turn context assembly and budget, structured turn records) and §17 chains/spec import; **migration 5** (committed, tests green): `threads`, `thread_projects`, `thread_messages`, `thread_decisions`, `thread_questions`, `proposals`, `projects.after_json`, `projects.phase_gate`; `addProject` accepts `after` (→ state `framing`), `phaseGate`, `mergePolicy`, `environmentId`; `watchman` added to `ROLES`.
+
+Next, in order:
+1. Store functions for threads/messages/decisions/questions/proposals (+ FTS rows with kind `message`).
+2. Generalize `runAgentSession` so a session need not belong to a unit/attempt (a recorder interface), then `watchman.ts`: assemble context under a token budget (setting, ~40k; chars/4 estimate) in the §8a priority order; render the watchman brief; parse the reply + last ```yagura block (zod: decisions add/supersede, questions add/resolve, spec section edits, optional proposal); store atomically.
+3. Proposal apply: create projects (existing repo, or a new local bare repo under `~/.yagura/repos` with an initial commit), environment, merge policy, min tier, `after`, initial units via `applyDelta`, `projects/<p>/spec.md`; link to the thread; autonomy `go` applies automatically except irreversible actions.
+4. Engine: activate `framing` projects whose `after` are all closed (ring a gate first when `phase_gate`); post a **report** into the thread when its projects close or block (generated from records: landed units + SHAs + tiers, blocked reasons, how to run from the verify pack, open questions) and ring the bell.
+5. `plugins/yagura/skills/yagura-watchman`; CLI `yagura talk [--thread N] [--go] "…"`, `thread list|show|search`, `proposal apply|discard`; API endpoints for the dashboard.
+6. Tests: context-budget trimming (pure); fake-agent `watchman` role emitting a proposal → apply → engine drives it to closed → report posted.
+
+Open questions for the user: phase review gate on by default for chains?; run the first real spec-driven project on this Mac or on the RHEL9 VM?; collapse the scene to a horizon strip on scroll?
 
 ## Phase 4 — Dashboard: in progress
 

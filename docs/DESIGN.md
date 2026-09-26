@@ -211,6 +211,10 @@ The watchman follows yagura's first principle: no long-lived LLM context. Every 
 
 Proposals apply through the same validated paths as planner deltas and CLI commands; the watchman never writes to the store directly.
 
+### Project chains and spec import
+
+Large work is either one long project (units are the small pieces) or a **chain** of projects when parts need their own predicate, repo, environment, or merge policy. A project may declare `after: [projects]` (migration 5: `projects.after_json`); it stays `framing` (dark tower) until those close, then the engine activates it; `phase_gate` optionally rings the bell for a human review before it starts. A finished spec with phases and exit criteria (e.g. trackplan's BUILD_SPEC §14) is imported by giving it to the watchman: it drafts the chain (project per phase, predicate from the exit criteria, `after`, environment), asks about anything the spec marks OPEN, and applies it only on Go. An LLM program-level planner is deferred until needed.
+
 ## 9. Scheduler
 
 A unit is **ready** when: deps satisfied (`needs-source` → upstream has a verdict ≥ its required tier; `needs-landed` → upstream landed), no running unit overlaps its write scope in the same repo, project in-flight cap not hit, no andon on the project.
@@ -547,6 +551,9 @@ Chosen with the user from three rounds of mocks (canvas: https://claude.ai/artif
 - **Motion carries meaning, never decoration.** Lit shōji flicker like candles (per-panel offsets) and the lookout glow breathes; the hanshō swings in short bursts with sound rings until the gate is answered or snoozed; the ridge lamp pulses while planning; signal arcs flow toward what is waited on; the current beacon's flame flickers, a blocked unit's ember smoulders. `prefers-reduced-motion` turns all of it off; the lights alone still carry the state.
 - **Themes.** Night and daybreak both ship, toggled in the header (☾/☀), remembered per browser.
 - Reference geometry and CSS: `docs/design/scene.py` (tower, pine, castle), `docs/design/anim.css`, and the mock artboards `docs/design/Watch-*.dc.html`.
+- **What is drawn.** One tower per **project** (not per unit). Shōji panels = the project's agent limit (`project.max_in_flight`), lit per running agent; 3 per row, a second row up to 6, beyond 6 a count beside the lookout (e.g. `9/12`). The drawing never limits concurrency. About 6 towers fit the ridge, ordered by urgency (ringing bell, then busy, then idle); further quiet projects become small silhouettes on the far ridge with a "+N quiet" label; ringing or busy towers are never pushed back. Closed projects stand dark for a day, then leave the scene. A `framing` (not yet started, waiting in a chain) project stands dark.
+- **Scene size.** ~290px on a 900px screen; labels drawn unscaled. Open question: collapse to a slim horizon strip on scroll.
+- **Home also hosts the watchman:** a "Talk to the watch" input and the thread list beside the bell inbox (§8a).
 - The scene is for glancing; every light links to its row.
 
 Bind to localhost by default; token auth when exposed on the LAN.

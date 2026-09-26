@@ -47,7 +47,7 @@ export const UNIT_TYPES = [
 ] as const;
 export type UnitType = (typeof UNIT_TYPES)[number];
 
-export const ROLES = ["planner", "worker", "verifier", "pack", "rebase", "ci-fix", "review-triage"] as const;
+export const ROLES = ["planner", "worker", "verifier", "pack", "rebase", "ci-fix", "review-triage", "watchman"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_OF: Record<UnitType, Role | null> = {
@@ -196,6 +196,8 @@ export interface Project {
   mergePolicy: MergePolicy;
   andonReason: string | null;
   refs: string[];
+  after: ProjectId[];
+  phaseGate: boolean;
   createdAt: IsoTime;
   closedAt: IsoTime | null;
 }

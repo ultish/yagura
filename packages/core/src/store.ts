@@ -107,16 +107,37 @@ export function getRepo(db: Db, id: RepoId): Repo {
 
 export function addProject(
   db: Db,
-  p: { id: string; name: string; goal: string; predicate: string; minTier: PassTier; repos: RepoId[]; refs?: string[] },
+  p: {
+    id: string;
+    name: string;
+    goal: string;
+    predicate: string;
+    minTier: PassTier;
+    repos: RepoId[];
+    refs?: string[];
+    after?: ProjectId[];
+    phaseGate?: boolean;
+    mergePolicy?: Project["mergePolicy"];
+    environmentId?: EnvironmentId | null;
+  },
 ): Project {
   db.transaction(() => {
-    db.prepare("INSERT INTO projects (id, name, goal, predicate, min_tier, state, refs_json, created_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)").run(
+    for (const dep of p.after ?? []) getProject(db, dep);
+    db.prepare(
+      `INSERT INTO projects (id, name, goal, predicate, min_tier, state, refs_json, after_json, phase_gate, merge_policy, environment_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
       p.id,
       p.name,
       p.goal,
       p.predicate,
       p.minTier,
+      p.after?.length ? "framing" : "active",
       JSON.stringify(p.refs ?? []),
+      JSON.stringify(p.after ?? []),
+      p.phaseGate ? 1 : 0,
+      p.mergePolicy ?? "human",
+      p.environmentId ?? null,
       now(),
     );
     for (const repo of p.repos) db.prepare("INSERT INTO project_repos (project_id, repo_id) VALUES (?, ?)").run(p.id, repo);
@@ -139,6 +160,8 @@ export function getProject(db: Db, id: ProjectId): Project {
     mergePolicy: r.merge_policy as Project["mergePolicy"],
     andonReason: (r.andon_reason as string | null) ?? null,
     refs: JSON.parse((r.refs_json as string | undefined) ?? "[]"),
+    after: JSON.parse((r.after_json as string | undefined) ?? "[]"),
+    phaseGate: r.phase_gate === 1,
     createdAt: r.created_at as IsoTime,
     closedAt: (r.closed_at as IsoTime | null) ?? null,
   };
