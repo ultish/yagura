@@ -1,6 +1,6 @@
 # yagura build status
 
-Updated 2026-09-26 (phase 3 done). Phases are from `DESIGN.md` §19.
+Updated 2026-09-26 (phase 4 in progress). Phases are from `DESIGN.md` §19.
 
 ## Phase 1 — Core: done
 
@@ -45,9 +45,16 @@ Proof: project `orders` (PRD requirements 2 and 3), `merge: auto`, driven end to
 
 Found and fixed during phase 3: a plan unit briefly in `ready` was picked up as work (the scheduler now only runs work and verify units); plan triggers were keyed to the end of the previous drain, which would miss events during a planner run; `applyDelta` returned pre-transition unit snapshots.
 
-## Phase 4 — Dashboard: next
+## Phase 4 — Dashboard: in progress
 
-DESIGN §17. First a long-running daemon that owns the engine for all projects and serves the API + SSE (the CLI becomes a client), then the web UI. The visual style is chosen with the user from 2–3 prototypes of the core screens before building (projects overview, unit graph, live agent log).
+Done:
+- `apps/daemon` + `yagura daemon`: one always-on process runs the engine for every active project (`Engine.runForever`), recovers attempts orphaned by a previous process, stops running agents on shutdown, and holds a lock (`~/.yagura/daemon.pid`) so `yagura drive` refuses while it runs.
+- Hono API (`apps/daemon/src/server.ts`): projects, project detail (units with attempts, deps, gates, waiting reasons), unit trace, events, agents vs caps, attempt detail (brief, handoff, leftovers, runs), agent logs parsed and resumable by line, artifacts, gates (answer), andon, settings (get/set), FTS search, trace; SSE `/api/stream` (events) and `/api/attempts/:id/stream` (live log). Token auth when bound beyond localhost (`Authorization: Bearer` or `?token=`; token at `YAGURA_TOKEN_FILE`).
+- Stopping an agent (`POST /api/attempts/:id/stop` with an optional note): work goes back to `ready` with the note, verification retries, a planner run is dropped; stopped runs do not count against attempts, skill checks, or planner rejections.
+
+Waiting on the user: the visual direction. Three directions (A Lantern: dark/amber, lanes; B Washi: paper/ink/vermilion, grouped reading list; C Blueprint: crisp/cobalt, dense table + dependency strip), each with a project view and a live agent log, are on a private canvas: https://claude.ai/artifact/AuLG6d7GiuQoSBFfdGeLS5. The agent logs replay the real `orders` U3 verifier run; the project views use labelled sample data.
+
+Next after the pick: `apps/web` (React + Vite, served by the daemon from its build), screens from DESIGN §17 against the API above.
 
 ## Audit trail and skill enforcement: done (between phases 3 and 4)
 
