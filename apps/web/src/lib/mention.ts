@@ -1,6 +1,6 @@
 export function mentionHref(token: string): string | null {
   if (token.startsWith("thread:")) return `/talk/${token.slice(7)}`;
-  if (token.startsWith("repo:")) return null;
+  if (token.startsWith("repo:")) return `/repos#${token.slice(5)}`;
   const m = /^([a-z][a-z0-9-]*)(?:\/U(\d+)(?:\.(\d+))?)?$/.exec(token);
   if (!m) return null;
   return m[3] ? `/p/${m[1]}/u/${m[2]}/${m[3]}` : m[2] ? `/p/${m[1]}/u/${m[2]}` : `/p/${m[1]}`;

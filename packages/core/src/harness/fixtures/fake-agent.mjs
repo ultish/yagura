@@ -96,6 +96,12 @@ function watchman() {
     const records = fixed ? { decisions: [{ text: "fixed on retry" }] } : { answered: [{ question: "Q99", answer: "x" }] };
     return finish(`${fixed ? "Corrected." : "First try."}\n\n\`\`\`yagura\n${JSON.stringify(records)}\n\`\`\``);
   }
+  const register = /^register (\S+) (.+)$/.exec(asked);
+  if (register) {
+    const [, id, existing] = register;
+    const proposal = { summary: `work in ${id}`, repos: [{ id, existing }], projects: [{ id: `${id}-work`, goal: "g", predicate: "p", repos: [id] }] };
+    return finish(`Registering it.\n\n\`\`\`yagura\n${JSON.stringify({ proposal })}\n\`\`\``);
+  }
   const pack = { provider: "local-process", checks: [{ name: "unit", command: "test -f README.md", tier: "unit-verified" }] };
   const project = (id, after) => ({ id, goal: `build ${id}`, predicate: "all files landed", repos: ["proto"], merge: "auto", after, spec: `# ${id}\n\n## Scope\nWrite the files.` });
   const records = brief.includes("[watchman #")

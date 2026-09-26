@@ -1,8 +1,8 @@
 # yagura build status
 
-Updated 2026-09-27 (phase 4: daemon, watchman, and web UI core done).
+Updated 2026-09-27 (phase 4: daemon, watchman, web UI core, and Repos done).
 
-**Resume here:** build the Repos page with "Add an existing repo" and the watchman's `repos[].existing` proposal field (DESIGN §17 Repos, §8a), then Environments and Settings. Run `pnpm dev` (daemon with rebuild-and-restart, dashboard with hot reload on :5173, home `~/.yagura-dev`); for no-cost end-to-end runs point `harness.claude.bin` at the fake agent (CLAUDE.md). The jsondiff and proto proofs below ran in a session scratch home that no longer exists; recreate data with the fake agent or a new real run. Phases are from `DESIGN.md` §19.
+**Resume here:** build the Environments page, then Settings (DESIGN §17). Run `pnpm dev` (daemon with rebuild-and-restart, dashboard with hot reload on :5173, home `~/.yagura-dev`); for no-cost end-to-end runs point `harness.claude.bin` at the fake agent (CLAUDE.md). The jsondiff and proto proofs below ran in a session scratch home that no longer exists; recreate data with the fake agent or a new real run. Phases are from `DESIGN.md` §19.
 
 ## Phase 1 — Core: done
 
@@ -75,7 +75,9 @@ Web UI (`apps/web`, DESIGN §17 "As built"), built 2026-09-27 from option F plus
 
 Proof: the daemon served the real `jsondiff` data (scratch home) and every page rendered it, including the real worker log, the verifier's trunk-vs-head grid, and the thread's decisions with D5 struck through. A live run against the repo's fake agent (`harness.claude.bin` pointed at `fake-agent.mjs` with a delay) went end to end in the browser: typed "prototype a chain" on the home page → the watchman's reply and proposal arrived live → Go → proto-a's tower lit (ridge lamp, then two shōji), proto-b stood dark with a signal arc → beacons showed flames, scope-overlap serialization, landings into the keep → the agent page streamed with `+m:ss` times and a live trunk-vs-head grid → proto-b activated after proto-a closed → both reports rang the bell. Found and fixed during the build: effects returning a React 19 setter's value crashed on re-run; the `@` trigger ignored the uppercase `U` in unit tokens; the catch-all static route shadowed the SSE routes.
 
-Next for the UI: **Repos page with "Add an existing repo"** (path or git URL, no project needed) and the matching watchman proposal field `repos[].existing` (DESIGN §17 Repos, §8a; decided 2026-09-27), Gates inbox page (the bell covers it for now), Environments, Settings (with live cap counts), repo browsing (prototype first), "Message the agent" mid-run (needs `--input-format stream-json`), a watchman turn's live log inside the thread, and the "conversations about this" list on unit and agent pages (`GET /api/mentions/:token/messages` exists).
+Repos page and existing repos (2026-09-27, DESIGN §17 Repos "As built", §8a): `registerRepo` (`repos.ts`) detects the default branch and reads the trunk pack; `yagura repo add <path | URL> [--id]` (the old `<id> <url> --branch` form is gone), `POST /api/repos`, the Repos page with an "Add an existing repo" form, and the watchman's `repos[].existing` proposal field, checked before the proposal is stored. Proof: in a scratch home, the CLI registered a working copy (notes: working copy, no pack), the page registered a bare repo on branch `trunk` with its pack, refused it a second time ("repo billing already exists"), and registered a packless working copy showing both notes; tests cover a fake watchman proposing an existing repo through a real turn, the packless-with-project rejection, and the API.
+
+Next for the UI: Environments, Settings, Gates inbox page (the bell covers it for now), Environments, Settings (with live cap counts), repo browsing (prototype first), "Message the agent" mid-run (needs `--input-format stream-json`), a watchman turn's live log inside the thread, and the "conversations about this" list on unit and agent pages (`GET /api/mentions/:token/messages` exists).
 
 Daemon/API (earlier in phase 4):
 - `apps/daemon` + `yagura daemon`: one always-on process runs the engine for every active project (`Engine.runForever`), recovers attempts orphaned by a previous process, stops running agents on shutdown, and holds a lock (`~/.yagura/daemon.pid`) so `yagura drive` refuses while it runs.
@@ -98,6 +100,7 @@ Build order decided 2026-09-26: (1) watchman — done; (2) project chains and re
 - A rebase that changes the patch blocks the unit; re-verifying a rebased head arrives with the babysit units (phase 5).
 - Landing does not void dependents' verdicts, and `needs-source` behaves like `needs-landed` until read-only mounts arrive (phase 6).
 - Pack `doctor`/`deploy`/`teardown` are parsed but not run; deployed verification comes with the `kube-namespace` provider (phase 5).
+- A working copy registered as a repo cannot be landed into while its default branch is checked out (git refuses the push). Registration says so, but the note is not kept: the Repos list does not show it later.
 - `yagura evidence run` trusts `YAGURA_ATTEMPT` plus the attempt being in `running`; a per-attempt token is not added yet.
 - `yagura drive` (one project, foreground) refuses while the daemon runs; it is for debugging only. Normal use is `yagura daemon`, or `pnpm dev` while developing.
 - No wall-clock budget or landing cutoff yet (DESIGN §6).

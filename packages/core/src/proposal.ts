@@ -9,16 +9,20 @@ import { commitAll, git } from "./git.js";
 import { VerifyPack } from "./pack.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta, PlanRejected, PlanUnit } from "./plan.js";
+import { checkRepoFree, inspectRepo, packStatusOf, REPO_ID, RepoUnusable, resolveSource, type RepoInspection } from "./repos.js";
 import { parseSpec, writeSpec } from "./spec.js";
 import { addEnvironment, addProject, addRepo, getProject, recordEvent, setProjectState, type Db } from "./store.js";
 import { getProposal, getThread, linkThreadProject, resolveProposal } from "./threads.js";
 
-const Slug = z.string().regex(/^[a-z][a-z0-9-]{1,39}$/, "ids are lowercase words joined by dashes, e.g. kafka-diff");
+const Slug = z.string().regex(REPO_ID, "ids are lowercase words joined by dashes, e.g. kafka-diff");
+const NewRepo = z.object({ id: Slug, description: z.string().default(""), verifyPack: VerifyPack }).strict();
+const ExistingRepo = z.object({ id: Slug, existing: z.string().min(1) }).strict();
+type ExistingRepo = z.output<typeof ExistingRepo>;
 
 export const ProposalBody = z
   .object({
     summary: z.string().min(1),
-    repos: z.array(z.object({ id: Slug, description: z.string().default(""), verifyPack: VerifyPack }).strict()).default([]),
+    repos: z.array(z.union([NewRepo, ExistingRepo])).default([]),
     projects: z
       .array(
         z
@@ -48,6 +52,8 @@ export type ProposalBody = z.output<typeof ProposalBody>;
 
 export class ProposalInvalid extends Error {}
 
+const isExisting = (r: ProposalBody["repos"][number]): r is ExistingRepo => "existing" in r;
+
 const DEFAULT_ENVIRONMENT = "local";
 
 function defaultEnvironment(db: Db): string {
@@ -62,7 +68,14 @@ export function validateProposal(db: Db, threadId: number, p: ProposalBody): voi
   const projectExists = (id: string) => !!db.prepare("SELECT 1 FROM projects WHERE id = ?").get(id);
   const newRepos = new Set<string>();
   for (const r of p.repos) {
-    if (repoExists(r.id) || newRepos.has(r.id)) throw new ProposalInvalid(`repo ${r.id} already exists`);
+    if (newRepos.has(r.id)) throw new ProposalInvalid(`repo ${r.id} is listed twice`);
+    try {
+      if (isExisting(r)) checkRepoFree(db, r.id, resolveSource(r.existing));
+      else if (repoExists(r.id)) throw new RepoUnusable(`repo ${r.id} already exists`);
+    } catch (e) {
+      if (e instanceof RepoUnusable) throw new ProposalInvalid(e.message);
+      throw e;
+    }
     newRepos.add(r.id);
   }
   const earlier = new Set<string>();
@@ -83,7 +96,26 @@ export function validateProposal(db: Db, threadId: number, p: ProposalBody): voi
   }
 }
 
-async function createLocalRepo(boot: Bootstrap, db: Db, r: ProposalBody["repos"][number]): Promise<string> {
+export async function inspectProposalRepos(p: ProposalBody, mirror?: (id: string) => string): Promise<Map<string, RepoInspection>> {
+  const out = new Map<string, RepoInspection>();
+  for (const r of p.repos.filter(isExisting)) {
+    try {
+      out.set(r.id, await inspectRepo(r.existing, mirror?.(r.id)));
+    } catch (e) {
+      if (e instanceof RepoUnusable) throw new ProposalInvalid(`repo ${r.id}: ${e.message}`);
+      throw e;
+    }
+    const pack = out.get(r.id)!.pack;
+    const users = p.projects.filter((proj) => proj.repos.includes(r.id)).map((proj) => proj.id);
+    if (!pack.ok && users.length)
+      throw new ProposalInvalid(
+        `repo ${r.id}: ${pack.reason}, so ${users.join(", ")} could never be verified; propose the repo alone and ask the developer to add a verify pack, or leave the project out`,
+      );
+  }
+  return out;
+}
+
+async function createLocalRepo(boot: Bootstrap, db: Db, r: z.output<typeof NewRepo>): Promise<string> {
   const bare = layout(boot).newRepo(r.id);
   if (existsSync(bare)) return bare;
   const seed = mkdtempSync(join(tmpdir(), `yagura-seed-${r.id}-`));
@@ -113,12 +145,15 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
   const body = ProposalBody.parse(proposal.body);
   try {
     validateProposal(db, proposal.threadId, body);
+    const existing = await inspectProposalRepos(body, (id) => layout(boot).mirror(id as RepoId));
     const bares = new Map<string, string>();
-    for (const r of body.repos) bares.set(r.id, await createLocalRepo(boot, db, r));
+    for (const r of body.repos) if (!isExisting(r)) bares.set(r.id, await createLocalRepo(boot, db, r));
     const result = db.transaction((): ApplyProposalResult => {
       const out: ApplyProposalResult = { repos: [], projects: [], units: {}, environment: null };
       for (const r of body.repos) {
-        addRepo(db, { id: r.id, url: bares.get(r.id)!, defaultBranch: "main" });
+        const seen = existing.get(r.id);
+        if (seen) addRepo(db, { id: r.id, url: seen.url, defaultBranch: seen.defaultBranch, packStatus: packStatusOf(seen.pack) });
+        else addRepo(db, { id: r.id, url: bares.get(r.id)!, defaultBranch: "main", packStatus: "unproven" });
         out.repos.push(r.id);
       }
       for (const p of body.projects) {
@@ -169,7 +204,12 @@ export function discardProposal(db: Db, proposalId: number, reason = ""): void {
 
 export function describeProposal(body: ProposalBody): string {
   const lines = [body.summary, ""];
-  for (const r of body.repos) lines.push(`- new repo ${r.id}${r.description ? `: ${r.description}` : ""} (checks: ${r.verifyPack.checks.map((c) => c.name).join(", ")})`);
+  for (const r of body.repos)
+    lines.push(
+      isExisting(r)
+        ? `- existing repo ${r.id}: ${r.existing}`
+        : `- new repo ${r.id}${r.description ? `: ${r.description}` : ""} (checks: ${r.verifyPack.checks.map((c) => c.name).join(", ")})`,
+    );
   for (const p of body.projects) {
     const facts = [`repos ${p.repos.join(", ")}`, `merge ${p.merge}`, `min ${p.minTier}`, p.after.length ? `after ${p.after.join(", ")}` : "", p.phaseGate ? "phase gate" : "", p.environment ? `env ${p.environment}` : ""];
     lines.push(`- project ${p.id}: ${p.goal}`, `  done when: ${p.predicate}`, `  ${facts.filter(Boolean).join(" · ")}`);

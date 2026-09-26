@@ -32,7 +32,7 @@ import {
   listGates,
   setAndon,
   setMergePolicy,
-  addRepo,
+  registerRepo,
   addUnitNote,
   evidenceCli,
   landUnit,
@@ -71,7 +71,7 @@ import {
 
 const USAGE = `yagura — agent orchestration
 
-  yagura repo add <id> <url> [--branch main]
+  yagura repo add <path | git URL> [--id <id>]   mirror an existing repo; default branch and verify pack are read from it
   yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified] [--issue <ref>...]
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
@@ -166,15 +166,16 @@ function printRecords(threadId: number, sinceMessageId: number) {
 async function main() {
   switch (command) {
     case "repo": {
-      const { positionals, values } = args({ branch: { type: "string", default: "main" }, url: { type: "string" } });
+      const { positionals, values } = args({ id: { type: "string" }, url: { type: "string" } });
       if (positionals[0] === "set" && positionals[1] && values.url) {
         setRepoUrl(db, positionals[1] as RepoId, values.url);
         console.log(`repo ${positionals[1]} → ${values.url}`);
         return;
       }
-      if (positionals[0] !== "add" || !positionals[1] || !positionals[2]) fail(USAGE);
-      const repo = addRepo(db, { id: positionals[1]!, url: positionals[2]!, defaultBranch: values.branch as string });
-      console.log(`repo ${repo.id} → ${repo.url} (${repo.defaultBranch})`);
+      if (positionals[0] !== "add" || !positionals[1] || positionals[2]) fail(USAGE);
+      const { repo, inspection } = await registerRepo({ db, boot }, { source: positionals[1]!, id: values.id as string | undefined });
+      console.log(`repo ${repo.id} → ${repo.url} (${repo.defaultBranch} at ${inspection.trunk.slice(0, 10)}, verify pack ${repo.packStatus})`);
+      for (const n of inspection.notes) console.log(`  note: ${n}`);
       return;
     }
     case "project": {

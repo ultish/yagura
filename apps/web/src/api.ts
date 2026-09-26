@@ -15,6 +15,17 @@ export interface ProjectSummary {
   summary: string | null;
 }
 
+export interface RepoView {
+  repo: Repo;
+  trunk: string | null;
+  pack: { ok: true; checks: { name: string; tier: string }[] } | { ok: false; reason: string } | null;
+  projects: { id: string; state: string }[];
+  landingQueue: { projectId: string; seq: number; goal: string; at: string }[];
+  landedCount: number;
+  lastLanded: { projectId: string; seq: number; goal: string; at: string; sha: string } | null;
+  notes?: string[];
+}
+
 export interface UnitView extends Unit {
   attempts: Attempt[];
   verdict: { id: number; tier: string; headSha: string } | null;

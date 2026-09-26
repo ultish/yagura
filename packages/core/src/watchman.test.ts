@@ -8,14 +8,15 @@ import type { RunContext } from "./agent.js";
 import type { Bootstrap } from "./config.js";
 import type { ProjectId, RepoId } from "./domain.js";
 import { Engine } from "./engine.js";
-import { git } from "./git.js";
+import { write } from "./agent.js";
+import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { applyProposal } from "./proposal.js";
 import { editSpec, parseSpec, relevantSections, renderSpec } from "./spec.js";
-import { addProject, addRepo, getProject, listGates, listUnits, openStore, type Db } from "./store.js";
-import { createThread, getProposal, getThread, linkThreadProject, listDecisions, listMessages, listQuestions } from "./threads.js";
+import { addProject, addRepo, getProject, getRepo, listGates, listUnits, openStore, type Db } from "./store.js";
+import { createThread, getProposal, getThread, linkThreadProject, listDecisions, listMessages, listProposals, listQuestions } from "./threads.js";
 import { assembleContext, parseReply, runWatchmanTurn, storeTurn, TurnRecords, type ContextParts } from "./watchman.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
@@ -180,6 +181,41 @@ describe("watchman turns", () => {
     const files = await git(["ls-tree", "-r", "--name-only", "main"], { cwd: layout(boot).newRepo("proto") });
     expect(files.split("\n").filter((f) => f.startsWith("app/")).length).toBe(6);
   }, 120_000);
+
+  it("registers an existing repo from a proposal, checking it before storing and mirroring it on apply", async () => {
+    const seed = join(boot.home, "..", "billing-seed");
+    write(join(seed, "README.md"), "# billing\n");
+    write(join(seed, ".agents/verify/verify.json"), JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] }));
+    await git(["init", "--quiet", "-b", "trunk"], { cwd: seed });
+    await commitAll(seed, "init", { name: "t", email: "t@localhost" });
+    const origin = join(boot.home, "..", "billing.git");
+    await git(["clone", "--quiet", "--bare", seed, origin]);
+
+    const t = createThread(db, { title: "t" });
+    const turn = await runWatchmanTurn(ctx, t.id, `register billing ${origin}`);
+    expect(turn.problem).toBeNull();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM repos").get()).toEqual({ n: 0 });
+    expect(await applyProposal(ctx, turn.proposal!.id)).toMatchObject({ repos: ["billing"], projects: ["billing-work"] });
+    expect(getRepo(db, "billing" as RepoId)).toMatchObject({ url: origin, defaultBranch: "trunk", packStatus: "unproven" });
+    expect(existsSync(layout(boot).mirror("billing" as RepoId))).toBe(true);
+
+    const again = await runWatchmanTurn(ctx, t.id, `register billing-2 ${origin}`);
+    expect(again.problem).toBe(`proposal: ${origin} is already registered as repo billing`);
+  });
+
+  it("rejects an existing repo it cannot read, or one without a verify pack that a project would build in", async () => {
+    const t = createThread(db, { title: "t" });
+    const missing = await runWatchmanTurn(ctx, t.id, `register ghost ${join(boot.home, "ghost")}`);
+    expect(missing.problem).toMatch(/^proposal: repo ghost: cannot read .*ghost as a git repo/);
+
+    const seed = join(boot.home, "..", "bare-seed");
+    write(join(seed, "README.md"), "# x\n");
+    await git(["init", "--quiet", "-b", "main"], { cwd: seed });
+    await commitAll(seed, "init", { name: "t", email: "t@localhost" });
+    const packless = await runWatchmanTurn(ctx, t.id, `register nopack ${seed}`);
+    expect(packless.problem).toBe("proposal: repo nopack: no verify pack at .agents/verify/verify.json, so nopack-work could never be verified; propose the repo alone and ask the developer to add a verify pack, or leave the project out");
+    expect(listProposals(db, t.id)).toEqual([]);
+  });
 
   it("waits at a phase gate before starting the next project in a chain", async () => {
     const t = createThread(db, { title: "t" });

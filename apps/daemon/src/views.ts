@@ -1,5 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
+  getRepo,
+  layout,
+  parsePack,
+  readFileAt,
+  resolveRef,
+  type Bootstrap,
+  type RepoId,
   getProject,
   getUnit,
   latestDelta,
@@ -129,5 +136,29 @@ export function attemptDetail(db: Db, paths: { brief: string; handoff: string; l
     runs: listEvidenceRuns(db, attempt.id),
     verifications,
     waiting: readiness(db, unit.projectId).waiting.find((w) => w.unit.id === unit.id)?.reason ?? null,
+  };
+}
+
+export async function repoView(db: Db, boot: Bootstrap, repoId: RepoId) {
+  const repo = getRepo(db, repoId);
+  const mirror = layout(boot).mirror(repoId);
+  const trunk = existsSync(mirror) ? await resolveRef(mirror, `origin/${repo.defaultBranch}`).catch(() => null) : null;
+  const pack = trunk ? parsePack(await readFileAt(mirror, trunk, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath) : null;
+  const projects = db
+    .prepare("SELECT p.id, p.state FROM project_repos pr JOIN projects p ON p.id = pr.project_id WHERE pr.repo_id = ? ORDER BY p.created_at")
+    .all(repoId) as { id: string; state: string }[];
+  const units = db
+    .prepare("SELECT project_id, seq, goal, state, landed_sha, updated_at FROM units WHERE repo_id = ? AND type = 'work' AND state IN ('verified', 'landed') ORDER BY updated_at DESC")
+    .all(repoId) as Row[];
+  const ref = (u: Row) => ({ projectId: u.project_id as string, seq: u.seq as number, goal: u.goal as string, at: u.updated_at as string });
+  const landed = units.filter((u) => u.state === "landed");
+  return {
+    repo,
+    trunk,
+    pack: pack ? (pack.ok ? { ok: true as const, checks: pack.pack.checks.map((c) => ({ name: c.name, tier: c.tier })) } : { ok: false as const, reason: pack.reason }) : null,
+    projects,
+    landingQueue: units.filter((u) => u.state === "verified").map(ref),
+    landedCount: landed.length,
+    lastLanded: landed[0] ? { ...ref(landed[0]), sha: landed[0].landed_sha as string } : null,
   };
 }

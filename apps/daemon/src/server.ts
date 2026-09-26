@@ -54,9 +54,13 @@ import {
   type Db,
   type HarnessAdapter,
   type ProjectId,
+  type RepoId,
   type SettingScope,
+  registerRepo,
+  RepoUnusable,
+  suggestRepoId,
 } from "@yagura/core";
-import { attemptDetail, bell, projectSummary, unitView } from "./views.js";
+import { attemptDetail, bell, projectSummary, repoView, unitView } from "./views.js";
 
 export interface ServerOptions {
   db: Db;
@@ -234,7 +238,22 @@ export function createApp(opts: ServerOptions): Hono {
   });
 
   app.get("/api/environments", (c) => c.json(db.prepare("SELECT * FROM environments ORDER BY id").all()));
-  app.get("/api/repos", (c) => c.json(db.prepare("SELECT * FROM repos ORDER BY id").all()));
+  app.get("/api/repos", async (c) => {
+    const ids = (db.prepare("SELECT id FROM repos ORDER BY id").all() as { id: RepoId }[]).map((r) => r.id);
+    return c.json(await Promise.all(ids.map((id) => repoView(db, boot, id))));
+  });
+  app.post("/api/repos", async (c) => {
+    const b = (await c.req.json()) as { source?: string; id?: string };
+    if (!b.source?.trim()) return c.json({ error: "give a local path or a git URL" }, 400);
+    try {
+      const { repo, inspection } = await registerRepo({ db, boot }, { source: b.source, id: b.id });
+      return c.json({ ...(await repoView(db, boot, repo.id)), notes: inspection.notes }, 201);
+    } catch (e) {
+      if (e instanceof RepoUnusable) return c.json({ error: e.message }, e.message.includes("already") ? 409 : 400);
+      throw e;
+    }
+  });
+  app.get("/api/repos/suggest-id", (c) => c.json({ id: suggestRepoId(c.req.query("source") ?? "") }));
 
   app.get("/api/settings", (c) =>
     c.json(effectiveSettings(db, { projectId: (c.req.query("project") as ProjectId) ?? null, repoId: (c.req.query("repo") as never) ?? null })),

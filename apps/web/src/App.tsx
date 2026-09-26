@@ -5,6 +5,7 @@ import { Agents } from "./pages/Agents";
 import { Home } from "./pages/Home";
 import { Project } from "./pages/Project";
 import { Projects } from "./pages/Projects";
+import { Repos } from "./pages/Repos";
 import { Talk } from "./pages/Talk";
 import markDark from "./assets/mark-dark.png";
 import markLight from "./assets/mark-light.png";
@@ -28,6 +29,7 @@ const NAV = [
   { to: "/talk", label: "Talk", match: (p: string) => p.startsWith("/talk") },
   { to: "/projects", label: "Projects", match: (p: string) => p === "/projects" || p.startsWith("/p/") },
   { to: "/agents", label: "Agents", match: (p: string) => p.startsWith("/agents") || p.startsWith("/a/") },
+  { to: "/repos", label: "Repos", match: (p: string) => p === "/repos" },
 ];
 
 function Header() {
@@ -65,6 +67,7 @@ function Routes() {
   if (path === "/") return <Home />;
   if (path === "/projects") return <Projects />;
   if (path === "/agents") return <Agents />;
+  if (path === "/repos") return <Repos />;
   if ((m = /^\/talk(?:\/(\d+))?\/?$/.exec(path))) return <Talk threadId={m[1] ? Number(m[1]) : null} />;
   if ((m = /^\/a\/(\d+)\/?$/.exec(path))) return <Agent attemptId={Number(m[1])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)(?:\/(\d+))?\/?$/.exec(path))) return <UnitAgent projectId={m[1]!} seq={Number(m[2])} n={m[3] ? Number(m[3]) : null} />;

@@ -8,7 +8,7 @@ import { missingSkills } from "./pack.js";
 import { layout } from "./paths.js";
 import { lastDrainEventId, latestDelta } from "./planner.js";
 import { WORK_PLAYBOOKS } from "./plan.js";
-import { applyProposal, describeProposal, ProposalBody, ProposalInvalid, validateProposal, type ApplyProposalResult } from "./proposal.js";
+import { applyProposal, describeProposal, inspectProposalRepos, ProposalBody, ProposalInvalid, validateProposal, type ApplyProposalResult } from "./proposal.js";
 import { editSpec, readSpec, relevantSections, renderSpec, writeSpec, type Spec } from "./spec.js";
 import { generateStatus } from "./status.js";
 import { getProject, recordEvent, type Db } from "./store.js";
@@ -206,7 +206,10 @@ Reply to the developer in plain prose. Then end your final message with exactly 
   "spec": [{ "project": "kafka-diff", "section": "Ignored fields", "body": "markdown, or null to delete the section" }],
   "proposal": {
     "summary": "what applying this starts and why",
-    "repos": [{ "id": "kafka-diff", "description": "one line", "verifyPack": { "provider": "local-process", "checks": [{ "name": "unit", "command": "python3 -m unittest -v", "tier": "unit-verified" }] } }],
+    "repos": [
+      { "id": "kafka-diff", "description": "one line", "verifyPack": { "provider": "local-process", "checks": [{ "name": "unit", "command": "python3 -m unittest -v", "tier": "unit-verified" }] } },
+      { "id": "billing", "existing": "/path/to/billing or git URL" }
+    ],
     "projects": [{
       "id": "kafka-diff", "goal": "…", "predicate": "checkable done condition", "repos": ["kafka-diff"],
       "environment": null, "merge": "auto", "minTier": "unit-verified", "after": [], "phaseGate": false,
@@ -421,12 +424,14 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
     if (session.final && !session.final.isError && !session.timedOut) return { text: session.final.text, problem: null };
     return { text: null, problem: session.timedOut ? "the watchman ran out of time" : `the watchman ended without a reply (exit ${session.exitCode ?? session.signal})` };
   };
-  const attemptStore = (text: string, log: string): { stored: ReturnType<typeof storeTurn> | null; body: string; problem: string | null } => {
+  const attemptStore = async (text: string, log: string): Promise<{ stored: ReturnType<typeof storeTurn> | null; body: string; problem: string | null }> => {
     const parsed = parseReply(text);
     if (!parsed.records) return { stored: null, body: parsed.body, problem: parsed.error };
     try {
+      if (parsed.records.proposal) await inspectProposalRepos(parsed.records.proposal);
       return { stored: storeTurn(ctx, threadId, { body: parsed.body, records: parsed.records, turnLog: log }), body: parsed.body, problem: null };
     } catch (e) {
+      if (e instanceof ProposalInvalid) return { stored: null, body: parsed.body, problem: `proposal: ${e.message}` };
       if (!(e instanceof RecordsRejected)) throw e;
       return { stored: null, body: parsed.body, problem: e.message };
     }
@@ -440,12 +445,12 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
     return out;
   }
   let log = logPath;
-  let result = attemptStore(first.text, log);
+  let result = await attemptStore(first.text, log);
   if (!result.stored) {
     recordEvent(db, "watchman.records_rejected", {}, { thread: threadId, message: human.id, reason: result.problem });
     const retryLog = paths.turnLog(threadId, human.id).replace(/\.jsonl$/, ".retry.jsonl");
     const retry = await ask(renderRetry(brief.text, first.text, result.problem!), retryLog);
-    if (retry.text) [result, log] = [attemptStore(retry.text, retryLog), retryLog];
+    if (retry.text) [result, log] = [await attemptStore(retry.text, retryLog), retryLog];
   }
   if (result.stored) {
     out.reply = result.stored.message;

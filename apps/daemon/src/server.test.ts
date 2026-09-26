@@ -7,7 +7,9 @@ import {
   addProject,
   addRepo,
   addUnit,
+  commitAll,
   createAttempt,
+  git,
   layout,
   openStore,
   parseClaudeLine,
@@ -93,6 +95,32 @@ describe("daemon API", () => {
     expect(await (await post("/api/projects/orders/andon", { reason: "bad deploy" })).json()).toMatchObject({ andonReason: "bad deploy" });
     await post("/api/settings", { scope: "project", id: "orders", key: "project.max_in_flight", value: 1 });
     expect(await (await get("/api/settings?project=orders")).json()).toMatchObject({ "project.max_in_flight": { value: 1, source: "project" } });
+  });
+
+  it("registers an existing repo and lists repos with their pack, projects, and landing queue", async () => {
+    const seed = join(boot.home, "seed");
+    mkdirSync(join(seed, ".agents/verify"), { recursive: true });
+    writeFileSync(join(seed, ".agents/verify/verify.json"), JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] }));
+    await git(["init", "--quiet", "-b", "main"], { cwd: seed });
+    await commitAll(seed, "init", { name: "t", email: "t@localhost" });
+    const origin = join(boot.home, "Billing.git");
+    await git(["clone", "--quiet", "--bare", seed, origin]);
+
+    expect(await (await get(`/api/repos/suggest-id?source=${encodeURIComponent(origin)}`)).json()).toEqual({ id: "billing" });
+    const created = await post("/api/repos", { source: origin });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({
+      repo: { id: "billing", url: origin, defaultBranch: "main", packStatus: "unproven" },
+      pack: { ok: true, checks: [{ name: "unit", tier: "unit-verified" }] },
+      trunk: expect.stringMatching(/^[0-9a-f]{40}$/),
+      notes: [],
+    });
+    expect((await post("/api/repos", { source: origin, id: "billing-2" })).status).toBe(409);
+    expect(await (await post("/api/repos", { source: join(boot.home, "nowhere") })).json()).toMatchObject({ error: expect.stringMatching(/cannot read/) });
+
+    const repos = (await (await get("/api/repos")).json()) as { repo: { id: string } }[];
+    expect(repos.map((r) => r.repo.id)).toEqual(["billing", "testbed"]);
+    expect(repos[1]).toMatchObject({ trunk: null, pack: null, projects: [{ id: "orders", state: "active" }], landingQueue: [], landedCount: 0 });
   });
 
   it("searches handoffs and traces issue refs", async () => {

@@ -129,7 +129,7 @@ describe("layoutScene", () => {
 
 describe("mentions and formatting", () => {
   it("maps mention tokens to pages", () => {
-    expect(["kafka-diff", "kafka-diff/U3", "kafka-diff/U3.2", "thread:4", "repo:jsondiff"].map(mentionHref)).toEqual(["/p/kafka-diff", "/p/kafka-diff/u/3", "/p/kafka-diff/u/3/2", "/talk/4", null]);
+    expect(["kafka-diff", "kafka-diff/U3", "kafka-diff/U3.2", "thread:4", "repo:jsondiff"].map(mentionHref)).toEqual(["/p/kafka-diff", "/p/kafka-diff/u/3", "/p/kafka-diff/u/3/2", "/talk/4", "/repos#jsondiff"]);
   });
 
   it("finds the mention being typed at the caret", () => {

@@ -21,6 +21,7 @@ import type {
   UnitType,
   PassTier,
   Forge,
+  PackStatus,
 } from "./domain.js";
 
 export type Db = Database.Database;
@@ -79,12 +80,13 @@ export function transitionUnit(db: Db, unitId: UnitId, to: UnitState, data: Reco
   })();
 }
 
-export function addRepo(db: Db, r: { id: string; url: string; defaultBranch: string; forge?: Forge }): Repo {
-  db.prepare("INSERT INTO repos (id, url, default_branch, forge, created_at) VALUES (?, ?, ?, ?, ?)").run(
+export function addRepo(db: Db, r: { id: string; url: string; defaultBranch: string; forge?: Forge; packStatus?: PackStatus }): Repo {
+  db.prepare("INSERT INTO repos (id, url, default_branch, forge, pack_status, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
     r.id,
     r.url,
     r.defaultBranch,
     r.forge ?? "none",
+    r.packStatus ?? "missing",
     now(),
   );
   return getRepo(db, r.id as RepoId);
