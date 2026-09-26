@@ -130,4 +130,21 @@ describe("runWorkUnit", () => {
     setSetting(db, "global", "", "method.enforce_required_skills", false);
     expect((await run("noskills")).unit.state).toBe("verifying");
   });
+
+  it("stops a running agent on request and puts the unit back with the operator's note", async () => {
+    const { stopAttempt } = await import("./agent.js");
+    process.env.FAKE_MODE = "hang";
+    const unit = addUnit(db, { projectId: project, type: "work", repoId: "testbed" as RepoId, goal: "g", writeScope: ["app/**"], acceptance: ["a"], verify: "v", timeboxSeconds: 60, maxAttempts: 1 });
+    transitionUnit(db, unit.id, "ready");
+    const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli: [] }, unit.id);
+    let attempt = listAttempts(db, unit.id)[0];
+    for (let i = 0; i < 50 && !attempt?.pid; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+      attempt = listAttempts(db, unit.id)[0];
+    }
+    expect(stopAttempt(db, attempt!.id, "wrong approach; use the store")).toBe(true);
+    const done = await running;
+    expect(done.state).toBe("stopped");
+    expect(getUnit(db, unit.id)).toMatchObject({ state: "ready", notes: ["Operator stopped attempt 1: wrong approach; use the store"] });
+  });
 });

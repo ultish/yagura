@@ -6,6 +6,7 @@ import {
   addEnvironment,
   addProject,
   answerGate,
+  daemonPid,
   Engine,
   findByRef,
   findUnitsByCommit,
@@ -61,7 +62,8 @@ const USAGE = `yagura — agent orchestration
   yagura env add <id> --provider local-process [--capacity 2] [--name <text>]
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...]
   yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
-  yagura drive <project>                 plan, run, verify, and land until nothing is left to do
+  yagura daemon                          run yagura for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)
+  yagura drive <project>                 plan, run, verify, and land until nothing is left to do (without a daemon)
   yagura andon <project> --reason <text> | --clear
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
@@ -80,6 +82,11 @@ if (command === "evidence") {
   const result = await evidenceCli(rest);
   process.stdout.write(result.output);
   process.exit(result.code);
+}
+if (command === "daemon") {
+  const { startDaemon } = await import("@yagura/daemon");
+  await startDaemon([process.execPath, fileURLToPath(import.meta.url)]);
+  process.exit(0);
 }
 const boot = loadBootstrap();
 const db = openStore(layout(boot).db);
@@ -267,6 +274,8 @@ async function main() {
     case "drive": {
       const [projectId] = rest;
       if (!projectId) fail(USAGE);
+      const daemon = daemonPid(boot);
+      if (daemon) fail(`a yagura daemon (pid ${daemon}) is already running this project; watch it in the dashboard instead`);
       const engine = new Engine(agentCtx(), {
         projectId: projectId as ProjectId,
         log: (line) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`),

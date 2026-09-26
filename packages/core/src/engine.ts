@@ -1,4 +1,4 @@
-import type { RunContext } from "./agent.js";
+import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import type { Project, ProjectId, Unit, UnitId } from "./domain.js";
 import { landUnit } from "./land.js";
@@ -177,6 +177,38 @@ export class Engine {
       if (listUnits(this.db, p.id).some((u) => u.state === "verified" && (p.mergePolicy === "auto" || landApproved(this.db, p.id, u)))) return false;
       return !listUnits(this.db, p.id).some((u) => u.type === "work" && (u.state === "failed" || u.state === "rejected"));
     });
+  }
+
+  recoverOrphans(): number {
+    const orphans = this.db
+      .prepare("SELECT a.id, a.pid, a.unit_id FROM attempts a WHERE a.state IN ('running', 'queued')")
+      .all() as { id: number; pid: number | null; unit_id: number }[];
+    for (const o of orphans) {
+      if (o.pid) {
+        try {
+          process.kill(-o.pid, "SIGTERM");
+        } catch {}
+      }
+      this.recoverCrashed(o.unit_id as UnitId, new Error("yagura restarted while this attempt was running"));
+    }
+    return orphans.length;
+  }
+
+  async runForever(signal: AbortSignal): Promise<void> {
+    const tickMs = this.opts.tickMs ?? 2000;
+    const recovered = this.recoverOrphans();
+    if (recovered) this.log(`recovered ${recovered} attempt(s) left running by a previous process`);
+    while (!signal.aborted) {
+      await this.tick().catch((e: unknown) => this.log(`✗ tick: ${e instanceof Error ? e.message : String(e)}`));
+      await Promise.race([
+        ...this.inflight.values(),
+        new Promise((r) => setTimeout(r, tickMs)),
+        new Promise((r) => signal.addEventListener("abort", r, { once: true })),
+      ]);
+    }
+    for (const a of this.db.prepare("SELECT id FROM attempts WHERE state = 'running'").all() as { id: number }[])
+      stopAttempt(this.db, a.id as never, "yagura daemon shut down");
+    await Promise.allSettled(this.inflight.values());
   }
 
   async runUntilIdle(): Promise<void> {

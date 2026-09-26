@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { runAgentSession, write, type RunContext } from "./agent.js";
+import { runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import type { Attempt, RenderedBrief, Unit, UnitId } from "./domain.js";
@@ -106,6 +106,16 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     logPath: paths.log(project.id, unit.seq, attempt.n),
   });
   const endedAt = now();
+
+  const stop = stopRequested(db, attempt.id);
+  if (stop.stopped) {
+    await discardLeftovers(worktree);
+    updateAttempt(db, attempt.id, { state: "stopped", endedAt, exitCode: session.exitCode });
+    if (stop.note) addUnitNote(db, unit.id, `Operator stopped attempt ${attempt.n}: ${stop.note}`);
+    transitionUnit(db, unit.id, "ready", { reason: "stopped by operator", attempt: attempt.n });
+    recordEvent(db, "attempt.ended", { projectId: project.id, unitId: unit.id, attemptId: attempt.id }, { stopped: true });
+    return getAttempt(db, attempt.id);
+  }
 
   const leftovers = await discardLeftovers(worktree);
   if (leftovers.paths.length) write(paths.leftovers(project.id, unit.seq, attempt.n), leftovers.patch);

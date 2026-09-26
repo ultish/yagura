@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { runAgentSession, write, type RunContext } from "./agent.js";
+import { runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { renderVerifyBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import type { Attempt, EnvironmentId, Unit, UnitId, VerdictId } from "./domain.js";
@@ -44,7 +44,7 @@ function applyOutcome(db: Db, target: Unit, decision: VerdictDecision, verifySeq
     case "code-fault": {
       addUnitNote(db, target.id, `Verifier U${verifySeq} rejected the previous attempt: ${decision.reason}. Read its findings in handoffs/u${verifySeq}.*.md.`);
       transitionUnit(db, target.id, "rejected", { reason: decision.reason });
-      const used = listAttempts(db, target.id).length;
+      const used = listAttempts(db, target.id).filter((a) => a.state !== "stopped").length;
       transitionUnit(db, target.id, used < target.maxAttempts ? "ready" : "blocked", { attemptsUsed: used });
       return;
     }
@@ -155,6 +155,12 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     });
 
     const final = session.final;
+    const stop = stopRequested(db, attempt.id);
+    if (stop.stopped) {
+      updateAttempt(db, attempt.id, { state: "stopped", endedAt: now(), exitCode: session.exitCode });
+      const decision: VerdictDecision = { outcome: "invalid", tier: null, reason: `stopped by operator${stop.note ? `: ${stop.note}` : ""}`, trunkOutcome: null, headOutcome: null, citedRunIds: [] };
+      return finish(decision, false);
+    }
     const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
     if (final?.text) write(paths.handoff(project.id, unit.seq, attempt.n), final.text);
     const decision = decideVerdict({ handoff, runs: listEvidenceRuns(db, attempt.id), checks: pack.pack.checks, playbook: target.playbook, minTier: project.minTier });

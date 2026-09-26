@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { runAgentSession, write, type RunContext } from "./agent.js";
+import { runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { renderPlanBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import type { ProjectId } from "./domain.js";
@@ -18,6 +18,7 @@ export interface PlanResult {
 }
 
 const MAX_CONSECUTIVE_REJECTIONS = 3;
+const STOPPED = "planner stopped by operator";
 
 export function lastDrainEventId(db: Db, projectId: ProjectId): number {
   return (db.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM events WHERE project_id = ? AND type = 'plan.drain_started'").get(projectId) as { id: number }).id;
@@ -29,9 +30,9 @@ export function latestDelta(db: Db, projectId: ProjectId): PlanDelta | null {
 }
 
 function consecutiveRejections(db: Db, projectId: ProjectId): number {
-  const rows = db.prepare("SELECT applied FROM drains WHERE project_id = ? AND finished_at IS NOT NULL ORDER BY id DESC LIMIT ?").all(projectId, MAX_CONSECUTIVE_REJECTIONS) as {
-    applied: number;
-  }[];
+  const rows = db
+    .prepare("SELECT applied, rejection FROM drains WHERE project_id = ? AND finished_at IS NOT NULL AND COALESCE(rejection, '') <> ? ORDER BY id DESC LIMIT ?")
+    .all(projectId, STOPPED, MAX_CONSECUTIVE_REJECTIONS) as { applied: number }[];
   let n = 0;
   for (const r of rows) {
     if (r.applied) break;
@@ -87,7 +88,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
       now(),
       drainId,
     );
-    if (outcome !== "applied") recordEvent(db, "plan.rejected", { projectId, unitId: unit.id }, { drain: drainId, reason });
+    if (outcome !== "applied" && reason !== STOPPED) recordEvent(db, "plan.rejected", { projectId, unitId: unit.id }, { drain: drainId, reason });
     recordEvent(db, "plan.drain_finished", { projectId, unitId: unit.id }, { drain: drainId, outcome, reason });
     if (outcome !== "applied" && consecutiveRejections(db, projectId) >= MAX_CONSECUTIVE_REJECTIONS)
       setAndon(db, projectId, `planner failed to produce a valid plan ${MAX_CONSECUTIVE_REJECTIONS} times in a row; last: ${reason}`);
@@ -130,6 +131,12 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
       timeboxSeconds: unit.timeboxSeconds,
       logPath: paths.log(projectId, unit.seq, attempt.n),
     });
+    if (stopRequested(db, attempt.id).stopped) {
+      updateAttempt(db, attempt.id, { state: "stopped", endedAt: now(), exitCode: session.exitCode });
+      transitionUnit(db, unit.id, "failed", { drain: drainId, reason: "stopped by operator" });
+      transitionUnit(db, unit.id, "abandoned", { drain: drainId });
+      return finish("failed", STOPPED, null);
+    }
     const text = session.final && !session.final.isError && !session.timedOut ? session.final.text : null;
     if (text) write(paths.handoff(projectId, unit.seq, attempt.n), text);
     updateAttempt(db, attempt.id, { state: text ? "handed_off" : "failed", endedAt: now(), exitCode: session.exitCode, failureMode: text ? null : session.timedOut ? "timebox" : "unknown" });

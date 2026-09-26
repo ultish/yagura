@@ -6,7 +6,8 @@ import type { Bootstrap } from "./config.js";
 import type { Attempt, HarnessEvent, ProjectId, Role, Unit } from "./domain.js";
 import type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
 import { missingSkills } from "./pack.js";
-import { recordEvent, updateAttempt, type Db } from "./store.js";
+import { getAttempt, getUnit, recordEvent, updateAttempt, type Db } from "./store.js";
+import type { AttemptId } from "./domain.js";
 
 export interface RunContext {
   db: Db;
@@ -144,10 +145,27 @@ export async function runAgentSession(
   });
   clearTimeout(timer);
 
-  const missing = missingSkills(s.role, skills);
+  const missing = getAttempt(db, s.attempt.id).stopNote !== null ? [] : missingSkills(s.role, skills);
   updateAttempt(db, s.attempt.id, { skills, missingSkills: missing });
   if (missing.length)
     recordEvent(db, "attempt.method_miss", { projectId: s.projectId, unitId: s.unit.id, attemptId: s.attempt.id }, { role: s.role, missing, loaded: skills });
 
   return { final, exitCode: exit.code, signal: exit.signal, timedOut, stderrTail: stderr, lastActivity, skills, missingSkills: missing };
+}
+
+export function stopAttempt(db: Db, attemptId: AttemptId, note: string | null): boolean {
+  const attempt = getAttempt(db, attemptId);
+  if (attempt.state !== "running" || !attempt.pid) return false;
+  updateAttempt(db, attemptId, { stopNote: note ?? "" });
+  const unit = getUnit(db, attempt.unitId);
+  recordEvent(db, "attempt.stop_requested", { projectId: unit.projectId, unitId: unit.id, attemptId }, { note });
+  try {
+    process.kill(-attempt.pid, "SIGTERM");
+  } catch {}
+  return true;
+}
+
+export function stopRequested(db: Db, attemptId: AttemptId): { stopped: boolean; note: string | null } {
+  const note = getAttempt(db, attemptId).stopNote;
+  return { stopped: note !== null, note: note || null };
 }
