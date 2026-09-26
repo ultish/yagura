@@ -9,6 +9,7 @@ import { addDetachedWorktree, diffText, ensureMirror, patchId, readFileAt } from
 import { parseHandoff } from "./handoff.js";
 import { acquireLease, releaseLease } from "./leases.js";
 import { parsePack } from "./pack.js";
+import { addVerifyUnit } from "./runner.js";
 import { layout } from "./paths.js";
 import { addUnitNote, createAttempt, getAttempt, getProject, getRepo, getUnit, listAttempts, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
 import { CHECK_LABEL, decideVerdict, type VerdictDecision } from "./verdict.js";
@@ -53,6 +54,7 @@ function applyOutcome(db: Db, target: Unit, decision: VerdictDecision, verifySeq
     case "env-blocked":
     case "invalid":
       if (failedVerifications(db, target) >= maxRetries) transitionUnit(db, target.id, "blocked", { reason: `verification did not reach a verdict ${maxRetries} times: ${decision.reason}` });
+      else addVerifyUnit(db, target);
   }
 }
 
@@ -124,7 +126,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       headPath: head,
       basePath: baseWorktree(head),
       scenarioDir,
-      cli: "$YAGURA_CLI",
+      cli: "yagura",
       leaseVars: lease.vars,
       timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
       standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",

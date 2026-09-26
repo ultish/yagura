@@ -12,7 +12,7 @@ import { addUnit, createAttempt, getAttempt, getProject, getRepo, getUnit, now, 
 
 export type { RunContext } from "./agent.js";
 
-export function queueVerification(db: Db, target: Unit): Unit {
+export function addVerifyUnit(db: Db, target: Unit): Unit {
   const verify = addUnit(db, {
     projectId: target.projectId,
     type: "verify",
@@ -25,9 +25,14 @@ export function queueVerification(db: Db, target: Unit): Unit {
     timeboxSeconds: resolveSetting(db, "timebox.verify_seconds", { projectId: target.projectId }).value,
     maxAttempts: 1,
   });
-  transitionUnit(db, target.id, "verifying", { verifyUnit: verify.seq });
   transitionUnit(db, verify.id, "ready");
   return getUnit(db, verify.id);
+}
+
+export function queueVerification(db: Db, target: Unit): Unit {
+  const verify = addVerifyUnit(db, target);
+  transitionUnit(db, target.id, "verifying", { verifyUnit: verify.seq });
+  return verify;
 }
 
 export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt> {

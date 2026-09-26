@@ -13,7 +13,7 @@ import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { runWorkUnit } from "./runner.js";
-import { addEnvironment, addProject, addRepo, addUnit, getUnit, getUnitBySeq, listAttempts, openStore, setProjectEnvironment, transitionUnit, type Db } from "./store.js";
+import { addEnvironment, addProject, addRepo, addUnit, getUnit, getUnitBySeq, listAttempts, listUnits, openStore, setProjectEnvironment, transitionUnit, type Db } from "./store.js";
 import { runVerifyUnit } from "./verify.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
@@ -88,6 +88,15 @@ describe("runVerifyUnit", () => {
     expect(result.decision).toMatchObject({ outcome: "invalid", reason: expect.stringMatching(/proves nothing/) });
     expect(result.verdictId).toBeNull();
     expect(target.state).toBe("verifying");
+    expect(getUnitBySeq(db, project, 3)).toMatchObject({ type: "verify", state: "ready", targetUnitId: target.id });
+  });
+
+  it("blocks the work after repeated verifications fail to reach a verdict", async () => {
+    const { target } = await workThenVerify("verify-weak");
+    process.env.FAKE_MODE = "verify-weak";
+    await runVerifyUnit(ctx, getUnitBySeq(db, project, 3).id);
+    expect(getUnit(db, target.id).state).toBe("blocked");
+    expect(listUnits(db, project).filter((u) => u.type === "verify" && u.state === "ready")).toEqual([]);
   });
 
   it("discards a verdict that cites runs yagura never recorded", async () => {

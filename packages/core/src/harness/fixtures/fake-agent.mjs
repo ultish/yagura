@@ -34,7 +34,7 @@ function verify(mode) {
   const body = mode === "verify-weak" ? "true" : mode === "verify-fail" ? "grep -q 'never there' app/orders.py" : "grep -q 'edited by fake agent' app/orders.py";
   writeFileSync(script, `${body}\n`);
   const run = (at) => {
-    const out = execSync(`${process.env.YAGURA_CLI} evidence run --at ${at} --label scenario -- sh ${script}`, { encoding: "utf8" });
+    const out = execSync(`yagura evidence run --at ${at} --label scenario -- sh ${script}`, { encoding: "utf8" });
     return Number(/run:(\d+)/.exec(out)[1]);
   };
   if (mode === "verify-tamper") appendFileSync(`${process.env.YAGURA_HEAD}/app/orders.py`, "# edited by fake agent\n");

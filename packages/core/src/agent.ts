@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { appendFileSync, chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Bootstrap } from "./config.js";
 import type { Attempt, HarnessEvent, ProjectId, Role, Unit } from "./domain.js";
@@ -31,6 +31,15 @@ export interface SessionResult {
 
 const KILL_GRACE_MS = 10_000;
 
+const shellQuote = (arg: string) => `'${arg.replace(/'/g, `'\\''`)}'`;
+
+export function installCliShim(ctx: RunContext): string {
+  const bin = join(ctx.boot.home, "bin");
+  write(join(bin, "yagura"), `#!/bin/sh\nexec ${ctx.cli.map(shellQuote).join(" ")} "$@"\n`);
+  chmodSync(join(bin, "yagura"), 0o755);
+  return bin;
+}
+
 export function write(path: string, text: string) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, text);
@@ -59,6 +68,7 @@ export async function runAgentSession(
 ): Promise<SessionResult> {
   const { db } = ctx;
   write(s.logPath, "");
+  const bin = ctx.cli.length ? installCliShim(ctx) : null;
   const { argv, stdin } = s.adapter.command(s.run);
   const [cmd, ...args] = argv as [string, ...string[]];
   const child = spawn(cmd, args, {
@@ -73,7 +83,7 @@ export async function runAgentSession(
       YAGURA_PROJECT: s.projectId,
       YAGURA_UNIT: `U${s.unit.seq}`,
       YAGURA_ROLE: s.role,
-      YAGURA_CLI: ctx.cli.join(" "),
+      ...(bin ? { YAGURA_CLI: join(bin, "yagura"), PATH: `${bin}:${process.env.PATH ?? ""}` } : {}),
     },
   });
   updateAttempt(db, s.attempt.id, { pid: child.pid ?? null });
