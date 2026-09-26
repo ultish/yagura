@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>yagura · orders-v2 beacons</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;600;700&amp;family=Zen+Kaku+Gothic+New:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#11141f}
+a{color:#f0a94a}a:hover{color:#f7c886}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+.nav a{color:#a3a7b8;text-decoration:none;font-size:14.5px}
+.nav a.on{color:#ece6da;font-weight:700}
+.gh{display:flex;align-items:baseline;gap:12px;padding:0 0 4px}
+.gh h2{margin:0;font-family:'Shippori Mincho',serif;font-size:21px;font-weight:600}
+.gh span{font-family:'JetBrains Mono',monospace;font-size:12px;color:#a3a7b8}
+.item{display:flex;gap:22px;align-items:flex-start;padding:15px 0;border-top:1px solid #262b3f}
+.seq{font-family:'JetBrains Mono',monospace;font-size:13px;color:#a3a7b8;width:34px;flex-shrink:0;padding-top:3px}
+.body{flex-grow:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.goal{font-size:17px;line-height:1.4;color:#ece6da}
+.status{font-size:14px;line-height:1.45}
+.facts{display:flex;flex-wrap:wrap;gap:6px 22px;font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#a3a7b8;margin-top:3px}
+.facts b{font-weight:500;color:#d6d2c6}
+.run{font-family:'JetBrains Mono',monospace;font-size:12px;border:1px solid;border-radius:3px;padding:1px 6px}
+.actions{display:flex;gap:8px;flex-shrink:0}
+.btn{font-family:'Zen Kaku Gothic New',sans-serif;font-size:14px;font-weight:700;border-radius:4px;padding:8px 16px;border:1px solid #3a4058;background:transparent;color:#ece6da;cursor:pointer}
+.btn.bell{background:#e5553a;border-color:#e5553a;color:#141018}
+.btn.lamp{background:#f0a94a;border-color:#f0a94a;color:#141018}
+@keyframes flicker{0%,100%{opacity:1}18%{opacity:.8}30%{opacity:.96}52%{opacity:.74}66%{opacity:1}84%{opacity:.86}}
+@keyframes breathe{0%,100%{opacity:.7}50%{opacity:1}}
+@keyframes pulse{0%,100%{opacity:.45}50%{opacity:1}}
+@keyframes swing{0%,58%,100%{transform:rotate(0deg)}63%{transform:rotate(14deg)}70%{transform:rotate(-11deg)}77%{transform:rotate(8deg)}84%{transform:rotate(-5deg)}91%{transform:rotate(2deg)}}
+@keyframes ring{0%,58%{opacity:0;transform:scale(.7)}66%{opacity:1}100%{opacity:0;transform:scale(1.5)}}
+@keyframes bellglow{0%,58%,100%{opacity:.35}66%{opacity:1}}
+@keyframes flow{to{stroke-dashoffset:-20}}
+@keyframes ember{0%,100%{opacity:.55}50%{opacity:1}}
+.shoji{animation:flicker 3.4s ease-in-out infinite}
+.breathe{animation:breathe 5s ease-in-out infinite}
+.pulse{animation:pulse 2.6s ease-in-out infinite}
+.swing{transform-box:fill-box;transform-origin:50% 0%;animation:swing 3.6s ease-in-out infinite}
+.ring{transform-box:fill-box;transform-origin:center;animation:ring 3.6s ease-out infinite}
+.bellglow{animation:bellglow 3.6s ease-in-out infinite}
+.flame{transform-box:fill-box;transform-origin:center;animation:flicker 2.2s ease-in-out infinite}
+.signal{animation:flow 1.4s linear infinite}
+.ember{animation:ember 4s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.shoji,.breathe,.pulse,.swing,.ring,.bellglow,.flame,.signal,.ember{animation:none}}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1320px; display: flex; flex-direction: column; background: #11141f; color: #ece6da; font-family: 'Zen Kaku Gothic New', sans-serif; overflow: hidden">
+  <header style="height: 60px; flex-shrink: 0; display: flex; align-items: center; gap: 36px; padding: 0 36px; border-bottom: 1px solid #1f2335">
+    <div style="display: flex; align-items: baseline; gap: 10px"><span style="font-family: 'Shippori Mincho', serif; font-size: 24px; font-weight: 700">櫓</span><span style="font-family: 'Shippori Mincho', serif; font-size: 16px; letter-spacing: .12em">yagura</span></div>
+    <nav class="nav" style="display: flex; gap: 26px"><a href="#">The watch</a><a class="on" href="#">Projects</a><a href="#">Agents</a><a href="#">Environments</a><a href="#">Repos</a><a href="#">Settings</a></nav>
+    <div class="mono" style="margin-left: auto; font-size: 12px; color: #a3a7b8">devvm:7300 · sample data</div><button type="button" aria-label="Switch to daybreak theme" style="font-family: 'JetBrains Mono', monospace; font-size: 12px; border: 1px solid #3a4058; background: transparent; color: #ece6da; border-radius: 999px; padding: 6px 12px; cursor: pointer">☾ night · daybreak</button>
+  </header>
+  <section style="padding: 26px 36px 8px; display: flex; flex-direction: column; gap: 10px">
+    <div class="mono" style="font-size: 12.5px; color: #a3a7b8">kuru-testbed@main · env local · merge by hand · ≥ unit-verified · gitlab#123</div>
+    <div style="display: flex; align-items: flex-end; gap: 20px">
+      <h1 style="margin: 0; font-family: 'Shippori Mincho', serif; font-size: 42px; font-weight: 600">orders-v2</h1>
+      <div style="margin-left: auto; display: flex; gap: 10px"><button class="btn" type="button">Ring andon</button><button class="btn lamp" type="button">Add work</button></div>
+    </div>
+    <p style="margin: 0; font-size: 16.5px; line-height: 1.6; color: #cfccd9; max-width: 820px">Persist orders, expose read-back by id, and audit rejected discount codes. Done when all three are landed on main at unit-verified or better.</p>
+  </section>
+  <svg width="1440" height="440" viewBox="0 0 1440 440" role="img" aria-label="Beacon chains for each unit from plan to work, verify and land, ending at the main fortress" style="display: block; flex-shrink: 0">
+    <defs>
+      <radialGradient id="lamp"><stop offset="0" stop-color="#f0a94a" stop-opacity="0.45"/><stop offset="1" stop-color="#f0a94a" stop-opacity="0"/></radialGradient>
+      <radialGradient id="bell"><stop offset="0" stop-color="#e5553a" stop-opacity="0.65"/><stop offset="1" stop-color="#e5553a" stop-opacity="0"/></radialGradient>
+    </defs>
+    <path d="M0 410 C 260 392 520 404 780 396 S 1200 386 1440 398 L1440 440 L0 440 Z" fill="#171b2b"/>
+    <g style="font-family: 'JetBrains Mono', monospace; font-size: 12px" fill="#a3a7b8" text-anchor="middle">
+      <text x="456" y="36">plan</text><text x="636" y="36">work</text><text x="816" y="36">verify</text><text x="996" y="36">land</text>
+    </g>
+    <g transform="translate(1240 32)">
+  <path d="M-110 330 Q-96 250 -84 200 L84 200 Q96 250 110 330 Z" fill="#3a3a4a" stroke="#56566a" stroke-width="1.5"/>
+  <path d="M-102 300 L102 300 M-97 270 L97 270 M-92 240 L92 240 M-60 200 L-66 330 M-20 200 L-22 330 M20 200 L22 330 M60 200 L66 330" stroke="#4c4c60" stroke-width="1"/>
+  <rect x="-70" y="120" width="140" height="80" fill="#c9c2b2"/>
+  <rect x="-58" y="138" width="16" height="12" fill="#2a2630"/><rect x="-24" y="138" width="16" height="12" fill="#f0a94a"/><rect x="8" y="138" width="16" height="12" fill="#2a2630"/><rect x="42" y="138" width="16" height="12" fill="#2a2630"/>
+  <path d="M-100 124 Q-78 118 -70 106 L-58 96 L58 96 L70 106 Q78 118 100 124 Q60 114 0 114 Q-60 114 -100 124 Z" fill="#2b2533" stroke="#8a7160" stroke-width="2"/>
+  <rect x="-44" y="54" width="88" height="44" fill="#c9c2b2"/>
+  <rect x="-30" y="66" width="14" height="11" fill="#2a2630"/><rect x="-7" y="66" width="14" height="11" fill="#2a2630"/><rect x="16" y="66" width="14" height="11" fill="#2a2630"/>
+  <path d="M-72 58 Q-54 52 -46 40 L-30 26 L30 26 L46 40 Q54 52 72 58 Q40 48 0 48 Q-40 48 -72 58 Z" fill="#2b2533" stroke="#8a7160" stroke-width="2"/>
+  <path d="M-30 26 L30 26 M-36 26 Q-40 18 -34 16 M36 26 Q40 18 34 16" stroke="#a88a5c" stroke-width="2" fill="none"/>
+  <text x="0" y="-8" text-anchor="middle" fill="#ece6da" style="font-family: 'Shippori Mincho', serif; font-size: 26px; font-weight: 600">main</text>
+  <text x="0" y="360" text-anchor="middle" fill="#f0a94a" style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px">a41c9e2 · U2</text>
+  <text x="0" y="380" text-anchor="middle" fill="#a3a7b8" style="font-family: 'JetBrains Mono', monospace; font-size: 12px">kuru-testbed · landed 09:07</text>
+</g>
+    <g style="font-family: 'Zen Kaku Gothic New', sans-serif; font-size: 15px" fill="#ece6da">
+      <text x="36" y="80"><tspan style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px" fill="#a3a7b8">U2  </tspan>Persist orders in the store</text>
+      <text x="36" y="136"><tspan style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px" fill="#a3a7b8">U4  </tspan>Audit rejected discount codes</text>
+      <text x="36" y="192"><tspan style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px" fill="#a3a7b8">U8  </tspan>Reject negative quantities</text>
+      <text x="36" y="248"><tspan style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px" fill="#a3a7b8">U3  </tspan>Read orders back by id</text>
+      <text x="36" y="304"><tspan style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px" fill="#a3a7b8">U6  </tspan>Split store and pricing</text>
+      <text x="36" y="360"><tspan style="font-family: 'JetBrains Mono', monospace; font-size: 12.5px" fill="#a3a7b8">U5  </tspan>Totals with banker's rounding</text>
+    </g>
+    <g stroke-width="2.5" fill="none">
+      <path d="M456 75 L1166 75" stroke="#b98643"/>
+      <path d="M456 131 L996 131" stroke="#b98643"/>
+      <path d="M456 187 L816 187" stroke="#b98643"/><path d="M816 187 L996 187" stroke="#343a52"/>
+      <path d="M456 243 L636 243" stroke="#b98643"/><path d="M636 243 L996 243" stroke="#343a52"/>
+      <path d="M456 299 L636 299" stroke="#7a3a30"/><path d="M636 299 L996 299" stroke="#343a52"/>
+      <path d="M456 355 L996 355" stroke="#343a52"/>
+    </g>
+    <path class="signal" d="M462 350 C 560 320 900 290 990 250" fill="none" stroke="#f0a94a" stroke-width="1.5" stroke-dasharray="3 7" opacity=".8"/>
+    <text x="700" y="318" fill="#e8c898" style="font-family: 'JetBrains Mono', monospace; font-size: 11.5px">U5 waits for U3 to land</text>
+    <g>
+      <circle cx="456" cy="75" r="16" fill="url(#lamp)"/><circle cx="456" cy="75" r="6.5" fill="#f0a94a"/>
+      <circle cx="636" cy="75" r="16" fill="url(#lamp)"/><circle cx="636" cy="75" r="6.5" fill="#f0a94a"/>
+      <circle cx="816" cy="75" r="16" fill="url(#lamp)"/><circle cx="816" cy="75" r="6.5" fill="#f0a94a"/>
+      <circle cx="996" cy="75" r="16" fill="url(#lamp)"/><circle cx="996" cy="75" r="6.5" fill="#f0a94a"/>
+      <circle cx="456" cy="131" r="16" fill="url(#lamp)"/><circle cx="456" cy="131" r="6.5" fill="#f0a94a"/>
+      <circle cx="636" cy="131" r="16" fill="url(#lamp)"/><circle cx="636" cy="131" r="6.5" fill="#f0a94a"/>
+      <circle cx="816" cy="131" r="16" fill="url(#lamp)"/><circle cx="816" cy="131" r="6.5" fill="#f0a94a"/>
+      <circle class="bellglow" cx="996" cy="131" r="30" fill="url(#bell)"/><g class="swing"><path d="M996 112 L996 120" stroke="#8a7160" stroke-width="1.2"/><path d="M988 138 Q996 116 1004 138 L1007 142 L985 142 Z" fill="#e5553a"/></g><text x="1020" y="136" fill="#f08a73" style="font-family: 'JetBrains Mono', monospace; font-size: 12px">land?</text>
+      <circle cx="456" cy="187" r="16" fill="url(#lamp)"/><circle cx="456" cy="187" r="6.5" fill="#f0a94a"/>
+      <circle cx="636" cy="187" r="16" fill="url(#lamp)"/><circle cx="636" cy="187" r="6.5" fill="#f0a94a"/>
+      <circle class="breathe" cx="816" cy="187" r="30" fill="url(#lamp)"/><circle cx="816" cy="187" r="14" fill="none" stroke="#f0a94a" stroke-opacity=".5"/><circle class="flame" cx="816" cy="187" r="8.5" fill="#f0a94a"/><text x="836" y="192" fill="#e8c898" style="font-family: 'JetBrains Mono', monospace; font-size: 12px">U9 · 2m</text>
+      <circle cx="996" cy="187" r="6.5" fill="#161a28" stroke="#4a4f68" stroke-width="1.5"/>
+      <circle cx="456" cy="243" r="16" fill="url(#lamp)"/><circle cx="456" cy="243" r="6.5" fill="#f0a94a"/>
+      <circle class="breathe" cx="636" cy="243" r="30" fill="url(#lamp)"/><circle cx="636" cy="243" r="14" fill="none" stroke="#f0a94a" stroke-opacity=".5"/><circle class="flame" cx="636" cy="243" r="8.5" fill="#f0a94a"/><text x="656" y="238" fill="#e8c898" style="font-family: 'JetBrains Mono', monospace; font-size: 12px">worker · 12m</text>
+      <circle cx="816" cy="243" r="6.5" fill="#161a28" stroke="#4a4f68" stroke-width="1.5"/>
+      <circle cx="996" cy="243" r="6.5" fill="#161a28" stroke="#4a4f68" stroke-width="1.5"/>
+      <circle cx="456" cy="299" r="16" fill="url(#lamp)"/><circle cx="456" cy="299" r="6.5" fill="#f0a94a"/>
+      <circle class="ember" cx="636" cy="299" r="20" fill="url(#bell)"/><circle cx="636" cy="299" r="6.5" fill="#e5553a"/><text x="656" y="304" fill="#f08a73" style="font-family: 'JetBrains Mono', monospace; font-size: 12px">ember · blocked</text>
+      <circle cx="816" cy="299" r="6.5" fill="#161a28" stroke="#4a4f68" stroke-width="1.5"/>
+      <circle cx="996" cy="299" r="6.5" fill="#161a28" stroke="#4a4f68" stroke-width="1.5"/>
+      <circle cx="456" cy="355" r="6.5" fill="#161a28" stroke="#4a4f68" stroke-width="1.5"/>
+      <circle cx="636" cy="355" r="6.5" fill="#161a28" stroke="#4a4f68" stroke-width="1.5"/>
+      <circle cx="816" cy="355" r="6.5" fill="#161a28" stroke="#4a4f68" stroke-width="1.5"/>
+      <circle cx="996" cy="355" r="6.5" fill="#161a28" stroke="#4a4f68" stroke-width="1.5"/>
+    </g>
+  </svg>
+  <section style="padding: 20px 36px 0; display: flex; flex-direction: column; gap: 24px; background: #141827; border-top: 1px solid #1f2335; flex-grow: 1">
+    <div>
+      <div class="gh"><h2 style="color: #f08a73">The bell · needs you</h2><span>2</span></div>
+      <div class="item">
+        <span class="seq">U4</span>
+        <div class="body">
+          <div class="goal">Log rejected discount codes to the audit table</div>
+          <div class="status" style="color: #b7c0ff">Verified by U7 at unit-verified. Ready to land on kuru-testbed.</div>
+          <div class="facts"><span><b>opus-5.5</b> · try 1 of 2 · skills ✓</span><span>18m of 30m · ctx 52k</span><span><span class="run" style="color: #f08a73; border-color: #5c3530">r21 base ✕</span> <span class="run" style="color: #8fd1a8; border-color: #2c4d3c">r22 head ✓</span></span><span>yg/orders-v2/u4-1</span></div>
+        </div>
+        <div class="actions"><button class="btn bell" type="button">Land</button><button class="btn" type="button">Hold</button></div>
+      </div>
+      <div class="item">
+        <span class="seq">U6</span>
+        <div class="body">
+          <div class="goal">Split orders.py into store and pricing modules</div>
+          <div class="status" style="color: #f08a73">Blocked. Both attempts skipped pstack:poteto-mode, so yagura rejected them.</div>
+          <div class="facts"><span><b>opus-5.5</b> · try 2 of 2 · skills ✕ poteto-mode</span><span>9m of 30m · ctx 38k</span></div>
+        </div>
+        <div class="actions"><button class="btn" type="button">Retry with a note</button><button class="btn" type="button">Cancel</button></div>
+      </div>
+    </div>
+    <div>
+      <div class="gh"><h2>Lanterns lit</h2><span>2</span></div>
+      <div class="item">
+        <span class="seq">U3</span>
+        <div class="body">
+          <div class="goal">Expose OrderStore.get by id with the discounted total</div>
+          <div class="status" style="color: #f0a94a">Worker running for 12 minutes. Last step: python3 -m unittest discover -s tests</div>
+          <div class="facts"><span><b>opus-5.5</b> · try 1 of 2 · skills ✓</span><span>ctx 41k of 256k</span><span>after U2 ✓</span></div>
+        </div>
+        <div class="actions"><button class="btn" type="button">Watch</button><button class="btn" type="button">Stop</button></div>
+      </div>
+      <div class="item">
+        <span class="seq">U8</span>
+        <div class="body">
+          <div class="goal">Reject negative item quantities when an order is created</div>
+          <div class="status" style="color: #f0a94a">U9 is verifying: capturing evidence on trunk.</div>
+          <div class="facts"><span><b>opus-5.5</b> · lease local/slot-1</span><span>2m of 20m</span><span><span class="run" style="color: #8fd1a8; border-color: #2c4d3c">r30 unit base ✓</span> <span class="run" style="color: #8fd1a8; border-color: #2c4d3c">r31 unit head ✓</span></span></div>
+        </div>
+        <div class="actions"><button class="btn" type="button">Watch</button></div>
+      </div>
+    </div>
+    <div>
+      <div class="gh"><h2>Waiting for a signal</h2><span>1</span></div>
+      <div class="item">
+        <span class="seq">U5</span>
+        <div class="body">
+          <div class="goal">Order totals in cents with banker's rounding on create</div>
+          <div class="status" style="color: #a3a7b8">Starts when U3 lands.</div>
+        </div>
+        <div class="actions"><button class="btn" type="button">Edit</button></div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
