@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { loadBootstrap, resolveSetting, setSetting, UnknownSetting, effectiveSettings } from "./config.js";
 import { IllegalTransition, type ProjectId, type RepoId } from "./domain.js";
-import { addProject, addRepo, addUnit, createAttempt, getUnit, openStore, transitionUnit, updateAttempt, getAttempt, type Db } from "./store.js";
+import { addProject, addRepo, addUnit, createAttempt, getUnit, openStore, schemaVersion, transitionUnit, updateAttempt, getAttempt, type Db } from "./store.js";
+import { LATEST_VERSION } from "./migrations.js";
+import Database from "better-sqlite3";
+import { readFileSync } from "node:fs";
 
 let db: Db;
 const project = "p" as ProjectId;
@@ -36,6 +39,22 @@ describe("store", () => {
     first.close();
     const second = openStore(path);
     expect(second.prepare("SELECT COUNT(*) AS n FROM repos").get()).toEqual({ n: 1 });
+  });
+
+  it("brings a fresh database to the latest schema version", () => {
+    expect(schemaVersion(db)).toBe(LATEST_VERSION);
+  });
+
+  it("migrates a version-1 database in place without losing rows", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "yagura-v1-")), "yagura.db");
+    const v1 = new Database(path);
+    v1.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
+    v1.prepare("INSERT INTO repos (id, url, default_branch, created_at) VALUES ('old', 'file:///old', 'main', 't')").run();
+    v1.close();
+    const upgraded = openStore(path);
+    expect(schemaVersion(upgraded)).toBe(LATEST_VERSION);
+    expect(upgraded.prepare("SELECT id FROM repos").all()).toEqual([{ id: "old" }]);
+    expect(upgraded.prepare("SELECT COUNT(*) AS n FROM evidence_runs").get()).toEqual({ n: 0 });
   });
 
   it("numbers units per project and round-trips their fields", () => {

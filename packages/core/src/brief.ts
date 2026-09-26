@@ -98,3 +98,99 @@ ${b.report}
 ${b.standing.trim() || "(none)"}
 `;
 }
+
+export const VERIFIER_HANDOFF_TEMPLATE = `## Status
+success | blocked
+(success = you reached a verdict; blocked = you could not)
+
+## Verification
+<one of: deployed-verified | live-local-verified | e2e-verified | unit-verified | build-only | verifier-failed | verifier-blocked>
+
+## Evidence
+- run:<id> <what this run shows>
+
+## Findings
+- [x] <acceptance criterion>: met, run:<id>
+- [ ] <acceptance criterion>: not met, run:<id>, <what is wrong>
+
+## Notes, concerns, deviations
+- <anything the planner or the next worker must know>`;
+
+export interface VerifyBrief {
+  target: { seq: number; goal: string; playbook: string | null; baseSha: string; headSha: string };
+  acceptance: string[];
+  verifyRecipe: string;
+  diff: string;
+  checks: { name: string; tier: string; base: string; head: string }[];
+  headPath: string;
+  basePath: string;
+  scenarioDir: string;
+  cli: string;
+  leaseVars: Record<string, string>;
+  timeboxMinutes: number;
+  standing: string;
+}
+
+const DIFF_LIMIT = 60_000;
+
+export function renderVerifyBrief(v: VerifyBrief): string {
+  const diff = v.diff.length > DIFF_LIMIT ? `${v.diff.slice(0, DIFF_LIMIT)}\n… (diff truncated; read the full change in the head checkout)` : v.diff;
+  const behaviour =
+    v.target.playbook === "refactoring" || v.target.playbook === "visual-parity"
+      ? "This is a behaviour-preserving change: your scenario must behave the same on base and head, and pass."
+      : "Your scenario must FAIL on base and PASS on head. A scenario that passes on base proves nothing and your verdict will be discarded.";
+  return `# yagura verify brief
+
+You are a verifier inside yagura. You did not write this change and must not trust any description of it. Decide from evidence whether U${v.target.seq} meets its acceptance criteria. yagura only accepts evidence it captured itself: every claim you make must cite a run id that \`evidence run\` gave you.
+
+## GOAL
+Verify U${v.target.seq}: ${v.target.goal}
+
+## ACCEPTANCE (what the change must do)
+${list(v.acceptance)}
+
+## CHECKOUTS (read-only)
+- head (the change): ${v.headPath} @ ${v.target.headSha}
+- base (trunk before the change): ${v.basePath} @ ${v.target.baseSha}
+Every evidence run starts from a clean checkout of that SHA, so edits you make there are discarded and flagged as tampering.
+
+## THE CHANGE
+\`\`\`diff
+${diff}
+\`\`\`
+
+## PACK CHECKS (already run by yagura)
+${list(v.checks.map((c) => `${c.name} (${c.tier}): base ${c.base}, head ${c.head}`))}
+
+## HOW TO CAPTURE EVIDENCE
+Write scenario scripts in your scratch directory ${v.scenarioDir} (your working directory), then run them through yagura on both checkouts:
+
+    ${v.cli} evidence run --at base --label <name> -- <command>
+    ${v.cli} evidence run --at head --label <name> -- <command>
+
+The command runs with the checkout as its working directory and prints a run id (run:<id>), the exit code, and the output. Use the same command on base and head so yagura can pair them. Files written to $YAGURA_EVIDENCE are kept as evidence. ${behaviour}
+
+Recipe from the unit: ${v.verifyRecipe}
+
+## ENV
+${list(Object.entries(v.leaseVars).map(([k, val]) => `${k}=${val}`))}
+
+## TIMEBOX
+${v.timeboxMinutes} minutes.
+
+## FORBIDDEN
+- editing either checkout, committing, pushing, or touching git
+- claiming a result you did not capture with evidence run
+
+## METHOD
+Load the yagura-verifier skill first and follow it.
+
+## REPORT
+Your final message is your verdict; nothing else you write is read. Use exactly this structure:
+
+${VERIFIER_HANDOFF_TEMPLATE}
+
+## STANDING ORDERS
+${v.standing.trim() || "(none)"}
+`;
+}

@@ -214,6 +214,7 @@ export interface Unit {
   verify: string | null;
   context: string[];
   measurements: MeasurementSpec[];
+  notes: string[];
   playbook: string | null;
   timeboxSeconds: number;
   maxAttempts: number;
@@ -255,6 +256,8 @@ export interface Attempt {
   tokensIn: number;
   tokensOut: number;
   contextPeak: number;
+  skills: string[];
+  missingSkills: string[];
   startedAt: IsoTime | null;
   endedAt: IsoTime | null;
 }

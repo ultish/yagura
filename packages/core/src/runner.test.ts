@@ -10,7 +10,7 @@ import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { runWorkUnit } from "./runner.js";
-import { addProject, addRepo, addUnit, getUnit, listAttempts, openStore, transitionUnit, type Db } from "./store.js";
+import { addProject, addRepo, addUnit, getUnit, getUnitBySeq, listAttempts, openStore, transitionUnit, type Db } from "./store.js";
 
 const fakeAgent = fileURLToPath(new URL("./harness/fixtures/fake-agent.mjs", import.meta.url));
 const fake: HarnessAdapter = {
@@ -50,14 +50,16 @@ async function run(mode: string, timeboxSeconds = 60) {
     maxAttempts: 2,
   });
   transitionUnit(db, unit.id, "ready");
-  const attempt = await runWorkUnit({ db, boot, adapters: { claude: fake } }, unit.id);
+  const attempt = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli: [] }, unit.id);
   return { unit: getUnit(db, unit.id), attempt, paths: layout(boot) };
 }
 
 describe("runWorkUnit", () => {
   it("runs an agent in its own worktree and records a clean handoff", async () => {
     const { unit, attempt, paths } = await run("success");
-    expect(unit.state).toBe("handed_off");
+    expect(unit.state).toBe("verifying");
+    expect(getUnitBySeq(db, project, 2)).toMatchObject({ type: "verify", state: "ready", targetUnitId: unit.id });
+    expect(attempt.missingSkills).toEqual(["yagura:yagura-worker", "pstack:poteto-mode"]);
     expect(attempt).toMatchObject({ state: "handed_off", handoffStatus: "success", selfTier: "unit-verified", model: "fake-model", contextPeak: 1200 });
     expect(attempt.pluginVersions).toEqual({ pstack: "0.5.0" });
     expect(attempt.headSha).not.toBe(attempt.baseSha);
@@ -111,7 +113,7 @@ describe("runWorkUnit", () => {
       timeboxSeconds: 60,
       maxAttempts: 1,
     });
-    await expect(runWorkUnit({ db, boot, adapters: { claude: fake } }, unit.id)).rejects.toThrow(/draft, not ready/);
+    await expect(runWorkUnit({ db, boot, adapters: { claude: fake }, cli: [] }, unit.id)).rejects.toThrow(/draft, not ready/);
     expect(existsSync(layout(boot).mirror("testbed" as RepoId))).toBe(false);
   });
 });

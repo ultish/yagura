@@ -31,6 +31,35 @@ export async function addWorktree(gitDir: string, path: string, branch: string, 
   await git(["worktree", "add", "--quiet", "-b", branch, path, base], { gitDir });
 }
 
+export async function addDetachedWorktree(gitDir: string, path: string, sha: Sha): Promise<void> {
+  await git(["worktree", "add", "--quiet", "--detach", path, sha], { gitDir });
+}
+
+export async function isPristine(worktree: string, sha: Sha): Promise<boolean> {
+  const [status, head] = await Promise.all([git(["status", "--porcelain"], { cwd: worktree }), git(["rev-parse", "HEAD"], { cwd: worktree })]);
+  return status === "" && head === sha;
+}
+
+export async function restorePristine(worktree: string, sha: Sha): Promise<void> {
+  await git(["checkout", "--quiet", "--detach", "--force", sha], { cwd: worktree });
+  await git(["reset", "--quiet", "--hard", sha], { cwd: worktree });
+  await git(["clean", "--quiet", "-fd"], { cwd: worktree });
+}
+
+export async function patchId(worktree: string, base: Sha, head: Sha): Promise<string | null> {
+  const diff = await git(["diff", "--binary", base, head], { cwd: worktree });
+  if (!diff) return null;
+  const { stdout } = await new Promise<{ stdout: string }>((resolve, reject) => {
+    const child = execFile("git", ["patch-id", "--stable"], { cwd: worktree }, (err, stdout) => (err ? reject(err) : resolve({ stdout })));
+    child.stdin?.end(`${diff}\n`);
+  });
+  return stdout.split(" ")[0] || null;
+}
+
+export async function diffText(worktree: string, base: Sha, head: Sha): Promise<string> {
+  return git(["diff", "--stat", "--patch", base, head], { cwd: worktree });
+}
+
 export async function removeWorktree(gitDir: string, path: string): Promise<void> {
   await git(["worktree", "remove", "--force", path], { gitDir });
 }

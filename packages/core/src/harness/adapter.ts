@@ -6,6 +6,7 @@ export interface HarnessRun {
   model: string | null;
   permissionMode: string;
   pluginDirs: string[];
+  addDirs: string[];
   extraArgs: string[];
 }
 

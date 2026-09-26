@@ -55,6 +55,8 @@ export const SETTINGS = {
   "role.planner.harness": z.string().default("claude"),
   "role.planner.model": z.string().nullable().default(null),
   "timebox.work_seconds": z.number().int().positive().default(1800),
+  "timebox.verify_seconds": z.number().int().positive().default(1200),
+  "verify.max_retries": z.number().int().positive().default(2),
   max_attempts: z.number().int().positive().default(2),
   "git.author_name": z.string().default("yagura"),
   "git.author_email": z.string().default("yagura@localhost"),

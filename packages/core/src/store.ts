@@ -2,9 +2,13 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import { canTransition, IllegalTransition } from "./domain.js";
+import { MIGRATIONS } from "./migrations.js";
 import type {
   Attempt,
   AttemptId,
+  Environment,
+  EnvironmentId,
+  Provider,
   IsoTime,
   MeasurementSpec,
   Project,
@@ -31,7 +35,22 @@ export function openStore(path: string): Db {
   db.pragma("busy_timeout = 5000");
   const initialized = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'").get();
   if (!initialized) db.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
+  migrate(db);
   return db;
+}
+
+export function schemaVersion(db: Db): number {
+  return (db.prepare("SELECT version FROM schema_version").get() as { version: number }).version;
+}
+
+function migrate(db: Db): void {
+  for (const m of MIGRATIONS) {
+    if (m.version <= schemaVersion(db)) continue;
+    db.transaction(() => {
+      db.exec(m.sql);
+      db.prepare("UPDATE schema_version SET version = ?").run(m.version);
+    })();
+  }
 }
 
 export function recordEvent(
@@ -192,6 +211,7 @@ function toUnit(r: Record<string, unknown>): Unit {
     verify: (r.verify as string | null) ?? null,
     context: JSON.parse(r.context_json as string),
     measurements: JSON.parse(r.measurements_json as string),
+    notes: JSON.parse((r.notes_json as string | undefined) ?? "[]"),
     playbook: (r.playbook as string | null) ?? null,
     timeboxSeconds: r.timebox_seconds as number,
     maxAttempts: r.max_attempts as number,
@@ -239,6 +259,8 @@ function toAttempt(r: Record<string, unknown>): Attempt {
     tokensIn: r.tokens_in as number,
     tokensOut: r.tokens_out as number,
     contextPeak: r.context_peak as number,
+    skills: JSON.parse((r.skills_json as string | undefined) ?? "[]"),
+    missingSkills: JSON.parse((r.missing_skills_json as string | undefined) ?? "[]"),
     startedAt: (r.started_at as IsoTime | null) ?? null,
     endedAt: (r.ended_at as IsoTime | null) ?? null,
   };
@@ -281,12 +303,61 @@ const ATTEMPT_COLUMNS = {
   endedAt: "ended_at",
   pluginVersions: "plugin_versions_json",
   model: "model",
+  skills: "skills_json",
+  missingSkills: "missing_skills_json",
 } as const satisfies Partial<Record<keyof Attempt, string>>;
 
 export function updateAttempt(db: Db, id: AttemptId, patch: Partial<Pick<Attempt, keyof typeof ATTEMPT_COLUMNS>>): void {
   const entries = Object.entries(patch) as [keyof typeof ATTEMPT_COLUMNS, unknown][];
   if (!entries.length) return;
   const sets = entries.map(([k]) => `${ATTEMPT_COLUMNS[k]} = ?`).join(", ");
-  const values = entries.map(([k, v]) => (k === "pluginVersions" ? JSON.stringify(v) : v));
+  const values = entries.map(([k, v]) => (k === "pluginVersions" || k === "skills" || k === "missingSkills" ? JSON.stringify(v) : v));
   db.prepare(`UPDATE attempts SET ${sets} WHERE id = ?`).run(...values, id);
+}
+
+export function addEnvironment(
+  db: Db,
+  e: { id: string; name: string; provider: Provider; capacity: number; providerConfig?: Record<string, unknown> },
+): Environment {
+  db.prepare("INSERT INTO environments (id, name, provider, provider_config_json, capacity, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+    e.id,
+    e.name,
+    e.provider,
+    JSON.stringify(e.providerConfig ?? {}),
+    e.capacity,
+    now(),
+  );
+  return getEnvironment(db, e.id as EnvironmentId);
+}
+
+export function getEnvironment(db: Db, id: EnvironmentId): Environment {
+  const r = db.prepare("SELECT * FROM environments WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  if (!r) throw new Error(`environment ${id} not found`);
+  return {
+    id: r.id as EnvironmentId,
+    name: r.name as string,
+    provider: r.provider as Provider,
+    providerConfig: JSON.parse(r.provider_config_json as string),
+    capacity: r.capacity as number,
+    doctorStatus: r.doctor_status as Environment["doctorStatus"],
+    doctorCheckedAt: (r.doctor_checked_at as IsoTime | null) ?? null,
+    createdAt: r.created_at as IsoTime,
+  };
+}
+
+export function setProjectEnvironment(db: Db, projectId: ProjectId, environmentId: EnvironmentId | null): void {
+  if (environmentId) getEnvironment(db, environmentId);
+  db.prepare("UPDATE projects SET environment_id = ? WHERE id = ?").run(environmentId, projectId);
+  recordEvent(db, "project.environment", { projectId }, { environment: environmentId });
+}
+
+export function setRepoUrl(db: Db, repoId: RepoId, url: string): void {
+  db.prepare("UPDATE repos SET url = ? WHERE id = ?").run(url, repoId);
+}
+
+export function addUnitNote(db: Db, unitId: UnitId, note: string): void {
+  const row = db.prepare("SELECT notes_json, project_id FROM units WHERE id = ?").get(unitId) as { notes_json: string; project_id: ProjectId };
+  const notes = [...(JSON.parse(row.notes_json) as string[]), note];
+  db.prepare("UPDATE units SET notes_json = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(notes), now(), unitId);
+  recordEvent(db, "unit.note", { projectId: row.project_id, unitId }, { note });
 }

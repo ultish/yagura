@@ -40,7 +40,7 @@ describe("claude stream-json parser (real transcript)", () => {
 
 describe("claude command", () => {
   it("builds a headless stream-json invocation with plugin dirs and optional model", () => {
-    const run = { prompt: "brief", bin: null, model: null, permissionMode: "bypassPermissions", pluginDirs: ["/y/plugins/yagura"], extraArgs: [] };
+    const run = { prompt: "brief", bin: null, model: null, permissionMode: "bypassPermissions", pluginDirs: ["/y/plugins/yagura"], addDirs: [], extraArgs: [] };
     expect(claudeAdapter.command(run)).toEqual({
       argv: ["claude", "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions", "--plugin-dir", "/y/plugins/yagura"],
       stdin: "brief",
