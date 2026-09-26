@@ -8,6 +8,19 @@ importers:
 
   .: {}
 
+  apps/cli:
+    dependencies:
+      '@yagura/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+    devDependencies:
+      '@types/node':
+        specifier: ^22.13.10
+        version: 22.20.4
+      typescript:
+        specifier: ^5.8.2
+        version: 5.9.3
+
   packages/core:
     dependencies:
       better-sqlite3:

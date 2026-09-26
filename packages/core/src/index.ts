@@ -1,1 +1,11 @@
 export * from "./domain.js";
+export * from "./brief.js";
+export * from "./handoff.js";
+export * from "./scope.js";
+export * from "./git.js";
+export * from "./store.js";
+export * from "./config.js";
+export * from "./paths.js";
+export * from "./runner.js";
+export type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
+export { claudeAdapter, parseClaudeLine } from "./harness/claude.js";
