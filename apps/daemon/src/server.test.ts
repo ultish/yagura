@@ -10,6 +10,7 @@ import {
   createAttempt,
   layout,
   openStore,
+  parseClaudeLine,
   transitionUnit,
   updateAttempt,
   type Bootstrap,
@@ -106,5 +107,38 @@ describe("daemon API", () => {
     while (!text.includes("gate.opened")) text += new TextDecoder().decode((await reader.read()).value);
     await reader.cancel();
     expect(text).toMatch(/event: yagura\ndata: .*"type":"project.created"/);
+  });
+});
+
+describe("watchman API", () => {
+  const fakeAgent = new URL("../../../packages/core/src/harness/fixtures/fake-agent.mjs", import.meta.url).pathname;
+  const auth = { authorization: "Bearer secret", "content-type": "application/json" };
+
+  it("starts a thread, answers it through the watchman, and applies the proposal on Go", async () => {
+    process.env.FAKE_MODE = "engine";
+    const talkApp = createApp({
+      db,
+      boot,
+      token: "secret",
+      adapters: { claude: { id: "claude", command: (run) => ({ argv: [process.execPath, fakeAgent], stdin: run.prompt }), parse: parseClaudeLine } },
+    });
+    const started = await talkApp.request("/api/threads", { method: "POST", headers: auth, body: JSON.stringify({ message: "prototype a chain" }) });
+    expect(started.status).toBe(202);
+    const { thread } = (await started.json()) as { thread: { id: number } };
+    const again = await talkApp.request(`/api/threads/${thread.id}/messages`, { method: "POST", headers: auth, body: JSON.stringify({ message: "and?" }) });
+    expect(again.status).toBe(409);
+
+    let view: { busy: boolean; messages: { role: string; body: string }[]; proposals: { id: number; state: string }[] };
+    do {
+      await new Promise((r) => setTimeout(r, 50));
+      view = (await (await talkApp.request(`/api/threads/${thread.id}`, { headers: auth })).json()) as typeof view;
+    } while (view.busy);
+    expect(view.messages.map((m) => m.role)).toEqual(["human", "watchman"]);
+    expect(view.proposals.map((p) => p.state)).toEqual(["pending"]);
+
+    const applied = await talkApp.request(`/api/proposals/${view.proposals[0]!.id}/apply`, { method: "POST", headers: auth });
+    expect(((await applied.json()) as { result: { projects: string[] } }).result.projects).toEqual(["proto-a", "proto-b"]);
+    const found = (await (await talkApp.request("/api/search?q=prototype", { headers: auth })).json()) as { kind: string; messageId?: number }[];
+    expect(found).toEqual([expect.objectContaining({ kind: "message", messageId: 1 })]);
   });
 });

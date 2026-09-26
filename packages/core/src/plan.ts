@@ -36,28 +36,26 @@ export const WORK_PLAYBOOKS = [
 
 const UnitRef = z.string().regex(/^U\d+$/, "unit references look like U3");
 
+export const PlanUnit = z
+  .object({
+    key: z.string().regex(/^[a-z][a-z0-9-]*$/, "keys are lowercase words, e.g. discount-create"),
+    repo: z.string(),
+    goal: z.string().min(1),
+    write: z.array(z.string().min(1)).min(1),
+    forbid: z.array(z.string()).default([]),
+    accept: z.array(z.string().min(1)).min(1),
+    verify: z.string().min(1),
+    context: z.array(z.string()).default([]),
+    playbook: z.enum(WORK_PLAYBOOKS).default("feature"),
+    timeboxMinutes: z.number().int().positive().max(240).optional(),
+    refs: z.array(z.string().min(1)).default([]),
+    deps: z.array(z.object({ on: z.string(), kind: z.enum(["needs-landed", "needs-source"]).default("needs-landed") }).strict()).default([]),
+  })
+  .strict();
+
 export const PlanDelta = z
   .object({
-    add: z
-      .array(
-        z
-          .object({
-            key: z.string().regex(/^[a-z][a-z0-9-]*$/, "keys are lowercase words, e.g. discount-create"),
-            repo: z.string(),
-            goal: z.string().min(1),
-            write: z.array(z.string().min(1)).min(1),
-            forbid: z.array(z.string()).default([]),
-            accept: z.array(z.string().min(1)).min(1),
-            verify: z.string().min(1),
-            context: z.array(z.string()).default([]),
-            playbook: z.enum(WORK_PLAYBOOKS).default("feature"),
-            timeboxMinutes: z.number().int().positive().max(240).optional(),
-            refs: z.array(z.string().min(1)).default([]),
-            deps: z.array(z.object({ on: z.string(), kind: z.enum(["needs-landed", "needs-source"]).default("needs-landed") }).strict()).default([]),
-          })
-          .strict(),
-      )
-      .default([]),
+    add: z.array(PlanUnit).default([]),
     amend: z
       .array(
         z

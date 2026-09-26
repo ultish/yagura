@@ -1,6 +1,6 @@
 # yagura build status
 
-Updated 2026-09-26 (phase 4 in progress; watchman started). Phases are from `DESIGN.md` §19.
+Updated 2026-09-26 (phase 4 in progress; watchman done). Phases are from `DESIGN.md` §19.
 
 ## Phase 1 — Core: done
 
@@ -45,19 +45,21 @@ Proof: project `orders` (PRD requirements 2 and 3), `merge: auto`, driven end to
 
 Found and fixed during phase 3: a plan unit briefly in `ready` was picked up as work (the scheduler now only runs work and verify units); plan triggers were keyed to the end of the previous drain, which would miss events during a planner run; `applyDelta` returned pre-transition unit snapshots.
 
-## Watchman: in progress (resume here)
+## Watchman: done (DESIGN §8a "As built")
 
-Done: DESIGN §8a (flow, autonomy, DB-backed memory, per-turn context assembly and budget, structured turn records) and §17 chains/spec import; **migration 5** (committed, tests green): `threads`, `thread_projects`, `thread_messages`, `thread_decisions`, `thread_questions`, `proposals`, `projects.after_json`, `projects.phase_gate`; `addProject` accepts `after` (→ state `framing`), `phaseGate`, `mergePolicy`, `environmentId`; `watchman` added to `ROLES`.
+- Thread store (`threads.ts`): threads, messages (FTS kind `message`), decisions with supersede, questions resolved by a message, proposals; enums in `domain.ts`.
+- `runAgentSession` takes a `SessionRecorder` (`attemptRecorder` for units; the watchman records to its thread), so a session need not belong to a unit.
+- `watchman.ts`: per-turn context assembled under `watchman.context_tokens` in the §8a priority order (`assembleContext` is pure and tested), the watchman brief, `yagura` records block parsed with zod and stored atomically or not at all (`storeTurn`), autonomy `go` applies the proposal at once.
+- `proposal.ts`: proposal schema, validation, apply (new local bare repos with a starting verify pack, projects with `after`/`phaseGate`/merge/min tier/environment, initial units via `applyDelta`, `spec.md`, amendments that reopen closed projects).
+- `spec.ts`: `spec.md` in `##` sections; edits trigger a plan drain; the planner brief links the spec.
+- Engine: activates `framing` projects when their `after` are closed (phase gate `start | hold` first when set); `report.ts` posts done / andon / stuck reports into threads and rings a `report` gate.
+- `plugins/yagura/skills/yagura-watchman` (required skill for the watchman role; a miss is recorded, not enforced).
+- CLI: `yagura talk [--thread N] [--go] …`, `thread list|show|search|set --autonomy`, `proposal apply|discard`. API: `GET/POST /api/threads`, `GET /api/threads/:id`, `POST /api/threads/:id/messages` (202; the reply arrives as events; 409 while a turn runs), `POST /api/threads/:id/autonomy`, `GET /api/threads/search`, `POST /api/proposals/:id/apply|discard`; `/api/search` returns `messageId` for message hits.
+- Tests: context trimming, spec edits, reply parsing, atomic record rejection, propose vs go, a fake watchman's chain proposal driven by the engine through two projects in a new repo to closed with both reports posted, the phase gate, and the thread API.
 
-Next, in order:
-1. Store functions for threads/messages/decisions/questions/proposals (+ FTS rows with kind `message`).
-2. Generalize `runAgentSession` so a session need not belong to a unit/attempt (a recorder interface), then `watchman.ts`: assemble context under a token budget (setting, ~40k; chars/4 estimate) in the §8a priority order; render the watchman brief; parse the reply + last ```yagura block (zod: decisions add/supersede, questions add/resolve, spec section edits, optional proposal); store atomically.
-3. Proposal apply: create projects (existing repo, or a new local bare repo under `~/.yagura/repos` with an initial commit), environment, merge policy, min tier, `after`, initial units via `applyDelta`, `projects/<p>/spec.md`; link to the thread; autonomy `go` applies automatically except irreversible actions.
-4. Engine: activate `framing` projects whose `after` are all closed (ring a gate first when `phase_gate`); post a **report** into the thread when its projects close or block (generated from records: landed units + SHAs + tiers, blocked reasons, how to run from the verify pack, open questions) and ring the bell.
-5. `plugins/yagura/skills/yagura-watchman`; CLI `yagura talk [--thread N] [--go] "…"`, `thread list|show|search`, `proposal apply|discard`; API endpoints for the dashboard.
-6. Tests: context-budget trimming (pure); fake-agent `watchman` role emitting a proposal → apply → engine drives it to closed → report posted.
+Proof (real `claude`, Opus 5.5, scratch `YAGURA_HOME`): `yagura talk "Prototype a tiny Python CLI, jsondiff.py … ignore any field whose name ends in _ts …"` → the watchman loaded its skill, recorded 7 decisions (path syntax, exit codes, list and number rules), and proposed a new `jsondiff` repo with a `python3 -m unittest discover -v` pack, `merge: auto`, a spec, and a checkable predicate. `yagura proposal apply 1` created the repo and project; `yagura drive jsondiff` planned one unit, the worker's first attempt was rejected for skipping `pstack:poteto-mode` (existing enforcement), the second succeeded, the verifier proved it at unit-verified, it landed at `153a90b`, the planner reported done, and the engine posted the report into the thread and rang a `report` gate, in about 4 minutes for about $2. A fresh clone passes its 19 tests and the CLI ignores `*_ts` and exits 0/1 as decided. A follow-up turn ("also ignore `seq`; actually match lists by `id`") read the thread's memory and proposed a `jsondiff-keyed` project on the same repo with 4 new decisions. It did not supersede D5 (positional lists), so the skill now requires superseding any decision a new one changes.
 
-Open questions for the user: phase review gate on by default for chains?; run the first real spec-driven project on this Mac or on the RHEL9 VM?; collapse the scene to a horizon strip on scroll?
+Open questions for the user: phase review gate on by default for chains?; run the first real spec-driven project on this Mac or on the RHEL9 VM?; collapse the scene to a horizon strip on scroll?; should a watchman turn whose records are rejected retry once automatically with the reason?
 
 ## Phase 4 — Dashboard: in progress
 
@@ -68,7 +70,7 @@ Done:
 
 Visual direction chosen: "the watch" (DESIGN §17). Earlier rounds, for reference: Three directions (A Lantern: dark/amber, lanes; B Washi: paper/ink/vermilion, grouped reading list; C Blueprint: crisp/cobalt, dense table + dependency strip), each with a project view and a live agent log, are on a private canvas: https://claude.ai/artifact/AuLG6d7GiuQoSBFfdGeLS5. The agent logs replay the real `orders` U3 verifier run; the project views use labelled sample data.
 
-Decided next (user, 2026-09-26): the **watchman** (DESIGN §8a) — conversation as yagura's front door, with DB-backed memory — then project chains + repo creation, then `apps/web`. Build order: (1) watchman core in daemon/API + `yagura talk`; (2) project chains (`--after`, optional phase gate) and repo creation for prototypes; (3) `apps/web`: home (towers + bell inbox + lanterns), project (beacon chains + rows), agent (narrated log + trunk-vs-head grid), then gates, environments, repos, settings.
+Decided next (user, 2026-09-26): the **watchman** (DESIGN §8a) — conversation as yagura's front door, with DB-backed memory — then project chains + repo creation, then `apps/web`. Build order: (1) watchman core in daemon/API + `yagura talk` — done; (2) project chains (`after`, optional phase gate) and repo creation for prototypes — done, through proposals (no `yagura project new --after` flag yet); (3) **next:** `apps/web`: home (towers + bell inbox + lanterns), project (beacon chains + rows), agent (narrated log + trunk-vs-head grid), then gates, environments, repos, settings.
 
 ## Audit trail and skill enforcement: done (between phases 3 and 4)
 
@@ -78,6 +80,8 @@ Decided next (user, 2026-09-26): the **watchman** (DESIGN §8a) — conversation
 
 ## Known gaps
 
+- Watchman turns are not attempts, so they do not appear in the Agents view and cannot be stopped from the API; the turn log is at `threads/<id>/turns/<message>.jsonl`. Two turns on one thread are refused only within one daemon process (the CLI does not check).
+- Reports are posted by the engine, so a thread hears nothing unless a daemon (or `yagura drive` for that project) is running.
 - A rebase that changes the patch blocks the unit; re-verifying a rebased head arrives with the babysit units (phase 5).
 - Landing does not void dependents' verdicts, and `needs-source` behaves like `needs-landed` until read-only mounts arrive (phase 6).
 - Pack `doctor`/`deploy`/`teardown` are parsed but not run; deployed verification comes with the `kube-namespace` provider (phase 5).

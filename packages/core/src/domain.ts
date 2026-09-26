@@ -160,6 +160,15 @@ export type GateState = (typeof GATE_STATES)[number];
 export const MR_DECISIONS = ["fixed", "dismissed", "asked"] as const;
 export type MrDecision = (typeof MR_DECISIONS)[number];
 
+export const THREAD_AUTONOMIES = ["propose", "go"] as const;
+export type ThreadAutonomy = (typeof THREAD_AUTONOMIES)[number];
+export const THREAD_STATES = ["open", "closed"] as const;
+export type ThreadState = (typeof THREAD_STATES)[number];
+export const MESSAGE_ROLES = ["human", "watchman", "system"] as const;
+export type MessageRole = (typeof MESSAGE_ROLES)[number];
+export const PROPOSAL_STATES = ["pending", "applied", "discarded", "failed"] as const;
+export type ProposalState = (typeof PROPOSAL_STATES)[number];
+
 export const SETTING_SCOPES = ["global", "environment", "repo", "project"] as const;
 export type SettingScope = (typeof SETTING_SCOPES)[number];
 

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
+import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import type { Attempt, RenderedBrief, Unit, UnitId } from "./domain.js";
@@ -86,10 +86,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base });
 
   const session = await runAgentSession(ctx, {
-    attempt,
-    unit,
-    projectId: project.id,
-    role: "worker",
+    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "worker" }),
     adapter,
     run: {
       prompt: briefText,

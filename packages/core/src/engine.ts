@@ -21,6 +21,8 @@ import {
   updateAttempt,
   type Db,
 } from "./store.js";
+import { postReport, reportKey, type ReportKind } from "./report.js";
+import { listThreads } from "./threads.js";
 import { runVerifyUnit } from "./verify.js";
 
 export interface EngineOptions {
@@ -107,7 +109,8 @@ export class Engine {
       .prepare(
         `SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND id > ? AND (
            (type = 'unit.state' AND json_extract(data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(data_json, '$.drain') IS NULL)
-           OR type IN ('plan.rejected', 'project.andon_cleared', 'gate.answered'))`,
+           OR (type = 'gate.answered' AND COALESCE(json_extract(data_json, '$.kind'), '') <> 'report')
+           OR type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed'))`,
       )
       .get(project.id, since, ...PLAN_TRIGGERS) as { n: number };
     return triggers.n > 0;
@@ -152,10 +155,63 @@ export class Engine {
     return true;
   }
 
+  private activationDue(project: Project): "activate" | "gate" | null {
+    if (project.state !== "framing" || !project.after.every((a) => getProject(this.db, a).state === "closed")) return null;
+    if (!project.phaseGate) return "activate";
+    const gate = listGates(this.db, project.id).filter((g) => g.kind === "phase").at(-1);
+    if (!gate || gate.state === "cancelled") return "gate";
+    return gate.state === "answered" && gate.answer === "start" ? "activate" : null;
+  }
+
+  private activate(project: Project): void {
+    const due = this.activationDue(project);
+    if (due === "gate") {
+      addGate(this.db, { projectId: project.id, kind: "phase", question: `${project.after.join(", ")} closed. Start ${project.id}: ${project.goal}?`, options: ["start", "hold"], defaultOption: "hold" });
+      this.log(`  gate: start ${project.id}?`);
+    }
+    if (due !== "activate") return;
+    setProjectState(this.db, project.id, "active");
+    this.log(`▲ project ${project.id} activated (after ${project.after.join(", ")})`);
+  }
+
+  private stalled(project: Project): number[] | null {
+    if (project.state !== "active" || project.andonReason) return null;
+    if ([...this.inflight.keys()].some((k) => k === `plan:${project.id}`)) return null;
+    const units = listUnits(this.db, project.id);
+    if (units.some((u) => this.inflight.has(`unit:${u.id}`) || ["ready", "running", "handed_off", "verifying", "verified", "landing"].includes(u.state))) return null;
+    const blocked = units.filter((u) => u.type === "work" && u.state === "blocked").map((u) => u.seq);
+    return blocked.length && !this.planNeeded(project) ? blocked : null;
+  }
+
+  private dueReports(projects: Project[]): { threadId: number; projectId: ProjectId; kind: ReportKind }[] {
+    const due: { threadId: number; projectId: ProjectId; kind: ReportKind }[] = [];
+    for (const thread of listThreads(this.db).filter((t) => t.state === "open")) {
+      for (const project of projects.filter((p) => thread.projects.includes(p.id))) {
+        const p = getProject(this.db, project.id);
+        const blocked = this.stalled(p);
+        const kind: ReportKind | null =
+          p.state === "closed" ? { kind: "closed" } : p.andonReason ? { kind: "andon", reason: p.andonReason } : blocked ? { kind: "stalled", blocked } : null;
+        if (kind && thread.reported[p.id] !== reportKey(kind)) due.push({ threadId: thread.id, projectId: p.id, kind });
+      }
+    }
+    return due;
+  }
+
+  private report(projects: Project[]): void {
+    for (const r of this.dueReports(projects)) {
+      const key = `report:${r.threadId}:${r.projectId}`;
+      if (!this.inflight.has(key)) this.start(key, `report ${r.projectId} → thread ${r.threadId}`, () => postReport(this.ctx, r.threadId, r.projectId, r.kind), () => undefined);
+    }
+  }
+
+  private scope(): Project[] {
+    return this.opts.projectId ? [getProject(this.db, this.opts.projectId)] : listProjects(this.db);
+  }
+
   async tick(): Promise<void> {
     if (this.inflight.size === 0) await reapLeases(this.db, this.ctx.boot);
-    const projects = this.opts.projectId ? [getProject(this.db, this.opts.projectId)] : listProjects(this.db);
-    for (const project of projects.filter((p) => p.state === "active")) {
+    for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
+    for (const project of this.scope().filter((p) => p.state === "active")) {
       this.settleFailures(project);
       if (this.maybeClose(project)) continue;
       if (project.andonReason) continue;
@@ -164,11 +220,13 @@ export class Engine {
         this.start(`plan:${project.id}`, `plan ${project.id}`, () => runPlanner(this.ctx, project.id), () => undefined);
       this.spawn(project);
     }
+    this.report(this.scope());
   }
 
   isIdle(): boolean {
     if (this.inflight.size) return false;
-    const projects = this.opts.projectId ? [getProject(this.db, this.opts.projectId)] : listProjects(this.db);
+    const projects = this.scope();
+    if (projects.some((p) => this.activationDue(p)) || this.dueReports(projects).length) return false;
     return projects.every((p) => {
       if (p.state !== "active") return true;
       if (p.andonReason) return true;

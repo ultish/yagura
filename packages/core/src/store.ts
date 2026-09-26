@@ -483,7 +483,7 @@ export function answerGate(db: Db, id: number, answer: string): Gate {
   if (gate.state !== "open") throw new Error(`gate ${id} is ${gate.state}`);
   if (gate.options.length && !gate.options.includes(answer)) throw new Error(`answer must be one of: ${gate.options.join(", ")}`);
   db.prepare("UPDATE gates SET state = 'answered', answer = ?, resolved_at = ? WHERE id = ?").run(answer, now(), id);
-  recordEvent(db, "gate.answered", { projectId: gate.projectId, unitId: gate.unitId }, { gate: id, answer });
+  recordEvent(db, "gate.answered", { projectId: gate.projectId, unitId: gate.unitId }, { gate: id, kind: gate.kind, answer });
   return { ...gate, state: "answered", answer };
 }
 

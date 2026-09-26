@@ -17,7 +17,7 @@ export interface LandResult {
   reason: string;
 }
 
-interface LiveVerdict {
+export interface LiveVerdict {
   id: VerdictId;
   attempt_id: number;
   tier: string;
@@ -25,7 +25,7 @@ interface LiveVerdict {
   patch_id: string | null;
 }
 
-function liveVerdict(db: Db, unitId: UnitId): LiveVerdict | null {
+export function liveVerdict(db: Db, unitId: UnitId): LiveVerdict | null {
   const tiers = PASS_TIERS.map(() => "?").join(", ");
   return (
     (db

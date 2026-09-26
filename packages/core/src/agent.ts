@@ -52,13 +52,37 @@ function describeCall(e: Extract<HarnessEvent, { kind: "tool_call" }>): string {
   return `${e.name}: ${String(detail).slice(0, 120)}`;
 }
 
+export interface SessionRecorder {
+  env: Record<string, string>;
+  started(pid: number | null): void;
+  session(e: Extract<HarnessEvent, { kind: "session" }>): void;
+  usage(contextPeak: number, tokensOut: number): void;
+  finished(skills: string[]): string[];
+}
+
+export function attemptRecorder(db: Db, s: { attempt: Attempt; unit: Unit; projectId: ProjectId; role: Role }): SessionRecorder {
+  const refs = { projectId: s.projectId, unitId: s.unit.id, attemptId: s.attempt.id };
+  return {
+    env: { YAGURA_ATTEMPT: String(s.attempt.id), YAGURA_PROJECT: s.projectId, YAGURA_UNIT: `U${s.unit.seq}`, YAGURA_ROLE: s.role },
+    started: (pid) => {
+      updateAttempt(db, s.attempt.id, { pid });
+      recordEvent(db, "attempt.started", refs, { pid, role: s.role });
+    },
+    session: (e) => updateAttempt(db, s.attempt.id, { pluginVersions: e.plugins, model: e.model }),
+    usage: (contextPeak, tokensOut) => updateAttempt(db, s.attempt.id, { contextPeak, tokensOut }),
+    finished: (skills) => {
+      const missing = getAttempt(db, s.attempt.id).stopNote !== null ? [] : missingSkills(s.role, skills);
+      updateAttempt(db, s.attempt.id, { skills, missingSkills: missing });
+      if (missing.length) recordEvent(db, "attempt.method_miss", refs, { role: s.role, missing, loaded: skills });
+      return missing;
+    },
+  };
+}
+
 export async function runAgentSession(
   ctx: RunContext,
   s: {
-    attempt: Attempt;
-    unit: Unit;
-    projectId: ProjectId;
-    role: Role;
+    recorder: SessionRecorder;
     adapter: HarnessAdapter;
     run: HarnessRun;
     cwd: string;
@@ -67,7 +91,6 @@ export async function runAgentSession(
     logPath: string;
   },
 ): Promise<SessionResult> {
-  const { db } = ctx;
   write(s.logPath, "");
   const bin = ctx.cli.length ? installCliShim(ctx) : null;
   const { argv, stdin } = s.adapter.command(s.run);
@@ -80,15 +103,11 @@ export async function runAgentSession(
       ...process.env,
       ...s.env,
       YAGURA_HOME: ctx.boot.home,
-      YAGURA_ATTEMPT: String(s.attempt.id),
-      YAGURA_PROJECT: s.projectId,
-      YAGURA_UNIT: `U${s.unit.seq}`,
-      YAGURA_ROLE: s.role,
+      ...s.recorder.env,
       ...(bin ? { YAGURA_CLI: join(bin, "yagura"), PATH: `${bin}:${process.env.PATH ?? ""}` } : {}),
     },
   });
-  updateAttempt(db, s.attempt.id, { pid: child.pid ?? null });
-  recordEvent(db, "attempt.started", { projectId: s.projectId, unitId: s.unit.id, attemptId: s.attempt.id }, { pid: child.pid, role: s.role });
+  s.recorder.started(child.pid ?? null);
   child.stdin.end(stdin);
 
   let final: FinalEvent | null = null;
@@ -124,11 +143,11 @@ export async function runAgentSession(
       continue;
     }
     for (const e of events) {
-      if (e.kind === "session") updateAttempt(db, s.attempt.id, { pluginVersions: e.plugins, model: e.model });
+      if (e.kind === "session") s.recorder.session(e);
       if (e.kind === "usage") {
         contextPeak = Math.max(contextPeak, e.contextTokens);
         tokensOut += e.outputTokens;
-        updateAttempt(db, s.attempt.id, { contextPeak, tokensOut });
+        s.recorder.usage(contextPeak, tokensOut);
       }
       if (e.kind === "tool_call") {
         lastActivity = describeCall(e);
@@ -145,11 +164,7 @@ export async function runAgentSession(
   });
   clearTimeout(timer);
 
-  const missing = getAttempt(db, s.attempt.id).stopNote !== null ? [] : missingSkills(s.role, skills);
-  updateAttempt(db, s.attempt.id, { skills, missingSkills: missing });
-  if (missing.length)
-    recordEvent(db, "attempt.method_miss", { projectId: s.projectId, unitId: s.unit.id, attemptId: s.attempt.id }, { role: s.role, missing, loaded: skills });
-
+  const missing = s.recorder.finished(skills);
   return { final, exitCode: exit.code, signal: exit.signal, timedOut, stderrTail: stderr, lastActivity, skills, missingSkills: missing };
 }
 

@@ -2,6 +2,20 @@ import { existsSync, readFileSync } from "node:fs";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
+  addMessage,
+  applyProposal,
+  createThread,
+  discardProposal,
+  getProposal,
+  getThread,
+  listDecisions,
+  listMessages,
+  listProposals,
+  listQuestions,
+  listThreads,
+  runWatchmanTurn,
+  searchMessages,
+  setThreadAutonomy,
   answerGate,
   claudeAdapter,
   effectiveSettings,
@@ -40,6 +54,7 @@ export interface ServerOptions {
   boot: Bootstrap;
   token: string | null;
   adapters?: Record<string, HarnessAdapter>;
+  cli?: string[];
   pollMs?: number;
 }
 
@@ -201,7 +216,74 @@ export function createApp(opts: ServerOptions): Hono {
     const rows = db
       .prepare("SELECT kind, ref_id, project_id, snippet(search, 0, '[', ']', '…', 12) AS snippet FROM search WHERE search MATCH ? LIMIT 50")
       .all(q.replace(/"/g, '""').split(/\s+/).map((t) => `"${t}"`).join(" ")) as Row[];
-    return c.json(rows.map((r) => ({ kind: r.kind, attemptId: Number(r.ref_id), projectId: r.project_id, snippet: r.snippet })));
+    return c.json(
+      rows.map((r) => ({ kind: r.kind, ...(r.kind === "message" ? { messageId: Number(r.ref_id) } : { attemptId: Number(r.ref_id) }), projectId: r.project_id, snippet: r.snippet })),
+    );
+  });
+
+  const talking = new Set<number>();
+  const talk = (threadId: number, text: string) => {
+    if (talking.has(threadId)) throw new Error(`thread ${threadId} is already waiting on the watchman`);
+    talking.add(threadId);
+    const turn = runWatchmanTurn({ db, boot, adapters: opts.adapters ?? { claude: claudeAdapter }, cli: opts.cli ?? [] }, threadId, text)
+      .catch((e: unknown) => {
+        addMessage(db, { threadId, role: "system", body: `the watchman failed: ${e instanceof Error ? e.message : String(e)}` });
+      })
+      .finally(() => talking.delete(threadId));
+    return turn;
+  };
+  const threadView = (id: number) => ({
+    thread: getThread(db, id),
+    busy: talking.has(id),
+    messages: listMessages(db, id),
+    decisions: listDecisions(db, id),
+    questions: listQuestions(db, id),
+    proposals: listProposals(db, id),
+  });
+  const body = async (c: Context) => (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+
+  app.get("/api/threads", (c) => c.json(listThreads(db).map((t) => ({ ...t, busy: talking.has(t.id) }))));
+  app.get("/api/threads/search", (c) => c.json(searchMessages(db, c.req.query("q") ?? "", c.req.query("thread") ? Number(c.req.query("thread")) : undefined)));
+  app.post("/api/threads", async (c) => {
+    const b = await body(c);
+    if (typeof b.message !== "string" || !b.message.trim()) return c.json({ error: "message is required" }, 400);
+    const thread = createThread(db, { title: b.message.trim().slice(0, 60), autonomy: b.autonomy === "go" ? "go" : "propose" });
+    void talk(thread.id, b.message.trim());
+    return c.json(threadView(thread.id), 202);
+  });
+  app.get("/api/threads/:id", (c) => c.json(threadView(Number(c.req.param("id")))));
+  app.post("/api/threads/:id/messages", async (c) => {
+    const id = Number(c.req.param("id"));
+    const b = await body(c);
+    getThread(db, id);
+    if (typeof b.message !== "string" || !b.message.trim()) return c.json({ error: "message is required" }, 400);
+    if (talking.has(id)) return c.json({ error: `thread ${id} is already waiting on the watchman` }, 409);
+    void talk(id, b.message.trim());
+    return c.json(threadView(id), 202);
+  });
+  app.post("/api/threads/:id/autonomy", async (c) => {
+    const id = Number(c.req.param("id"));
+    const b = await body(c);
+    if (b.autonomy !== "go" && b.autonomy !== "propose") return c.json({ error: "autonomy must be propose or go" }, 400);
+    setThreadAutonomy(db, id, b.autonomy);
+    return c.json(getThread(db, id));
+  });
+  app.post("/api/proposals/:id/apply", async (c) => {
+    const proposal = getProposal(db, Number(c.req.param("id")));
+    try {
+      const result = await applyProposal({ db, boot }, proposal.id);
+      addMessage(db, { threadId: proposal.threadId, role: "system", body: `Go: applied proposal ${proposal.id}: ${JSON.stringify(result)}` });
+      return c.json({ proposal: getProposal(db, proposal.id), result });
+    } catch (e) {
+      addMessage(db, { threadId: proposal.threadId, role: "system", body: `Applying proposal ${proposal.id} failed: ${e instanceof Error ? e.message : String(e)}` });
+      throw e;
+    }
+  });
+  app.post("/api/proposals/:id/discard", async (c) => {
+    const proposal = getProposal(db, Number(c.req.param("id")));
+    discardProposal(db, proposal.id, String((await body(c)).reason ?? ""));
+    addMessage(db, { threadId: proposal.threadId, role: "system", body: `Proposal ${proposal.id} discarded.` });
+    return c.json(getProposal(db, proposal.id));
   });
 
   app.get("/api/trace/:target", (c) => {

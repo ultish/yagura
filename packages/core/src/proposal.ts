@@ -1,0 +1,180 @@
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { z } from "zod";
+import { write } from "./agent.js";
+import { resolveSetting, type Bootstrap } from "./config.js";
+import { MERGE_POLICIES, PASS_TIERS, type EnvironmentId, type ProjectId, type RepoId } from "./domain.js";
+import { commitAll, git } from "./git.js";
+import { VerifyPack } from "./pack.js";
+import { layout } from "./paths.js";
+import { applyDelta, PlanDelta, PlanRejected, PlanUnit } from "./plan.js";
+import { parseSpec, writeSpec } from "./spec.js";
+import { addEnvironment, addProject, addRepo, getProject, recordEvent, setProjectState, type Db } from "./store.js";
+import { getProposal, getThread, linkThreadProject, resolveProposal } from "./threads.js";
+
+const Slug = z.string().regex(/^[a-z][a-z0-9-]{1,39}$/, "ids are lowercase words joined by dashes, e.g. kafka-diff");
+
+export const ProposalBody = z
+  .object({
+    summary: z.string().min(1),
+    repos: z.array(z.object({ id: Slug, description: z.string().default(""), verifyPack: VerifyPack }).strict()).default([]),
+    projects: z
+      .array(
+        z
+          .object({
+            id: Slug,
+            name: z.string().min(1).optional(),
+            goal: z.string().min(1),
+            predicate: z.string().min(1),
+            repos: z.array(z.string()).min(1),
+            environment: z.string().nullable().default(null),
+            merge: z.enum(MERGE_POLICIES).default("human"),
+            minTier: z.enum(PASS_TIERS).default("unit-verified"),
+            after: z.array(z.string()).default([]),
+            phaseGate: z.boolean().default(false),
+            refs: z.array(z.string().min(1)).default([]),
+            spec: z.string().default(""),
+            units: z.array(PlanUnit).default([]),
+          })
+          .strict(),
+      )
+      .default([]),
+    amend: z.array(z.object({ project: z.string(), units: z.array(PlanUnit).min(1), reopen: z.boolean().default(true) }).strict()).default([]),
+  })
+  .strict()
+  .refine((p) => p.repos.length + p.projects.length + p.amend.length > 0, "a proposal must create or change something");
+export type ProposalBody = z.output<typeof ProposalBody>;
+
+export class ProposalInvalid extends Error {}
+
+const DEFAULT_ENVIRONMENT = "local";
+
+function defaultEnvironment(db: Db): string {
+  const envs = db.prepare("SELECT id FROM environments ORDER BY id").all() as { id: string }[];
+  if (envs.length === 1) return envs[0]!.id;
+  if (envs.length === 0) return DEFAULT_ENVIRONMENT;
+  throw new ProposalInvalid(`several environments exist (${envs.map((e) => e.id).join(", ")}); name one`);
+}
+
+export function validateProposal(db: Db, threadId: number, p: ProposalBody): void {
+  const repoExists = (id: string) => !!db.prepare("SELECT 1 FROM repos WHERE id = ?").get(id);
+  const projectExists = (id: string) => !!db.prepare("SELECT 1 FROM projects WHERE id = ?").get(id);
+  const newRepos = new Set<string>();
+  for (const r of p.repos) {
+    if (repoExists(r.id) || newRepos.has(r.id)) throw new ProposalInvalid(`repo ${r.id} already exists`);
+    newRepos.add(r.id);
+  }
+  const earlier = new Set<string>();
+  for (const proj of p.projects) {
+    if (projectExists(proj.id) || earlier.has(proj.id)) throw new ProposalInvalid(`project ${proj.id} already exists`);
+    for (const r of proj.repos) if (!repoExists(r) && !newRepos.has(r)) throw new ProposalInvalid(`${proj.id}: repo ${r} is neither registered nor created by this proposal`);
+    for (const a of proj.after) if (!projectExists(a) && !earlier.has(a)) throw new ProposalInvalid(`${proj.id}: after ${a}, which is neither an existing project nor listed earlier in this proposal`);
+    if (proj.environment && !db.prepare("SELECT 1 FROM environments WHERE id = ?").get(proj.environment)) throw new ProposalInvalid(`${proj.id}: environment ${proj.environment} does not exist`);
+    if (!proj.environment) defaultEnvironment(db);
+    for (const u of proj.units) if (!proj.repos.includes(u.repo)) throw new ProposalInvalid(`${proj.id}: unit ${u.key} uses repo ${u.repo}, which is not one of the project's repos`);
+    earlier.add(proj.id);
+  }
+  const linked = new Set(getThread(db, threadId).projects as string[]);
+  for (const a of p.amend) {
+    if (!linked.has(a.project)) throw new ProposalInvalid(`amend: project ${a.project} is not part of this thread`);
+    const state = getProject(db, a.project as ProjectId).state;
+    if (state === "closed" && !a.reopen) throw new ProposalInvalid(`amend: project ${a.project} is closed; set reopen to add units`);
+  }
+}
+
+async function createLocalRepo(boot: Bootstrap, db: Db, r: ProposalBody["repos"][number]): Promise<string> {
+  const bare = layout(boot).newRepo(r.id);
+  if (existsSync(bare)) return bare;
+  const seed = mkdtempSync(join(tmpdir(), `yagura-seed-${r.id}-`));
+  try {
+    write(join(seed, "README.md"), `# ${r.id}\n\n${r.description}\n`.replace(/\n\n\n$/, "\n"));
+    write(join(seed, ".agents/verify/verify.json"), `${JSON.stringify(r.verifyPack, null, 2)}\n`);
+    await git(["init", "--quiet", "-b", "main"], { cwd: seed });
+    await commitAll(seed, `chore: start ${r.id}`, { name: resolveSetting(db, "git.author_name").value, email: resolveSetting(db, "git.author_email").value });
+    await git(["clone", "--quiet", "--bare", seed, bare]);
+  } finally {
+    rmSync(seed, { recursive: true, force: true });
+  }
+  return bare;
+}
+
+export interface ApplyProposalResult {
+  repos: string[];
+  projects: string[];
+  units: Record<string, string[]>;
+  environment: string | null;
+}
+
+export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId: number): Promise<ApplyProposalResult> {
+  const { db, boot } = ctx;
+  const proposal = getProposal(db, proposalId);
+  if (proposal.state !== "pending") throw new Error(`proposal ${proposalId} is ${proposal.state}`);
+  const body = ProposalBody.parse(proposal.body);
+  try {
+    validateProposal(db, proposal.threadId, body);
+    const bares = new Map<string, string>();
+    for (const r of body.repos) bares.set(r.id, await createLocalRepo(boot, db, r));
+    const result = db.transaction((): ApplyProposalResult => {
+      const out: ApplyProposalResult = { repos: [], projects: [], units: {}, environment: null };
+      for (const r of body.repos) {
+        addRepo(db, { id: r.id, url: bares.get(r.id)!, defaultBranch: "main" });
+        out.repos.push(r.id);
+      }
+      for (const p of body.projects) {
+        const env = p.environment ?? defaultEnvironment(db);
+        if (!db.prepare("SELECT 1 FROM environments WHERE id = ?").get(env)) {
+          addEnvironment(db, { id: env, name: env, provider: "local-process", capacity: 2 });
+          out.environment = env;
+        }
+        const project = addProject(db, {
+          id: p.id,
+          name: p.name ?? p.id,
+          goal: p.goal,
+          predicate: p.predicate,
+          minTier: p.minTier,
+          repos: p.repos as RepoId[],
+          refs: p.refs,
+          after: p.after as ProjectId[],
+          phaseGate: p.phaseGate,
+          mergePolicy: p.merge,
+          environmentId: env as EnvironmentId,
+        });
+        linkThreadProject(db, proposal.threadId, project.id);
+        if (p.units.length) out.units[p.id] = applyDelta(db, project.id, PlanDelta.parse({ add: p.units }), null).added.map((u) => `U${u.seq}`);
+        out.projects.push(p.id);
+      }
+      for (const a of body.amend) {
+        const id = a.project as ProjectId;
+        if (getProject(db, id).state === "closed") setProjectState(db, id, "active");
+        out.units[a.project] = [...(out.units[a.project] ?? []), ...applyDelta(db, id, PlanDelta.parse({ add: a.units }), null).added.map((u) => `U${u.seq}`)];
+      }
+      resolveProposal(db, proposalId, "applied", out);
+      return out;
+    })();
+    for (const p of body.projects) if (p.spec.trim()) writeSpec(layout(boot).spec(p.id as ProjectId), parseSpec(p.spec));
+    return result;
+  } catch (e) {
+    if (e instanceof ProposalInvalid || e instanceof PlanRejected) {
+      resolveProposal(db, proposalId, "failed", { error: e.message });
+      recordEvent(db, "proposal.apply_failed", {}, { thread: proposal.threadId, proposal: proposalId, error: e.message });
+    }
+    throw e;
+  }
+}
+
+export function discardProposal(db: Db, proposalId: number, reason = ""): void {
+  resolveProposal(db, proposalId, "discarded", { reason });
+}
+
+export function describeProposal(body: ProposalBody): string {
+  const lines = [body.summary, ""];
+  for (const r of body.repos) lines.push(`- new repo ${r.id}${r.description ? `: ${r.description}` : ""} (checks: ${r.verifyPack.checks.map((c) => c.name).join(", ")})`);
+  for (const p of body.projects) {
+    const facts = [`repos ${p.repos.join(", ")}`, `merge ${p.merge}`, `min ${p.minTier}`, p.after.length ? `after ${p.after.join(", ")}` : "", p.phaseGate ? "phase gate" : "", p.environment ? `env ${p.environment}` : ""];
+    lines.push(`- project ${p.id}: ${p.goal}`, `  done when: ${p.predicate}`, `  ${facts.filter(Boolean).join(" · ")}`);
+    for (const u of p.units) lines.push(`  - unit ${u.key}: ${u.goal}`);
+  }
+  for (const a of body.amend) for (const u of a.units) lines.push(`- ${a.project} + unit ${u.key}: ${u.goal}`);
+  return lines.join("\n");
+}

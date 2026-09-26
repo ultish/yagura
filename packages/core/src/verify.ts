@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
+import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { renderVerifyBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import type { Attempt, EnvironmentId, Unit, UnitId, VerdictId } from "./domain.js";
@@ -134,10 +134,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     write(paths.brief(project.id, unit.seq, attempt.n), briefText);
 
     const session = await runAgentSession(ctx, {
-      attempt,
-      unit,
-      projectId: project.id,
-      role: "verifier",
+      recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "verifier" }),
       adapter,
       run: {
         prompt: briefText,

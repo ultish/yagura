@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
+import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { renderPlanBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import type { ProjectId } from "./domain.js";
@@ -106,16 +106,14 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
       playbooks: WORK_PLAYBOOKS,
       standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
       timeboxMinutes: setting("timebox.work_seconds") / 60,
+      specPath: existsSync(paths.spec(projectId)) ? paths.spec(projectId) : null,
     });
     write(paths.brief(projectId, unit.seq, attempt.n), briefText);
     transitionUnit(db, unit.id, "running", { attempt: attempt.n });
     updateAttempt(db, attempt.id, { state: "running", startedAt: now() });
 
     const session = await runAgentSession(ctx, {
-      attempt,
-      unit,
-      projectId,
-      role: "planner",
+      recorder: attemptRecorder(db, { attempt, unit, projectId, role: "planner" }),
       adapter,
       run: {
         prompt: briefText,

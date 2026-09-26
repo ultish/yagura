@@ -7,7 +7,7 @@ let brief = "";
 process.stdin.on("data", (d) => (brief += d));
 process.stdin.on("end", () => {
   emit({ type: "system", subtype: "init", session_id: "s1", model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
-  const skills = { worker: ["yagura:yagura-worker", "pstack:poteto-mode"], planner: ["yagura:yagura-planner"], verifier: ["yagura:yagura-verifier"] }[process.env.YAGURA_ROLE] ?? [];
+  const skills = { worker: ["yagura:yagura-worker", "pstack:poteto-mode"], planner: ["yagura:yagura-planner"], verifier: ["yagura:yagura-verifier"], watchman: ["yagura:yagura-watchman"] }[process.env.YAGURA_ROLE] ?? [];
   if (mode !== "noskills")
     for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
@@ -55,9 +55,11 @@ function finish(text) {
 }
 
 function engine(role) {
+  if (role === "watchman") return watchman();
   if (role === "planner") {
     const workRows = [...brief.matchAll(/^\| U\d+ \| work \| (\w+)/gm)].map((m) => m[1]);
-    const unit = (key, write) => ({ key, repo: "testbed", goal: `write ${key}`, write: [write], accept: [`${key} file exists`], verify: "true", playbook: "feature" });
+    const repo = /^## CODE[^\n]*\n- ([\w-]+):/m.exec(brief)[1];
+    const unit = (key, write) => ({ key, repo, goal: `write ${key}`, write: [write], accept: [`${key} file exists`], verify: "true", playbook: "feature" });
     const delta = !workRows.length
       ? { add: [unit("a", "app/a/**"), unit("b", "app/b/**"), unit("c", "app/a/extra/**")], summary: "three units" }
       : { done: workRows.every((s) => s === "landed"), summary: workRows.every((s) => s === "landed") ? "all landed" : "waiting" };
@@ -66,7 +68,7 @@ function engine(role) {
   if (role === "worker") {
     const base = /May write:\n- ([^*\n]+?)\/?\*\*/.exec(brief)[1];
     mkdirSync(base, { recursive: true });
-    writeFileSync(`${base}/${process.env.YAGURA_UNIT}.txt`, "work\n");
+    writeFileSync(`${base}/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`, "work\n");
     const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
     g("add", "-A");
     g("commit", "-q", "-m", `work ${process.env.YAGURA_UNIT}`);
@@ -80,4 +82,18 @@ function engine(role) {
     const head = run("head");
     return finish(`## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Evidence\n- run:${head}\n- run:${base}\n`);
   }
+}
+
+function watchman() {
+  const pack = { provider: "local-process", checks: [{ name: "unit", command: "test -f README.md", tier: "unit-verified" }] };
+  const project = (id, after) => ({ id, goal: `build ${id}`, predicate: "all files landed", repos: ["proto"], merge: "auto", after, spec: `# ${id}\n\n## Scope\nWrite the files.` });
+  const records = brief.includes("[watchman #")
+    ? { decisions: [{ text: "Timestamps are ignored", supersedes: /^- (D\d+):/m.exec(brief)[1] }], answered: [{ question: /^- (Q\d+):/m.exec(brief)[1], answer: "local" }] }
+    : {
+        title: "proto chain",
+        decisions: [{ text: "Build proto in a new repo" }],
+        questions: ["Which environment later?"],
+        proposal: { summary: "two chained projects", repos: [{ id: "proto", description: "a prototype", verifyPack: pack }], projects: [project("proto-a", []), project("proto-b", ["proto-a"])] },
+      };
+  finish(`Here is the plan.\n\n\`\`\`yagura\n${JSON.stringify(records)}\n\`\`\``);
 }

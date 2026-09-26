@@ -3,6 +3,22 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import {
+  addMessage,
+  applyProposal,
+  createThread,
+  describeProposal,
+  discardProposal,
+  getProposal,
+  getThread,
+  listDecisions,
+  listMessages,
+  listProposals,
+  listQuestions,
+  listThreads,
+  ProposalBody,
+  runWatchmanTurn,
+  searchMessages,
+  setThreadAutonomy,
   addEnvironment,
   addProject,
   answerGate,
@@ -61,6 +77,9 @@ const USAGE = `yagura — agent orchestration
   yagura repo set <id> --url <url>
   yagura env add <id> --provider local-process [--capacity 2] [--name <text>]
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...]
+  yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
+  yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go
+  yagura proposal apply|discard <id>
   yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
   yagura daemon                          run yagura for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)
   yagura drive <project>                 plan, run, verify, and land until nothing is left to do (without a daemon)
@@ -127,6 +146,17 @@ function renderEvent(e: HarnessEvent): string | null {
       return `  ■ ${e.isError ? "error" : "finished"} (${e.stopReason ?? "?"}${e.costUsd !== null ? `, $${e.costUsd.toFixed(4)}` : ""})`;
     default:
       return null;
+  }
+}
+
+function printRecords(threadId: number, sinceMessageId: number) {
+  for (const d of listDecisions(db, threadId).filter((x) => (x.sourceMessageId ?? 0) > sinceMessageId))
+    console.log(`  decision D${d.id}: ${d.text}`);
+  for (const q of listQuestions(db, threadId).filter((x) => (x.sourceMessageId ?? 0) > sinceMessageId)) console.log(`  question Q${q.id}: ${q.text}`);
+  for (const q of listQuestions(db, threadId).filter((x) => (x.resolvedMessageId ?? 0) > sinceMessageId)) console.log(`  answered Q${q.id}: ${q.answer}`);
+  for (const p of listProposals(db, threadId).filter((x) => (x.messageId ?? 0) > sinceMessageId)) {
+    const body = ProposalBody.safeParse(p.body);
+    console.log(`\nproposal ${p.id} [${p.state}]\n${body.success ? describeProposal(body.data) : JSON.stringify(p.body)}`);
   }
 }
 
@@ -411,6 +441,75 @@ async function main() {
       if (!key || json === undefined) fail(USAGE);
       setSetting(db, values.scope as SettingScope, values.id as string, key!, JSON.parse(json!));
       console.log(`${key} = ${json} (${values.scope}${values.id ? ` ${values.id}` : ""})`);
+      return;
+    }
+    case "talk": {
+      const { positionals, values } = args({ thread: { type: "string" }, go: { type: "boolean" } });
+      const text = positionals.join(" ").trim();
+      if (!text) fail(USAGE);
+      const thread = values.thread ? getThread(db, Number(values.thread)) : createThread(db, { title: text.slice(0, 60), autonomy: values.go ? "go" : "propose" });
+      if (values.go && thread.autonomy !== "go") setThreadAutonomy(db, thread.id, "go");
+      console.log(`thread ${thread.id} · ${values.go ? "go" : thread.autonomy}`);
+      const ctx = { ...agentCtx(), onEvent: (e: HarnessEvent) => (e.kind === "tool_call" ? console.log(renderEvent(e)) : undefined) };
+      const turn = await runWatchmanTurn(ctx, thread.id, text);
+      if (turn.reply) console.log(`\n${turn.reply.body}\n`);
+      if (turn.problem) console.log(`! ${turn.problem}`);
+      printRecords(thread.id, turn.human.id);
+      if (turn.applied) console.log(`applied proposal ${turn.proposal!.id}: ${JSON.stringify(turn.applied)}`);
+      else if (turn.proposal?.state === "pending") console.log(`proposal ${turn.proposal.id} is waiting: yagura proposal apply ${turn.proposal.id}   (or discard)`);
+      return;
+    }
+    case "thread": {
+      const { positionals, values } = args({ thread: { type: "string" }, autonomy: { type: "string" } });
+      const [sub, ...more] = positionals;
+      if (sub === "list" || !sub) {
+        for (const t of listThreads(db)) console.log(`thread ${t.id} [${t.state}, ${t.autonomy}] ${t.title}${t.projects.length ? ` · ${t.projects.join(", ")}` : ""} · ${t.updatedAt}`);
+        return;
+      }
+      if (sub === "show" && more[0]) {
+        const t = getThread(db, Number(more[0]));
+        console.log(`thread ${t.id} [${t.state}, ${t.autonomy}] ${t.title}${t.projects.length ? `\nprojects: ${t.projects.join(", ")}` : ""}`);
+        for (const m of listMessages(db, t.id)) console.log(`\n── ${m.role} #${m.id} · ${m.createdAt}\n${m.body}`);
+        const decisions = listDecisions(db, t.id);
+        if (decisions.length) console.log(`\ndecisions:\n${decisions.map((d) => `  D${d.id}${d.supersededBy ? ` (superseded by D${d.supersededBy})` : ""}: ${d.text}`).join("\n")}`);
+        const questions = listQuestions(db, t.id);
+        if (questions.length) console.log(`\nquestions:\n${questions.map((q) => `  Q${q.id}: ${q.text}${q.answer ? ` → ${q.answer}` : " (open)"}`).join("\n")}`);
+        for (const p of listProposals(db, t.id)) {
+          const body = ProposalBody.safeParse(p.body);
+          console.log(`\nproposal ${p.id} [${p.state}]\n${body.success ? describeProposal(body.data) : JSON.stringify(p.body)}${p.result ? `\n→ ${JSON.stringify(p.result)}` : ""}`);
+        }
+        return;
+      }
+      if (sub === "search" && more.length) {
+        for (const m of searchMessages(db, more.join(" "), values.thread ? Number(values.thread) : undefined)) console.log(`thread ${m.threadId} ${m.role} #${m.id} · ${m.createdAt}: ${m.snippet}`);
+        return;
+      }
+      if (sub === "set" && more[0] && (values.autonomy === "go" || values.autonomy === "propose")) {
+        setThreadAutonomy(db, Number(more[0]), values.autonomy);
+        console.log(`thread ${more[0]} autonomy → ${values.autonomy}`);
+        return;
+      }
+      fail(USAGE);
+      return;
+    }
+    case "proposal": {
+      const [sub, id] = rest;
+      if (!id || (sub !== "apply" && sub !== "discard")) fail(USAGE);
+      const proposal = getProposal(db, Number(id));
+      if (sub === "discard") {
+        discardProposal(db, proposal.id);
+        addMessage(db, { threadId: proposal.threadId, role: "system", body: `Proposal ${proposal.id} discarded.` });
+        console.log(`proposal ${proposal.id} discarded`);
+        return;
+      }
+      try {
+        const result = await applyProposal({ db, boot }, proposal.id);
+        addMessage(db, { threadId: proposal.threadId, role: "system", body: `Go: applied proposal ${proposal.id}: ${JSON.stringify(result)}` });
+        console.log(`applied proposal ${proposal.id}: ${JSON.stringify(result)}${daemonPid(boot) ? "" : `\nno daemon is running; start one with \`yagura daemon\` or drive a project with \`yagura drive <project>\``}`);
+      } catch (e) {
+        addMessage(db, { threadId: proposal.threadId, role: "system", body: `Applying proposal ${proposal.id} failed: ${e instanceof Error ? e.message : String(e)}` });
+        throw e;
+      }
       return;
     }
     default:

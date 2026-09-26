@@ -23,7 +23,7 @@ export async function startDaemon(cli: string[]): Promise<void> {
   const token = LOOPBACK.has(boot.bind) ? null : loadOrCreateToken(boot);
   const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
   const engine = new Engine({ db, boot, adapters: { claude: claudeAdapter }, cli }, { log });
-  const app = createApp({ db, boot, token });
+  const app = createApp({ db, boot, token, cli });
   const server = serve({ fetch: app.fetch, hostname: boot.bind, port: boot.port });
   log(`yagura daemon on http://${boot.bind}:${boot.port}${token ? ` (token in ${boot.tokenFile})` : ""}, home ${boot.home}`);
 

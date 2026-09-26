@@ -68,7 +68,7 @@ describe("Engine", () => {
     expect(at("attempt.started", c!)).toBeGreaterThan(at("unit.landed", a!));
 
     const files = await git(["ls-tree", "-r", "--name-only", "main"], { cwd: origin });
-    expect(files.split("\n").filter((f) => f.startsWith("app/")).sort()).toEqual([`app/a/U${work[0]!.seq}.txt`, `app/a/extra/U${work[2]!.seq}.txt`, `app/b/U${work[1]!.seq}.txt`]);
+    expect(files.split("\n").filter((f) => f.startsWith("app/")).sort()).toEqual([`app/a/extra/p-U${work[2]!.seq}.txt`, `app/a/p-U${work[0]!.seq}.txt`, `app/b/p-U${work[1]!.seq}.txt`]);
     expect(log.some((l) => l.startsWith("✔ project p closed"))).toBe(true);
   }, 60_000);
 

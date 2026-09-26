@@ -42,6 +42,7 @@ export const REQUIRED_SKILLS: Partial<Record<Role, readonly string[]>> = {
   worker: ["yagura:yagura-worker", "pstack:poteto-mode"],
   verifier: ["yagura:yagura-verifier"],
   planner: ["yagura:yagura-planner"],
+  watchman: ["yagura:yagura-watchman"],
 };
 
 export function missingSkills(role: Role, loaded: readonly string[]): string[] {
