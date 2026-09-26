@@ -177,6 +177,40 @@ Parallelism is therefore dynamic (the planner proposes any shape at any drain) b
 
 **As built (phase 3).** The delta is the last fenced ```json block of the planner's final message, validated strictly (unknown fields are rejected): `add[]` (`key`, `repo`, `goal`, `write`, `forbid`, `accept`, `verify`, `context`, `playbook`, `timeboxMinutes`, `deps[{on, kind}]` where `on` is a key in the delta or `U<n>`), `amend[]` (units not started), `retry[]` (blocked/failed/rejected units, with a note carried into the next brief and one more attempt), `cancel[]` (idle units; running ones are reported, not killed), `gates[]` (question, options, default), `done`, `summary`. Scope overlap is decided on each glob's static base path, conservatively. A drain is triggered by the first run, a unit landing, blocking, or being abandoned (except by the planner itself), a rejected delta, an answered gate, or andon being cleared; the trigger window starts when the previous drain started, so nothing that happens while a planner runs is missed. Three rejected deltas in a row raise andon. The project closes when the latest applied delta says `done` and no unit is left except blocked ones.
 
+## 8a. The watchman: talking to yagura
+
+yagura's front door is a conversation. A developer talks to the **watchman** (*bannin*) to start work or evolve it; the watchman turns the conversation into projects, and reports back when they are done. It serves both ways of working: hand it a finished spec ("here is BUILD_SPEC.md, build it") or grow something conversationally ("prototype a Kafka diff service" … "now ignore timestamp fields").
+
+### Flow
+
+1. **Talk.** The watchman asks only what no experiment could settle.
+2. **Propose.** A proposal lists projects (one, or a chain with `after` dependencies), their goals and done predicates, repos (existing, or a new repo for a prototype), environment, a starting verify pack, merge policy, minimum tier, and initial units or spec. The developer answers **Go / Edit / Discard**.
+3. **Build.** The projects run as usual (plan → work → verify → land).
+4. **Report.** When the thread's projects close (or block), the bell rings and the thread gets a report assembled from records: what landed and how it was verified, how to run it (from the verify pack's commands), what is still open, trace links.
+5. **Evolve.** Further messages in the same thread propose amendments: new units, spec changes, new projects.
+
+**Autonomy per thread:** `propose` (default; nothing starts without Go) or `go` (prototyping: applies its own proposals and rings only for real decisions and the report). Irreversible actions (creating a GitLab project, deploying beyond dev, force operations) always ask. **Prototype defaults:** new repo, `min_tier` unit-verified, `merge: auto`, a short wall-clock budget.
+
+### Memory: the database, never the conversation
+
+The watchman follows yagura's first principle: no long-lived LLM context. Every message is a fresh harness session whose context is assembled from the store under a fixed token budget (default ~40k tokens, a setting).
+
+| Stored | Content |
+|---|---|
+| `threads` | title, autonomy, linked projects, state |
+| `thread_messages` | every human and watchman message, verbatim; FTS-indexed |
+| `thread_decisions` | one structured record per decision (text, source message, superseded-by) |
+| `thread_questions` | open questions; resolved with the answering message |
+| `proposals` | the proposed change set, its state (pending, applied, edited, discarded), and what applying it created |
+| `projects/<p>/spec.md` | the living spec the watchman maintains, in addressable sections |
+| reports | done/blocked summaries, generated from records |
+
+**Context assembly, in priority order:** (1) watchman instructions and standing orders; (2) all *active* decisions and open questions; (3) a generated status of each linked project; (4) the spec sections relevant to the message (by heading), never a whole large spec; (5) the most recent messages verbatim, trimmed oldest-first to fit; (6) nothing older — the watchman can pull an older detail with `yagura thread search`.
+
+**Every turn ends with structured records** alongside the reply: decisions added or superseded, questions opened or resolved, spec section edits, and an optional proposal. yagura validates them (schema, references) and stores them atomically. A decision made 200 messages ago is still exactly in `thread_decisions`; nothing important depends on recalling or summarizing old messages.
+
+Proposals apply through the same validated paths as planner deltas and CLI commands; the watchman never writes to the store directly.
+
 ## 9. Scheduler
 
 A unit is **ready** when: deps satisfied (`needs-source` → upstream has a verdict ≥ its required tier; `needs-landed` → upstream landed), no running unit overlaps its write scope in the same repo, project in-flight cap not hit, no andon on the project.

@@ -54,7 +54,7 @@ Done:
 
 Visual direction chosen: "the watch" (DESIGN §17). Earlier rounds, for reference: Three directions (A Lantern: dark/amber, lanes; B Washi: paper/ink/vermilion, grouped reading list; C Blueprint: crisp/cobalt, dense table + dependency strip), each with a project view and a live agent log, are on a private canvas: https://claude.ai/artifact/AuLG6d7GiuQoSBFfdGeLS5. The agent logs replay the real `orders` U3 verifier run; the project views use labelled sample data.
 
-Next: `apps/web` (React + Vite, served by the daemon from its build) in the watch style: home (towers + bell inbox + lanterns), project (beacon chains + rows), agent (narrated log + trunk-vs-head grid), then gates, environments, repos, settings.
+Decided next (user, 2026-09-26): the **watchman** (DESIGN §8a) — conversation as yagura's front door, with DB-backed memory — then project chains + repo creation, then `apps/web`. Build order: (1) watchman core in daemon/API + `yagura talk`; (2) project chains (`--after`, optional phase gate) and repo creation for prototypes; (3) `apps/web`: home (towers + bell inbox + lanterns), project (beacon chains + rows), agent (narrated log + trunk-vs-head grid), then gates, environments, repos, settings.
 
 ## Audit trail and skill enforcement: done (between phases 3 and 4)
 
