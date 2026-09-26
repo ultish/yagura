@@ -1,4 +1,5 @@
-import { writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_MODE;
 const emit = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
@@ -9,6 +10,11 @@ process.stdin.on("end", () => {
   if (mode === "hang") return setTimeout(() => {}, 60_000);
   const file = mode === "scope" ? "README.md" : "app/orders.py";
   writeFileSync(file, `# edited by fake agent\n# brief had GOAL: ${brief.includes("## GOAL")}\n`);
+  const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
+  g("add", file);
+  g("commit", "-q", "-m", "fake agent work");
+  mkdirSync("app/__pycache__", { recursive: true });
+  writeFileSync("app/__pycache__/orders.pyc", "generated after commit\n");
   emit({
     type: "assistant",
     message: { content: [{ type: "tool_use", id: "t1", name: "Edit", input: { file_path: file } }], usage: { input_tokens: 1200, output_tokens: 30 } },

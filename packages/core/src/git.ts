@@ -48,6 +48,15 @@ export async function commitAll(worktree: string, message: string, author: { nam
   return true;
 }
 
+export async function discardLeftovers(worktree: string): Promise<{ paths: string[]; patch: string }> {
+  if (!(await git(["status", "--porcelain"], { cwd: worktree }))) return { paths: [], patch: "" };
+  await git(["add", "-A"], { cwd: worktree });
+  const patch = await git(["diff", "--cached", "--binary"], { cwd: worktree });
+  const paths = (await git(["diff", "--cached", "--name-only", "-z"], { cwd: worktree })).split("\0").filter(Boolean);
+  await git(["reset", "--quiet", "--hard", "HEAD"], { cwd: worktree });
+  return { paths, patch: `${patch}\n` };
+}
+
 export async function changedPaths(worktree: string, base: Sha): Promise<string[]> {
   const out = await git(["diff", "--name-only", "--no-renames", "-z", base, "HEAD"], { cwd: worktree });
   return out.split("\0").filter(Boolean);

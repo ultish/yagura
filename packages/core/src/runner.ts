@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
 import { resolveSetting, type Bootstrap } from "./config.js";
 import type { Attempt, HarnessEvent, RenderedBrief, UnitId } from "./domain.js";
-import { addWorktree, changedPaths, commitAll, ensureMirror, headSha, resolveRef } from "./git.js";
+import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, resolveRef } from "./git.js";
 import { classifyFailure, parseHandoff, syntheticFailureHandoff, type ExitFacts } from "./handoff.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { layout, unitRef } from "./paths.js";
@@ -28,7 +28,7 @@ function write(path: string, text: string) {
 
 function describeCall(e: Extract<HarnessEvent, { kind: "tool_call" }>): string {
   const input = e.input as Record<string, unknown> | null;
-  const detail = input?.command ?? input?.file_path ?? input?.pattern ?? input?.description ?? "";
+  const detail = input?.skill ?? input?.command ?? input?.file_path ?? input?.pattern ?? input?.description ?? "";
   return `${e.name}: ${String(detail).slice(0, 120)}`;
 }
 
@@ -155,8 +155,8 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   clearTimeout(timer);
   const endedAt = now();
 
-  const author = { name: setting("git.author_name"), email: setting("git.author_email") };
-  const leftovers = await commitAll(worktree, `yagura: uncommitted changes left by U${unit.seq} attempt ${attempt.n}`, author);
+  const leftovers = await discardLeftovers(worktree);
+  if (leftovers.paths.length) write(paths.leftovers(project.id, unit.seq, attempt.n), leftovers.patch);
   const head = await headSha(worktree);
   const touched = await changedPaths(worktree, base);
   const refs = { projectId: project.id, unitId: unit.id, attemptId: attempt.id };
@@ -174,7 +174,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       handoffStatus: handoff.status,
       selfTier: handoff.verification === "not-verified" ? null : handoff.verification,
     });
-    transitionUnit(db, unit.id, "handed_off", { attempt: attempt.n, status: handoff.status, head, leftovers });
+    transitionUnit(db, unit.id, "handed_off", { attempt: attempt.n, status: handoff.status, head, leftovers: leftovers.paths });
     const violations = checkScope(touched, unit.writeScope, unit.forbidScope);
     if (violations.length) {
       updateAttempt(db, attempt.id, { failureMode: "scope" });

@@ -11,7 +11,7 @@ You are one worker in a yagura project. The daemon that started you owns everyth
 
 - **The brief is the task.** GOAL, SCOPE, ACCEPTANCE, and VERIFY are fixed. You cannot ask questions; when something is ambiguous, pick the reading that best serves GOAL, do it, and name the choice under Notes in your handoff.
 - **Stay inside SCOPE.** yagura diffs your branch against its base when you finish. Any touched path outside "May write", or inside "Must not write", rejects the whole attempt.
-- **Commit to your branch; nothing else in git.** No push, rebase, merge, branch switch, or new branch. Uncommitted changes are committed for you when you exit, so commit deliberately with clear messages.
+- **Commit to your branch; nothing else in git.** No push, rebase, merge, branch switch, or new branch. Your branch is exactly what you commit: anything left uncommitted when you exit is saved aside and discarded, never added to your branch. Commit deliberately with clear messages, and leave generated files (caches, build output) uncommitted.
 - **Skip pstack's landing and orchestration steps.** Do not run Opening a PR, Babysit, Shipping, Orchestrate, Autonomous run, Pause safely, Session pickup, worktree cleanup, or show-me-your-work. Do not arm `/loop` or any wake mechanism. yagura does all of these.
 - **Use poteto-mode for the work itself.** Follow the playbook METHOD names, its principles, and its verification standard. Where a playbook step says to open a PR or hand to a human, stop at the handoff instead.
 - **Verify before you hand off.** Run the VERIFY commands yourself and report what you actually ran under Evidence. Report the strongest tier your evidence supports; a later verifier will check it.

@@ -154,6 +154,8 @@ A unit whose brief cannot fill GOAL, SCOPE, ACCEPTANCE, and VERIFY is refused at
 
 Adopted from orchestrate: `## Status` (success | partial | blocked) · `## Branch` · `## What I did` · `## Measurements` · `## Verification` (self-reported tier) · `## Evidence` (artifact ids) · `## Notes, concerns, deviations` · `## Suggested follow-ups`.
 
+The branch is exactly what the agent committed. Anything left uncommitted at exit (build caches, regenerated files, half-finished edits) is saved as `leftovers/<unit>.<n>.patch`, its paths are recorded in the unit's event, and the worktree is reset; yagura never commits on the agent's behalf.
+
 If the process dies or ends without the structure, the daemon writes a **synthetic failure handoff** with a classified failure mode: `timebox | context-exhausted | oom | network | tool-error | harness-error | unknown`.
 
 ## 8. Planning and dynamic parallelism

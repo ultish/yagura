@@ -62,7 +62,7 @@ function renderEvent(e: HarnessEvent): string | null {
       return `${indent}· ${e.text.split("\n")[0]!.slice(0, 160)}`;
     case "tool_call": {
       const input = e.input as Record<string, unknown> | null;
-      return `${indent}→ ${e.name} ${String(input?.command ?? input?.file_path ?? input?.pattern ?? input?.description ?? "").slice(0, 140)}`;
+      return `${indent}→ ${e.name} ${String(input?.skill ?? input?.command ?? input?.file_path ?? input?.pattern ?? input?.description ?? "").slice(0, 140)}`;
     }
     case "tool_result":
       return e.isError ? `${indent}  ✗ ${e.output.split("\n")[0]!.slice(0, 140)}` : null;

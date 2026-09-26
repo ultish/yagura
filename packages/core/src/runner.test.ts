@@ -65,7 +65,10 @@ describe("runWorkUnit", () => {
     expect(readFileSync(paths.brief(project, 1, 1), "utf8")).toContain("## ACCEPTANCE\n- SAVE10 takes 10% off");
     expect(readFileSync(paths.handoff(project, 1, 1), "utf8")).toMatch(/^## Status\nsuccess/);
     expect(readFileSync(paths.log(project, 1, 1), "utf8").trim().split("\n")).toHaveLength(4);
-    expect(await git(["log", "-1", "--format=%s"], { cwd: attempt.worktreePath! })).toMatch(/uncommitted changes left by U1 attempt 1/);
+    expect(await git(["log", "-1", "--format=%s"], { cwd: attempt.worktreePath! })).toBe("fake agent work");
+    expect(await git(["diff", "--name-only", attempt.baseSha!, "HEAD"], { cwd: attempt.worktreePath! })).toBe("app/orders.py");
+    expect(await git(["status", "--porcelain"], { cwd: attempt.worktreePath! })).toBe("");
+    expect(readFileSync(paths.leftovers(project, 1, 1), "utf8")).toContain("app/__pycache__/orders.pyc");
   });
 
   it("rejects work that wrote outside its scope", async () => {

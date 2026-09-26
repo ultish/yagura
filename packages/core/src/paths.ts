@@ -15,5 +15,6 @@ export function layout(boot: Bootstrap) {
     brief: (p: ProjectId, seq: number, n: number) => join(project(p), "briefs", `${attemptRef(seq, n)}.md`),
     handoff: (p: ProjectId, seq: number, n: number) => join(project(p), "handoffs", `${attemptRef(seq, n)}.md`),
     log: (p: ProjectId, seq: number, n: number) => join(project(p), "logs", `${attemptRef(seq, n)}.jsonl`),
+    leftovers: (p: ProjectId, seq: number, n: number) => join(project(p), "leftovers", `${attemptRef(seq, n)}.patch`),
   };
 }
