@@ -230,6 +230,7 @@ ${p.status}
 - \`verify\` is the command a worker runs to check itself (for example the repo's test command).
 - \`deps\` names units that must land first: a key from this delta or an existing unit such as "U3".
 - \`playbook\` is one of: ${p.playbooks.join(", ")}.
+- \`refs\` (optional) lists issue keys the unit addresses, e.g. "gitlab#123"; the project's own refs are added automatically.
 - A blocked or failed unit can be retried with a note that changes what the next attempt does, split into new units, or cancelled.
 - Ask the human only for a product or preference decision no experiment can settle, with a default.
 - Set "done": true only when the DONE WHEN condition is met by landed, verified work.

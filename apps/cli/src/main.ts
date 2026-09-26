@@ -7,6 +7,10 @@ import {
   addProject,
   answerGate,
   Engine,
+  findByRef,
+  findUnitsByCommit,
+  setProjectRefs,
+  traceUnit,
   listGates,
   setAndon,
   setMergePolicy,
@@ -50,12 +54,13 @@ import {
 const USAGE = `yagura — agent orchestration
 
   yagura repo add <id> <url> [--branch main]
-  yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified]
+  yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified] [--issue <ref>...]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
   yagura repo set <id> --url <url>
   yagura env add <id> --provider local-process [--capacity 2] [--name <text>]
-  yagura project set <id> [--env <env id>] [--merge auto|human]
+  yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...]
+  yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
   yagura drive <project>                 plan, run, verify, and land until nothing is left to do
   yagura andon <project> --reason <text> | --clear
   yagura gates [project]                 open questions for a human
@@ -141,15 +146,17 @@ async function main() {
         "min-tier": { type: "string", default: "unit-verified" },
         env: { type: "string" },
         merge: { type: "string" },
+        issue: { type: "string", multiple: true },
       });
       const id = positionals[1];
-      if (positionals[0] === "set" && id && (values.env || values.merge)) {
+      if (positionals[0] === "set" && id && (values.env || values.merge || values.issue)) {
+        if (values.issue) setProjectRefs(db, id as ProjectId, many(values.issue));
         if (values.env) setProjectEnvironment(db, id as ProjectId, values.env as EnvironmentId);
         if (values.merge) {
           if (values.merge !== "auto" && values.merge !== "human") fail("--merge must be auto or human");
           setMergePolicy(db, id as ProjectId, values.merge as "auto" | "human");
         }
-        console.log(`project ${id}:${values.env ? ` environment → ${values.env}` : ""}${values.merge ? ` merge → ${values.merge}` : ""}`);
+        console.log(`project ${id}:${values.env ? ` environment → ${values.env}` : ""}${values.merge ? ` merge → ${values.merge}` : ""}${values.issue ? ` refs → ${many(values.issue).join(", ")}` : ""}`);
         return;
       }
       if (positionals[0] !== "new" || !id || !values.goal || !values.predicate || !many(values.repo).length) fail(USAGE);
@@ -162,6 +169,7 @@ async function main() {
         predicate: values.predicate as string,
         minTier: minTier as PassTier,
         repos: many(values.repo) as RepoId[],
+        refs: many(values.issue),
       });
       console.log(`project ${p.id}: ${p.goal}`);
       return;
@@ -178,6 +186,7 @@ async function main() {
         playbook: { type: "string" },
         timebox: { type: "string" },
         note: { type: "string" },
+        issue: { type: "string", multiple: true },
       });
       const projectId = positionals[1] as ProjectId | undefined;
       if ((positionals[0] === "reject" || positionals[0] === "requeue") && projectId && positionals[2]) {
@@ -206,6 +215,7 @@ async function main() {
         verify: fields.verify || null,
         context: many(values.context),
         playbook: (values.playbook as string) ?? null,
+        refs: many(values.issue),
         timeboxSeconds: values.timebox ? Number(values.timebox) : resolveSetting(db, "timebox.work_seconds", { projectId }).value,
         maxAttempts: resolveSetting(db, "max_attempts", { projectId }).value,
       });
@@ -268,6 +278,33 @@ async function main() {
         `\n${project.id} is ${project.state}${project.andonReason ? ` (andon: ${project.andonReason})` : ""}` +
           (open.length ? `\nwaiting on ${open.length} gate(s):\n${open.map((g) => `  gate ${g.id}: ${g.question} [${g.options.join(" | ")}]`).join("\n")}` : ""),
       );
+      return;
+    }
+    case "trace": {
+      const [target] = rest;
+      if (!target) fail(USAGE);
+      const byCommit = findUnitsByCommit(db, target!);
+      const byRef = byCommit.length ? { projects: [], units: [] } : findByRef(db, target!);
+      const units = byCommit.length ? byCommit : byRef.units;
+      if (!units.length) fail(`nothing in yagura matches ${target}`);
+      if (byRef.projects.length) console.log(`${target} is referenced by project(s): ${byRef.projects.map((p) => p.id).join(", ")}`);
+      for (const unit of units) {
+        const t = traceUnit(db, boot, unit);
+        console.log(`\n${t.project.id}/U${unit.seq} [${unit.state}] ${unit.goal}`);
+        if (unit.landedSha) console.log(`  landed as ${unit.landedSha}`);
+        if (unit.refs.length || t.project.refs.length) console.log(`  refs: ${[...new Set([...t.project.refs, ...unit.refs])].join(", ")}`);
+        for (const a of t.work)
+          console.log(
+            `  work attempt ${a.n} (attempt id ${a.id}): ${a.state} ${a.handoffStatus ?? a.failureMode ?? ""} · ${a.model ?? a.harness}` +
+              `${a.pluginVersions.pstack ? ` · pstack ${a.pluginVersions.pstack}` : ""} · skills ${a.skills.join(", ") || "none"} · ${a.branch ?? ""}`,
+          );
+        for (const v of t.verifications) {
+          console.log(`  verified by U${v.unit.seq} [${v.unit.state}]`);
+          for (const r of v.runs) console.log(`    run:${r.id} ${r.label}@${r.at} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}${r.tampered ? " TAMPERED" : ""}`);
+        }
+        for (const v of t.verdicts) console.log(`  verdict ${v.id}: ${v.tier} @ ${v.headSha.slice(0, 10)}${v.voided ? ` (void: ${v.voidReason})` : " (live)"}`);
+        for (const h of t.handoffPaths) console.log(`  handoff ${h}`);
+      }
       return;
     }
     case "andon": {

@@ -109,3 +109,12 @@ export async function mergesCleanly(gitDir: string, trunk: Sha, head: Sha): Prom
     throw e;
   }
 }
+
+export async function gitWithEnv(args: string[], cwd: string, env: Record<string, string>, stdin: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = execFile("git", args, { cwd, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env } }, (err, stdout) =>
+      err ? reject(err) : resolve(stdout.trimEnd()),
+    );
+    child.stdin?.end(stdin);
+  });
+}

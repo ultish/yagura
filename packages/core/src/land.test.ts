@@ -10,6 +10,8 @@ import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
+import { findByRef, findUnitsByCommit, traceUnit } from "./audit.js";
+import { setSetting } from "./config.js";
 import { landUnit } from "./land.js";
 import { layout } from "./paths.js";
 import { runWorkUnit } from "./runner.js";
@@ -43,7 +45,7 @@ beforeEach(async () => {
   db = openStore(layout(boot).db);
   ctx = { db, boot, adapters: { claude: fake }, cli: [process.execPath, "--import", tsx, fixtures("evidence-shim.ts")] };
   addRepo(db, { id: "testbed", url: origin, defaultBranch: "main" });
-  addProject(db, { id: project, name: "P", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["testbed" as RepoId] });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["testbed" as RepoId], refs: ["gitlab#42"] });
   addEnvironment(db, { id: "local", name: "local", provider: "local-process", capacity: 1 });
   setProjectEnvironment(db, project, "local" as EnvironmentId);
 });
@@ -53,7 +55,7 @@ async function verifiedUnit() {
     projectId: project,
     type: "work",
     repoId: "testbed" as RepoId,
-    goal: "g",
+    goal: "Implement apply_discount. Then more detail.",
     writeScope: ["app/**"],
     acceptance: ["a"],
     verify: "v",
@@ -81,26 +83,50 @@ async function advanceTrunk(file: string, content: string) {
 const originMain = () => git(["rev-parse", "main"], { cwd: origin });
 
 describe("landUnit (forge none)", () => {
-  it("fast-forwards trunk to the verified head", async () => {
+  it("lands the unit as one squashed commit on trunk, with an audit trail in its trailers", async () => {
     const work = await verifiedUnit();
+    const trunkBefore = await originMain();
+    setSetting(db, "global", "", "yagura.url", "http://devvm:7300");
     const result = await landUnit(ctx, work.id);
-    expect(result).toMatchObject({ outcome: "landed", reason: "fast-forward" });
-    expect(result.unit.state).toBe("landed");
+    expect(result).toMatchObject({ outcome: "landed", reason: "squashed onto trunk" });
+    expect(result.unit).toMatchObject({ state: "landed", landedSha: result.landedSha });
     expect(await originMain()).toBe(result.landedSha);
+    expect(await git(["rev-parse", `${result.landedSha}^`], { cwd: origin })).toBe(trunkBefore);
+    const message = await git(["log", "-1", "--format=%B", "main"], { cwd: origin });
+    expect(message).toMatch(/^Implement apply_discount\n\n- edited app\/orders.py\n\n/);
+    expect(message).toContain("Yagura-Project: p\nYagura-Unit: U1\n");
+    expect(message).toMatch(/Yagura-Attempt: \d+ \(fake-model, pstack 0\.5\.0\)/);
+    expect(message).toContain("Yagura-Branch: yg/p/u1-1");
+    expect(message).toMatch(/Yagura-Verdict: unit-verified by U2 \(run:\d+/);
+    expect(message).toContain("Yagura-Link: http://devvm:7300/p/p/u/1");
+    expect(message).toContain("Refs: gitlab#42");
   });
 
-  it("rebases onto a moved trunk and carries the verdict when the patch is unchanged", async () => {
+  it("rebases onto a moved trunk, squashes, and carries the verdict when the patch is unchanged", async () => {
     const work = await verifiedUnit();
     await advanceTrunk("README.md", "readme v2\n");
     const result = await landUnit(ctx, work.id);
-    expect(result).toMatchObject({ outcome: "landed", reason: "rebased; patch unchanged" });
+    expect(result).toMatchObject({ outcome: "landed", reason: "rebased onto the moved trunk and squashed; patch unchanged" });
     expect(await originMain()).toBe(result.landedSha);
-    expect(await git(["log", "--format=%s", "-3", "main"], { cwd: origin })).toBe("fake agent work\ntrunk edits README.md\ninit");
+    expect(await git(["log", "--format=%s", "-3", "main"], { cwd: origin })).toBe("Implement apply_discount\ntrunk edits README.md\ninit");
     const verdicts = db.prepare("SELECT head_sha, voided_at IS NOT NULL AS voided FROM verdicts WHERE unit_id = ? ORDER BY id").all(work.id);
     expect(verdicts).toEqual([
       { head_sha: expect.any(String), voided: 1 },
       { head_sha: result.landedSha, voided: 0 },
     ]);
+  });
+
+  it("traces a landed commit and an issue back to the units, agents, and evidence behind them", async () => {
+    const work = await verifiedUnit();
+    const { landedSha } = await landUnit(ctx, work.id);
+    const [unit] = findUnitsByCommit(db, landedSha!.slice(0, 10));
+    const trace = traceUnit(db, ctx.boot, unit!);
+    expect(trace.unit.seq).toBe(1);
+    expect(trace.work.map((a) => a.state)).toEqual(["handed_off"]);
+    expect(trace.verifications[0]!.runs.map((r) => r.label)).toContain("scenario");
+    expect(trace.verdicts.at(-1)).toMatchObject({ headSha: landedSha, voided: false });
+    expect(findByRef(db, "gitlab#42").units.map((u) => u.seq)).toEqual([1]);
+    expect(findUnitsByCommit(db, "not-a-sha")).toEqual([]);
   });
 
   it("blocks instead of landing when trunk conflicts with the change", async () => {

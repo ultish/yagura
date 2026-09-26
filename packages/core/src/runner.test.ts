@@ -59,14 +59,15 @@ describe("runWorkUnit", () => {
     const { unit, attempt, paths } = await run("success");
     expect(unit.state).toBe("verifying");
     expect(getUnitBySeq(db, project, 2)).toMatchObject({ type: "verify", state: "ready", targetUnitId: unit.id });
-    expect(attempt.missingSkills).toEqual(["yagura:yagura-worker", "pstack:poteto-mode"]);
+    expect(attempt.skills).toEqual(["yagura:yagura-worker", "pstack:poteto-mode"]);
+    expect(attempt.missingSkills).toEqual([]);
     expect(attempt).toMatchObject({ state: "handed_off", handoffStatus: "success", selfTier: "unit-verified", model: "fake-model", contextPeak: 1200 });
     expect(attempt.pluginVersions).toEqual({ pstack: "0.5.0" });
     expect(attempt.headSha).not.toBe(attempt.baseSha);
     expect(readFileSync(join(attempt.worktreePath!, "app/orders.py"), "utf8")).toContain("brief had GOAL: true");
     expect(readFileSync(paths.brief(project, 1, 1), "utf8")).toContain("## ACCEPTANCE\n- SAVE10 takes 10% off");
     expect(readFileSync(paths.handoff(project, 1, 1), "utf8")).toMatch(/^## Status\nsuccess/);
-    expect(readFileSync(paths.log(project, 1, 1), "utf8").trim().split("\n")).toHaveLength(4);
+    expect(readFileSync(paths.log(project, 1, 1), "utf8").trim().split("\n")).toHaveLength(6);
     expect(await git(["log", "-1", "--format=%s"], { cwd: attempt.worktreePath! })).toBe("fake agent work");
     expect(await git(["diff", "--name-only", attempt.baseSha!, "HEAD"], { cwd: attempt.worktreePath! })).toBe("app/orders.py");
     expect(await git(["status", "--porcelain"], { cwd: attempt.worktreePath! })).toBe("");
@@ -115,5 +116,18 @@ describe("runWorkUnit", () => {
     });
     await expect(runWorkUnit({ db, boot, adapters: { claude: fake }, cli: [] }, unit.id)).rejects.toThrow(/draft, not ready/);
     expect(existsSync(layout(boot).mirror("testbed" as RepoId))).toBe(false);
+  });
+
+  it("rejects an otherwise good attempt that skipped required skills, with a note for the retry", async () => {
+    const { unit, attempt } = await run("noskills");
+    expect(attempt.missingSkills).toEqual(["yagura:yagura-worker", "pstack:poteto-mode"]);
+    expect(unit.state).toBe("rejected");
+    expect(unit.notes[0]).toMatch(/skipped required skills \(yagura:yagura-worker, pstack:poteto-mode\)/);
+  });
+
+  it("lets a skipped skill through when enforcement is switched off", async () => {
+    const { setSetting } = await import("./config.js");
+    setSetting(db, "global", "", "method.enforce_required_skills", false);
+    expect((await run("noskills")).unit.state).toBe("verifying");
   });
 });

@@ -107,15 +107,16 @@ export function getRepo(db: Db, id: RepoId): Repo {
 
 export function addProject(
   db: Db,
-  p: { id: string; name: string; goal: string; predicate: string; minTier: PassTier; repos: RepoId[] },
+  p: { id: string; name: string; goal: string; predicate: string; minTier: PassTier; repos: RepoId[]; refs?: string[] },
 ): Project {
   db.transaction(() => {
-    db.prepare("INSERT INTO projects (id, name, goal, predicate, min_tier, state, created_at) VALUES (?, ?, ?, ?, ?, 'active', ?)").run(
+    db.prepare("INSERT INTO projects (id, name, goal, predicate, min_tier, state, refs_json, created_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)").run(
       p.id,
       p.name,
       p.goal,
       p.predicate,
       p.minTier,
+      JSON.stringify(p.refs ?? []),
       now(),
     );
     for (const repo of p.repos) db.prepare("INSERT INTO project_repos (project_id, repo_id) VALUES (?, ?)").run(p.id, repo);
@@ -137,6 +138,7 @@ export function getProject(db: Db, id: ProjectId): Project {
     state: r.state as Project["state"],
     mergePolicy: r.merge_policy as Project["mergePolicy"],
     andonReason: (r.andon_reason as string | null) ?? null,
+    refs: JSON.parse((r.refs_json as string | undefined) ?? "[]"),
     createdAt: r.created_at as IsoTime,
     closedAt: (r.closed_at as IsoTime | null) ?? null,
   };
@@ -155,6 +157,7 @@ export interface NewUnit {
   context?: string[];
   measurements?: MeasurementSpec[];
   playbook?: string | null;
+  refs?: string[];
   timeboxSeconds: number;
   maxAttempts: number;
 }
@@ -166,8 +169,8 @@ export function addUnit(db: Db, u: NewUnit): Unit {
     const result = db
       .prepare(
         `INSERT INTO units (project_id, seq, type, repo_id, target_unit_id, goal, write_scope_json, forbid_scope_json,
-          acceptance_json, verify, context_json, measurements_json, playbook, timebox_seconds, max_attempts, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          acceptance_json, verify, context_json, measurements_json, playbook, timebox_seconds, max_attempts, refs_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         u.projectId,
@@ -185,6 +188,7 @@ export function addUnit(db: Db, u: NewUnit): Unit {
         u.playbook ?? null,
         u.timeboxSeconds,
         u.maxAttempts,
+        JSON.stringify(u.refs ?? []),
         t,
         t,
       );
@@ -212,6 +216,8 @@ function toUnit(r: Record<string, unknown>): Unit {
     context: JSON.parse(r.context_json as string),
     measurements: JSON.parse(r.measurements_json as string),
     notes: JSON.parse((r.notes_json as string | undefined) ?? "[]"),
+    refs: JSON.parse((r.refs_json as string | undefined) ?? "[]"),
+    landedSha: (r.landed_sha as Unit["landedSha"]) ?? null,
     playbook: (r.playbook as string | null) ?? null,
     timeboxSeconds: r.timebox_seconds as number,
     maxAttempts: r.max_attempts as number,
@@ -472,4 +478,13 @@ export function amendUnit(db: Db, unitId: UnitId, patch: { goal?: string; writeS
   if (patch.context !== undefined) sets.push("context_json = ?"), values.push(JSON.stringify(patch.context));
   if (!sets.length) return;
   db.prepare(`UPDATE units SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`).run(...values, now(), unitId);
+}
+
+export function setProjectRefs(db: Db, projectId: ProjectId, refs: string[]): void {
+  db.prepare("UPDATE projects SET refs_json = ? WHERE id = ?").run(JSON.stringify(refs), projectId);
+  recordEvent(db, "project.refs", { projectId }, { refs });
+}
+
+export function setLandedSha(db: Db, unitId: UnitId, sha: string): void {
+  db.prepare("UPDATE units SET landed_sha = ?, updated_at = ? WHERE id = ?").run(sha, now(), unitId);
 }

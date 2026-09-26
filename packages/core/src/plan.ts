@@ -52,6 +52,7 @@ export const PlanDelta = z
             context: z.array(z.string()).default([]),
             playbook: z.enum(WORK_PLAYBOOKS).default("feature"),
             timeboxMinutes: z.number().int().positive().max(240).optional(),
+            refs: z.array(z.string().min(1)).default([]),
             deps: z.array(z.object({ on: z.string(), kind: z.enum(["needs-landed", "needs-source"]).default("needs-landed") }).strict()).default([]),
           })
           .strict(),
@@ -169,6 +170,7 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
         verify: a.verify,
         context: a.context,
         playbook: a.playbook,
+        refs: a.refs,
         timeboxSeconds: a.timeboxMinutes ? a.timeboxMinutes * 60 : timebox,
         maxAttempts,
       });

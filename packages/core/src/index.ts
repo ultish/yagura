@@ -21,5 +21,6 @@ export * from "./planner.js";
 export * from "./schedule.js";
 export * from "./status.js";
 export * from "./engine.js";
+export * from "./audit.js";
 export type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
 export { claudeAdapter, parseClaudeLine } from "./harness/claude.js";

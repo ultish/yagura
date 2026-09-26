@@ -7,6 +7,9 @@ let brief = "";
 process.stdin.on("data", (d) => (brief += d));
 process.stdin.on("end", () => {
   emit({ type: "system", subtype: "init", session_id: "s1", model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
+  const skills = { worker: ["yagura:yagura-worker", "pstack:poteto-mode"], planner: ["yagura:yagura-planner"], verifier: ["yagura:yagura-verifier"] }[process.env.YAGURA_ROLE] ?? [];
+  if (mode !== "noskills")
+    for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
   if (mode === "hang") return setTimeout(() => {}, 60_000);
   if ((mode ?? "").startsWith("verify")) return verify(mode);

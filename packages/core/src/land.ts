@@ -3,9 +3,10 @@ import { dirname } from "node:path";
 import { resolveSetting, type Bootstrap } from "./config.js";
 import { PASS_TIERS } from "./domain.js";
 import type { Sha, Unit, UnitId, VerdictId } from "./domain.js";
-import { addDetachedWorktree, ensureMirror, git, headSha, patchId, removeWorktree, resolveRef } from "./git.js";
+import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWorktree, resolveRef } from "./git.js";
 import { layout } from "./paths.js";
-import { getProject, getRepo, getUnit, listAttempts, now, recordEvent, transitionUnit, type Db } from "./store.js";
+import { getProject, getRepo, getUnit, listAttempts, now, recordEvent, setLandedSha, transitionUnit, type Db } from "./store.js";
+import { landMessage } from "./audit.js";
 
 export type LandOutcome = "landed" | "blocked";
 
@@ -18,6 +19,7 @@ export interface LandResult {
 
 interface LiveVerdict {
   id: VerdictId;
+  attempt_id: number;
   tier: string;
   head_sha: Sha;
   patch_id: string | null;
@@ -27,7 +29,7 @@ function liveVerdict(db: Db, unitId: UnitId): LiveVerdict | null {
   const tiers = PASS_TIERS.map(() => "?").join(", ");
   return (
     (db
-      .prepare(`SELECT id, tier, head_sha, patch_id FROM verdicts WHERE unit_id = ? AND voided_at IS NULL AND tier IN (${tiers}) ORDER BY id DESC LIMIT 1`)
+      .prepare(`SELECT id, attempt_id, tier, head_sha, patch_id FROM verdicts WHERE unit_id = ? AND voided_at IS NULL AND tier IN (${tiers}) ORDER BY id DESC LIMIT 1`)
       .get(unitId, ...PASS_TIERS) as LiveVerdict | undefined) ?? null
   );
 }
@@ -61,33 +63,41 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
 
   await ensureMirror(repo.url, mirror);
   const trunk = await resolveRef(mirror, `origin/${repo.defaultBranch}`);
-  let landed = verdict.head_sha;
-
-  if (trunk !== work.baseSha) {
-    const wt = `${paths.worktree(repo.id, project.id, unit.seq, 0)}.land`;
-    mkdirSync(dirname(wt), { recursive: true });
-    await addDetachedWorktree(mirror, wt, verdict.head_sha);
-    try {
+  const wt = `${paths.worktree(repo.id, project.id, unit.seq, 0)}.land`;
+  mkdirSync(dirname(wt), { recursive: true });
+  await addDetachedWorktree(mirror, wt, verdict.head_sha);
+  let landed: Sha;
+  try {
+    if (trunk !== work.baseSha) {
       try {
         await git(["-c", `user.name=${author.name}`, "-c", `user.email=${author.email}`, "rebase", "--quiet", "--onto", trunk, work.baseSha], { cwd: wt });
       } catch {
         await git(["rebase", "--abort"], { cwd: wt }).catch(() => undefined);
         return block(`conflicts with ${repo.defaultBranch} at ${trunk.slice(0, 10)}; needs a rebase unit`);
       }
-      landed = await headSha(wt);
-      const rebasedPatch = await patchId(wt, trunk, landed);
-      if (!verdict.patch_id || rebasedPatch !== verdict.patch_id)
-        return block(`rebasing onto ${repo.defaultBranch} changed the patch; the rebased head needs re-verification`);
-      db.transaction(() => {
-        db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), `rebased to ${landed}; patch-id unchanged, carried forward`, verdict.id);
-        db.prepare(
-          `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, created_at)
-           SELECT unit_id, attempt_id, tier, repo_id, ?, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, ? FROM verdicts WHERE id = ?`,
-        ).run(landed, now(), verdict.id);
-      })();
-    } finally {
-      await removeWorktree(mirror, wt).catch(() => undefined);
     }
+    const tree = await git(["rev-parse", "HEAD^{tree}"], { cwd: wt });
+    const message = landMessage(db, boot, {
+      unit,
+      work,
+      verdict: { id: verdict.id, tier: verdict.tier, attemptId: verdict.attempt_id },
+      url: resolveSetting(db, "yagura.url", { projectId: project.id, repoId: repo.id }).value,
+    });
+    const identity = { GIT_AUTHOR_NAME: author.name, GIT_AUTHOR_EMAIL: author.email, GIT_COMMITTER_NAME: author.name, GIT_COMMITTER_EMAIL: author.email };
+    landed = (await gitWithEnv(["commit-tree", tree, "-p", trunk, "-F", "-"], wt, identity, message)) as Sha;
+    const squashedPatch = await patchId(wt, trunk, landed);
+    if (!verdict.patch_id || squashedPatch !== verdict.patch_id)
+      return block(`landing onto ${repo.defaultBranch} changed the patch; the new head needs re-verification`);
+    db.transaction(() => {
+      db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), `landed as ${landed}; patch-id unchanged, carried forward`, verdict.id);
+      db.prepare(
+        `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, created_at)
+         SELECT unit_id, attempt_id, tier, repo_id, ?, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, ? FROM verdicts WHERE id = ?`,
+      ).run(landed, now(), verdict.id);
+      db.prepare("INSERT INTO verdict_artifacts (verdict_id, artifact_id) SELECT last_insert_rowid(), artifact_id FROM verdict_artifacts WHERE verdict_id = ?").run(verdict.id);
+    })();
+  } finally {
+    await removeWorktree(mirror, wt).catch(() => undefined);
   }
 
   try {
@@ -96,7 +106,13 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
     return block(`push to ${repo.defaultBranch} was rejected: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
   }
   await ensureMirror(repo.url, mirror);
+  setLandedSha(db, unit.id, landed);
   transitionUnit(db, unit.id, "landed", { sha: landed, onto: trunk });
-  recordEvent(db, "unit.landed", refs, { sha: landed, branch: repo.defaultBranch, rebased: landed !== verdict.head_sha });
-  return { unit: getUnit(db, unit.id), outcome: "landed", landedSha: landed, reason: landed === verdict.head_sha ? "fast-forward" : "rebased; patch unchanged" };
+  recordEvent(db, "unit.landed", refs, { sha: landed, branch: repo.defaultBranch, rebased: trunk !== work.baseSha, squashedFrom: verdict.head_sha });
+  return {
+    unit: getUnit(db, unit.id),
+    outcome: "landed",
+    landedSha: landed,
+    reason: trunk === work.baseSha ? "squashed onto trunk" : "rebased onto the moved trunk and squashed; patch unchanged",
+  };
 }

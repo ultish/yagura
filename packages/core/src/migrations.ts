@@ -46,6 +46,15 @@ CREATE UNIQUE INDEX leases_active_slot ON leases (environment_id, slot) WHERE st
 ALTER TABLE gates ADD COLUMN kind TEXT NOT NULL DEFAULT 'question';
 `,
   },
+  {
+    version: 4,
+    sql: `
+ALTER TABLE projects ADD COLUMN refs_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE units ADD COLUMN refs_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE units ADD COLUMN landed_sha TEXT;
+CREATE INDEX units_landed_sha ON units (landed_sha);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

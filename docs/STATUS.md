@@ -49,9 +49,11 @@ Found and fixed during phase 3: a plan unit briefly in `ready` was picked up as 
 
 DESIGN §17. First a long-running daemon that owns the engine for all projects and serves the API + SSE (the CLI becomes a client), then the web UI. The visual style is chosen with the user from 2–3 prototypes of the core screens before building (projects overview, unit graph, live agent log).
 
-## Decisions waiting on the user
+## Audit trail and skill enforcement: done (between phases 3 and 4)
 
-- **Skipped required skills.** Workers skipped `pstack:poteto-mode` in 2 of 3 real attempts; it is recorded and shown, not enforced. Options: keep it as information; fail the attempt (retry with a note); or have the planner see it and add a note. Recommendation: fail the attempt once with a note naming the skill, then accept.
+- Landing squashes each unit into one commit with yagura trailers (project, unit, attempt with model and pstack version, branch, verdict with cited runs, link when `yagura.url` is set, issue refs). The verdict carries to the squashed commit because the patch-id is unchanged.
+- Issue refs on projects and units (migration 4: `refs_json`, `units.landed_sha`); `yagura trace <sha|issue>` walks back to units, attempts, runs, verdicts, and handoffs.
+- A work attempt that skipped a required skill is rejected with a note, every time (user decision: pstack is what keeps the principles consistent); the engine retries within `max_attempts`. Setting: `method.enforce_required_skills`.
 
 ## Known gaps
 

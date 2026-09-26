@@ -64,6 +64,8 @@ export const SETTINGS = {
   "git.author_name": z.string().default("yagura"),
   "git.author_email": z.string().default("yagura@localhost"),
   "git.branch_prefix": z.string().default("yg"),
+  "yagura.url": z.string().url().nullable().default(null),
+  "method.enforce_required_skills": z.boolean().default(true),
 } satisfies Record<string, z.ZodTypeAny>;
 
 export type SettingKey = keyof typeof SETTINGS;

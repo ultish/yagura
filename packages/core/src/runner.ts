@@ -135,6 +135,9 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       transitionUnit(db, unit.id, "blocked", { reason: "agent reported blocked" });
     } else if (head === base) {
       transitionUnit(db, unit.id, "blocked", { reason: "handed off with no commits" });
+    } else if (session.missingSkills.length && setting("method.enforce_required_skills")) {
+      addUnitNote(db, unit.id, `Attempt ${attempt.n} skipped required skills (${session.missingSkills.join(", ")}). Load each of them with the Skill tool before doing any work.`);
+      transitionUnit(db, unit.id, "rejected", { reason: "skipped required skills", missing: session.missingSkills });
     } else {
       await ensureMirror(repo.url, mirror);
       const trunk = await resolveRef(mirror, `origin/${repo.defaultBranch}`);

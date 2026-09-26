@@ -195,6 +195,7 @@ export interface Project {
   state: ProjectState;
   mergePolicy: MergePolicy;
   andonReason: string | null;
+  refs: string[];
   createdAt: IsoTime;
   closedAt: IsoTime | null;
 }
@@ -215,6 +216,8 @@ export interface Unit {
   context: string[];
   measurements: MeasurementSpec[];
   notes: string[];
+  refs: string[];
+  landedSha: Sha | null;
   playbook: string | null;
   timeboxSeconds: number;
   maxAttempts: number;

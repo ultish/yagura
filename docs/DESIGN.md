@@ -66,7 +66,7 @@ draft → ready → running → handed_off ─┬→ verifying → verified → 
           └──────── blocked (gate open) ──── abandoned
 ```
 
-Transitions are daemon-only. Agents never set state; they produce handoffs, and the daemon classifies them.
+Transitions are daemon-only. Agents never set state; they produce handoffs, and the daemon classifies them. A work attempt that skipped a required skill of its role (e.g. `pstack:poteto-mode` for workers) is rejected with a note naming the skills, even if its change is good; `method.enforce_required_skills` switches this off.
 
 ## 4. Architecture
 
@@ -405,6 +405,22 @@ Per repo, one lander, serialized:
 3. Land by the repo's forge adapter: `none` → fast-forward / merge push; `glab` / `gh` → **one MR per unit**: push with MR (`-o merge_request.create` works without API access), babysit as above until the forge reports mergeable, then merge. Whether yagura may click merge is a per-project setting (`merge: auto | human`); `human` stops at merge-ready and raises a gate.
 4. `release` units publish real versions after land when a downstream `needs-landed` dep waits on them.
 5. **Retro watch** (after merge): watch trunk's post-merge pipeline and later reverts. A post-merge break creates a `ci-fix` unit against trunk (or a revert unit if the project allows auto-revert).
+
+### Audit trail
+
+Every landed unit is **one squashed commit** on trunk (the agent's own commits stay on its `yg/…` branch). Its message is the unit's goal as the subject, the worker's "What I did" as the body, and trailers that lead back to everything behind it:
+
+```
+Yagura-Project: orders
+Yagura-Unit: U2
+Yagura-Attempt: 5 (claude-opus-5-5, pstack 0.5.0)
+Yagura-Branch: yg/orders/u2-1
+Yagura-Verdict: unit-verified by U3 (run:13, run:14)
+Yagura-Link: http://devvm:7300/p/orders/u/2
+Refs: gitlab#123
+```
+
+Squashing leaves the patch-id unchanged, so the verdict carries to the squashed commit. `Yagura-Link` appears when the `yagura.url` setting is set. Issue refs live on projects (`--issue`) and units (planner `refs`, CLI `--issue`); a unit's commit carries both. `yagura trace <sha|ref>` walks back from a commit (landed SHA, verified head, or attempt head) or an issue ref to the project, unit, work attempts (model, pstack version, skills loaded, branch), verification runs, verdicts, and handoffs. With a forge adapter (phase 5) the refs also go into the MR description and yagura comments on the issue when work lands.
 
 ## 16. Configuration
 
