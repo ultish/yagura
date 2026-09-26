@@ -7,6 +7,7 @@ let brief = "";
 process.stdin.on("data", (d) => (brief += d));
 process.stdin.on("end", () => {
   emit({ type: "system", subtype: "init", session_id: "s1", model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
+  if (mode === "engine") return engine(process.env.YAGURA_ROLE);
   if (mode === "hang") return setTimeout(() => {}, 60_000);
   if ((mode ?? "").startsWith("verify")) return verify(mode);
   const file = mode === "scope" ? "README.md" : "app/orders.py";
@@ -44,4 +45,36 @@ function verify(mode) {
   const cite = mode === "verify-lie" ? "run:999" : `run:${head}`;
   const handoff = `## Status\nsuccess\n\n## Verification\n${tier}\n\n## Evidence\n- ${cite} scenario on head\n- run:${base} scenario on base\n\n## Findings\n- [x] criterion: ${cite}\n`;
   emit({ type: "result", subtype: "success", is_error: false, result: handoff, terminal_reason: "completed", total_cost_usd: 0.01 });
+}
+
+function finish(text) {
+  emit({ type: "result", subtype: "success", is_error: false, result: text, terminal_reason: "completed", total_cost_usd: 0.01 });
+}
+
+function engine(role) {
+  if (role === "planner") {
+    const workRows = [...brief.matchAll(/^\| U\d+ \| work \| (\w+)/gm)].map((m) => m[1]);
+    const unit = (key, write) => ({ key, repo: "testbed", goal: `write ${key}`, write: [write], accept: [`${key} file exists`], verify: "true", playbook: "feature" });
+    const delta = !workRows.length
+      ? { add: [unit("a", "app/a/**"), unit("b", "app/b/**"), unit("c", "app/a/extra/**")], summary: "three units" }
+      : { done: workRows.every((s) => s === "landed"), summary: workRows.every((s) => s === "landed") ? "all landed" : "waiting" };
+    return finish("Plan:\n```json\n" + JSON.stringify(delta) + "\n```");
+  }
+  if (role === "worker") {
+    const base = /May write:\n- ([^*\n]+?)\/?\*\*/.exec(brief)[1];
+    mkdirSync(base, { recursive: true });
+    writeFileSync(`${base}/${process.env.YAGURA_UNIT}.txt`, "work\n");
+    const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
+    g("add", "-A");
+    g("commit", "-q", "-m", `work ${process.env.YAGURA_UNIT}`);
+    return setTimeout(() => finish("## Status\nsuccess\n\n## Verification\nunit-verified\n"), 400);
+  }
+  if (role === "verifier") {
+    const file = /^\+\+\+ b\/(.+)$/m.exec(brief)[1];
+    writeFileSync("scenario.sh", `test -f ${file}\n`);
+    const run = (at) => Number(/run:(\d+)/.exec(execSync(`yagura evidence run --at ${at} --label s -- sh ${process.cwd()}/scenario.sh`, { encoding: "utf8" }))[1]);
+    const base = run("base");
+    const head = run("head");
+    return finish(`## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Evidence\n- run:${head}\n- run:${base}\n`);
+  }
 }

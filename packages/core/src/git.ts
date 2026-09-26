@@ -99,3 +99,13 @@ export async function changedPaths(worktree: string, base: Sha): Promise<string[
   const out = await git(["diff", "--name-only", "--no-renames", "-z", base, "HEAD"], { cwd: worktree });
   return out.split("\0").filter(Boolean);
 }
+
+export async function mergesCleanly(gitDir: string, trunk: Sha, head: Sha): Promise<boolean> {
+  try {
+    await git(["merge-tree", "--write-tree", "--quiet", trunk, head], { gitDir });
+    return true;
+  } catch (e) {
+    if ((e as { code?: number }).code === 1) return false;
+    throw e;
+  }
+}

@@ -4,11 +4,11 @@ import { runAgentSession, write, type RunContext } from "./agent.js";
 import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import type { Attempt, RenderedBrief, Unit, UnitId } from "./domain.js";
-import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, resolveRef } from "./git.js";
+import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
 import { classifyFailure, parseHandoff, syntheticFailureHandoff } from "./handoff.js";
 import { layout, unitRef } from "./paths.js";
 import { checkScope } from "./scope.js";
-import { addUnit, createAttempt, getAttempt, getProject, getRepo, getUnit, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
+import { addUnit, addUnitNote, createAttempt, getAttempt, getProject, getRepo, getUnit, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
 
 export type { RunContext } from "./agent.js";
 
@@ -136,7 +136,12 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     } else if (head === base) {
       transitionUnit(db, unit.id, "blocked", { reason: "handed off with no commits" });
     } else {
-      queueVerification(db, getUnit(db, unit.id));
+      await ensureMirror(repo.url, mirror);
+      const trunk = await resolveRef(mirror, `origin/${repo.defaultBranch}`);
+      if (trunk !== base && !(await mergesCleanly(mirror, trunk, head))) {
+        addUnitNote(db, unit.id, `Attempt ${attempt.n} conflicted with ${repo.defaultBranch} at ${trunk.slice(0, 10)}, which moved while it worked; the next attempt starts from the new trunk.`);
+        transitionUnit(db, unit.id, "rejected", { reason: "conflicts with trunk", trunk });
+      } else queueVerification(db, getUnit(db, unit.id));
     }
   } else {
     const facts = {

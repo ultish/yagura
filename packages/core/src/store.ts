@@ -361,3 +361,115 @@ export function addUnitNote(db: Db, unitId: UnitId, note: string): void {
   db.prepare("UPDATE units SET notes_json = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(notes), now(), unitId);
   recordEvent(db, "unit.note", { projectId: row.project_id, unitId }, { note });
 }
+
+export function listProjects(db: Db): Project[] {
+  return (db.prepare("SELECT id FROM projects ORDER BY created_at").all() as { id: ProjectId }[]).map((r) => getProject(db, r.id));
+}
+
+export function projectRepos(db: Db, projectId: ProjectId): Repo[] {
+  return (db.prepare("SELECT repo_id FROM project_repos WHERE project_id = ? ORDER BY repo_id").all(projectId) as { repo_id: RepoId }[]).map((r) =>
+    getRepo(db, r.repo_id),
+  );
+}
+
+export function setAndon(db: Db, projectId: ProjectId, reason: string | null): void {
+  db.prepare("UPDATE projects SET andon_reason = ? WHERE id = ?").run(reason, projectId);
+  recordEvent(db, reason ? "project.andon" : "project.andon_cleared", { projectId }, { reason });
+}
+
+export function setMergePolicy(db: Db, projectId: ProjectId, policy: Project["mergePolicy"]): void {
+  db.prepare("UPDATE projects SET merge_policy = ? WHERE id = ?").run(policy, projectId);
+}
+
+export function setProjectState(db: Db, projectId: ProjectId, state: Project["state"]): void {
+  db.prepare("UPDATE projects SET state = ?, closed_at = CASE WHEN ? = 'closed' THEN ? ELSE closed_at END WHERE id = ?").run(state, state, now(), projectId);
+  recordEvent(db, "project.state", { projectId }, { state });
+}
+
+export interface UnitDepRow {
+  unitId: UnitId;
+  dependsOn: UnitId;
+  kind: "needs-source" | "needs-landed" | "scope-overlap";
+}
+
+export function addDep(db: Db, dep: UnitDepRow): void {
+  db.prepare("INSERT OR IGNORE INTO unit_deps (unit_id, depends_on, kind) VALUES (?, ?, ?)").run(dep.unitId, dep.dependsOn, dep.kind);
+}
+
+export function listDeps(db: Db, projectId: ProjectId): UnitDepRow[] {
+  return (
+    db
+      .prepare("SELECT d.unit_id, d.depends_on, d.kind FROM unit_deps d JOIN units u ON u.id = d.unit_id WHERE u.project_id = ?")
+      .all(projectId) as { unit_id: UnitId; depends_on: UnitId; kind: UnitDepRow["kind"] }[]
+  ).map((r) => ({ unitId: r.unit_id, dependsOn: r.depends_on, kind: r.kind }));
+}
+
+export interface Gate {
+  id: number;
+  projectId: ProjectId;
+  unitId: UnitId | null;
+  question: string;
+  options: string[];
+  defaultOption: string | null;
+  state: "open" | "answered" | "defaulted" | "cancelled";
+  answer: string | null;
+  kind: string;
+}
+
+export function addGate(db: Db, g: { projectId: ProjectId; unitId?: UnitId | null; question: string; options: string[]; defaultOption?: string | null; kind: string }): number {
+  const id = Number(
+    db
+      .prepare("INSERT INTO gates (project_id, unit_id, kind, question, options_json, default_option, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+      .run(g.projectId, g.unitId ?? null, g.kind, g.question, JSON.stringify(g.options), g.defaultOption ?? null, now()).lastInsertRowid,
+  );
+  recordEvent(db, "gate.opened", { projectId: g.projectId, unitId: g.unitId ?? null }, { gate: id, kind: g.kind, question: g.question });
+  return id;
+}
+
+function toGate(r: Record<string, unknown>): Gate {
+  return {
+    id: r.id as number,
+    projectId: r.project_id as ProjectId,
+    unitId: (r.unit_id as UnitId | null) ?? null,
+    question: r.question as string,
+    kind: r.kind as string,
+    options: JSON.parse(r.options_json as string),
+    defaultOption: (r.default_option as string | null) ?? null,
+    state: r.state as Gate["state"],
+    answer: (r.answer as string | null) ?? null,
+  };
+}
+
+export function listGates(db: Db, projectId: ProjectId | null, state?: Gate["state"]): Gate[] {
+  const rows = db
+    .prepare(`SELECT * FROM gates WHERE (? IS NULL OR project_id = ?) AND (? IS NULL OR state = ?) ORDER BY id`)
+    .all(projectId, projectId, state ?? null, state ?? null) as Record<string, unknown>[];
+  return rows.map(toGate);
+}
+
+export function answerGate(db: Db, id: number, answer: string): Gate {
+  const row = db.prepare("SELECT * FROM gates WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  if (!row) throw new Error(`gate ${id} not found`);
+  const gate = toGate(row);
+  if (gate.state !== "open") throw new Error(`gate ${id} is ${gate.state}`);
+  if (gate.options.length && !gate.options.includes(answer)) throw new Error(`answer must be one of: ${gate.options.join(", ")}`);
+  db.prepare("UPDATE gates SET state = 'answered', answer = ?, resolved_at = ? WHERE id = ?").run(answer, now(), id);
+  recordEvent(db, "gate.answered", { projectId: gate.projectId, unitId: gate.unitId }, { gate: id, answer });
+  return { ...gate, state: "answered", answer };
+}
+
+export function bumpMaxAttempts(db: Db, unitId: UnitId, to: number): void {
+  db.prepare("UPDATE units SET max_attempts = MAX(max_attempts, ?), updated_at = ? WHERE id = ?").run(to, now(), unitId);
+}
+
+export function amendUnit(db: Db, unitId: UnitId, patch: { goal?: string; writeScope?: string[]; acceptance?: string[]; verify?: string; context?: string[] }): void {
+  const sets: string[] = [];
+  const values: unknown[] = [];
+  if (patch.goal !== undefined) sets.push("goal = ?"), values.push(patch.goal);
+  if (patch.writeScope !== undefined) sets.push("write_scope_json = ?"), values.push(JSON.stringify(patch.writeScope));
+  if (patch.acceptance !== undefined) sets.push("acceptance_json = ?"), values.push(JSON.stringify(patch.acceptance));
+  if (patch.verify !== undefined) sets.push("verify = ?"), values.push(patch.verify);
+  if (patch.context !== undefined) sets.push("context_json = ?"), values.push(JSON.stringify(patch.context));
+  if (!sets.length) return;
+  db.prepare(`UPDATE units SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`).run(...values, now(), unitId);
+}

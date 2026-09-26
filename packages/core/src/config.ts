@@ -45,6 +45,9 @@ export function loadBootstrap(env: NodeJS.ProcessEnv = process.env): Bootstrap {
 
 export const SETTINGS = {
   max_parallel_agents: z.number().int().positive().default(4),
+  max_parallel_per_harness: z.number().int().positive().default(4),
+  "project.max_in_flight": z.number().int().positive().default(3),
+  "timebox.plan_seconds": z.number().int().positive().default(900),
   "harness.claude.bin": z.string().default("claude"),
   "harness.claude.permission_mode": z.string().default("bypassPermissions"),
   "harness.claude.extra_args": z.array(z.string()).default([]),

@@ -41,6 +41,7 @@ export function parsePack(text: string | null, packPath: string): PackLoad {
 export const REQUIRED_SKILLS: Partial<Record<Role, readonly string[]>> = {
   worker: ["yagura:yagura-worker", "pstack:poteto-mode"],
   verifier: ["yagura:yagura-verifier"],
+  planner: ["yagura:yagura-planner"],
 };
 
 export function missingSkills(role: Role, loaded: readonly string[]): string[] {

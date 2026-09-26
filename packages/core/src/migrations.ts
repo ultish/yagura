@@ -40,6 +40,12 @@ ALTER TABLE leases_v2 RENAME TO leases;
 CREATE UNIQUE INDEX leases_active_slot ON leases (environment_id, slot) WHERE state = 'active';
 `,
   },
+  {
+    version: 3,
+    sql: `
+ALTER TABLE gates ADD COLUMN kind TEXT NOT NULL DEFAULT 'question';
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;
