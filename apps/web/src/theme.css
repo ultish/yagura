@@ -117,6 +117,7 @@ button, input, textarea { font: inherit; color: inherit; }
 .btn:disabled { opacity: .5; cursor: default; }
 .btn.bell { background: var(--bell); border-color: var(--bell); color: var(--on-accent); }
 .btn.lamp { background: var(--lamp); border-color: var(--lamp); color: #141018; }
+.btn.lamp:disabled, .btn.bell:disabled { background: transparent; border-color: var(--btnline); color: var(--muted); opacity: 1; }
 .btn.sm { font-size: 12.5px; padding: 5px 10px; min-height: 30px; }
 
 .h2 { margin: 0; font-family: "Shippori Mincho", serif; font-size: 20px; font-weight: 600; }

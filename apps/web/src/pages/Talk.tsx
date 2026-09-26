@@ -214,12 +214,7 @@ function Composer({ threadId, busy, initial, draftKey }: { threadId: number | nu
           the watchman is reading the records and replying…
         </div>
       )}
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-        <MentionInput value={text} onChange={setText} onSubmit={() => void send()} label="Message the watchman" placeholder="Message the watchman · @ mentions a project, unit, run, thread or repo" disabled={action.busy || busy} autoFocus />
-        <button className="btn lamp" type="button" disabled={action.busy || busy || !text.trim()} onClick={() => void send()}>
-          Send
-        </button>
-      </div>
+      <MentionInput value={text} onChange={setText} onSubmit={() => void send()} label="Message the watchman" placeholder="Message the watchman" disabled={action.busy || busy} autoFocus />
       {action.error && <div className="s-bell" style={{ fontSize: 13, marginTop: 6 }}>{action.error}</div>}
     </div>
   );

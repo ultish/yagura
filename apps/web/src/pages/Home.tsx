@@ -43,12 +43,7 @@ function TalkBox() {
       <h2 className="h2" style={{ marginBottom: 8 }}>
         Talk to the watch
       </h2>
-      <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-        <MentionInput value={text} onChange={setText} onSubmit={() => void send()} label="Talk to the watch" placeholder="What should yagura build or change? @ mentions a project" disabled={action.busy} />
-        <button className="btn lamp" type="button" disabled={action.busy || !text.trim()} onClick={() => void send()}>
-          Send
-        </button>
-      </div>
+      <MentionInput value={text} onChange={setText} onSubmit={() => void send()} label="Talk to the watch" placeholder="What should yagura build or change?" disabled={action.busy} hint="@ mentions a project, unit or run · Enter sends" />
       {action.error && <div className="s-bell" style={{ fontSize: 13, marginTop: 6 }}>{action.error}</div>}
     </div>
   );

@@ -1,7 +1,6 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { api, type Suggestion } from "../api";
 import { mentionQuery } from "../lib/mention";
-
 
 export function MentionInput({
   value,
@@ -11,6 +10,7 @@ export function MentionInput({
   label,
   disabled,
   autoFocus,
+  hint = "@ mentions a project, unit, run, thread or repo · Enter sends · Shift+Enter for a new line",
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -19,6 +19,7 @@ export function MentionInput({
   label: string;
   disabled?: boolean;
   autoFocus?: boolean;
+  hint?: string;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const id = useId();
@@ -66,68 +67,117 @@ export function MentionInput({
     });
   };
 
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight + 2, 220)}px`;
+  }, [value]);
+
   const showList = open !== null && items.length > 0;
+  const canSend = !disabled && value.trim().length > 0;
   return (
-    <div style={{ position: "relative", flexGrow: 1 }}>
-      <label htmlFor={id} className="sr-only">
-        {label}
-      </label>
-      <textarea
-        ref={ref}
-        id={id}
-        role="combobox"
-        aria-expanded={showList}
-        aria-controls={`${id}-list`}
-        aria-autocomplete="list"
-        aria-activedescendant={showList ? `${id}-opt-${active}` : undefined}
-        rows={Math.min(8, Math.max(1, value.split("\n").length))}
-        value={value}
-        disabled={disabled}
-        autoFocus={autoFocus}
-        placeholder={placeholder}
-        onChange={(e) => {
-          onChange(e.target.value);
-          refresh(e.target.value);
-        }}
-        onClick={() => refresh(value)}
-        onBlur={() => setTimeout(() => setOpen(null), 150)}
-        onKeyDown={(e) => {
-          if (showList) {
-            if (e.key === "ArrowDown") return e.preventDefault(), setActive((a) => (a + 1) % items.length);
-            if (e.key === "ArrowUp") return e.preventDefault(), setActive((a) => (a - 1 + items.length) % items.length);
-            if (e.key === "Enter" || e.key === "Tab") return e.preventDefault(), pick(items[active]!);
-            if (e.key === "Escape") return e.preventDefault(), setOpen(null);
-          }
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            if (value.trim()) onSubmit();
-          }
-        }}
-        style={{ width: "100%", resize: "none", fontSize: 15, lineHeight: 1.45, background: "var(--bg)", border: `1px solid ${showList ? "var(--amber)" : "var(--btnline)"}`, borderRadius: 4, padding: "10px 12px" }}
-      />
-      {showList && (
-        <ul id={`${id}-list`} role="listbox" aria-label="Mentions" style={{ position: "absolute", left: 0, bottom: "calc(100% + 6px)", width: "min(520px, 100%)", margin: 0, padding: "6px 0", listStyle: "none", background: "var(--panel)", border: "1px solid var(--btnline)", borderRadius: 6, boxShadow: "0 8px 24px rgba(0,0,0,.35)", zIndex: 10 }}>
-          {items.map((s, i) => (
-            <li
-              key={s.token}
-              id={`${id}-opt-${i}`}
-              role="option"
-              aria-selected={i === active}
-              onMouseDown={(e) => {
+    <div>
+      <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+        <div style={{ position: "relative", flexGrow: 1, minWidth: 0 }}>
+          <label htmlFor={id} className="sr-only">
+            {label}
+          </label>
+          <textarea
+            ref={ref}
+            id={id}
+            role="combobox"
+            aria-expanded={showList}
+            aria-controls={`${id}-list`}
+            aria-autocomplete="list"
+            aria-activedescendant={showList ? `${id}-opt-${active}` : undefined}
+            rows={1}
+            aria-describedby={`${id}-hint`}
+            value={value}
+            disabled={disabled}
+            autoFocus={autoFocus}
+            placeholder={placeholder}
+            onChange={(e) => {
+              onChange(e.target.value);
+              refresh(e.target.value);
+            }}
+            onClick={() => refresh(value)}
+            onBlur={() => setTimeout(() => setOpen(null), 150)}
+            onKeyDown={(e) => {
+              if (showList) {
+                if (e.key === "ArrowDown") return (e.preventDefault(), setActive((a) => (a + 1) % items.length));
+                if (e.key === "ArrowUp") return (e.preventDefault(), setActive((a) => (a - 1 + items.length) % items.length));
+                if (e.key === "Enter" || e.key === "Tab") return (e.preventDefault(), pick(items[active]!));
+                if (e.key === "Escape") return (e.preventDefault(), setOpen(null));
+              }
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                pick(s);
+                if (value.trim()) onSubmit();
+              }
+            }}
+            style={{
+              display: "block",
+              width: "100%",
+              minHeight: 44,
+              resize: "none",
+              overflowY: "auto",
+              fontSize: 15,
+              lineHeight: 1.45,
+              background: "var(--bg)",
+              border: `1px solid ${showList ? "var(--amber)" : "var(--btnline)"}`,
+              borderRadius: 4,
+              padding: "10px 12px",
+            }}
+          />
+          {showList && (
+            <ul
+              id={`${id}-list`}
+              role="listbox"
+              aria-label="Mentions"
+              style={{
+                position: "absolute",
+                left: 0,
+                bottom: "calc(100% + 6px)",
+                width: "min(520px, 100%)",
+                margin: 0,
+                padding: "6px 0",
+                listStyle: "none",
+                background: "var(--panel)",
+                border: "1px solid var(--btnline)",
+                borderRadius: 6,
+                boxShadow: "0 8px 24px rgba(0,0,0,.35)",
+                zIndex: 10,
               }}
-              onMouseEnter={() => setActive(i)}
-              style={{ display: "flex", gap: 10, padding: "7px 12px", cursor: "pointer", background: i === active ? "var(--line2)" : "transparent" }}
             >
-              <span className="mono" style={{ fontSize: 13, color: "var(--amber)", minWidth: 130, flexShrink: 0 }}>
-                {s.token}
-              </span>
-              <span style={{ fontSize: 13, color: "var(--soft)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
-            </li>
-          ))}
-        </ul>
-      )}
+              {items.map((s, i) => (
+                <li
+                  key={s.token}
+                  id={`${id}-opt-${i}`}
+                  role="option"
+                  aria-selected={i === active}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pick(s);
+                  }}
+                  onMouseEnter={() => setActive(i)}
+                  style={{ display: "flex", gap: 10, padding: "7px 12px", cursor: "pointer", background: i === active ? "var(--line2)" : "transparent" }}
+                >
+                  <span className="mono" style={{ fontSize: 13, color: "var(--amber)", minWidth: 130, flexShrink: 0 }}>
+                    {s.token}
+                  </span>
+                  <span style={{ fontSize: 13, color: "var(--soft)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <button className="btn lamp" type="button" disabled={!canSend} onClick={onSubmit} style={{ height: 44 }}>
+          Send
+        </button>
+      </div>
+      <div id={`${id}-hint`} className="mono muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+        {hint}
+      </div>
     </div>
   );
 }
