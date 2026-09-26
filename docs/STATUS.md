@@ -1,6 +1,8 @@
 # yagura build status
 
-Updated 2026-09-27 (phase 4: daemon, watchman, and web UI core done). Phases are from `DESIGN.md` §19.
+Updated 2026-09-27 (phase 4: daemon, watchman, and web UI core done).
+
+**Resume here:** build the Repos page with "Add an existing repo" and the watchman's `repos[].existing` proposal field (DESIGN §17 Repos, §8a), then Environments and Settings. Run `pnpm dev` (daemon with rebuild-and-restart, dashboard with hot reload on :5173, home `~/.yagura-dev`); for no-cost end-to-end runs point `harness.claude.bin` at the fake agent (CLAUDE.md). The jsondiff and proto proofs below ran in a session scratch home that no longer exists; recreate data with the fake agent or a new real run. Phases are from `DESIGN.md` §19.
 
 ## Phase 1 — Core: done
 
@@ -65,7 +67,7 @@ Answered (user, 2026-09-26): the first real spec-driven project runs on this Mac
 
 Decided (user, 2026-09-26): phase gates stay off by default (automation first; the developer steps in when they want or when asked); the home scene collapses to a thin strip on scroll; no "New project" form in the UI — conversation is the front door, and the CLI covers the manual path (`project new --after --phase-gate --merge --env`).
 
-@mentions (DESIGN §8a "Mentions", migration 6 `message_refs`): tokens `@project`, `@project/U3`, `@project/U3.2`, `@thread:4`, `@repo:id` are indexed on every message, described in the watchman brief, searchable (`yagura thread mentions`, `GET /api/mentions/:token/messages`), and completed by `GET /api/mentions?q=`. The `@` autocomplete widget and mention links are `apps/web` work.
+@mentions (DESIGN §8a "Mentions", migration 6 `message_refs`): tokens `@project`, `@project/U3`, `@project/U3.2`, `@thread:4`, `@repo:id` are indexed on every message, described in the watchman brief, searchable (`yagura thread mentions`, `GET /api/mentions/:token/messages`), and completed by `GET /api/mentions?q=`. The `@` autocomplete and mention links are built in `apps/web`.
 
 ## Phase 4 — Dashboard: in progress (web UI core done)
 
@@ -96,7 +98,7 @@ Build order decided 2026-09-26: (1) watchman — done; (2) project chains and re
 - A rebase that changes the patch blocks the unit; re-verifying a rebased head arrives with the babysit units (phase 5).
 - Landing does not void dependents' verdicts, and `needs-source` behaves like `needs-landed` until read-only mounts arrive (phase 6).
 - Pack `doctor`/`deploy`/`teardown` are parsed but not run; deployed verification comes with the `kube-namespace` provider (phase 5).
-- `yagura evidence run` trusts `YAGURA_ATTEMPT` plus the attempt being in `running`; a per-attempt token arrives with the daemon API.
-- `yagura drive` runs the engine in the foreground for one project; the always-on daemon and API arrive in phase 4.
+- `yagura evidence run` trusts `YAGURA_ATTEMPT` plus the attempt being in `running`; a per-attempt token is not added yet.
+- `yagura drive` (one project, foreground) refuses while the daemon runs; it is for debugging only. Normal use is `yagura daemon`, or `pnpm dev` while developing.
 - No wall-clock budget or landing cutoff yet (DESIGN §6).
 - The user's SessionStart hook (codebase-memory-mcp indexing) runs in every agent session; suggested fix is to skip when `YAGURA_ATTEMPT` is set. Not yet applied.
