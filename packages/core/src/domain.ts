@@ -304,10 +304,10 @@ export interface Handoff {
 }
 
 export type HarnessEvent =
-  | { kind: "session"; sessionId: string; model: string | null }
+  | { kind: "session"; sessionId: string; model: string | null; plugins: Record<string, string> }
   | { kind: "text"; text: string; parentId: string | null }
   | { kind: "tool_call"; id: string; name: string; input: unknown; parentId: string | null }
-  | { kind: "tool_result"; id: string; output: string; isError: boolean }
-  | { kind: "usage"; inputTokens: number; outputTokens: number; contextTokens: number }
-  | { kind: "final"; text: string; isError: boolean }
-  | { kind: "unknown"; raw: unknown };
+  | { kind: "tool_result"; id: string; output: string; isError: boolean; parentId: string | null }
+  | { kind: "usage"; outputTokens: number; contextTokens: number }
+  | { kind: "final"; text: string; isError: boolean; stopReason: string | null; costUsd: number | null }
+  | { kind: "ignored"; type: string };
