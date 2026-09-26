@@ -23,7 +23,7 @@ pnpm -r build                 # core copies schema.sql into dist
 pnpm -r test                  # vitest; real SQLite, real git, fake agent
 pnpm -r typecheck
 node apps/cli/dist/main.js    # the CLI (chmod +x dist/main.js after a build if needed)
-pnpm --filter @yagura/web dev # dashboard dev server, proxies /api to the daemon (YAGURA_PORT, default 7300)
+pnpm dev                      # dev mode: rebuilds core/daemon/cli on change, restarts the daemon, Vite with hot reload on :5173; home ~/.yagura-dev unless YAGURA_HOME is set
 ```
 
 ## Conventions
