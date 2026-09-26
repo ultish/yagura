@@ -20,7 +20,16 @@ export async function ensureMirror(url: string, gitDir: string): Promise<void> {
     await git(["clone", "--bare", "--quiet", url, gitDir]);
     await git(["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], { gitDir });
   }
+  if ((await git(["remote", "get-url", "origin"], { gitDir })) !== url) await git(["remote", "set-url", "origin", url], { gitDir });
   await git(["fetch", "--quiet", "--prune", "origin"], { gitDir });
+}
+
+export async function readFileAt(gitDir: string, ref: string, path: string): Promise<string | null> {
+  try {
+    return await git(["show", `${ref}:${path}`], { gitDir });
+  } catch {
+    return null;
+  }
 }
 
 export async function resolveRef(gitDir: string, ref: string): Promise<Sha> {

@@ -1,0 +1,102 @@
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { resolveSetting, type Bootstrap } from "./config.js";
+import { PASS_TIERS } from "./domain.js";
+import type { Sha, Unit, UnitId, VerdictId } from "./domain.js";
+import { addDetachedWorktree, ensureMirror, git, headSha, patchId, removeWorktree, resolveRef } from "./git.js";
+import { layout } from "./paths.js";
+import { getProject, getRepo, getUnit, listAttempts, now, recordEvent, transitionUnit, type Db } from "./store.js";
+
+export type LandOutcome = "landed" | "blocked";
+
+export interface LandResult {
+  unit: Unit;
+  outcome: LandOutcome;
+  landedSha: Sha | null;
+  reason: string;
+}
+
+interface LiveVerdict {
+  id: VerdictId;
+  tier: string;
+  head_sha: Sha;
+  patch_id: string | null;
+}
+
+function liveVerdict(db: Db, unitId: UnitId): LiveVerdict | null {
+  const tiers = PASS_TIERS.map(() => "?").join(", ");
+  return (
+    (db
+      .prepare(`SELECT id, tier, head_sha, patch_id FROM verdicts WHERE unit_id = ? AND voided_at IS NULL AND tier IN (${tiers}) ORDER BY id DESC LIMIT 1`)
+      .get(unitId, ...PASS_TIERS) as LiveVerdict | undefined) ?? null
+  );
+}
+
+export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId): Promise<LandResult> {
+  const { db, boot } = ctx;
+  const unit = getUnit(db, unitId);
+  if (unit.state !== "verified") throw new Error(`U${unit.seq} is ${unit.state}, not verified`);
+  if (!unit.repoId) throw new Error(`U${unit.seq} has no repo`);
+  const repo = getRepo(db, unit.repoId);
+  const busy = db.prepare("SELECT seq FROM units WHERE repo_id = ? AND state = 'landing' AND id <> ?").get(repo.id, unit.id) as { seq: number } | undefined;
+  if (busy) throw new Error(`U${busy.seq} is already landing in ${repo.id}; one lander per repo`);
+  const verdict = liveVerdict(db, unit.id);
+  if (!verdict) throw new Error(`U${unit.seq} has no live passing verdict`);
+  const work = listAttempts(db, unit.id).find((a) => a.headSha === verdict.head_sha && a.baseSha);
+  if (!work?.baseSha) throw new Error(`U${unit.seq}: no attempt produced the verified head ${verdict.head_sha}`);
+  const project = getProject(db, unit.projectId);
+  const author = {
+    name: resolveSetting(db, "git.author_name", { projectId: project.id, repoId: repo.id }).value,
+    email: resolveSetting(db, "git.author_email", { projectId: project.id, repoId: repo.id }).value,
+  };
+  const refs = { projectId: project.id, unitId: unit.id };
+  const paths = layout(boot);
+  const mirror = paths.mirror(repo.id);
+
+  transitionUnit(db, unit.id, "landing", { verdict: verdict.id });
+  const block = (reason: string): LandResult => {
+    transitionUnit(db, unit.id, "blocked", { reason });
+    return { unit: getUnit(db, unit.id), outcome: "blocked", landedSha: null, reason };
+  };
+
+  await ensureMirror(repo.url, mirror);
+  const trunk = await resolveRef(mirror, `origin/${repo.defaultBranch}`);
+  let landed = verdict.head_sha;
+
+  if (trunk !== work.baseSha) {
+    const wt = `${paths.worktree(repo.id, project.id, unit.seq, 0)}.land`;
+    mkdirSync(dirname(wt), { recursive: true });
+    await addDetachedWorktree(mirror, wt, verdict.head_sha);
+    try {
+      try {
+        await git(["-c", `user.name=${author.name}`, "-c", `user.email=${author.email}`, "rebase", "--quiet", "--onto", trunk, work.baseSha], { cwd: wt });
+      } catch {
+        await git(["rebase", "--abort"], { cwd: wt }).catch(() => undefined);
+        return block(`conflicts with ${repo.defaultBranch} at ${trunk.slice(0, 10)}; needs a rebase unit`);
+      }
+      landed = await headSha(wt);
+      const rebasedPatch = await patchId(wt, trunk, landed);
+      if (!verdict.patch_id || rebasedPatch !== verdict.patch_id)
+        return block(`rebasing onto ${repo.defaultBranch} changed the patch; the rebased head needs re-verification`);
+      db.transaction(() => {
+        db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), `rebased to ${landed}; patch-id unchanged, carried forward`, verdict.id);
+        db.prepare(
+          `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, created_at)
+           SELECT unit_id, attempt_id, tier, repo_id, ?, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, ? FROM verdicts WHERE id = ?`,
+        ).run(landed, now(), verdict.id);
+      })();
+    } finally {
+      await removeWorktree(mirror, wt).catch(() => undefined);
+    }
+  }
+
+  try {
+    await git(["push", "--quiet", "origin", `${landed}:refs/heads/${repo.defaultBranch}`], { gitDir: mirror });
+  } catch (e) {
+    return block(`push to ${repo.defaultBranch} was rejected: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
+  }
+  await ensureMirror(repo.url, mirror);
+  transitionUnit(db, unit.id, "landed", { sha: landed, onto: trunk });
+  recordEvent(db, "unit.landed", refs, { sha: landed, branch: repo.defaultBranch, rebased: landed !== verdict.head_sha });
+  return { unit: getUnit(db, unit.id), outcome: "landed", landedSha: landed, reason: landed === verdict.head_sha ? "fast-forward" : "rebased; patch unchanged" };
+}

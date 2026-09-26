@@ -1,9 +1,23 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import {
+  addEnvironment,
   addProject,
   addRepo,
+  addUnitNote,
+  evidenceCli,
+  landUnit,
+  listEvidenceRuns,
+  PROVIDERS,
+  reapLeases,
+  runVerifyUnit,
+  setProjectEnvironment,
+  setRepoUrl,
+  type EnvironmentId,
+  type Provider,
+  type RunContext,
   addUnit,
   claudeAdapter,
   effectiveSettings,
@@ -34,15 +48,37 @@ const USAGE = `yagura — agent orchestration
   yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
-  yagura run <project> <unit#>
+  yagura repo set <id> --url <url>
+  yagura env add <id> --provider local-process [--capacity 2] [--name <text>]
+  yagura project set <id> --env <env id>
+  yagura unit reject|requeue <project> <unit#> [--note <text>]
+  yagura run <project> <unit#>           run a ready work unit
+  yagura verify <project> <unit#>        run the queued verify unit for a unit in verifying
+  yagura land <project> <unit#>          land a verified unit onto its repo's default branch
+  yagura evidence run --at base|head --label <name> -- <command>   (inside a verify session)
   yagura show <project> [unit#]
   yagura logs <project> <unit#> [--attempt <n>]
   yagura settings [--project <id>] [--repo <id>]
   yagura set <key> <json> [--scope global|environment|repo|project] [--id <scope id>]`;
 
+const [command, ...rest] = process.argv.slice(2);
+if (command === "evidence") {
+  const result = await evidenceCli(rest);
+  process.stdout.write(result.output);
+  process.exit(result.code);
+}
 const boot = loadBootstrap();
 const db = openStore(layout(boot).db);
-const [command, ...rest] = process.argv.slice(2);
+const agentCtx = (): RunContext => ({
+  db,
+  boot,
+  adapters: { claude: claudeAdapter },
+  cli: [process.execPath, fileURLToPath(import.meta.url)],
+  onEvent: (e) => {
+    const line = renderEvent(e);
+    if (line) console.log(line);
+  },
+});
 
 function args<const O extends NonNullable<ParseArgsConfig["options"]>>(options: O) {
   return parseArgs({ args: rest, options, allowPositionals: true, strict: true });
@@ -76,7 +112,12 @@ function renderEvent(e: HarnessEvent): string | null {
 async function main() {
   switch (command) {
     case "repo": {
-      const { positionals, values } = args({ branch: { type: "string", default: "main" } });
+      const { positionals, values } = args({ branch: { type: "string", default: "main" }, url: { type: "string" } });
+      if (positionals[0] === "set" && positionals[1] && values.url) {
+        setRepoUrl(db, positionals[1] as RepoId, values.url);
+        console.log(`repo ${positionals[1]} → ${values.url}`);
+        return;
+      }
       if (positionals[0] !== "add" || !positionals[1] || !positionals[2]) fail(USAGE);
       const repo = addRepo(db, { id: positionals[1]!, url: positionals[2]!, defaultBranch: values.branch as string });
       console.log(`repo ${repo.id} → ${repo.url} (${repo.defaultBranch})`);
@@ -89,8 +130,14 @@ async function main() {
         repo: { type: "string", multiple: true },
         name: { type: "string" },
         "min-tier": { type: "string", default: "unit-verified" },
+        env: { type: "string" },
       });
       const id = positionals[1];
+      if (positionals[0] === "set" && id && values.env) {
+        setProjectEnvironment(db, id as ProjectId, values.env as EnvironmentId);
+        console.log(`project ${id} environment → ${values.env}`);
+        return;
+      }
       if (positionals[0] !== "new" || !id || !values.goal || !values.predicate || !many(values.repo).length) fail(USAGE);
       const minTier = values["min-tier"] as string;
       if (!(PASS_TIERS as readonly string[]).includes(minTier)) fail(`--min-tier must be one of ${PASS_TIERS.join(", ")}`);
@@ -116,8 +163,17 @@ async function main() {
         context: { type: "string", multiple: true },
         playbook: { type: "string" },
         timebox: { type: "string" },
+        note: { type: "string" },
       });
       const projectId = positionals[1] as ProjectId | undefined;
+      if ((positionals[0] === "reject" || positionals[0] === "requeue") && projectId && positionals[2]) {
+        const u = getUnitBySeq(db, projectId, Number(positionals[2]));
+        if (values.note) addUnitNote(db, u.id, values.note);
+        if (u.state !== "rejected") transitionUnit(db, u.id, "rejected", { by: "operator", note: values.note ?? null });
+        if (positionals[0] === "requeue") transitionUnit(db, u.id, "ready", { by: "operator" });
+        console.log(`U${u.seq} → ${getUnitBySeq(db, projectId, u.seq).state}`);
+        return;
+      }
       if (positionals[0] !== "add" || !projectId || !values.repo) fail(USAGE);
       const fields = {
         goal: (values.goal as string) ?? "",
@@ -153,26 +209,52 @@ async function main() {
       if (!projectId || !seq) fail(USAGE);
       const unit = getUnitBySeq(db, projectId as ProjectId, Number(seq));
       console.log(`running ${projectId}/U${unit.seq}: ${unit.goal}`);
-      const attempt = await runWorkUnit(
-        {
-          db,
-          boot,
-          adapters: { claude: claudeAdapter },
-          onEvent: (e) => {
-            const line = renderEvent(e);
-            if (line) console.log(line);
-          },
-        },
-        unit.id,
-      );
+      await reapLeases(db, boot);
+      const attempt = await runWorkUnit(agentCtx(), unit.id);
       const after = getUnitBySeq(db, projectId as ProjectId, Number(seq));
       console.log(
         `\nU${after.seq} → ${after.state} · attempt ${attempt.n} ${attempt.state}` +
           `${attempt.handoffStatus ? ` (${attempt.handoffStatus}, self-reported ${attempt.selfTier ?? "no tier"})` : ""}` +
           `${attempt.failureMode ? ` · failure: ${attempt.failureMode}` : ""}` +
           `\n  branch ${attempt.branch} @ ${attempt.headSha?.slice(0, 10)} · worktree ${attempt.worktreePath}` +
-          `\n  handoff ${layout(boot).handoff(projectId as ProjectId, after.seq, attempt.n)}`,
+          `\n  handoff ${layout(boot).handoff(projectId as ProjectId, after.seq, attempt.n)}` +
+          (after.state === "verifying" ? `\n  next: yagura verify ${projectId} ${after.seq}` : ""),
       );
+      return;
+    }
+    case "verify": {
+      const [projectId, seq] = rest;
+      if (!projectId || !seq) fail(USAGE);
+      const target = getUnitBySeq(db, projectId as ProjectId, Number(seq));
+      const verifyUnit = listUnits(db, target.projectId).filter((u) => u.type === "verify" && u.targetUnitId === target.id && u.state === "ready").at(-1);
+      if (!verifyUnit) fail(`U${target.seq} has no ready verify unit (it is ${target.state})`);
+      await reapLeases(db, boot);
+      console.log(`verifying ${projectId}/U${target.seq} with U${verifyUnit!.seq}`);
+      const result = await runVerifyUnit(agentCtx(), verifyUnit!.id);
+      const after = getUnitBySeq(db, projectId as ProjectId, target.seq);
+      console.log(
+        `\nverdict: ${result.decision.outcome}${result.decision.tier ? ` (${result.decision.tier})` : ""} — ${result.decision.reason}` +
+          `\n  trunk: ${result.decision.trunkOutcome ?? "-"}\n  head:  ${result.decision.headOutcome ?? "-"}` +
+          `\n  cited: ${result.decision.citedRunIds.map((id) => `run:${id}`).join(", ") || "none"}` +
+          `\nU${after.seq} → ${after.state}${after.state === "verified" ? `\n  next: yagura land ${projectId} ${after.seq}` : ""}`,
+      );
+      return;
+    }
+    case "land": {
+      const [projectId, seq] = rest;
+      if (!projectId || !seq) fail(USAGE);
+      const unit = getUnitBySeq(db, projectId as ProjectId, Number(seq));
+      const result = await landUnit({ db, boot }, unit.id);
+      console.log(`U${unit.seq} ${result.outcome}: ${result.reason}${result.landedSha ? ` @ ${result.landedSha.slice(0, 10)}` : ""}`);
+      return;
+    }
+    case "env": {
+      const { positionals, values } = args({ provider: { type: "string" }, capacity: { type: "string", default: "1" }, name: { type: "string" } });
+      const id = positionals[1];
+      if (positionals[0] !== "add" || !id || !values.provider) fail(USAGE);
+      if (!(PROVIDERS as readonly string[]).includes(values.provider!)) fail(`--provider must be one of ${PROVIDERS.join(", ")}`);
+      const e = addEnvironment(db, { id: id!, name: values.name ?? id!, provider: values.provider as Provider, capacity: Number(values.capacity) });
+      console.log(`environment ${e.id}: ${e.provider}, capacity ${e.capacity}`);
       return;
     }
     case "show": {
@@ -186,10 +268,23 @@ async function main() {
       }
       const u = getUnitBySeq(db, project.id, Number(seq));
       console.log(`U${u.seq} [${u.state}] ${u.goal}\n  write: ${u.writeScope.join(", ")}\n  verify: ${u.verify}`);
-      for (const a of listAttempts(db, u.id))
+      if (u.notes.length) console.log(`  notes:\n${u.notes.map((n) => `    - ${n}`).join("\n")}`);
+      for (const a of listAttempts(db, u.id)) {
         console.log(
-          `  attempt ${a.n}: ${a.state} ${a.handoffStatus ?? ""} ${a.failureMode ?? ""} · ${a.model ?? "?"} · ctx peak ${a.contextPeak} · ${a.branch}`,
+          `  attempt ${a.n}: ${a.state} ${a.handoffStatus ?? ""} ${a.failureMode ?? ""} · ${a.model ?? "?"} · ctx peak ${a.contextPeak} · ${a.branch ?? a.headSha?.slice(0, 10) ?? ""}` +
+            (a.missingSkills.length ? `\n    skipped required skills: ${a.missingSkills.join(", ")}` : ""),
         );
+        for (const r of listEvidenceRuns(db, a.id))
+          console.log(`    run:${r.id} ${r.label}@${r.at} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}${r.tampered ? " TAMPERED" : ""}`);
+      }
+      for (const v of db.prepare("SELECT id, tier, head_sha, voided_at, void_reason FROM verdicts WHERE unit_id = ? ORDER BY id").all(u.id) as {
+        id: number;
+        tier: string;
+        head_sha: string;
+        voided_at: string | null;
+        void_reason: string | null;
+      }[])
+        console.log(`  verdict ${v.id}: ${v.tier} @ ${v.head_sha.slice(0, 10)}${v.voided_at ? ` (void: ${v.void_reason})` : " (live)"}`);
       return;
     }
     case "logs": {

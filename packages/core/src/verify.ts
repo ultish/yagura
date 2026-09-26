@@ -5,10 +5,10 @@ import { renderVerifyBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import type { Attempt, EnvironmentId, Unit, UnitId, VerdictId } from "./domain.js";
 import { baseWorktree, listEvidenceRuns, runEvidence } from "./evidence.js";
-import { addDetachedWorktree, diffText, ensureMirror, patchId } from "./git.js";
+import { addDetachedWorktree, diffText, ensureMirror, patchId, readFileAt } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { acquireLease, releaseLease } from "./leases.js";
-import { loadPack } from "./pack.js";
+import { parsePack } from "./pack.js";
 import { layout } from "./paths.js";
 import { addUnitNote, createAttempt, getAttempt, getProject, getRepo, getUnit, listAttempts, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
 import { CHECK_LABEL, decideVerdict, type VerdictDecision } from "./verdict.js";
@@ -94,7 +94,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     return { attempt: getAttempt(db, attempt.id), decision, verdictId: null };
   };
 
-  const pack = loadPack(head, repo.verifyPackPath);
+  const pack = parsePack(await readFileAt(mirror, `origin/${repo.defaultBranch}`, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath);
   if (!pack.ok) {
     updateAttempt(db, attempt.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
     const decision: VerdictDecision = { outcome: "below-min", tier: null, reason: `cannot verify: ${pack.reason}`, trunkOutcome: null, headOutcome: null, citedRunIds: [] };
