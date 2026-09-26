@@ -6,6 +6,8 @@ import { Home } from "./pages/Home";
 import { Project } from "./pages/Project";
 import { Projects } from "./pages/Projects";
 import { Talk } from "./pages/Talk";
+import markDark from "./assets/mark-dark.png";
+import markLight from "./assets/mark-light.png";
 import { Link } from "./ui/Link";
 
 type Theme = "night" | "day";
@@ -34,11 +36,9 @@ function Header() {
   const health = useApi<{ ok: boolean; home: string }>("/api/health");
   return (
     <header style={{ minHeight: 60, display: "flex", alignItems: "center", gap: 36, padding: "0 36px", borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>
-      <Link to="/" style={{ display: "flex", alignItems: "baseline", gap: 10, color: "var(--text)", textDecoration: "none" }}>
-        <span className="serif" style={{ fontSize: 24, fontWeight: 700 }}>
-          櫓
-        </span>
-        <span className="serif" style={{ fontSize: 16, letterSpacing: ".12em" }}>
+      <Link to="/" aria-label="yagura, the watch" style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text)", textDecoration: "none" }}>
+        <img src={theme === "night" ? markDark : markLight} alt="" width={36} height={37} style={{ display: "block" }} />
+        <span className="serif" style={{ fontSize: 17, letterSpacing: ".12em" }}>
           yagura
         </span>
       </Link>
