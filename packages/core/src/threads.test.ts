@@ -66,3 +66,27 @@ describe("thread store", () => {
     expect(searchMessages(db, "kafka").map((m) => m.threadId).sort()).toEqual([t.id, other.id].sort());
   });
 });
+
+describe("mentions", () => {
+  it("links messages to the projects, units, and attempts they mention, and suggests completions", async () => {
+    const { addRepo, addProject, addUnit, createAttempt } = await import("./store.js");
+    const { messagesMentioning, parseMentions, suggestMentions } = await import("./mentions.js");
+    addRepo(db, { id: "r", url: "/r", defaultBranch: "main" });
+    addProject(db, { id: "kafka-diff", name: "k", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["r" as never] });
+    const u = addUnit(db, { projectId: "kafka-diff" as never, type: "work", repoId: "r" as never, goal: "ignore timestamps", writeScope: ["a"], acceptance: ["a"], verify: "v", timeboxSeconds: 60, maxAttempts: 2 });
+    createAttempt(db, u.id, "claude", null);
+    const t = createThread(db, { title: "diffing" });
+    expect(parseMentions("see @kafka-diff/U1.1, @kafka-diff and me@mail.com @ghost")).toEqual(["kafka-diff/U1.1", "kafka-diff", "ghost"]);
+    const m = addMessage(db, { threadId: t.id, role: "human", body: "why is @kafka-diff/U1 stuck? compare @kafka-diff/U1.1 and @nope" });
+    expect(db.prepare("SELECT kind, ref FROM message_refs WHERE message_id = ? ORDER BY ref").all(m.id)).toEqual([
+      { kind: "unit", ref: "kafka-diff/U1" },
+      { kind: "attempt", ref: "kafka-diff/U1.1" },
+    ]);
+    expect(messagesMentioning(db, "kafka-diff/U1").map((x) => x.messageId)).toEqual([m.id]);
+    expect(messagesMentioning(db, "kafka-diff").map((x) => x.messageId)).toEqual([m.id]);
+    expect(suggestMentions(db, "@kaf").map((s) => s.token)).toEqual(["kafka-diff"]);
+    expect(suggestMentions(db, "kafka-diff/U").map((s) => s.token)).toEqual(["kafka-diff/U1"]);
+    expect(suggestMentions(db, "kafka-diff/U1.").map((s) => s.token)).toEqual(["kafka-diff/U1.1"]);
+    expect(suggestMentions(db, "diffing").map((s) => s.token)).toContain(`thread:${t.id}`);
+  });
+});

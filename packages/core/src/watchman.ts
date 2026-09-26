@@ -3,6 +3,7 @@ import { z } from "zod";
 import { runAgentSession, write, type RunContext, type SessionRecorder } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { PASS_TIERS, type ProjectId } from "./domain.js";
+import { describeMention, resolveMentions } from "./mentions.js";
 import { missingSkills } from "./pack.js";
 import { layout } from "./paths.js";
 import { lastDrainEventId, latestDelta } from "./planner.js";
@@ -144,6 +145,7 @@ export interface WatchmanBrief {
   proposals: string;
   catalog: string;
   standing: string;
+  mentioned: string;
   context: AssembledContext;
   message: { id: number; body: string };
 }
@@ -169,6 +171,9 @@ ${b.questions || "(none)"}
 
 ## PROPOSALS
 ${b.proposals || "(none)"}
+
+## MENTIONED IN THE MESSAGE (generated from records)
+${b.mentioned || "(nothing)"}
 
 ## PROJECTS IN THIS THREAD (generated from records)
 ${sections.status || "(none yet)"}
@@ -249,6 +254,9 @@ export function buildWatchmanBrief(ctx: { db: Db; boot: RunContext["boot"] }, th
   const standingPath = `${paths.thread(threadId)}/standing-orders.md`;
   const standing = existsSync(standingPath) ? readFileSync(standingPath, "utf8").trim() : "";
   const cat = catalog(db);
+  const mentioned = resolveMentions(db, message.body)
+    .map((m) => `### @${m.ref}\n${truncateTo(describeMention(db, boot, m), 2000, `… (truncated; ask yagura for more)`)}`)
+    .join("\n\n");
 
   const statuses = thread.projects.map((p) => {
     const project = getProject(db, p);
@@ -263,11 +271,11 @@ export function buildWatchmanBrief(ctx: { db: Db; boot: RunContext["boot"] }, th
   });
   const history = listMessages(db, threadId).filter((m) => m.id !== message.id);
 
-  const template = renderWatchmanBrief({ thread, decisions: "", questions: "", proposals: "", catalog: "", standing: "", context: EMPTY_CONTEXT, message: { id: 0, body: "" } });
-  const fixed = [template, decisions, questions, proposals, standing, cat, message.body];
+  const template = renderWatchmanBrief({ thread, decisions: "", questions: "", proposals: "", catalog: "", standing: "", mentioned: "", context: EMPTY_CONTEXT, message: { id: 0, body: "" } });
+  const fixed = [template, decisions, questions, proposals, standing, cat, mentioned, message.body];
   const context = assembleContext({ fixed, statuses, spec, history }, resolveSetting(db, "watchman.context_tokens").value);
   return {
-    text: renderWatchmanBrief({ thread, decisions, questions, proposals, catalog: cat, standing, context, message: { id: message.id, body: message.body } }),
+    text: renderWatchmanBrief({ thread, decisions, questions, proposals, catalog: cat, standing, mentioned, context, message: { id: message.id, body: message.body } }),
     context,
   };
 }

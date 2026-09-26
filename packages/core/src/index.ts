@@ -28,5 +28,6 @@ export * from "./spec.js";
 export * from "./proposal.js";
 export * from "./watchman.js";
 export * from "./report.js";
+export * from "./mentions.js";
 export type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
 export { claudeAdapter, parseClaudeLine } from "./harness/claude.js";

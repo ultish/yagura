@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
+  messagesMentioning,
+  suggestMentions,
   addMessage,
   applyProposal,
   createThread,
@@ -242,6 +244,8 @@ export function createApp(opts: ServerOptions): Hono {
   });
   const body = async (c: Context) => (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
 
+  app.get("/api/mentions", (c) => c.json(suggestMentions(db, c.req.query("q") ?? "")));
+  app.get("/api/mentions/:token/messages", (c) => c.json(messagesMentioning(db, decodeURIComponent(c.req.param("token")))));
   app.get("/api/threads", (c) => c.json(listThreads(db).map((t) => ({ ...t, busy: talking.has(t.id) }))));
   app.get("/api/threads/search", (c) => c.json(searchMessages(db, c.req.query("q") ?? "", c.req.query("thread") ? Number(c.req.query("thread")) : undefined)));
   app.post("/api/threads", async (c) => {

@@ -169,6 +169,9 @@ export type MessageRole = (typeof MESSAGE_ROLES)[number];
 export const PROPOSAL_STATES = ["pending", "applied", "discarded", "failed"] as const;
 export type ProposalState = (typeof PROPOSAL_STATES)[number];
 
+export const MENTION_KINDS = ["project", "unit", "attempt", "thread", "repo"] as const;
+export type MentionKind = (typeof MENTION_KINDS)[number];
+
 export const SETTING_SCOPES = ["global", "environment", "repo", "project"] as const;
 export type SettingScope = (typeof SETTING_SCOPES)[number];
 

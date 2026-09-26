@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import {
+  messagesMentioning,
   addMessage,
   applyProposal,
   createThread,
@@ -72,6 +73,7 @@ const USAGE = `yagura — agent orchestration
 
   yagura repo add <id> <url> [--branch main]
   yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified] [--issue <ref>...]
+                  [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
   yagura repo set <id> --url <url>
@@ -79,6 +81,7 @@ const USAGE = `yagura — agent orchestration
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...]
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
   yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go
+  yagura thread mentions <@project | @project/U3 | @project/U3.2 | @thread:4 | @repo:id>   conversations that mention it
   yagura proposal apply|discard <id>
   yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
   yagura daemon                          run yagura for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)
@@ -184,6 +187,8 @@ async function main() {
         env: { type: "string" },
         merge: { type: "string" },
         issue: { type: "string", multiple: true },
+        after: { type: "string", multiple: true },
+        "phase-gate": { type: "boolean" },
       });
       const id = positionals[1];
       if (positionals[0] === "set" && id && (values.env || values.merge || values.issue)) {
@@ -207,6 +212,10 @@ async function main() {
         minTier: minTier as PassTier,
         repos: many(values.repo) as RepoId[],
         refs: many(values.issue),
+        after: many(values.after) as ProjectId[],
+        phaseGate: !!values["phase-gate"],
+        mergePolicy: values.merge === "auto" ? "auto" : "human",
+        environmentId: (values.env as EnvironmentId) ?? null,
       });
       console.log(`project ${p.id}: ${p.goal}`);
       return;
@@ -482,6 +491,10 @@ async function main() {
       }
       if (sub === "search" && more.length) {
         for (const m of searchMessages(db, more.join(" "), values.thread ? Number(values.thread) : undefined)) console.log(`thread ${m.threadId} ${m.role} #${m.id} · ${m.createdAt}: ${m.snippet}`);
+        return;
+      }
+      if (sub === "mentions" && more[0]) {
+        for (const m of messagesMentioning(db, more[0].replace(/^@/, ""))) console.log(`thread ${m.threadId} ${m.role} #${m.messageId} · ${m.createdAt}: ${m.body.split("\n")[0]!.slice(0, 140)}`);
         return;
       }
       if (sub === "set" && more[0] && (values.autonomy === "go" || values.autonomy === "propose")) {

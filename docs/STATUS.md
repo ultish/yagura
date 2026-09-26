@@ -63,7 +63,9 @@ Rejected records retry once automatically (user, 2026-09-26): the watchman gets 
 
 Answered (user, 2026-09-26): the first real spec-driven project runs on this Mac, when the user is ready.
 
-Open questions for the user: phase review gate on by default for chains (explained: pause and ring the bell between chained projects, vs start the next one automatically; currently off unless the watchman sets it)?; collapse the scene to a horizon strip on scroll (a UI detail for `apps/web`)?; a plain "New project" form in the UI beside "Talk to the watch"?
+Decided (user, 2026-09-26): phase gates stay off by default (automation first; the developer steps in when they want or when asked); the home scene collapses to a thin strip on scroll; no "New project" form in the UI — conversation is the front door, and the CLI covers the manual path (`project new --after --phase-gate --merge --env`).
+
+@mentions (DESIGN §8a "Mentions", migration 6 `message_refs`): tokens `@project`, `@project/U3`, `@project/U3.2`, `@thread:4`, `@repo:id` are indexed on every message, described in the watchman brief, searchable (`yagura thread mentions`, `GET /api/mentions/:token/messages`), and completed by `GET /api/mentions?q=`. The `@` autocomplete widget and mention links are `apps/web` work.
 
 ## Phase 4 — Dashboard: in progress
 
@@ -74,7 +76,7 @@ Done:
 
 Visual direction chosen: "the watch" (DESIGN §17). Earlier rounds, for reference: Three directions (A Lantern: dark/amber, lanes; B Washi: paper/ink/vermilion, grouped reading list; C Blueprint: crisp/cobalt, dense table + dependency strip), each with a project view and a live agent log, are on a private canvas: https://claude.ai/artifact/AuLG6d7GiuQoSBFfdGeLS5. The agent logs replay the real `orders` U3 verifier run; the project views use labelled sample data.
 
-Decided next (user, 2026-09-26): the **watchman** (DESIGN §8a) — conversation as yagura's front door, with DB-backed memory — then project chains + repo creation, then `apps/web`. Build order: (1) watchman core in daemon/API + `yagura talk` — done; (2) project chains (`after`, optional phase gate) and repo creation for prototypes — done, through proposals (no `yagura project new --after` flag yet); (3) **next:** `apps/web`: home (towers + bell inbox + lanterns), project (beacon chains + rows), agent (narrated log + trunk-vs-head grid), then gates, environments, repos, settings.
+Decided next (user, 2026-09-26): the **watchman** (DESIGN §8a) — conversation as yagura's front door, with DB-backed memory — then project chains + repo creation, then `apps/web`. Build order: (1) watchman core in daemon/API + `yagura talk` — done; (2) project chains (`after`, optional phase gate) and repo creation for prototypes — done, through proposals (no `yagura project new --after` flag yet); (3) **next:** `apps/web` (include the `@` autocomplete and conversation lists on project/unit/agent pages): home (towers + bell inbox + lanterns), project (beacon chains + rows), agent (narrated log + trunk-vs-head grid), then gates, environments, repos, settings.
 
 ## Audit trail and skill enforcement: done (between phases 3 and 4)
 

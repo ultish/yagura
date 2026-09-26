@@ -112,6 +112,20 @@ CREATE TABLE proposals (
 );
 `,
   },
+  {
+    version: 6,
+    sql: `
+CREATE TABLE message_refs (
+  message_id INTEGER NOT NULL REFERENCES thread_messages (id),
+  kind TEXT NOT NULL CHECK (kind IN ('project', 'unit', 'attempt', 'thread', 'repo')),
+  ref TEXT NOT NULL,
+  project_id TEXT REFERENCES projects (id),
+  PRIMARY KEY (message_id, ref)
+);
+CREATE INDEX message_refs_ref ON message_refs (ref);
+CREATE INDEX message_refs_project ON message_refs (project_id);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

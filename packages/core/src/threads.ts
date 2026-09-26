@@ -1,4 +1,5 @@
 import type { IsoTime, MessageRole, ProjectId, ProposalState, ThreadAutonomy, ThreadState } from "./domain.js";
+import { indexMentions } from "./mentions.js";
 import { getProject, now, recordEvent, type Db } from "./store.js";
 
 export interface Thread {
@@ -103,6 +104,7 @@ export function addMessage(db: Db, m: { threadId: number; role: MessageRole; bod
       .lastInsertRowid,
   );
   db.prepare("INSERT INTO search (body, kind, ref_id, project_id) VALUES (?, 'message', ?, NULL)").run(m.body, String(id));
+  indexMentions(db, id, m.body);
   db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(at, m.threadId);
   recordEvent(db, "thread.message", {}, { thread: m.threadId, message: id, role: m.role });
   return getMessage(db, id);
