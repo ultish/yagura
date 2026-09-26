@@ -47,11 +47,12 @@ def tower(x, y, scale=1.0, lit=0, slots=3, ringing=False, planner=False, dim=Fal
     swing = ' class="swing"' if ringing and not dim else ''
     out.append(f'<g{swing}><path d="M0 -243 L0 -229" stroke="{t}" stroke-width="1.2"/>')
     out.append(f'<path d="M-6 -241 Q-6 -246 0 -246 Q6 -246 6 -241 L7 -232 L-7 -232 Z" fill="{BELL if ringing and not dim else bell_c}"/></g>')
-    if name:
-        out.append(f'<text x="0" y="36" text-anchor="middle" fill="{"#8f93a6" if dim else "#ece6da"}" style="font-family: \'Shippori Mincho\', serif; font-size: 20px; font-weight: 600">{name}</text>')
-    if sub:
-        out.append(f'<text x="0" y="56" text-anchor="middle" fill="{"#8f93a6" if dim else "#a3a7b8"}" style="font-family: \'JetBrains Mono\', monospace; font-size: 12px">{sub}</text>')
     out.append('</g>')
+    if name:
+        color = "#8f93a6" if dim else "#ece6da"
+        muted = "#8f93a6" if dim else "#a3a7b8"
+        out.append(f'<g transform="translate({x} {y})"><text x="0" y="22" text-anchor="middle" fill="{color}" style="font-family: \'Shippori Mincho\', serif; font-size: {15 if dim else 18}px; font-weight: 600">{name}</text>')
+        out.append(f'<text x="0" y="39" text-anchor="middle" fill="{muted}" style="font-family: \'JetBrains Mono\', monospace; font-size: 11.5px">{sub}</text></g>')
     return "\n".join(out)
 
 def pine(x, y, s=1.0, fill="#141828"):
