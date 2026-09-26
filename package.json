@@ -1,0 +1,15 @@
+{
+  "name": "yagura",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent orchestration for long-running engineering projects",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@11.25.0"
+}
