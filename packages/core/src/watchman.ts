@@ -363,6 +363,19 @@ function threadRecorder(db: Db, threadId: number, messageId: number): SessionRec
   };
 }
 
+export function renderRetry(brief: string, reply: string, reason: string): string {
+  return `${brief}
+## YOUR PREVIOUS REPLY WAS REJECTED
+yagura stored nothing from it. Reason: ${reason}
+
+Your previous reply, for reference:
+
+${reply}
+
+Answer the same message again: the same prose, adjusted if the fix changes what you tell the developer, and a corrected \`yagura\` block.
+`;
+}
+
 export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: string): Promise<TurnResult> {
   const { db, boot } = ctx;
   const paths = layout(boot);
@@ -379,48 +392,60 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
   mkdirSync(cwd, { recursive: true });
   recordEvent(db, "watchman.turn", {}, { thread: threadId, message: human.id, contextTokens: brief.context.usedTokens, dropped: brief.context.dropped });
 
-  const session = await runAgentSession(ctx, {
-    recorder: threadRecorder(db, threadId, human.id),
-    adapter,
-    run: {
-      prompt: brief.text,
-      bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
-      model: setting("role.watchman.model"),
-      permissionMode: setting("harness.claude.permission_mode"),
-      pluginDirs: [boot.skillsDir],
-      addDirs: [],
-      extraArgs: setting("harness.claude.extra_args"),
-    },
-    cwd,
-    env: {},
-    timeboxSeconds: setting("timebox.watchman_seconds"),
-    logPath,
-  });
-  const out: TurnResult = { human, reply: null, proposal: null, applied: null, problem: null };
-  const final = session.final && !session.final.isError && !session.timedOut ? session.final.text : null;
-  if (!final) {
-    out.problem = session.timedOut ? "the watchman ran out of time" : `the watchman ended without a reply (exit ${session.exitCode ?? session.signal})`;
-    addMessage(db, { threadId, role: "system", body: out.problem, turnLog: logPath });
-    return out;
-  }
-
-  const parsed = parseReply(final);
-  let records = parsed.records;
-  if (parsed.error) out.problem = parsed.error;
-  if (records) {
+  const ask = async (prompt: string, log: string): Promise<{ text: string | null; problem: string | null }> => {
+    const session = await runAgentSession(ctx, {
+      recorder: threadRecorder(db, threadId, human.id),
+      adapter,
+      run: {
+        prompt,
+        bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
+        model: setting("role.watchman.model"),
+        permissionMode: setting("harness.claude.permission_mode"),
+        pluginDirs: [boot.skillsDir],
+        addDirs: [],
+        extraArgs: setting("harness.claude.extra_args"),
+      },
+      cwd,
+      env: {},
+      timeboxSeconds: setting("timebox.watchman_seconds"),
+      logPath: log,
+    });
+    if (session.final && !session.final.isError && !session.timedOut) return { text: session.final.text, problem: null };
+    return { text: null, problem: session.timedOut ? "the watchman ran out of time" : `the watchman ended without a reply (exit ${session.exitCode ?? session.signal})` };
+  };
+  const attemptStore = (text: string, log: string): { stored: ReturnType<typeof storeTurn> | null; body: string; problem: string | null } => {
+    const parsed = parseReply(text);
+    if (!parsed.records) return { stored: null, body: parsed.body, problem: parsed.error };
     try {
-      const stored = storeTurn(ctx, threadId, { body: parsed.body, records, turnLog: logPath });
-      out.reply = stored.message;
-      out.proposal = stored.proposal;
+      return { stored: storeTurn(ctx, threadId, { body: parsed.body, records: parsed.records, turnLog: log }), body: parsed.body, problem: null };
     } catch (e) {
       if (!(e instanceof RecordsRejected)) throw e;
-      out.problem = e.message;
-      records = null;
+      return { stored: null, body: parsed.body, problem: e.message };
     }
+  };
+
+  const out: TurnResult = { human, reply: null, proposal: null, applied: null, problem: null };
+  const first = await ask(brief.text, logPath);
+  if (!first.text) {
+    out.problem = first.problem;
+    addMessage(db, { threadId, role: "system", body: first.problem!, turnLog: logPath });
+    return out;
   }
-  if (!records) {
-    out.reply = addMessage(db, { threadId, role: "watchman", body: parsed.body, turnLog: logPath });
-    addMessage(db, { threadId, role: "system", body: `yagura rejected this turn's records, so nothing was stored or proposed: ${out.problem}` });
+  let log = logPath;
+  let result = attemptStore(first.text, log);
+  if (!result.stored) {
+    recordEvent(db, "watchman.records_rejected", {}, { thread: threadId, message: human.id, reason: result.problem });
+    const retryLog = paths.turnLog(threadId, human.id).replace(/\.jsonl$/, ".retry.jsonl");
+    const retry = await ask(renderRetry(brief.text, first.text, result.problem!), retryLog);
+    if (retry.text) [result, log] = [attemptStore(retry.text, retryLog), retryLog];
+  }
+  if (result.stored) {
+    out.reply = result.stored.message;
+    out.proposal = result.stored.proposal;
+  } else {
+    out.problem = result.problem;
+    out.reply = addMessage(db, { threadId, role: "watchman", body: result.body, turnLog: log });
+    addMessage(db, { threadId, role: "system", body: `yagura rejected this turn's records twice, so nothing was stored or proposed: ${out.problem}` });
   }
 
   if (out.proposal && getThread(db, threadId).autonomy === "go") {

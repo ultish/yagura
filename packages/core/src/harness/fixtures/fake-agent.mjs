@@ -85,6 +85,12 @@ function engine(role) {
 }
 
 function watchman() {
+  const asked = /## THE MESSAGE TO ANSWER\n\[human #\d+\]\n(.*)/.exec(brief)[1];
+  if (asked.startsWith("typo")) {
+    const fixed = asked === "typo once" && brief.includes("## YOUR PREVIOUS REPLY WAS REJECTED");
+    const records = fixed ? { decisions: [{ text: "fixed on retry" }] } : { answered: [{ question: "Q99", answer: "x" }] };
+    return finish(`${fixed ? "Corrected." : "First try."}\n\n\`\`\`yagura\n${JSON.stringify(records)}\n\`\`\``);
+  }
   const pack = { provider: "local-process", checks: [{ name: "unit", command: "test -f README.md", tier: "unit-verified" }] };
   const project = (id, after) => ({ id, goal: `build ${id}`, predicate: "all files landed", repos: ["proto"], merge: "auto", after, spec: `# ${id}\n\n## Scope\nWrite the files.` });
   const records = brief.includes("[watchman #")

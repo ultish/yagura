@@ -59,7 +59,11 @@ Found and fixed during phase 3: a plan unit briefly in `ready` was picked up as 
 
 Proof (real `claude`, Opus 5.5, scratch `YAGURA_HOME`): `yagura talk "Prototype a tiny Python CLI, jsondiff.py … ignore any field whose name ends in _ts …"` → the watchman loaded its skill, recorded 7 decisions (path syntax, exit codes, list and number rules), and proposed a new `jsondiff` repo with a `python3 -m unittest discover -v` pack, `merge: auto`, a spec, and a checkable predicate. `yagura proposal apply 1` created the repo and project; `yagura drive jsondiff` planned one unit, the worker's first attempt was rejected for skipping `pstack:poteto-mode` (existing enforcement), the second succeeded, the verifier proved it at unit-verified, it landed at `153a90b`, the planner reported done, and the engine posted the report into the thread and rang a `report` gate, in about 4 minutes for about $2. A fresh clone passes its 19 tests and the CLI ignores `*_ts` and exits 0/1 as decided. A follow-up turn ("also ignore `seq`; actually match lists by `id`") read the thread's memory and proposed a `jsondiff-keyed` project on the same repo with 4 new decisions. It did not supersede D5 (positional lists), so the skill now requires superseding any decision a new one changes.
 
-Open questions for the user: phase review gate on by default for chains?; run the first real spec-driven project on this Mac or on the RHEL9 VM?; collapse the scene to a horizon strip on scroll?; should a watchman turn whose records are rejected retry once automatically with the reason?
+Rejected records retry once automatically (user, 2026-09-26): the watchman gets its reply back with the reason (`renderRetry`, log `<message>.retry.jsonl`, event `watchman.records_rejected`); only a second rejection stores the prose with a system message.
+
+Answered (user, 2026-09-26): the first real spec-driven project runs on this Mac, when the user is ready.
+
+Open questions for the user: phase review gate on by default for chains (explained: pause and ring the bell between chained projects, vs start the next one automatically; currently off unless the watchman sets it)?; collapse the scene to a horizon strip on scroll (a UI detail for `apps/web`)?; a plain "New project" form in the UI beside "Talk to the watch"?
 
 ## Phase 4 — Dashboard: in progress
 
@@ -80,8 +84,7 @@ Decided next (user, 2026-09-26): the **watchman** (DESIGN §8a) — conversation
 
 ## Known gaps
 
-- Watchman turns are not attempts, so they do not appear in the Agents view and cannot be stopped from the API; the turn log is at `threads/<id>/turns/<message>.jsonl`. Two turns on one thread are refused only within one daemon process (the CLI does not check).
-- Reports are posted by the engine, so a thread hears nothing unless a daemon (or `yagura drive` for that project) is running.
+- Watchman turns are not attempts, so they do not appear in the Agents view and cannot be stopped from the API; the turn log is at `threads/<id>/turns/<message>.jsonl`. Plan for `apps/web`: show the turn's live log inside the thread. Two turns on one thread are refused only within one daemon process (the CLI does not check).
 - A rebase that changes the patch blocks the unit; re-verifying a rebased head arrives with the babysit units (phase 5).
 - Landing does not void dependents' verdicts, and `needs-source` behaves like `needs-landed` until read-only mounts arrive (phase 6).
 - Pack `doctor`/`deploy`/`teardown` are parsed but not run; deployed verification comes with the `kube-namespace` provider (phase 5).

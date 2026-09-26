@@ -118,6 +118,27 @@ describe("watchman turns", () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'project.spec_changed'").get()).toEqual({ n: 1 });
   });
 
+  it("retries once with the rejection reason, and stores only the corrected turn", async () => {
+    const t = createThread(db, { title: "t" });
+    const turn = await runWatchmanTurn(ctx, t.id, "typo once");
+    expect(turn.problem).toBeNull();
+    expect(listMessages(db, t.id).map((m) => [m.role, m.body])).toEqual([
+      ["human", "typo once"],
+      ["watchman", "Corrected."],
+    ]);
+    expect(listDecisions(db, t.id).map((d) => d.text)).toEqual(["fixed on retry"]);
+    expect(readFileSync(turn.reply!.turnLog!, "utf8")).toContain("Corrected.");
+  });
+
+  it("gives up after the retry and says why", async () => {
+    const t = createThread(db, { title: "t" });
+    const turn = await runWatchmanTurn(ctx, t.id, "typo twice");
+    expect(turn.problem).toBe("Q99 does not exist");
+    expect(listMessages(db, t.id).map((m) => m.role)).toEqual(["human", "watchman", "system"]);
+    expect(listMessages(db, t.id)[2]!.body).toMatch(/rejected this turn's records twice.*Q99 does not exist/);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'watchman.records_rejected'").get()).toEqual({ n: 1 });
+  });
+
   it("keeps a proposal pending under autonomy propose until it is applied", async () => {
     const t = createThread(db, { title: "t" });
     const turn = await runWatchmanTurn(ctx, t.id, "prototype a chain");
