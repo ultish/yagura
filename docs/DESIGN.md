@@ -500,9 +500,16 @@ The log view is a structured timeline, not a terminal dump:
 
 Controls on a running attempt: **stop**; **stop and respawn with a note** (the note is appended to the next attempt's brief); and, where the harness accepts streaming input (Claude's `--input-format stream-json`), **message the agent** mid-run.
 
-### Visual design
+### Visual design: "the watch"
 
-"Clean, modern, elegant" is decided with the user before it is built: 2–3 styled prototypes of the core screens (projects overview, unit graph, live agent log), compared side by side, one picked. The hana apps are the reference for components and conventions.
+Chosen with the user from three rounds of mocks (canvas: https://claude.ai/artifact/AuLG6d7GiuQoSBFfdGeLS5, round 3). A yagura is a fire-watch tower, and the UI uses that literally but only for real state:
+
+- **Palette.** Night (default): indigo sky `#11141f`, ridges `#171b2b`/`#1c2134`, cedar timber `#7a6758`, text `#ece6da`, muted `#a3a7b8`. **Amber `#f0a94a` means alive** (a running agent, a planner thinking, a verified signal). **Vermilion `#e5553a` means the bell: something needs you**, and is used for nothing else. Pine `#8fd1a8` for landed/passing evidence. Daybreak (light) variant with the same semantics.
+- **Type.** Shippori Mincho (titles), Zen Kaku Gothic New (body), JetBrains Mono (ids, facts, evidence).
+- **Home, "the watch".** One tower per project on a night ridge: lit windows = running agents, lit roof = planner, bell = needs you, dark tower = closed; dotted arcs of light between towers = real cross-project dependencies, fading when satisfied. Below: "The bell · needs you" inbox and "Lanterns lit" (running agents).
+- **Project.** Beacon chains per unit across plan → work → verify → land toward the `main` fortress: steady light = passed, flame = current stage (with agent and elapsed), bell = needs you, red ember = blocked, unlit = not reached, dotted signal = waiting on another unit.
+- **Rows.** Everything actionable is a full-width row: goal on its own line, a plain-language status line, one flowing line of small mono facts, actions at the right edge. Never table columns inside a row. No cost anywhere.
+- The scene is for glancing; every light links to its row.
 
 Bind to localhost by default; token auth when exposed on the LAN.
 

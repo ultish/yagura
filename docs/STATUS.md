@@ -52,9 +52,9 @@ Done:
 - Hono API (`apps/daemon/src/server.ts`): projects, project detail (units with attempts, deps, gates, waiting reasons), unit trace, events, agents vs caps, attempt detail (brief, handoff, leftovers, runs), agent logs parsed and resumable by line, artifacts, gates (answer), andon, settings (get/set), FTS search, trace; SSE `/api/stream` (events) and `/api/attempts/:id/stream` (live log). Token auth when bound beyond localhost (`Authorization: Bearer` or `?token=`; token at `YAGURA_TOKEN_FILE`).
 - Stopping an agent (`POST /api/attempts/:id/stop` with an optional note): work goes back to `ready` with the note, verification retries, a planner run is dropped; stopped runs do not count against attempts, skill checks, or planner rejections.
 
-Waiting on the user: the visual direction. Three directions (A Lantern: dark/amber, lanes; B Washi: paper/ink/vermilion, grouped reading list; C Blueprint: crisp/cobalt, dense table + dependency strip), each with a project view and a live agent log, are on a private canvas: https://claude.ai/artifact/AuLG6d7GiuQoSBFfdGeLS5. The agent logs replay the real `orders` U3 verifier run; the project views use labelled sample data.
+Visual direction chosen: "the watch" (DESIGN §17). Earlier rounds, for reference: Three directions (A Lantern: dark/amber, lanes; B Washi: paper/ink/vermilion, grouped reading list; C Blueprint: crisp/cobalt, dense table + dependency strip), each with a project view and a live agent log, are on a private canvas: https://claude.ai/artifact/AuLG6d7GiuQoSBFfdGeLS5. The agent logs replay the real `orders` U3 verifier run; the project views use labelled sample data.
 
-Next after the pick: `apps/web` (React + Vite, served by the daemon from its build), screens from DESIGN §17 against the API above.
+Next: `apps/web` (React + Vite, served by the daemon from its build) in the watch style: home (towers + bell inbox + lanterns), project (beacon chains + rows), agent (narrated log + trunk-vs-head grid), then gates, environments, repos, settings.
 
 ## Audit trail and skill enforcement: done (between phases 3 and 4)
 
