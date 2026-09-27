@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
+  gateDeadline,
+  recentlyResolvedGates,
   getEnvironment,
   PROVIDERS_IMPL,
   runningAttempts as runningCount,
@@ -84,7 +86,7 @@ export type BellItem =
       id: string;
       projectId: string;
       unit: { seq: number; goal: string } | null;
-      gate: { id: number; kind: string; question: string; options: string[]; defaultOption: string | null };
+      gate: { id: number; kind: string; question: string; options: string[]; defaultOption: string | null; deadline: string | null };
       at: string;
     }
   | {
@@ -101,24 +103,15 @@ export type BellItem =
 
 export function bell(db: Db): BellItem[] {
   const items: BellItem[] = [];
-  const gates = db
-    .prepare("SELECT id, project_id, unit_id, kind, question, options_json, default_option, created_at FROM gates WHERE state = 'open' ORDER BY id")
-    .all() as Row[];
-  for (const g of gates) {
-    const unit = g.unit_id ? getUnit(db, g.unit_id as UnitId) : null;
+  for (const g of listGates(db, null, "open")) {
+    const unit = g.unitId ? getUnit(db, g.unitId) : null;
     items.push({
       kind: "gate",
       id: `gate:${g.id}`,
-      projectId: g.project_id as string,
+      projectId: g.projectId,
       unit: unit ? { seq: unit.seq, goal: unit.goal } : null,
-      gate: {
-        id: g.id as number,
-        kind: g.kind as string,
-        question: g.question as string,
-        options: JSON.parse(g.options_json as string),
-        defaultOption: (g.default_option as string | null) ?? null,
-      },
-      at: g.created_at as string,
+      gate: { id: g.id, kind: g.kind, question: g.question, options: g.options, defaultOption: g.defaultOption, deadline: gateDeadline(db, g) },
+      at: g.createdAt,
     });
   }
   for (const u of db.prepare("SELECT id FROM units WHERE type = 'work' AND state = 'blocked' ORDER BY updated_at").all() as { id: number }[]) {
@@ -254,4 +247,11 @@ export function capCounts(db: Db) {
     },
     "project.max_in_flight": projects,
   };
+}
+
+export function resolvedGates(db: Db) {
+  return recentlyResolvedGates(db).map((g) => {
+    const unit = g.unitId ? getUnit(db, g.unitId) : null;
+    return { ...g, unit: unit ? { seq: unit.seq, goal: unit.goal } : null };
+  });
 }

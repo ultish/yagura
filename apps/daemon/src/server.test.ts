@@ -118,6 +118,25 @@ describe("daemon API", () => {
     expect(await (await get("/api/settings?project=orders")).json()).toMatchObject({ "project.max_in_flight": { value: 1, source: "project" } });
   });
 
+  it("lists what waits for an answer with each gate's deadline, and what was resolved", async () => {
+    const planner = addGate(db, {
+      projectId: project,
+      kind: "planner",
+      question: "SQLite or Postgres?",
+      options: ["sqlite", "postgres"],
+      defaultOption: "sqlite",
+    });
+    const inbox = (await (await get("/api/inbox")).json()) as { waiting: { gate?: { id: number; deadline: string | null } }[]; resolved: unknown[] };
+    const deadlines = Object.fromEntries(inbox.waiting.filter((w) => w.gate).map((w) => [w.gate!.id, w.gate!.deadline]));
+    expect(deadlines[1]).toBeNull();
+    expect(Date.parse(deadlines[planner]!) - Date.now()).toBeGreaterThan(23.9 * 3_600_000);
+    expect(inbox.resolved).toEqual([]);
+    await post(`/api/gates/${planner}/answer`, { answer: "postgres" });
+    expect(((await (await get("/api/inbox")).json()) as { resolved: unknown[] }).resolved).toMatchObject([
+      { id: planner, state: "answered", answer: "postgres", kind: "planner", unit: null },
+    ]);
+  });
+
   it("registers an existing repo and lists repos with their pack, projects, and landing queue", async () => {
     const seed = join(boot.home, "seed");
     mkdirSync(join(seed, ".agents/verify"), { recursive: true });

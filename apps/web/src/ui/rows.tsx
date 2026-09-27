@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { api, navigate, type BellItem } from "../api";
+import { api, navigate, useNow, type BellItem } from "../api";
+import { ifUnanswered } from "../lib/gates";
 import { Inline } from "../lib/markdown";
 import { Link } from "./Link";
 
@@ -109,6 +110,7 @@ const threadOf = (question: string) => /thread (\d+)/.exec(question)?.[1] ?? nul
 
 export function BellRow({ item, showProject }: { item: BellItem; showProject: boolean }) {
   const action = useAction();
+  const now = useNow(30_000);
   const [retrying, setRetrying] = useState(false);
   const where = (projectId: string, seq?: number) => (showProject ? `${projectId}${seq ? ` · U${seq}` : ""}` : seq ? `U${seq}` : "");
   const answer = (id: number, a: string) => action.run(() => api(`/api/gates/${id}/answer`, { body: { answer: a } }));
@@ -197,20 +199,16 @@ export function BellRow({ item, showProject }: { item: BellItem; showProject: bo
   );
   const labels: Record<string, string> = { land: "Land", hold: "Hold", start: "Start", seen: "Seen" };
   const thread = g.kind === "report" ? threadOf(g.question) : null;
+  const unanswered = ifUnanswered(g, now);
+  // The default is the likely answer; with a hold default, the action it holds back is.
+  const primary = g.kind === "report" || !g.defaultOption ? null : g.defaultOption === "hold" ? g.options[0] : g.defaultOption;
   return (
     <Row
       seq={seq}
       goal={item.unit?.goal ?? g.question}
-      status={
-        item.unit
-          ? g.question
-          : g.kind === "report"
-            ? "Report posted in the conversation."
-            : g.defaultOption
-              ? `Default if nobody answers: ${g.defaultOption}.`
-              : undefined
-      }
+      status={item.unit ? g.question : g.kind === "report" ? "Report posted in the conversation." : undefined}
       tone={g.kind === "report" ? "pine" : "bell"}
+      facts={unanswered && <span>{unanswered}</span>}
       extra={error}
       actions={
         <>
@@ -219,14 +217,8 @@ export function BellRow({ item, showProject }: { item: BellItem; showProject: bo
               Read
             </button>
           )}
-          {g.options.map((o, i) => (
-            <button
-              key={o}
-              className={`btn${i === 0 && g.kind !== "report" ? " bell" : ""}`}
-              type="button"
-              disabled={action.busy}
-              onClick={() => answer(g.id, o)}
-            >
+          {g.options.map((o) => (
+            <button key={o} className={`btn${o === primary ? " bell" : ""}`} type="button" disabled={action.busy} onClick={() => answer(g.id, o)}>
               {labels[o] ?? o}
             </button>
           ))}

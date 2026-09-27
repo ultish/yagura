@@ -6,6 +6,7 @@ import { Home } from "./pages/Home";
 import { Project } from "./pages/Project";
 import { Projects } from "./pages/Projects";
 import { Environments } from "./pages/Environments";
+import { Gates } from "./pages/Gates";
 import { Repos } from "./pages/Repos";
 import { Settings } from "./pages/Settings";
 import { Talk } from "./pages/Talk";
@@ -31,6 +32,7 @@ const NAV = [
   { to: "/talk", label: "Talk", match: (p: string) => p.startsWith("/talk") },
   { to: "/projects", label: "Projects", match: (p: string) => p === "/projects" || p.startsWith("/p/") },
   { to: "/agents", label: "Agents", match: (p: string) => p.startsWith("/agents") || p.startsWith("/a/") },
+  { to: "/gates", label: "Gates", match: (p: string) => p === "/gates" },
   { to: "/repos", label: "Repos", match: (p: string) => p === "/repos" },
   { to: "/environments", label: "Environments", match: (p: string) => p === "/environments" },
   { to: "/settings", label: "Settings", match: (p: string) => p === "/settings" },
@@ -84,6 +86,7 @@ function Routes() {
   if (path === "/") return <Home />;
   if (path === "/projects") return <Projects />;
   if (path === "/agents") return <Agents />;
+  if (path === "/gates") return <Gates />;
   if (path === "/repos") return <Repos />;
   if (path === "/environments") return <Environments />;
   if (path === "/settings") return <Settings />;

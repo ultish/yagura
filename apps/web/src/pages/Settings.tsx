@@ -6,7 +6,7 @@ import { SettingRow } from "../ui/settings";
 
 const GROUPS: { title: string; test: (key: string) => boolean }[] = [
   { title: "Limits", test: (k) => k.startsWith("max_") || k === "project.max_in_flight" || k === "verify.max_retries" },
-  { title: "Time limits", test: (k) => k.startsWith("timebox.") },
+  { title: "Time limits", test: (k) => k.startsWith("timebox.") || k.startsWith("gates.") },
   { title: "Agents and models", test: (k) => k.startsWith("role.") || k.startsWith("harness.") || k.startsWith("watchman.") || k.startsWith("method.") },
   { title: "Git and links", test: (k) => k.startsWith("git.") || k.startsWith("yagura.") },
 ];

@@ -6,6 +6,7 @@ import { reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
+import { defaultExpiredGates, gateResolved } from "./gates.js";
 import {
   addGate,
   getProject,
@@ -106,7 +107,7 @@ export class Engine {
           this.log(`  gate: land U${u.seq}?`);
           continue;
         }
-        if (gate.state !== "answered" || gate.answer !== "land") continue;
+        if (!gateResolved(gate, "land")) continue;
       }
       this.start(
         key,
@@ -125,7 +126,7 @@ export class Engine {
       .prepare(
         `SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND id > ? AND (
            (type = 'unit.state' AND json_extract(data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(data_json, '$.drain') IS NULL)
-           OR (type = 'gate.answered' AND COALESCE(json_extract(data_json, '$.kind'), '') <> 'report')
+           OR (type IN ('gate.answered', 'gate.defaulted') AND COALESCE(json_extract(data_json, '$.kind'), '') <> 'report')
            OR type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed'))`,
       )
       .get(project.id, since, ...PLAN_TRIGGERS) as { n: number };
@@ -182,7 +183,7 @@ export class Engine {
       .filter((g) => g.kind === "phase")
       .at(-1);
     if (!gate || gate.state === "cancelled") return "gate";
-    return gate.state === "answered" && gate.answer === "start" ? "activate" : null;
+    return gateResolved(gate, "start") ? "activate" : null;
   }
 
   private activate(project: Project): void {
@@ -245,6 +246,7 @@ export class Engine {
 
   async tick(): Promise<void> {
     if (this.inflight.size === 0) await reapLeases(this.db, this.ctx.boot);
+    for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
     for (const project of this.scope().filter((p) => p.state === "active")) {
       this.settleFailures(project);
@@ -325,5 +327,5 @@ function landApproved(db: Db, projectId: ProjectId, u: Unit): boolean {
   const gate = listGates(db, projectId)
     .filter((g) => g.kind === "land" && g.unitId === u.id)
     .at(-1);
-  return gate?.state === "answered" && gate.answer === "land";
+  return !!gate && gateResolved(gate, "land");
 }

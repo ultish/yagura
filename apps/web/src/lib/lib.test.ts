@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
 import { duration, modelName } from "./format";
+import { ifUnanswered } from "./gates";
 import { mentionHref, mentionQuery } from "./mention";
 import { layoutScene, subLabel } from "./scene";
 import { buildTimeline } from "./timeline";
@@ -191,5 +192,25 @@ describe("mentions and formatting", () => {
   it("formats durations and model names", () => {
     expect([duration(54_000), duration(12 * 60_000), duration(63 * 60_000)]).toEqual(["54s", "12m", "1h 3m"]);
     expect(modelName("claude-opus-5-5")).toBe("opus-5.5");
+  });
+
+  it("says what happens to a gate nobody answers", () => {
+    const now = Date.parse("2026-09-27T10:00:00Z");
+    const g = (defaultOption: string | null, deadline: string | null, kind = "planner") => ifUnanswered({ kind, defaultOption, deadline }, now);
+    expect([
+      g("sqlite", "2026-09-27T15:30:00Z"),
+      g("sqlite", "2026-09-27T09:00:00Z"),
+      g("sqlite", null),
+      g("hold", null, "land"),
+      g(null, null),
+      g("seen", null, "report"),
+    ]).toEqual([
+      "Takes sqlite in 5h 30m if nobody answers.",
+      "Taking sqlite now.",
+      "Waits for you; the default is sqlite.",
+      "Holds until you answer.",
+      "Waits for your answer.",
+      null,
+    ]);
   });
 });

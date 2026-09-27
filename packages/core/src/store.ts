@@ -457,6 +457,8 @@ export interface Gate {
   state: "open" | "answered" | "defaulted" | "cancelled";
   answer: string | null;
   kind: string;
+  createdAt: IsoTime;
+  resolvedAt: IsoTime | null;
 }
 
 export function addGate(
@@ -483,6 +485,8 @@ function toGate(r: Record<string, unknown>): Gate {
     defaultOption: (r.default_option as string | null) ?? null,
     state: r.state as Gate["state"],
     answer: (r.answer as string | null) ?? null,
+    createdAt: r.created_at as IsoTime,
+    resolvedAt: (r.resolved_at as IsoTime | null) ?? null,
   };
 }
 

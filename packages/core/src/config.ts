@@ -70,6 +70,7 @@ export const SETTINGS = {
   "git.branch_prefix": z.string().default("yg").describe("Prefix for unit branches"),
   "yagura.url": z.string().url().nullable().default(null).describe("Dashboard URL linked from commit trailers"),
   "method.enforce_required_skills": z.boolean().default(true).describe("Reject work that skipped a required skill"),
+  "gates.timeout_hours": z.number().positive().nullable().default(24).describe("Hours before an unanswered question takes its default (empty: never)"),
 } satisfies Record<string, z.ZodTypeAny>;
 
 export type SettingKey = keyof typeof SETTINGS;
@@ -107,6 +108,7 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "git.branch_prefix": PR,
   "yagura.url": PR,
   "method.enforce_required_skills": PR,
+  "gates.timeout_hours": P,
 };
 export type SettingValue<K extends SettingKey> = z.output<(typeof SETTINGS)[K]>;
 export type SettingSource = SettingScope | "default";

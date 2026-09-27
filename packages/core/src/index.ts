@@ -32,3 +32,4 @@ export * from "./mentions.js";
 export type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
 export { claudeAdapter, parseClaudeLine } from "./harness/claude.js";
 export * from "./repos.js";
+export * from "./gates.js";

@@ -70,7 +70,7 @@ import {
   type Provider,
   suggestRepoId,
 } from "@yagura/core";
-import { attemptDetail, bell, capCounts, environmentView, projectSummary, repoView, unitView } from "./views.js";
+import { attemptDetail, bell, capCounts, environmentView, projectSummary, repoView, resolvedGates, unitView } from "./views.js";
 
 export interface ServerOptions {
   db: Db;
@@ -214,6 +214,7 @@ export function createApp(opts: ServerOptions): Hono {
   });
 
   app.get("/api/bell", (c) => c.json(bell(db)));
+  app.get("/api/inbox", (c) => c.json({ waiting: bell(db), resolved: resolvedGates(db) }));
 
   app.post("/api/projects/:id/units/:seq/retry", async (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));

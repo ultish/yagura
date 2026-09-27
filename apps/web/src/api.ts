@@ -118,7 +118,7 @@ export type BellItem =
       id: string;
       projectId: string;
       unit: { seq: number; goal: string } | null;
-      gate: { id: number; kind: string; question: string; options: string[]; defaultOption: string | null };
+      gate: { id: number; kind: string; question: string; options: string[]; defaultOption: string | null; deadline: string | null };
       at: string;
     }
   | {
