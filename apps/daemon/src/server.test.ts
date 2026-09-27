@@ -204,7 +204,7 @@ describe("daemon API", () => {
   });
 
   it("creates and edits environments and shows who holds and waits for their slots", async () => {
-    expect((await post("/api/environments", { id: "dev", provider: "kube-namespace", capacity: 2 })).status).toBe(400);
+    expect((await post("/api/environments", { id: "dev", provider: "docker-compose", capacity: 2 })).status).toBe(400);
     expect(await (await post("/api/environments", { id: "dev", provider: "local-process", capacity: -1 })).json()).toEqual({
       error: "capacity must be a whole number, 0 or more",
     });
