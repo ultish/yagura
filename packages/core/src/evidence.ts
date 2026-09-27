@@ -98,7 +98,8 @@ export async function runEvidence(
   const attempt = getAttempt(db, req.attemptId);
   const unit = getUnit(db, attempt.unitId);
   if (unit.type !== "verify") throw new Error(`attempt ${attempt.id} is not a verify attempt`);
-  if (attempt.state !== "queued" && attempt.state !== "running") throw new Error(`attempt ${attempt.id} is ${attempt.state}; evidence can only be captured while it runs`);
+  if (attempt.state !== "queued" && attempt.state !== "running")
+    throw new Error(`attempt ${attempt.id} is ${attempt.state}; evidence can only be captured while it runs`);
   if (!attempt.worktreePath || !attempt.baseSha || !attempt.headSha) throw new Error(`attempt ${attempt.id} has no checkouts`);
   const sha = req.at === "head" ? attempt.headSha : attempt.baseSha;
   const cwd = req.at === "head" ? attempt.worktreePath : baseWorktree(attempt.worktreePath);
@@ -133,13 +134,18 @@ export async function runEvidence(
     for (const file of walk(evidenceDir))
       putArtifact(db, boot, { ...base, kind: "file", label: `${req.label}@${req.at} ${relative(evidenceDir, file)}`, data: readFileSync(file) });
     db.prepare("UPDATE evidence_runs SET stdout_artifact_id = ?, stderr_artifact_id = ? WHERE id = ?").run(stdoutId, stderrId, runId);
-    recordEvent(db, "evidence.run", { projectId: unit.projectId, unitId: unit.id, attemptId: attempt.id }, {
-      run: runId,
-      at: req.at,
-      label: req.label,
-      exit: result.exitCode,
-      tampered,
-    });
+    recordEvent(
+      db,
+      "evidence.run",
+      { projectId: unit.projectId, unitId: unit.id, attemptId: attempt.id },
+      {
+        run: runId,
+        at: req.at,
+        label: req.label,
+        exit: result.exitCode,
+        tampered,
+      },
+    );
     return getEvidenceRun(db, runId);
   })();
   rmSync(evidenceDir, { recursive: true, force: true });

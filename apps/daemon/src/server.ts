@@ -101,7 +101,15 @@ function eventsSince(db: Db, since: number, projectId: string | null, limit = 50
     db
       .prepare("SELECT id, ts, type, project_id, unit_id, attempt_id, data_json FROM events WHERE id > ? AND (? IS NULL OR project_id = ?) ORDER BY id LIMIT ?")
       .all(since, projectId, projectId, limit) as Row[]
-  ).map((e) => ({ id: e.id, ts: e.ts, type: e.type, projectId: e.project_id, unitId: e.unit_id, attemptId: e.attempt_id, data: JSON.parse(e.data_json as string) }));
+  ).map((e) => ({
+    id: e.id,
+    ts: e.ts,
+    type: e.type,
+    projectId: e.project_id,
+    unitId: e.unit_id,
+    attemptId: e.attempt_id,
+    data: JSON.parse(e.data_json as string),
+  }));
 }
 
 function readLog(opts: ServerOptions, attemptId: AttemptId, from: number) {
@@ -122,7 +130,6 @@ function readLog(opts: ServerOptions, attemptId: AttemptId, from: number) {
   });
   return { attempt, lines, next: from + lines.length };
 }
-
 
 export function createApp(opts: ServerOptions): Hono {
   const { db, boot } = opts;
@@ -194,11 +201,15 @@ export function createApp(opts: ServerOptions): Hono {
     const unit = getUnit(db, attempt.unitId);
     const paths = layout(boot);
     return c.json(
-      attemptDetail(db, {
-        brief: paths.brief(unit.projectId, unit.seq, attempt.n),
-        handoff: paths.handoff(unit.projectId, unit.seq, attempt.n),
-        leftovers: paths.leftovers(unit.projectId, unit.seq, attempt.n),
-      }, attempt.id),
+      attemptDetail(
+        db,
+        {
+          brief: paths.brief(unit.projectId, unit.seq, attempt.n),
+          handoff: paths.handoff(unit.projectId, unit.seq, attempt.n),
+          leftovers: paths.leftovers(unit.projectId, unit.seq, attempt.n),
+        },
+        attempt.id,
+      ),
     );
   });
 
@@ -207,7 +218,8 @@ export function createApp(opts: ServerOptions): Hono {
   app.post("/api/projects/:id/units/:seq/retry", async (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
     const note = String(((await c.req.json().catch(() => ({}))) as { note?: unknown }).note ?? "").trim();
-    if (!["blocked", "failed", "rejected"].includes(unit.state)) return c.json({ error: `U${unit.seq} is ${unit.state}; only blocked, failed, or rejected units can be retried` }, 409);
+    if (!["blocked", "failed", "rejected"].includes(unit.state))
+      return c.json({ error: `U${unit.seq} is ${unit.state}; only blocked, failed, or rejected units can be retried` }, 409);
     if (note) addUnitNote(db, unit.id, `Operator: ${note}`);
     bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).length + 1);
     transitionUnit(db, unit.id, "ready", { by: "operator", note: note || null });
@@ -217,7 +229,8 @@ export function createApp(opts: ServerOptions): Hono {
   app.post("/api/projects/:id/units/:seq/cancel", async (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
     const reason = String(((await c.req.json().catch(() => ({}))) as { reason?: unknown }).reason ?? "cancelled by operator");
-    if (["running", "landed", "done", "abandoned", "landing"].includes(unit.state)) return c.json({ error: `U${unit.seq} is ${unit.state} and cannot be cancelled` }, 409);
+    if (["running", "landed", "done", "abandoned", "landing"].includes(unit.state))
+      return c.json({ error: `U${unit.seq} is ${unit.state} and cannot be cancelled` }, 409);
     transitionUnit(db, unit.id, "abandoned", { by: "operator", reason });
     return c.json(unitView(db, getUnit(db, unit.id)));
   });
@@ -257,7 +270,8 @@ export function createApp(opts: ServerOptions): Hono {
   app.post("/api/environments", async (c) => {
     const b = (await c.req.json()) as { id?: string; name?: string; provider?: string; capacity?: number };
     if (!b.id || !/^[a-z][a-z0-9-]{1,39}$/.test(b.id)) return c.json({ error: "id must be lowercase words joined by dashes, e.g. dev-2" }, 400);
-    if (!PROVIDERS_IMPL[b.provider as Provider]) return c.json({ error: `provider ${b.provider} is not available yet; use ${Object.keys(PROVIDERS_IMPL).join(", ")}` }, 400);
+    if (!PROVIDERS_IMPL[b.provider as Provider])
+      return c.json({ error: `provider ${b.provider} is not available yet; use ${Object.keys(PROVIDERS_IMPL).join(", ")}` }, 400);
     if (!Number.isInteger(b.capacity) || b.capacity! < 0) return c.json({ error: "capacity must be a whole number, 0 or more" }, 400);
     if (db.prepare("SELECT 1 FROM environments WHERE id = ?").get(b.id)) return c.json({ error: `environment ${b.id} already exists` }, 409);
     addEnvironment(db, { id: b.id, name: b.name?.trim() || b.id, provider: b.provider as Provider, capacity: b.capacity! });
@@ -292,14 +306,20 @@ export function createApp(opts: ServerOptions): Hono {
     const scope = c.req.query("scope") as SettingScope | undefined;
     const id = c.req.query("id") ?? "";
     if (!scope || scope === "global") return c.json({ settings: describeSettings(db), caps: capCounts(db) });
-    const ctx = { projectId: scope === "project" ? (id as ProjectId) : null, repoId: scope === "repo" ? (id as RepoId) : null, environmentId: scope === "environment" ? (id as EnvironmentId) : null };
+    const ctx = {
+      projectId: scope === "project" ? (id as ProjectId) : null,
+      repoId: scope === "repo" ? (id as RepoId) : null,
+      environmentId: scope === "environment" ? (id as EnvironmentId) : null,
+    };
     return c.json({ settings: describeSettings(db, ctx, scope), caps: capCounts(db) });
   });
   app.post("/api/settings/clear", async (c) => {
     const b = (await c.req.json()) as { scope: SettingScope; id?: string; key: string };
     return c.json({ cleared: clearSetting(db, b.scope, b.id ?? "", b.key) });
   });
-  app.get("/api/settings/export", (c) => c.body(exportSettings(db), 200, { "content-type": "text/yaml; charset=utf-8", "content-disposition": 'attachment; filename="yagura-settings.yaml"' }));
+  app.get("/api/settings/export", (c) =>
+    c.body(exportSettings(db), 200, { "content-type": "text/yaml; charset=utf-8", "content-disposition": 'attachment; filename="yagura-settings.yaml"' }),
+  );
   app.post("/api/settings/import", async (c) => {
     const b = (await c.req.json()) as { yaml?: string };
     try {
@@ -318,11 +338,20 @@ export function createApp(opts: ServerOptions): Hono {
   app.get("/api/search", (c) => {
     const q = c.req.query("q") ?? "";
     if (!q.trim()) return c.json([]);
-    const rows = db
-      .prepare("SELECT kind, ref_id, project_id, snippet(search, 0, '[', ']', '…', 12) AS snippet FROM search WHERE search MATCH ? LIMIT 50")
-      .all(q.replace(/"/g, '""').split(/\s+/).map((t) => `"${t}"`).join(" ")) as Row[];
+    const rows = db.prepare("SELECT kind, ref_id, project_id, snippet(search, 0, '[', ']', '…', 12) AS snippet FROM search WHERE search MATCH ? LIMIT 50").all(
+      q
+        .replace(/"/g, '""')
+        .split(/\s+/)
+        .map((t) => `"${t}"`)
+        .join(" "),
+    ) as Row[];
     return c.json(
-      rows.map((r) => ({ kind: r.kind, ...(r.kind === "message" ? { messageId: Number(r.ref_id) } : { attemptId: Number(r.ref_id) }), projectId: r.project_id, snippet: r.snippet })),
+      rows.map((r) => ({
+        kind: r.kind,
+        ...(r.kind === "message" ? { messageId: Number(r.ref_id) } : { attemptId: Number(r.ref_id) }),
+        projectId: r.project_id,
+        snippet: r.snippet,
+      })),
     );
   });
 
@@ -383,7 +412,11 @@ export function createApp(opts: ServerOptions): Hono {
       addMessage(db, { threadId: proposal.threadId, role: "system", body: `Go: applied proposal ${proposal.id}: ${JSON.stringify(result)}` });
       return c.json({ proposal: getProposal(db, proposal.id), result });
     } catch (e) {
-      addMessage(db, { threadId: proposal.threadId, role: "system", body: `Applying proposal ${proposal.id} failed: ${e instanceof Error ? e.message : String(e)}` });
+      addMessage(db, {
+        threadId: proposal.threadId,
+        role: "system",
+        body: `Applying proposal ${proposal.id} failed: ${e instanceof Error ? e.message : String(e)}`,
+      });
       throw e;
     }
   });

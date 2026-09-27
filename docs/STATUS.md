@@ -84,6 +84,7 @@ Per-scope settings panels (2026-09-27): project page section, environment and re
 Next for the UI: Gates inbox page (the bell covers it for now), repo browsing (prototype first; the user wants it VS Code-like, and DESIGN §17 has the Monaco read-only plan), "Message the agent" mid-run (needs `--input-format stream-json`), a watchman turn's live log inside the thread, and the "conversations about this" list on unit and agent pages (`GET /api/mentions/:token/messages` exists).
 
 Daemon/API (earlier in phase 4):
+
 - `apps/daemon` + `yagura daemon`: one always-on process runs the engine for every active project (`Engine.runForever`), recovers attempts orphaned by a previous process, stops running agents on shutdown, and holds a lock (`~/.yagura/daemon.pid`) so `yagura drive` refuses while it runs.
 - Hono API (`apps/daemon/src/server.ts`): projects, project detail (units with attempts, deps, gates, waiting reasons), unit trace, events, agents vs caps, attempt detail (brief, handoff, leftovers, runs), agent logs parsed and resumable by line, artifacts, gates (answer), andon, settings (get/set), FTS search, trace; SSE `/api/stream` (events) and `/api/attempts/:id/stream` (live log). Token auth when bound beyond localhost (`Authorization: Bearer` or `?token=`; token at `YAGURA_TOKEN_FILE`).
 - Stopping an agent (`POST /api/attempts/:id/stop` with an optional note): work goes back to `ready` with the note, verification retries, a planner run is dropped; stopped runs do not count against attempts, skill checks, or planner rejections.

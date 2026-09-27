@@ -439,9 +439,11 @@ export function addDep(db: Db, dep: UnitDepRow): void {
 
 export function listDeps(db: Db, projectId: ProjectId): UnitDepRow[] {
   return (
-    db
-      .prepare("SELECT d.unit_id, d.depends_on, d.kind FROM unit_deps d JOIN units u ON u.id = d.unit_id WHERE u.project_id = ?")
-      .all(projectId) as { unit_id: UnitId; depends_on: UnitId; kind: UnitDepRow["kind"] }[]
+    db.prepare("SELECT d.unit_id, d.depends_on, d.kind FROM unit_deps d JOIN units u ON u.id = d.unit_id WHERE u.project_id = ?").all(projectId) as {
+      unit_id: UnitId;
+      depends_on: UnitId;
+      kind: UnitDepRow["kind"];
+    }[]
   ).map((r) => ({ unitId: r.unit_id, dependsOn: r.depends_on, kind: r.kind }));
 }
 
@@ -457,7 +459,10 @@ export interface Gate {
   kind: string;
 }
 
-export function addGate(db: Db, g: { projectId: ProjectId; unitId?: UnitId | null; question: string; options: string[]; defaultOption?: string | null; kind: string }): number {
+export function addGate(
+  db: Db,
+  g: { projectId: ProjectId; unitId?: UnitId | null; question: string; options: string[]; defaultOption?: string | null; kind: string },
+): number {
   const id = Number(
     db
       .prepare("INSERT INTO gates (project_id, unit_id, kind, question, options_json, default_option, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
@@ -503,14 +508,18 @@ export function bumpMaxAttempts(db: Db, unitId: UnitId, to: number): void {
   db.prepare("UPDATE units SET max_attempts = MAX(max_attempts, ?), updated_at = ? WHERE id = ?").run(to, now(), unitId);
 }
 
-export function amendUnit(db: Db, unitId: UnitId, patch: { goal?: string; writeScope?: string[]; acceptance?: string[]; verify?: string; context?: string[] }): void {
+export function amendUnit(
+  db: Db,
+  unitId: UnitId,
+  patch: { goal?: string; writeScope?: string[]; acceptance?: string[]; verify?: string; context?: string[] },
+): void {
   const sets: string[] = [];
   const values: unknown[] = [];
-  if (patch.goal !== undefined) sets.push("goal = ?"), values.push(patch.goal);
-  if (patch.writeScope !== undefined) sets.push("write_scope_json = ?"), values.push(JSON.stringify(patch.writeScope));
-  if (patch.acceptance !== undefined) sets.push("acceptance_json = ?"), values.push(JSON.stringify(patch.acceptance));
-  if (patch.verify !== undefined) sets.push("verify = ?"), values.push(patch.verify);
-  if (patch.context !== undefined) sets.push("context_json = ?"), values.push(JSON.stringify(patch.context));
+  if (patch.goal !== undefined) (sets.push("goal = ?"), values.push(patch.goal));
+  if (patch.writeScope !== undefined) (sets.push("write_scope_json = ?"), values.push(JSON.stringify(patch.writeScope)));
+  if (patch.acceptance !== undefined) (sets.push("acceptance_json = ?"), values.push(JSON.stringify(patch.acceptance)));
+  if (patch.verify !== undefined) (sets.push("verify = ?"), values.push(patch.verify));
+  if (patch.context !== undefined) (sets.push("context_json = ?"), values.push(JSON.stringify(patch.context)));
   if (!sets.length) return;
   db.prepare(`UPDATE units SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`).run(...values, now(), unitId);
 }

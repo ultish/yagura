@@ -23,8 +23,18 @@ export function resolveSource(source: string): string {
 
 export function suggestRepoId(source: string): string {
   if (!source.trim()) return "repo";
-  const name = basename(resolveSource(source).replace(/[/:]+$/, "").replace(/\.git$/, "")).split(":").pop()!;
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^[^a-z]+|-+$/g, "").slice(0, 40);
+  const name = basename(
+    resolveSource(source)
+      .replace(/[/:]+$/, "")
+      .replace(/\.git$/, ""),
+  )
+    .split(":")
+    .pop()!;
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^[^a-z]+|-+$/g, "")
+    .slice(0, 40);
   return REPO_ID.test(slug) ? slug : "repo";
 }
 
@@ -83,7 +93,10 @@ export function checkRepoFree(db: Db, id: string, url: string): void {
   if (same) throw new RepoUnusable(`${url} is already registered as repo ${same.id}`);
 }
 
-export async function registerRepo(ctx: { db: Db; boot: Bootstrap }, input: { source: string; id?: string }): Promise<{ repo: Repo; inspection: RepoInspection }> {
+export async function registerRepo(
+  ctx: { db: Db; boot: Bootstrap },
+  input: { source: string; id?: string },
+): Promise<{ repo: Repo; inspection: RepoInspection }> {
   const id = input.id?.trim() || suggestRepoId(input.source);
   checkRepoFree(ctx.db, id, resolveSource(input.source));
   const inspection = await inspectRepo(input.source, layout(ctx.boot).mirror(id as RepoId));

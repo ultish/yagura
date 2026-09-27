@@ -3,7 +3,17 @@ import type { HarnessEvent, LogLine } from "../api";
 export type Step =
   | { kind: "skill"; id: string; at: number | null; skill: string; ok: boolean }
   | { kind: "text"; id: string; at: number | null; text: string }
-  | { kind: "tool"; id: string; at: number | null; name: string; summary: string; diff: { old: string; new: string } | null; output: string | null; isError: boolean; children: Step[] }
+  | {
+      kind: "tool";
+      id: string;
+      at: number | null;
+      name: string;
+      summary: string;
+      diff: { old: string; new: string } | null;
+      output: string | null;
+      isError: boolean;
+      children: Step[];
+    }
   | { kind: "final"; id: string; at: number | null; text: string; isError: boolean; costUsd: number | null };
 
 export interface Timeline {
@@ -27,7 +37,13 @@ function summarize(name: string, input: unknown): { summary: string; diff: { old
   const str = (v: unknown) => (typeof v === "string" ? v : "");
   switch (name) {
     case "Bash":
-      return { summary: str(i.command).split("\n")[0]!.replace(/\/\S*\/(worktrees\/\S+?\/)/g, "") + (str(i.command).includes("\n") ? " …" : ""), diff: null };
+      return {
+        summary:
+          str(i.command)
+            .split("\n")[0]!
+            .replace(/\/\S*\/(worktrees\/\S+?\/)/g, "") + (str(i.command).includes("\n") ? " …" : ""),
+        diff: null,
+      };
     case "Read":
     case "Write":
     case "NotebookEdit":

@@ -19,7 +19,11 @@ import { addEnvironment, addProject, addRepo, addUnit, getUnitBySeq, openStore, 
 import { runVerifyUnit } from "./verify.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
-const fake: HarnessAdapter = { id: "claude", command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs")], stdin: run.prompt }), parse: parseClaudeLine };
+const fake: HarnessAdapter = {
+  id: "claude",
+  command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs")], stdin: run.prompt }),
+  parse: parseClaudeLine,
+};
 const tsx = pathToFileURL(join(dirname(createRequire(import.meta.url).resolve("tsx/package.json")), "dist/loader.mjs")).href;
 const author = { name: "t", email: "t@t" };
 
@@ -36,7 +40,10 @@ beforeEach(async () => {
   mkdirSync(join(seed, ".agents/verify"), { recursive: true });
   writeFileSync(join(seed, "app/orders.py"), "x = 1\n");
   writeFileSync(join(seed, "README.md"), "readme\n");
-  writeFileSync(join(seed, ".agents/verify/verify.json"), JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "test -f app/orders.py", tier: "unit-verified" }] }));
+  writeFileSync(
+    join(seed, ".agents/verify/verify.json"),
+    JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "test -f app/orders.py", tier: "unit-verified" }] }),
+  );
   await git(["init", "--quiet", "-b", "main"], { cwd: seed });
   await commitAll(seed, "init", author);
   origin = join(root, "origin.git");
@@ -140,7 +147,17 @@ describe("landUnit (forge none)", () => {
   });
 
   it("refuses to land a unit that is not verified", async () => {
-    const work = addUnit(db, { projectId: project, type: "work", repoId: "testbed" as RepoId, goal: "g", writeScope: ["app/**"], acceptance: ["a"], verify: "v", timeboxSeconds: 60, maxAttempts: 1 });
+    const work = addUnit(db, {
+      projectId: project,
+      type: "work",
+      repoId: "testbed" as RepoId,
+      goal: "g",
+      writeScope: ["app/**"],
+      acceptance: ["a"],
+      verify: "v",
+      timeboxSeconds: 60,
+      maxAttempts: 1,
+    });
     await expect(landUnit(ctx, work.id)).rejects.toThrow(/draft, not verified/);
   });
 });

@@ -46,8 +46,16 @@ function Transfer({ onImported }: { onImported: () => void }) {
       <span className="muted" style={{ fontSize: 13 }}>
         Export holds every value set on any layer. Import sets each value in the file and keeps the rest; one bad value and nothing is imported.
       </span>
-      {applied !== null && <span className="s-pine" style={{ fontSize: 13 }}>Imported {applied} value(s).</span>}
-      {action.error && <span className="s-bell" style={{ fontSize: 13, width: "100%" }}>{action.error}</span>}
+      {applied !== null && (
+        <span className="s-pine" style={{ fontSize: 13 }}>
+          Imported {applied} value(s).
+        </span>
+      )}
+      {action.error && (
+        <span className="s-bell" style={{ fontSize: 13, width: "100%" }}>
+          {action.error}
+        </span>
+      )}
     </div>
   );
 }
@@ -58,7 +66,10 @@ export function Settings() {
   const capText: Record<string, string | undefined> = caps
     ? {
         max_parallel_agents: `${caps.max_parallel_agents.running} running now`,
-        max_parallel_per_harness: Object.entries(caps.max_parallel_per_harness.byHarness).map(([h, n]) => `${h}: ${n} running`).join(", ") || "none running",
+        max_parallel_per_harness:
+          Object.entries(caps.max_parallel_per_harness.byHarness)
+            .map(([h, n]) => `${h}: ${n} running`)
+            .join(", ") || "none running",
       }
     : {};
   return (

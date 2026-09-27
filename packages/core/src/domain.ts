@@ -33,18 +33,7 @@ export type ProjectState = (typeof PROJECT_STATES)[number];
 export const MERGE_POLICIES = ["auto", "human"] as const;
 export type MergePolicy = (typeof MERGE_POLICIES)[number];
 
-export const UNIT_TYPES = [
-  "plan",
-  "work",
-  "verify",
-  "measure",
-  "pack",
-  "rebase",
-  "ci-fix",
-  "review-triage",
-  "land",
-  "release",
-] as const;
+export const UNIT_TYPES = ["plan", "work", "verify", "measure", "pack", "rebase", "ci-fix", "review-triage", "land", "release"] as const;
 export type UnitType = (typeof UNIT_TYPES)[number];
 
 export const ROLES = ["planner", "worker", "verifier", "pack", "rebase", "ci-fix", "review-triage", "watchman"] as const;
@@ -119,25 +108,10 @@ export type AttemptState = (typeof ATTEMPT_STATES)[number];
 export const HANDOFF_STATUSES = ["success", "partial", "blocked"] as const;
 export type HandoffStatus = (typeof HANDOFF_STATUSES)[number];
 
-export const FAILURE_MODES = [
-  "timebox",
-  "context-exhausted",
-  "oom",
-  "network",
-  "tool-error",
-  "harness-error",
-  "scope",
-  "unknown",
-] as const;
+export const FAILURE_MODES = ["timebox", "context-exhausted", "oom", "network", "tool-error", "harness-error", "scope", "unknown"] as const;
 export type FailureMode = (typeof FAILURE_MODES)[number];
 
-export const PASS_TIERS = [
-  "deployed-verified",
-  "live-local-verified",
-  "e2e-verified",
-  "unit-verified",
-  "build-only",
-] as const;
+export const PASS_TIERS = ["deployed-verified", "live-local-verified", "e2e-verified", "unit-verified", "build-only"] as const;
 export type PassTier = (typeof PASS_TIERS)[number];
 export const FAIL_TIERS = ["verifier-blocked", "verifier-failed"] as const;
 export type FailTier = (typeof FAIL_TIERS)[number];

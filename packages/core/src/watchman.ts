@@ -8,7 +8,15 @@ import { missingSkills } from "./pack.js";
 import { layout } from "./paths.js";
 import { lastDrainEventId, latestDelta } from "./planner.js";
 import { WORK_PLAYBOOKS } from "./plan.js";
-import { applyProposal, describeProposal, inspectProposalRepos, ProposalBody, ProposalInvalid, validateProposal, type ApplyProposalResult } from "./proposal.js";
+import {
+  applyProposal,
+  describeProposal,
+  inspectProposalRepos,
+  ProposalBody,
+  ProposalInvalid,
+  validateProposal,
+  type ApplyProposalResult,
+} from "./proposal.js";
 import { editSpec, readSpec, relevantSections, renderSpec, writeSpec, type Spec } from "./spec.js";
 import { generateStatus } from "./status.js";
 import { getProject, recordEvent, type Db } from "./store.js";
@@ -60,7 +68,12 @@ export function parseReply(text: string): ParsedReply {
     return { body, records: null, error: `the yagura block is not valid JSON: ${e instanceof Error ? e.message : String(e)}` };
   }
   const parsed = TurnRecords.safeParse(json);
-  if (!parsed.success) return { body, records: null, error: `the yagura block does not match the schema: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}` };
+  if (!parsed.success)
+    return {
+      body,
+      records: null,
+      error: `the yagura block does not match the schema: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`,
+    };
   return { body, records: parsed.data, error: null };
 }
 
@@ -136,7 +149,11 @@ export function assembleContext(parts: ContextParts, budgetTokens: number): Asse
   return { sections: { status, spec, history }, usedTokens: budgetTokens - left, dropped };
 }
 
-const EMPTY_CONTEXT: AssembledContext = { sections: { status: "", spec: "", history: "" }, usedTokens: 0, dropped: { messages: 0, statusTruncated: [], specSections: 0 } };
+const EMPTY_CONTEXT: AssembledContext = {
+  sections: { status: "", spec: "", history: "" },
+  usedTokens: 0,
+  dropped: { messages: 0, statusTruncated: [], specSections: 0 },
+};
 
 export interface WatchmanBrief {
   thread: { id: number; title: string; autonomy: string };
@@ -242,12 +259,20 @@ function describeProposalRow(p: Proposal): string {
   return `### proposal ${p.id} [${p.state}]${result}\n${text}`;
 }
 
-export function buildWatchmanBrief(ctx: { db: Db; boot: RunContext["boot"] }, threadId: number, message: ThreadMessage): { text: string; context: AssembledContext } {
+export function buildWatchmanBrief(
+  ctx: { db: Db; boot: RunContext["boot"] },
+  threadId: number,
+  message: ThreadMessage,
+): { text: string; context: AssembledContext } {
   const { db, boot } = ctx;
   const paths = layout(boot);
   const thread = getThread(db, threadId);
-  const decisions = listDecisions(db, threadId, { activeOnly: true }).map((d) => `- D${d.id}: ${d.text}`).join("\n");
-  const questions = listQuestions(db, threadId, { openOnly: true }).map((q) => `- Q${q.id}: ${q.text}`).join("\n");
+  const decisions = listDecisions(db, threadId, { activeOnly: true })
+    .map((d) => `- D${d.id}: ${d.text}`)
+    .join("\n");
+  const questions = listQuestions(db, threadId, { openOnly: true })
+    .map((q) => `- Q${q.id}: ${q.text}`)
+    .join("\n");
   const all = listProposals(db, threadId);
   const proposals = all
     .filter((p, i) => p.state === "pending" || i === all.length - 1)
@@ -265,7 +290,10 @@ export function buildWatchmanBrief(ctx: { db: Db; boot: RunContext["boot"] }, th
     const project = getProject(db, p);
     const after = project.after.length ? `\n- after: ${project.after.join(", ")}${project.phaseGate ? " (phase gate)" : ""}` : "";
     const summary = latestDelta(db, p)?.summary;
-    return { projectId: p, text: `${generateStatus(db, boot, p, lastDrainEventId(db, p)).replace(/^# /, "### ")}${after}${summary ? `\n- planner's last summary: ${summary}` : ""}` };
+    return {
+      projectId: p,
+      text: `${generateStatus(db, boot, p, lastDrainEventId(db, p)).replace(/^# /, "### ")}${after}${summary ? `\n- planner's last summary: ${summary}` : ""}`,
+    };
   });
   const spec = thread.projects.flatMap((p) => {
     const s = readSpec(paths.spec(p));
@@ -274,11 +302,31 @@ export function buildWatchmanBrief(ctx: { db: Db; boot: RunContext["boot"] }, th
   });
   const history = listMessages(db, threadId).filter((m) => m.id !== message.id);
 
-  const template = renderWatchmanBrief({ thread, decisions: "", questions: "", proposals: "", catalog: "", standing: "", mentioned: "", context: EMPTY_CONTEXT, message: { id: 0, body: "" } });
+  const template = renderWatchmanBrief({
+    thread,
+    decisions: "",
+    questions: "",
+    proposals: "",
+    catalog: "",
+    standing: "",
+    mentioned: "",
+    context: EMPTY_CONTEXT,
+    message: { id: 0, body: "" },
+  });
   const fixed = [template, decisions, questions, proposals, standing, cat, mentioned, message.body];
   const context = assembleContext({ fixed, statuses, spec, history }, resolveSetting(db, "watchman.context_tokens").value);
   return {
-    text: renderWatchmanBrief({ thread, decisions, questions, proposals, catalog: cat, standing, mentioned, context, message: { id: message.id, body: message.body } }),
+    text: renderWatchmanBrief({
+      thread,
+      decisions,
+      questions,
+      proposals,
+      catalog: cat,
+      standing,
+      mentioned,
+      context,
+      message: { id: message.id, body: message.body },
+    }),
     context,
   };
 }
@@ -321,7 +369,9 @@ export function storeTurn(
     if (q.threadId !== threadId) throw new RecordsRejected(`${a.question} belongs to another thread`);
     if (q.answer !== null) throw new RecordsRejected(`${a.question} is already answered`);
   }
-  for (const s of records.spec) if (!linked.has(s.project)) throw new RecordsRejected(`spec edit for ${s.project}, which is not a project of this thread (put a new project's spec in its proposal)`);
+  for (const s of records.spec)
+    if (!linked.has(s.project))
+      throw new RecordsRejected(`spec edit for ${s.project}, which is not a project of this thread (put a new project's spec in its proposal)`);
   if (records.proposal) {
     try {
       validateProposal(db, threadId, records.proposal);
@@ -341,7 +391,8 @@ export function storeTurn(
   const stored = db.transaction(() => {
     const message = addMessage(db, { threadId, role: "watchman", body: reply.body, turnLog: reply.turnLog });
     if (records.title) db.prepare("UPDATE threads SET title = ? WHERE id = ?").run(records.title, threadId);
-    for (const d of records.decisions) addDecision(db, { threadId, text: d.text, sourceMessageId: message.id, supersedes: d.supersedes ? refId(d.supersedes) : null });
+    for (const d of records.decisions)
+      addDecision(db, { threadId, text: d.text, sourceMessageId: message.id, supersedes: d.supersedes ? refId(d.supersedes) : null });
     for (const q of records.questions) addQuestion(db, { threadId, text: q, sourceMessageId: message.id });
     for (const a of records.answered) resolveQuestion(db, refId(a.question), a.answer, message.id);
     for (const p of specs.keys()) recordEvent(db, "project.spec_changed", { projectId: p as ProjectId }, { thread: threadId, message: message.id });
@@ -422,7 +473,10 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
       logPath: log,
     });
     if (session.final && !session.final.isError && !session.timedOut) return { text: session.final.text, problem: null };
-    return { text: null, problem: session.timedOut ? "the watchman ran out of time" : `the watchman ended without a reply (exit ${session.exitCode ?? session.signal})` };
+    return {
+      text: null,
+      problem: session.timedOut ? "the watchman ran out of time" : `the watchman ended without a reply (exit ${session.exitCode ?? session.signal})`,
+    };
   };
   const attemptStore = async (text: string, log: string): Promise<{ stored: ReturnType<typeof storeTurn> | null; body: string; problem: string | null }> => {
     const parsed = parseReply(text);

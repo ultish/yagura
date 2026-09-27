@@ -84,7 +84,10 @@ describe("verify pack", () => {
     const wt = mkdtempSync(join(tmpdir(), "yagura-pack-"));
     expect(loadPack(wt, ".agents/verify")).toEqual({ ok: false, reason: "no verify pack at .agents/verify/verify.json" });
     mkdirSync(join(wt, ".agents/verify"), { recursive: true });
-    writeFileSync(join(wt, ".agents/verify/verify.json"), JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "make test", tier: "unit-verified" }] }));
+    writeFileSync(
+      join(wt, ".agents/verify/verify.json"),
+      JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "make test", tier: "unit-verified" }] }),
+    );
     expect(loadPack(wt, ".agents/verify")).toMatchObject({ ok: true, pack: { checks: [{ name: "unit", timeoutSeconds: 300 }], protected: [] } });
     writeFileSync(join(wt, ".agents/verify/verify.json"), JSON.stringify({ provider: "k8s", checks: [] }));
     const bad = loadPack(wt, ".agents/verify");

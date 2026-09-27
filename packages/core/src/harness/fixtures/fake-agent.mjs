@@ -7,7 +7,13 @@ let brief = "";
 process.stdin.on("data", (d) => (brief += d));
 process.stdin.on("end", () => {
   emit({ type: "system", subtype: "init", session_id: "s1", model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
-  const skills = { worker: ["yagura:yagura-worker", "pstack:poteto-mode"], planner: ["yagura:yagura-planner"], verifier: ["yagura:yagura-verifier"], watchman: ["yagura:yagura-watchman"] }[process.env.YAGURA_ROLE] ?? [];
+  const skills =
+    {
+      worker: ["yagura:yagura-worker", "pstack:poteto-mode"],
+      planner: ["yagura:yagura-planner"],
+      verifier: ["yagura:yagura-verifier"],
+      watchman: ["yagura:yagura-watchman"],
+    }[process.env.YAGURA_ROLE] ?? [];
   if (mode !== "noskills")
     for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
@@ -35,7 +41,8 @@ process.stdin.on("end", () => {
 function verify(mode) {
   emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "s1", name: "Skill", input: { skill: "yagura:yagura-verifier" } }] } });
   const script = `${process.cwd()}/scenario.sh`;
-  const body = mode === "verify-weak" ? "true" : mode === "verify-fail" ? "grep -q 'never there' app/orders.py" : "grep -q 'edited by fake agent' app/orders.py";
+  const body =
+    mode === "verify-weak" ? "true" : mode === "verify-fail" ? "grep -q 'never there' app/orders.py" : "grep -q 'edited by fake agent' app/orders.py";
   writeFileSync(script, `${body}\n`);
   const run = (at) => {
     const out = execSync(`yagura evidence run --at ${at} --label scenario -- sh ${script}`, { encoding: "utf8" });
@@ -54,7 +61,10 @@ function finish(text) {
   const delay = Number(process.env.FAKE_DELAY_MS ?? 0);
   if (delay) {
     emit({ type: "assistant", message: { content: [{ type: "text", text: "Working through the brief." }] } });
-    return setTimeout(() => emit({ type: "result", subtype: "success", is_error: false, result: text, terminal_reason: "completed", total_cost_usd: 0.01 }), delay);
+    return setTimeout(
+      () => emit({ type: "result", subtype: "success", is_error: false, result: text, terminal_reason: "completed", total_cost_usd: 0.01 }),
+      delay,
+    );
   }
   emit({ type: "result", subtype: "success", is_error: false, result: text, terminal_reason: "completed", total_cost_usd: 0.01 });
 }
@@ -82,7 +92,8 @@ function engine(role) {
   if (role === "verifier") {
     const file = /^\+\+\+ b\/(.+)$/m.exec(brief)[1];
     writeFileSync("scenario.sh", `test -f ${file}\n`);
-    const run = (at) => Number(/run:(\d+)/.exec(execSync(`yagura evidence run --at ${at} --label s -- sh ${process.cwd()}/scenario.sh`, { encoding: "utf8" }))[1]);
+    const run = (at) =>
+      Number(/run:(\d+)/.exec(execSync(`yagura evidence run --at ${at} --label s -- sh ${process.cwd()}/scenario.sh`, { encoding: "utf8" }))[1]);
     const base = run("base");
     const head = run("head");
     return finish(`## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Evidence\n- run:${head}\n- run:${base}\n`);
@@ -103,14 +114,29 @@ function watchman() {
     return finish(`Registering it.\n\n\`\`\`yagura\n${JSON.stringify({ proposal })}\n\`\`\``);
   }
   const pack = { provider: "local-process", checks: [{ name: "unit", command: "test -f README.md", tier: "unit-verified" }] };
-  const project = (id, after) => ({ id, goal: `build ${id}`, predicate: "all files landed", repos: ["proto"], merge: "auto", after, spec: `# ${id}\n\n## Scope\nWrite the files.` });
+  const project = (id, after) => ({
+    id,
+    goal: `build ${id}`,
+    predicate: "all files landed",
+    repos: ["proto"],
+    merge: "auto",
+    after,
+    spec: `# ${id}\n\n## Scope\nWrite the files.`,
+  });
   const records = brief.includes("[watchman #")
-    ? { decisions: [{ text: "Timestamps are ignored", supersedes: /^- (D\d+):/m.exec(brief)[1] }], answered: [{ question: /^- (Q\d+):/m.exec(brief)[1], answer: "local" }] }
+    ? {
+        decisions: [{ text: "Timestamps are ignored", supersedes: /^- (D\d+):/m.exec(brief)[1] }],
+        answered: [{ question: /^- (Q\d+):/m.exec(brief)[1], answer: "local" }],
+      }
     : {
         title: "proto chain",
         decisions: [{ text: "Build proto in a new repo" }],
         questions: ["Which environment later?"],
-        proposal: { summary: "two chained projects", repos: [{ id: "proto", description: "a prototype", verifyPack: pack }], projects: [project("proto-a", []), project("proto-b", ["proto-a"])] },
+        proposal: {
+          summary: "two chained projects",
+          repos: [{ id: "proto", description: "a prototype", verifyPack: pack }],
+          projects: [project("proto-a", []), project("proto-b", ["proto-a"])],
+        },
       };
   finish(`Here is the plan.\n\n\`\`\`yagura\n${JSON.stringify(records)}\n\`\`\``);
 }

@@ -76,7 +76,8 @@ export function decideVerdict(input: VerdictInput): VerdictDecision {
     });
 
   const claimed = handoff.verification;
-  if (claimed === "verifier-blocked") return decision("env-blocked", "verifier reported the environment blocked verification", { tier: "verifier-blocked", ...summaries });
+  if (claimed === "verifier-blocked")
+    return decision("env-blocked", "verifier reported the environment blocked verification", { tier: "verifier-blocked", ...summaries });
   if (claimed === "verifier-failed") {
     const failingHead = cited.map((id) => byId.get(id)!).filter((r) => r.at === "head" && !passed(r));
     if (!failingHead.length) return decision("invalid", "verifier-failed without citing a failing run on head");
@@ -92,7 +93,10 @@ export function decideVerdict(input: VerdictInput): VerdictDecision {
     return head && !passed(head);
   });
   if (brokenOnBoth.length)
-    return decision("env-blocked", `pack checks fail on trunk and head alike: ${brokenOnBoth.map((c) => c.name).join(", ")}`, { tier: "verifier-blocked", ...summaries });
+    return decision("env-blocked", `pack checks fail on trunk and head alike: ${brokenOnBoth.map((c) => c.name).join(", ")}`, {
+      tier: "verifier-blocked",
+      ...summaries,
+    });
 
   const scenarioRuns = cited.map((id) => byId.get(id)!).filter((r) => !r.label.startsWith("check:"));
   const refactor = REFACTOR_PLAYBOOKS.has(input.playbook ?? "");
@@ -110,15 +114,22 @@ export function decideVerdict(input: VerdictInput): VerdictDecision {
     return decision("invalid", why, summaries);
   }
   const scenario = proving[0]!;
-  const scenarioSummary = { trunkOutcome: `${summaries.trunkOutcome}; scenario ${outcomeOf(scenario.base)}`, headOutcome: `${summaries.headOutcome}; scenario ${outcomeOf(scenario.head)}` };
+  const scenarioSummary = {
+    trunkOutcome: `${summaries.trunkOutcome}; scenario ${outcomeOf(scenario.base)}`,
+    headOutcome: `${summaries.headOutcome}; scenario ${outcomeOf(scenario.head)}`,
+  };
 
   const proven = strongest(input.checks.filter((c) => checkAt(c.name, "head") && passed(checkAt(c.name, "head")!)).map((c) => c.tier));
   if (!proven) return decision("invalid", "no pack check passed on head, so no tier is proven", scenarioSummary);
   const tier = (PASS_TIERS as readonly string[]).includes(claimed) ? weaker(claimed as PassTier, proven) : proven;
   if (!meetsTier(tier, input.minTier))
     return decision("below-min", `proven tier ${tier} is below the project's minimum ${input.minTier}`, { tier, ...scenarioSummary });
-  return decision("verified", `scenario run:${scenario.head.id} passes on head and ${refactor ? "matches" : "fails on"} trunk (run:${scenario.base.id}); checks prove ${proven}`, {
-    tier,
-    ...scenarioSummary,
-  });
+  return decision(
+    "verified",
+    `scenario run:${scenario.head.id} passes on head and ${refactor ? "matches" : "fails on"} trunk (run:${scenario.base.id}); checks prove ${proven}`,
+    {
+      tier,
+      ...scenarioSummary,
+    },
+  );
 }

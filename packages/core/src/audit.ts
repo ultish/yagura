@@ -10,7 +10,10 @@ const SUBJECT_MAX = 72;
 const BODY_MAX = 1500;
 
 export function commitSubject(goal: string): string {
-  const firstSentence = goal.split(/(?<=[.!?])\s/)[0]!.replace(/\s+/g, " ").trim();
+  const firstSentence = goal
+    .split(/(?<=[.!?])\s/)[0]!
+    .replace(/\s+/g, " ")
+    .trim();
   const subject = firstSentence.replace(/[.]$/, "");
   return subject.length <= SUBJECT_MAX ? subject : `${subject.slice(0, SUBJECT_MAX - 1).trimEnd()}…`;
 }

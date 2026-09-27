@@ -20,7 +20,11 @@ import { createThread, getProposal, getThread, linkThreadProject, listDecisions,
 import { assembleContext, parseReply, runWatchmanTurn, storeTurn, TurnRecords, type ContextParts } from "./watchman.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
-const fake: HarnessAdapter = { id: "claude", command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs")], stdin: run.prompt }), parse: parseClaudeLine };
+const fake: HarnessAdapter = {
+  id: "claude",
+  command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs")], stdin: run.prompt }),
+  parse: parseClaudeLine,
+};
 const tsx = pathToFileURL(join(dirname(createRequire(import.meta.url).resolve("tsx/package.json")), "dist/loader.mjs")).href;
 
 describe("assembleContext", () => {
@@ -109,11 +113,17 @@ describe("watchman turns", () => {
     expect(attempt({ decisions: [{ text: "a" }], answered: [{ question: "Q9", answer: "x" }] })).toThrow(/Q9 does not exist/);
     expect(attempt({ spec: [{ project: "other", section: "S", body: "x" }] })).toThrow(/not a project of this thread/);
     expect(attempt({ proposal: { summary: "s", projects: [{ id: "linked", goal: "g", predicate: "p", repos: ["r"] }] } })).toThrow(/already exists/);
-    expect(attempt({ proposal: { summary: "s", projects: [{ id: "newp", goal: "g", predicate: "p", repos: ["r"], after: ["ghost"] }] } })).toThrow(/after ghost/);
+    expect(attempt({ proposal: { summary: "s", projects: [{ id: "newp", goal: "g", predicate: "p", repos: ["r"], after: ["ghost"] }] } })).toThrow(
+      /after ghost/,
+    );
     expect(listMessages(db, t.id)).toEqual([]);
     expect(listDecisions(db, t.id)).toEqual([]);
 
-    const stored = storeTurn(ctx, t.id, { body: "b", records: TurnRecords.parse({ spec: [{ project: "linked", section: "Scope", body: "all of it" }] }), turnLog: null });
+    const stored = storeTurn(ctx, t.id, {
+      body: "b",
+      records: TurnRecords.parse({ spec: [{ project: "linked", section: "Scope", body: "all of it" }] }),
+      turnLog: null,
+    });
     expect(stored.message.body).toBe("b");
     expect(readFileSync(layout(boot).spec("linked" as ProjectId), "utf8")).toBe("# linked\n\n## Scope\n\nall of it\n");
     expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'project.spec_changed'").get()).toEqual({ n: 1 });
@@ -167,9 +177,15 @@ describe("watchman turns", () => {
     await new Engine(ctx, { tickMs: 50 }).runUntilIdle();
     for (const p of ["proto-a", "proto-b"] as ProjectId[]) {
       expect(getProject(db, p).state).toBe("closed");
-      expect(listUnits(db, p).filter((u) => u.type === "work").every((u) => u.state === "landed")).toBe(true);
+      expect(
+        listUnits(db, p)
+          .filter((u) => u.type === "work")
+          .every((u) => u.state === "landed"),
+      ).toBe(true);
     }
-    const aClosed = db.prepare("SELECT MIN(id) AS id FROM events WHERE project_id = 'proto-a' AND type = 'project.state' AND json_extract(data_json, '$.state') = 'closed'").get() as { id: number };
+    const aClosed = db
+      .prepare("SELECT MIN(id) AS id FROM events WHERE project_id = 'proto-a' AND type = 'project.state' AND json_extract(data_json, '$.state') = 'closed'")
+      .get() as { id: number };
     const bStarted = db.prepare("SELECT MIN(id) AS id FROM events WHERE project_id = 'proto-b' AND type = 'plan.drain_started'").get() as { id: number };
     expect(bStarted.id).toBeGreaterThan(aClosed.id);
 
@@ -177,7 +193,11 @@ describe("watchman turns", () => {
     expect(reports.map((m) => m.body.split("\n")[0])).toEqual(["**proto-a is done.** all landed", "**proto-b is done.** all landed"]);
     expect(reports[0]!.body).toMatch(/### Landed\n- U\d+ write a — landed `[0-9a-f]{10}` on proto, verified unit-verified/);
     expect(reports[0]!.body).toContain("- unit (unit-verified): `test -f README.md`");
-    expect(listGates(db, null, "open").filter((g) => g.kind === "report").map((g) => g.projectId)).toEqual(["proto-a", "proto-b"]);
+    expect(
+      listGates(db, null, "open")
+        .filter((g) => g.kind === "report")
+        .map((g) => g.projectId),
+    ).toEqual(["proto-a", "proto-b"]);
     const files = await git(["ls-tree", "-r", "--name-only", "main"], { cwd: layout(boot).newRepo("proto") });
     expect(files.split("\n").filter((f) => f.startsWith("app/")).length).toBe(6);
   }, 120_000);
@@ -185,7 +205,10 @@ describe("watchman turns", () => {
   it("registers an existing repo from a proposal, checking it before storing and mirroring it on apply", async () => {
     const seed = join(boot.home, "..", "billing-seed");
     write(join(seed, "README.md"), "# billing\n");
-    write(join(seed, ".agents/verify/verify.json"), JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] }));
+    write(
+      join(seed, ".agents/verify/verify.json"),
+      JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] }),
+    );
     await git(["init", "--quiet", "-b", "trunk"], { cwd: seed });
     await commitAll(seed, "init", { name: "t", email: "t@localhost" });
     const origin = join(boot.home, "..", "billing.git");
@@ -215,7 +238,9 @@ describe("watchman turns", () => {
     const bare = join(boot.home, "..", "nopack.git");
     await git(["clone", "--quiet", "--bare", seed, bare]);
     const packless = await runWatchmanTurn(ctx, t.id, `register nopack ${bare}`);
-    expect(packless.problem).toBe("proposal: repo nopack: no verify pack at .agents/verify/verify.json, so nopack-work could never be verified; propose the repo alone and ask the developer to add a verify pack, or leave the project out");
+    expect(packless.problem).toBe(
+      "proposal: repo nopack: no verify pack at .agents/verify/verify.json, so nopack-work could never be verified; propose the repo alone and ask the developer to add a verify pack, or leave the project out",
+    );
     expect(listProposals(db, t.id)).toEqual([]);
   });
 

@@ -48,12 +48,24 @@ function StepRow({ step, start, live }: { step: Step; start: number | null; live
   );
   switch (step.kind) {
     case "skill":
-      return wrap(<span className={`run ${step.ok ? "ok" : "bad"}`}>skill {step.ok ? "✓" : "✕"} {step.skill}</span>);
+      return wrap(
+        <span className={`run ${step.ok ? "ok" : "bad"}`}>
+          skill {step.ok ? "✓" : "✕"} {step.skill}
+        </span>,
+      );
     case "text":
       return wrap(<Markdown text={step.text} />);
     case "final":
       return wrap(
-        <details open style={{ border: `1px solid ${step.isError ? "var(--bad-border)" : "var(--ok-border)"}`, borderRadius: 6, padding: "10px 14px", background: "var(--bg)" }}>
+        <details
+          open
+          style={{
+            border: `1px solid ${step.isError ? "var(--bad-border)" : "var(--ok-border)"}`,
+            borderRadius: 6,
+            padding: "10px 14px",
+            background: "var(--bg)",
+          }}
+        >
           <summary style={{ cursor: "pointer" }} className="mono">
             <span className={step.isError ? "s-bell" : "s-pine"}>{step.isError ? "ended with an error" : "handoff"}</span>
           </summary>
@@ -67,20 +79,54 @@ function StepRow({ step, start, live }: { step: Step; start: number | null; live
       return wrap(
         <details>
           <summary className="mono" style={{ cursor: "pointer", fontSize: 13, display: "flex", gap: 10, alignItems: "center", listStyle: "none" }}>
-            {running && <span className="flame" style={{ width: 9, height: 13, borderRadius: "5px 5px 3px 3px", background: "var(--lamp)", display: "inline-block", flexShrink: 0 }} />}
+            {running && (
+              <span
+                className="flame"
+                style={{ width: 9, height: 13, borderRadius: "5px 5px 3px 3px", background: "var(--lamp)", display: "inline-block", flexShrink: 0 }}
+              />
+            )}
             <span style={{ color: step.isError ? "var(--bell-text)" : "var(--info)" }}>{step.name}</span>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{step.summary}</span>
-            {step.children.length > 0 && <span className="muted" style={{ fontSize: 11.5 }}>{step.children.length} steps</span>}
-            {step.isError && <span className="s-bell" style={{ fontSize: 11.5 }}>error</span>}
+            {step.children.length > 0 && (
+              <span className="muted" style={{ fontSize: 11.5 }}>
+                {step.children.length} steps
+              </span>
+            )}
+            {step.isError && (
+              <span className="s-bell" style={{ fontSize: 11.5 }}>
+                error
+              </span>
+            )}
           </summary>
           {step.diff && (
-            <div className="mono" style={{ fontSize: 12, marginTop: 6, borderLeft: "2px solid var(--btnline)", padding: "4px 10px", background: "var(--bg)", whiteSpace: "pre-wrap", overflowX: "auto" }}>
-              {step.diff.old.split("\n").slice(0, 12).map((l, i) => (
-                <div key={`o${i}`} className="s-bell">- {l}</div>
-              ))}
-              {step.diff.new.split("\n").slice(0, 12).map((l, i) => (
-                <div key={`n${i}`} className="s-pine">+ {l}</div>
-              ))}
+            <div
+              className="mono"
+              style={{
+                fontSize: 12,
+                marginTop: 6,
+                borderLeft: "2px solid var(--btnline)",
+                padding: "4px 10px",
+                background: "var(--bg)",
+                whiteSpace: "pre-wrap",
+                overflowX: "auto",
+              }}
+            >
+              {step.diff.old
+                .split("\n")
+                .slice(0, 12)
+                .map((l, i) => (
+                  <div key={`o${i}`} className="s-bell">
+                    - {l}
+                  </div>
+                ))}
+              {step.diff.new
+                .split("\n")
+                .slice(0, 12)
+                .map((l, i) => (
+                  <div key={`n${i}`} className="s-pine">
+                    + {l}
+                  </div>
+                ))}
             </div>
           )}
           {step.children.length > 0 && (
@@ -91,7 +137,20 @@ function StepRow({ step, start, live }: { step: Step; start: number | null; live
             </div>
           )}
           {step.output !== null && (
-            <pre className="mono" style={{ fontSize: 12, margin: "6px 0 0", padding: "8px 10px", background: "var(--bg)", border: "1px solid var(--line2)", borderRadius: 4, maxHeight: 320, overflow: "auto", whiteSpace: "pre-wrap" }}>
+            <pre
+              className="mono"
+              style={{
+                fontSize: 12,
+                margin: "6px 0 0",
+                padding: "8px 10px",
+                background: "var(--bg)",
+                border: "1px solid var(--line2)",
+                borderRadius: 4,
+                maxHeight: 320,
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+              }}
+            >
               {step.output.length > 6000 ? `${step.output.slice(0, 6000)}\n… (${step.output.length - 6000} more characters)` : step.output || "(no output)"}
             </pre>
           )}
@@ -109,7 +168,14 @@ function Meter({ label, value, max, text }: { label: string; value: number; max:
         <span className="muted">{label}</span>
         <span>{text}</span>
       </div>
-      <div role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={max} aria-valuenow={value} style={{ height: 6, background: "var(--line2)", borderRadius: 3, marginTop: 6 }}>
+      <div
+        role="meter"
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        style={{ height: 6, background: "var(--line2)", borderRadius: 3, marginTop: 6 }}
+      >
         <div style={{ width: `${pct}%`, height: 6, background: pct > 85 ? "var(--bell)" : "var(--lamp)", borderRadius: 3 }} />
       </div>
     </div>
@@ -118,7 +184,12 @@ function Meter({ label, value, max, text }: { label: string; value: number; max:
 
 function EvidenceGrid({ runs }: { runs: EvidenceRun[] }) {
   const labels = [...new Set(runs.map((r) => r.label))];
-  if (!labels.length) return <div className="muted" style={{ fontSize: 12.5 }}>No evidence captured yet.</div>;
+  if (!labels.length)
+    return (
+      <div className="muted" style={{ fontSize: 12.5 }}>
+        No evidence captured yet.
+      </div>
+    );
   const cell = (label: string, at: "base" | "head") => {
     const r = runs.filter((x) => x.label === label && x.at === at).at(-1);
     if (!r) return <span className="run wait">—</span>;
@@ -160,11 +231,17 @@ function statusOf(d: AttemptDetail, now: number, lastActivity: string | null): {
   const took = a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "";
   switch (a.state) {
     case "running":
-      return { text: `${role} running for ${a.startedAt ? duration(now - Date.parse(a.startedAt)) : "a moment"}.${lastActivity ? ` Now: ${lastActivity}` : ""}`, tone: "lamp" };
+      return {
+        text: `${role} running for ${a.startedAt ? duration(now - Date.parse(a.startedAt)) : "a moment"}.${lastActivity ? ` Now: ${lastActivity}` : ""}`,
+        tone: "lamp",
+      };
     case "queued":
       return { text: `Queued${d.waiting ? `: ${d.waiting}` : ""}.`, tone: "muted" };
     case "handed_off":
-      return { text: `Handed off${a.handoffStatus ? `: ${a.handoffStatus}` : ""} after ${took}.${a.missingSkills.length ? ` Skipped ${a.missingSkills.join(", ")}, so yagura rejected it.` : ""}`, tone: a.missingSkills.length ? "bell" : a.handoffStatus === "success" ? "pine" : "info" };
+      return {
+        text: `Handed off${a.handoffStatus ? `: ${a.handoffStatus}` : ""} after ${took}.${a.missingSkills.length ? ` Skipped ${a.missingSkills.join(", ")}, so yagura rejected it.` : ""}`,
+        tone: a.missingSkills.length ? "bell" : a.handoffStatus === "success" ? "pine" : "info",
+      };
     case "failed":
       return { text: `Failed${a.failureMode ? ` (${a.failureMode})` : ""} after ${took}.`, tone: "bell" };
     case "stopped":
@@ -180,8 +257,18 @@ export function Agent({ attemptId }: { attemptId: number }) {
   const timeline = useMemo(() => buildTimeline(lines), [lines]);
   const [stopping, setStopping] = useState(false);
   const action = useAction();
-  if (error) return <main style={{ padding: 36 }} className="s-bell">{error}</main>;
-  if (!d) return <main style={{ padding: 36 }} className="muted">Loading…</main>;
+  if (error)
+    return (
+      <main style={{ padding: 36 }} className="s-bell">
+        {error}
+      </main>
+    );
+  if (!d)
+    return (
+      <main style={{ padding: 36 }} className="muted">
+        Loading…
+      </main>
+    );
   const a = d.attempt;
   const u = d.unit;
   const role = u.type === "verify" ? "verifier" : u.type === "plan" ? "planner" : "worker";
@@ -193,7 +280,12 @@ export function Agent({ attemptId }: { attemptId: number }) {
   const verifierRuns = u.type === "verify" ? d.runs : (d.verifications.at(-1)?.attempts.at(-1)?.runs ?? []);
   const lastVerification = d.verifications.at(-1);
   const briefGoal = d.brief ? /## GOAL\n([\s\S]*?)\n##/.exec(d.brief)?.[1]?.trim() : null;
-  const acceptCount = d.brief ? (/## ACCEPTANCE\n([\s\S]*?)\n##/.exec(d.brief)?.[1]?.split("\n").filter((l) => l.startsWith("- ")).length ?? 0) : 0;
+  const acceptCount = d.brief
+    ? (/## ACCEPTANCE\n([\s\S]*?)\n##/
+        .exec(d.brief)?.[1]
+        ?.split("\n")
+        .filter((l) => l.startsWith("- ")).length ?? 0)
+    : 0;
   return (
     <main>
       <section style={{ padding: "22px 36px 14px", display: "flex", flexDirection: "column", gap: 8, borderBottom: "1px solid var(--line)" }}>
@@ -224,7 +316,14 @@ export function Agent({ attemptId }: { attemptId: number }) {
             </div>
           )}
         </div>
-        {stopping && <NoteForm label="Stop" placeholder="What should the next attempt do differently?" submit={(note) => api(`/api/attempts/${a.id}/stop`, { body: { note } })} onDone={() => setStopping(false)} />}
+        {stopping && (
+          <NoteForm
+            label="Stop"
+            placeholder="What should the next attempt do differently?"
+            submit={(note) => api(`/api/attempts/${a.id}/stop`, { body: { note } })}
+            onDone={() => setStopping(false)}
+          />
+        )}
         <div className={`s-${status.tone}`} style={{ fontSize: 14 }}>
           {status.text}
         </div>
@@ -258,7 +357,18 @@ export function Agent({ attemptId }: { attemptId: number }) {
             <StepRow key={s.id} step={s} start={start} live={!!live} />
           ))}
         </section>
-        <aside style={{ flex: "0 1 400px", minWidth: 300, borderLeft: "1px solid var(--line)", padding: "18px 24px 48px", display: "flex", flexDirection: "column", gap: 22, background: "var(--bg)" }}>
+        <aside
+          style={{
+            flex: "0 1 400px",
+            minWidth: 300,
+            borderLeft: "1px solid var(--line)",
+            padding: "18px 24px 48px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 22,
+            background: "var(--bg)",
+          }}
+        >
           <div>
             <Meter label="context" value={ctxPeak} max={window} text={`${tokens(ctxPeak)} of ${tokens(window)}`} />
             <Meter label="timebox" value={elapsed} max={d.timeboxSeconds * 1000} text={`${duration(elapsed)} of ${duration(d.timeboxSeconds * 1000)}`} />
@@ -269,13 +379,20 @@ export function Agent({ attemptId }: { attemptId: number }) {
             <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
               {acceptCount ? `${acceptCount} acceptance lines · ` : ""}verify <span className="mono">{u.verify ?? "—"}</span>
             </div>
-            {u.notes.length > 0 && <div style={{ fontSize: 13, marginTop: 4 }} className="s-lamp">Notes: {u.notes.join(" / ")}</div>}
+            {u.notes.length > 0 && (
+              <div style={{ fontSize: 13, marginTop: 4 }} className="s-lamp">
+                Notes: {u.notes.join(" / ")}
+              </div>
+            )}
             {d.brief && (
               <details style={{ marginTop: 6 }}>
                 <summary className="mono" style={{ fontSize: 12, cursor: "pointer", color: "var(--amber)" }}>
                   the whole brief
                 </summary>
-                <pre className="mono" style={{ fontSize: 11.5, whiteSpace: "pre-wrap", maxHeight: 420, overflow: "auto", background: "var(--bg2)", padding: 10, borderRadius: 4 }}>
+                <pre
+                  className="mono"
+                  style={{ fontSize: 11.5, whiteSpace: "pre-wrap", maxHeight: 420, overflow: "auto", background: "var(--bg2)", padding: 10, borderRadius: 4 }}
+                >
                   {d.brief}
                 </pre>
               </details>
@@ -285,7 +402,11 @@ export function Agent({ attemptId }: { attemptId: number }) {
             <div>
               <h2 className="h2">Trunk vs head</h2>
               <div className="muted" style={{ fontSize: 12.5, margin: "4px 0 6px" }}>
-                {u.type === "verify" ? "runs this verifier captured" : lastVerification ? `captured by the verifier, U${lastVerification.unit.seq} (${lastVerification.unit.state})` : "filled in by the verifier after hand-off"}
+                {u.type === "verify"
+                  ? "runs this verifier captured"
+                  : lastVerification
+                    ? `captured by the verifier, U${lastVerification.unit.seq} (${lastVerification.unit.state})`
+                    : "filled in by the verifier after hand-off"}
                 {u.verdict ? ` · verdict ${u.verdict.tier}` : ""}
               </div>
               <EvidenceGrid runs={verifierRuns} />
@@ -318,15 +439,32 @@ export function Agent({ attemptId }: { attemptId: number }) {
 
 export function UnitAgent({ projectId, seq, n }: { projectId: string; seq: number; n: number | null }) {
   const { data, error } = useApi<ProjectDetail>(`/api/projects/${projectId}`);
-  if (error) return <main style={{ padding: 36 }} className="s-bell">{error}</main>;
-  if (!data) return <main style={{ padding: 36 }} className="muted">Loading…</main>;
+  if (error)
+    return (
+      <main style={{ padding: 36 }} className="s-bell">
+        {error}
+      </main>
+    );
+  if (!data)
+    return (
+      <main style={{ padding: 36 }} className="muted">
+        Loading…
+      </main>
+    );
   const unit = data.units.find((u) => u.seq === seq);
   const attempt = unit && (n ? unit.attempts.find((a) => a.n === n) : (unit.attempts.find((a) => a.state === "running") ?? unit.attempts.at(-1)));
-  if (!unit) return <main style={{ padding: 36 }}>No U{seq} in {projectId}.</main>;
+  if (!unit)
+    return (
+      <main style={{ padding: 36 }}>
+        No U{seq} in {projectId}.
+      </main>
+    );
   if (!attempt)
     return (
       <main style={{ padding: 36 }}>
-        <h1 className="serif">U{seq}: {unit.goal}</h1>
+        <h1 className="serif">
+          U{seq}: {unit.goal}
+        </h1>
         <p className="muted">No agent has run for this unit yet ({unit.state}).</p>
         <Link to={`/p/${projectId}`}>Back to {projectId}</Link>
       </main>

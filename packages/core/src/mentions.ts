@@ -22,7 +22,8 @@ export function parseMentions(text: string): string[] {
 const exists = (db: Db, sql: string, ...args: unknown[]) => !!db.prepare(sql).get(...args);
 
 export function resolveMention(db: Db, token: string): Mention | null {
-  if (token.startsWith("thread:")) return exists(db, "SELECT 1 FROM threads WHERE id = ?", Number(token.slice(7))) ? { kind: "thread", ref: token, projectId: null } : null;
+  if (token.startsWith("thread:"))
+    return exists(db, "SELECT 1 FROM threads WHERE id = ?", Number(token.slice(7))) ? { kind: "thread", ref: token, projectId: null } : null;
   if (token.startsWith("repo:")) return exists(db, "SELECT 1 FROM repos WHERE id = ?", token.slice(5)) ? { kind: "repo", ref: token, projectId: null } : null;
   const m = /^([a-z][a-z0-9-]*)(?:\/U(\d+)(?:\.(\d+))?)?$/.exec(token);
   if (!m || !exists(db, "SELECT 1 FROM projects WHERE id = ?", m[1])) return null;
@@ -78,7 +79,9 @@ export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[]
   const unitRef = /^([a-z][a-z0-9-]*)\/(?:u(\d*)(?:\.(\d*))?)?$/.exec(q);
   if (unitRef) {
     const units = db
-      .prepare("SELECT id, seq, type, state, goal FROM units WHERE project_id = ? AND type IN ('work', 'verify') AND CAST(seq AS TEXT) LIKE ? ORDER BY seq DESC LIMIT ?")
+      .prepare(
+        "SELECT id, seq, type, state, goal FROM units WHERE project_id = ? AND type IN ('work', 'verify') AND CAST(seq AS TEXT) LIKE ? ORDER BY seq DESC LIMIT ?",
+      )
       .all(unitRef[1], `${unitRef[2] ?? ""}%`, limit) as { id: number; seq: number; type: string; state: string; goal: string }[];
     for (const u of units) {
       if (unitRef[3] !== undefined) {
@@ -89,7 +92,9 @@ export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[]
     return out.slice(0, limit);
   }
   const like = `%${q}%`;
-  for (const p of db.prepare("SELECT id, state, goal FROM projects WHERE id LIKE ? OR name LIKE ? ORDER BY id LIKE ? DESC, created_at DESC LIMIT ?").all(like, like, `${q}%`, limit) as {
+  for (const p of db
+    .prepare("SELECT id, state, goal FROM projects WHERE id LIKE ? OR name LIKE ? ORDER BY id LIKE ? DESC, created_at DESC LIMIT ?")
+    .all(like, like, `${q}%`, limit) as {
     id: string;
     state: string;
     goal: string;
@@ -99,12 +104,17 @@ export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[]
     .prepare("SELECT project_id, seq, state, goal FROM units WHERE type = 'work' AND goal LIKE ? ORDER BY updated_at DESC LIMIT ?")
     .all(like, q.length >= 3 ? limit : 0) as { project_id: string; seq: number; state: string; goal: string }[])
     out.push({ token: `${u.project_id}/U${u.seq}`, kind: "unit", label: `${u.state} · ${u.goal}` });
-  for (const t of db.prepare("SELECT id, title FROM threads WHERE title LIKE ? OR CAST(id AS TEXT) = ? ORDER BY updated_at DESC LIMIT ?").all(like, q.replace(/^thread:?/, ""), limit) as {
+  for (const t of db
+    .prepare("SELECT id, title FROM threads WHERE title LIKE ? OR CAST(id AS TEXT) = ? ORDER BY updated_at DESC LIMIT ?")
+    .all(like, q.replace(/^thread:?/, ""), limit) as {
     id: number;
     title: string;
   }[])
     out.push({ token: `thread:${t.id}`, kind: "thread", label: `thread · ${t.title}` });
-  for (const r of db.prepare("SELECT id, url FROM repos WHERE id LIKE ? ORDER BY id LIMIT ?").all(like.replace(/^%repo:?/, "%"), limit) as { id: string; url: string }[])
+  for (const r of db.prepare("SELECT id, url FROM repos WHERE id LIKE ? ORDER BY id LIMIT ?").all(like.replace(/^%repo:?/, "%"), limit) as {
+    id: string;
+    url: string;
+  }[])
     out.push({ token: `repo:${r.id}`, kind: "repo", label: `repo · ${r.url}` });
   return out.slice(0, limit);
 }
@@ -123,7 +133,9 @@ function describeUnit(db: Db, boot: Bootstrap, unit: Unit, onlyAttempt: number |
   if (unit.state === "blocked" && blocked) lines.push(`- blocked: ${JSON.stringify(JSON.parse(blocked.data_json).reason ?? "no reason recorded")}`);
   if (unit.notes.length) lines.push(`- notes: ${unit.notes.join(" / ")}`);
   for (const a of attempts) {
-    lines.push(`- attempt ${a.n}: ${a.state}${a.handoffStatus ? ` ${a.handoffStatus}` : ""}${a.failureMode ? ` (${a.failureMode})` : ""} · ${a.model ?? a.harness}${a.missingSkills.length ? ` · skipped ${a.missingSkills.join(", ")}` : ""}${a.stopNote ? ` · stopped: ${a.stopNote}` : ""}`);
+    lines.push(
+      `- attempt ${a.n}: ${a.state}${a.handoffStatus ? ` ${a.handoffStatus}` : ""}${a.failureMode ? ` (${a.failureMode})` : ""} · ${a.model ?? a.harness}${a.missingSkills.length ? ` · skipped ${a.missingSkills.join(", ")}` : ""}${a.stopNote ? ` · stopped: ${a.stopNote}` : ""}`,
+    );
   }
   const last = attempts.filter((a) => a.endedAt).at(-1);
   const path = last ? layout(boot).handoff(unit.projectId, unit.seq, last.n) : null;
@@ -144,9 +156,14 @@ export function describeMention(db: Db, boot: Bootstrap, m: Mention): string {
   if (m.kind === "thread") {
     const id = Number(m.ref.slice(7));
     const t = db.prepare("SELECT title, state FROM threads WHERE id = ?").get(id) as { title: string; state: string };
-    const decisions = db.prepare("SELECT id, text FROM thread_decisions WHERE thread_id = ? AND superseded_by IS NULL ORDER BY id").all(id) as { id: number; text: string }[];
+    const decisions = db.prepare("SELECT id, text FROM thread_decisions WHERE thread_id = ? AND superseded_by IS NULL ORDER BY id").all(id) as {
+      id: number;
+      text: string;
+    }[];
     const projects = (db.prepare("SELECT project_id FROM thread_projects WHERE thread_id = ?").all(id) as { project_id: string }[]).map((r) => r.project_id);
-    return [`- ${t.title} [${t.state}]${projects.length ? ` · projects ${projects.join(", ")}` : ""}`, ...decisions.map((d) => `- D${d.id}: ${d.text}`)].join("\n");
+    return [`- ${t.title} [${t.state}]${projects.length ? ` · projects ${projects.join(", ")}` : ""}`, ...decisions.map((d) => `- D${d.id}: ${d.text}`)].join(
+      "\n",
+    );
   }
   const [, seq, n] = /\/U(\d+)(?:\.(\d+))?$/.exec(m.ref)!;
   const project = getProject(db, m.projectId!);

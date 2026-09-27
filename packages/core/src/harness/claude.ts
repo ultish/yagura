@@ -11,8 +11,7 @@ type Usage = {
 
 function stringifyContent(content: unknown): string {
   if (typeof content === "string") return content;
-  if (Array.isArray(content))
-    return content.map((c) => (typeof c === "object" && c && "text" in c ? String(c.text) : JSON.stringify(c))).join("\n");
+  if (Array.isArray(content)) return content.map((c) => (typeof c === "object" && c && "text" in c ? String(c.text) : JSON.stringify(c))).join("\n");
   return JSON.stringify(content ?? "");
 }
 

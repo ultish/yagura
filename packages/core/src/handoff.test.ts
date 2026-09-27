@@ -22,7 +22,21 @@ const brief: RenderedBrief = {
 describe("brief", () => {
   it("renders every section a worker needs", () => {
     const text = renderBrief(brief);
-    for (const h of ["GOAL", "REPO", "SCOPE", "CONTEXT", "READONLY", "ACCEPTANCE", "VERIFY", "ENV", "TIMEBOX", "FORBIDDEN", "METHOD", "REPORT", "STANDING ORDERS"])
+    for (const h of [
+      "GOAL",
+      "REPO",
+      "SCOPE",
+      "CONTEXT",
+      "READONLY",
+      "ACCEPTANCE",
+      "VERIFY",
+      "ENV",
+      "TIMEBOX",
+      "FORBIDDEN",
+      "METHOD",
+      "REPORT",
+      "STANDING ORDERS",
+    ])
       expect(text).toContain(`## ${h}\n`);
     expect(text).toContain("- app/**");
     expect(text).toContain("1. Keep the stdlib-only constraint.");

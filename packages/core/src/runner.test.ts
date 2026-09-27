@@ -67,7 +67,11 @@ describe("runWorkUnit", () => {
     expect(readFileSync(join(attempt.worktreePath!, "app/orders.py"), "utf8")).toContain("brief had GOAL: true");
     expect(readFileSync(paths.brief(project, 1, 1), "utf8")).toContain("## ACCEPTANCE\n- SAVE10 takes 10% off");
     expect(readFileSync(paths.handoff(project, 1, 1), "utf8")).toMatch(/^## Status\nsuccess/);
-    expect(readFileSync(paths.log(project, 1, 1), "utf8").trim().split("\n")).toHaveLength(6);
+    expect(
+      readFileSync(paths.log(project, 1, 1), "utf8")
+        .trim()
+        .split("\n"),
+    ).toHaveLength(6);
     expect(await git(["log", "-1", "--format=%s"], { cwd: attempt.worktreePath! })).toBe("fake agent work");
     expect(await git(["diff", "--name-only", attempt.baseSha!, "HEAD"], { cwd: attempt.worktreePath! })).toBe("app/orders.py");
     expect(await git(["status", "--porcelain"], { cwd: attempt.worktreePath! })).toBe("");
@@ -134,7 +138,17 @@ describe("runWorkUnit", () => {
   it("stops a running agent on request and puts the unit back with the operator's note", async () => {
     const { stopAttempt } = await import("./agent.js");
     process.env.FAKE_MODE = "hang";
-    const unit = addUnit(db, { projectId: project, type: "work", repoId: "testbed" as RepoId, goal: "g", writeScope: ["app/**"], acceptance: ["a"], verify: "v", timeboxSeconds: 60, maxAttempts: 1 });
+    const unit = addUnit(db, {
+      projectId: project,
+      type: "work",
+      repoId: "testbed" as RepoId,
+      goal: "g",
+      writeScope: ["app/**"],
+      acceptance: ["a"],
+      verify: "v",
+      timeboxSeconds: 60,
+      maxAttempts: 1,
+    });
     transitionUnit(db, unit.id, "ready");
     const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli: [] }, unit.id);
     let attempt = listAttempts(db, unit.id)[0];

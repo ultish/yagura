@@ -6,7 +6,10 @@ import { createInterface } from "node:readline";
 const root = new URL("..", import.meta.url).pathname;
 const env = { ...process.env, YAGURA_HOME: process.env.YAGURA_HOME ?? join(homedir(), ".yagura-dev"), YAGURA_PORT: process.env.YAGURA_PORT ?? "7300" };
 
-const built = spawnSync("pnpm", ["--filter", "@yagura/core", "--filter", "@yagura/daemon", "--filter", "@yagura/cli", "build"], { cwd: root, stdio: "inherit" });
+const built = spawnSync("pnpm", ["--filter", "@yagura/core", "--filter", "@yagura/daemon", "--filter", "@yagura/cli", "build"], {
+  cwd: root,
+  stdio: "inherit",
+});
 if (built.status !== 0) process.exit(built.status ?? 1);
 
 const COLORS = { core: 36, daemon: 33, cli: 35, yagura: 32, web: 34 };
@@ -24,9 +27,19 @@ function run(name, cmd, args, filter = () => true) {
 }
 
 const tscFilter = (line) => /error|Found [1-9]/.test(line);
-for (const [name, pkg] of [["core", "@yagura/core"], ["daemon", "@yagura/daemon"], ["cli", "@yagura/cli"]])
+for (const [name, pkg] of [
+  ["core", "@yagura/core"],
+  ["daemon", "@yagura/daemon"],
+  ["cli", "@yagura/cli"],
+])
   run(name, "pnpm", ["--filter", pkg, "exec", "tsc", "--watch", "--preserveWatchOutput"], tscFilter);
-run("yagura", process.execPath, ["--watch-path=packages/core/dist", "--watch-path=apps/daemon/dist", "--watch-path=apps/cli/dist", "apps/cli/dist/main.js", "daemon"]);
+run("yagura", process.execPath, [
+  "--watch-path=packages/core/dist",
+  "--watch-path=apps/daemon/dist",
+  "--watch-path=apps/cli/dist",
+  "apps/cli/dist/main.js",
+  "daemon",
+]);
 run("web", "pnpm", ["--filter", "@yagura/web", "exec", "vite", "--clearScreen", "false"]);
 
 console.log(`yagura dev: home ${env.YAGURA_HOME}, API on :${env.YAGURA_PORT}, dashboard with hot reload on http://localhost:5173`);

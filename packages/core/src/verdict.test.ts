@@ -40,7 +40,16 @@ function scenario(opts: { checkBase?: number; checkHead?: number; scenBase?: num
     run("base", "discount", "sh /s/discount.sh", opts.scenBase ?? 1),
     run("head", "discount", "sh /s/discount.sh", opts.scenHead ?? 0),
   ];
-  return { runs, base: (h: Handoff | null): VerdictInput => ({ handoff: h, runs, checks: [{ name: "unit", tier: "unit-verified" }], playbook: "feature", minTier: "unit-verified" }) };
+  return {
+    runs,
+    base: (h: Handoff | null): VerdictInput => ({
+      handoff: h,
+      runs,
+      checks: [{ name: "unit", tier: "unit-verified" }],
+      playbook: "feature",
+      minTier: "unit-verified",
+    }),
+  };
 }
 
 describe("decideVerdict", () => {
@@ -75,7 +84,10 @@ describe("decideVerdict", () => {
   it("requires the scenario to have run on trunk as well as head", () => {
     const { runs, base } = scenario();
     const input = base(handoff("unit-verified", ["run:4"]));
-    expect(decideVerdict({ ...input, runs: runs.filter((r) => r.id !== 3) })).toMatchObject({ outcome: "invalid", reason: expect.stringMatching(/both trunk and head/) });
+    expect(decideVerdict({ ...input, runs: runs.filter((r) => r.id !== 3) })).toMatchObject({
+      outcome: "invalid",
+      reason: expect.stringMatching(/both trunk and head/),
+    });
   });
 
   it("rejects citations of runs yagura never recorded, and runs on tampered checkouts", () => {
@@ -94,7 +106,10 @@ describe("decideVerdict", () => {
 
   it("holds a pass below the project minimum", () => {
     const { base } = scenario();
-    expect(decideVerdict({ ...base(handoff("unit-verified", ["run:4"])), minTier: "deployed-verified" })).toMatchObject({ outcome: "below-min", tier: "unit-verified" });
+    expect(decideVerdict({ ...base(handoff("unit-verified", ["run:4"])), minTier: "deployed-verified" })).toMatchObject({
+      outcome: "below-min",
+      tier: "unit-verified",
+    });
   });
 
   it("accepts a refactor whose scenario behaves identically on trunk and head", () => {

@@ -28,7 +28,9 @@ export async function startDaemon(cli: string[]): Promise<void> {
   const webDir = fileURLToPath(new URL("../../web/dist", import.meta.url));
   const app = createApp({ db, boot, token, cli, webDir: existsSync(join(webDir, "index.html")) ? webDir : null });
   const server = serve({ fetch: app.fetch, hostname: boot.bind, port: boot.port });
-  log(`yagura daemon on http://${boot.bind}:${boot.port}${webDir && existsSync(join(webDir, "index.html")) ? "" : " (API only; build apps/web for the dashboard)"}${token ? ` (token in ${boot.tokenFile})` : ""}, home ${boot.home}`);
+  log(
+    `yagura daemon on http://${boot.bind}:${boot.port}${webDir && existsSync(join(webDir, "index.html")) ? "" : " (API only; build apps/web for the dashboard)"}${token ? ` (token in ${boot.tokenFile})` : ""}, home ${boot.home}`,
+  );
 
   const abort = new AbortController();
   const shutdown = () => {

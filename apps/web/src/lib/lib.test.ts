@@ -37,9 +37,33 @@ describe("buildTimeline", () => {
 
 const unit = (over: Partial<UnitView>): UnitView =>
   ({
-    id: 1 as never, projectId: "p", seq: 1, type: "work", state: "ready", repoId: "r", targetUnitId: null, goal: "g", writeScope: [], forbidScope: [], acceptance: [], verify: null,
-    context: [], measurements: [], notes: [], refs: [], landedSha: null, playbook: null, timeboxSeconds: 1800, maxAttempts: 2, createdByDrainId: null, createdAt: "", updatedAt: "",
-    attempts: [], verdict: null, blockedReason: null, ...over,
+    id: 1 as never,
+    projectId: "p",
+    seq: 1,
+    type: "work",
+    state: "ready",
+    repoId: "r",
+    targetUnitId: null,
+    goal: "g",
+    writeScope: [],
+    forbidScope: [],
+    acceptance: [],
+    verify: null,
+    context: [],
+    measurements: [],
+    notes: [],
+    refs: [],
+    landedSha: null,
+    playbook: null,
+    timeboxSeconds: 1800,
+    maxAttempts: 2,
+    createdByDrainId: null,
+    createdAt: "",
+    updatedAt: "",
+    attempts: [],
+    verdict: null,
+    blockedReason: null,
+    ...over,
   }) as UnitView;
 const attempt = (over: object) => ({ id: 9, unitId: 1, n: 1, state: "handed_off", startedAt: "2026-09-27T00:00:00Z", endedAt: null, ...over }) as never;
 const detail = (units: UnitView[], over: Partial<ProjectDetail> = {}): ProjectDetail => ({ units, gates: [], waiting: [], deps: [], ...over }) as ProjectDetail;
@@ -54,7 +78,12 @@ describe("unit stages and status", () => {
 
   it("puts a flame on the work stage while a worker runs", () => {
     const u = unit({ state: "running", attempts: [attempt({ state: "running" })] });
-    expect(stages(detail([u]), u, NOW).map((s) => [s.light, s.label])).toEqual([["lit", null], ["flame", "worker · 12m"], ["off", null], ["off", null]]);
+    expect(stages(detail([u]), u, NOW).map((s) => [s.light, s.label])).toEqual([
+      ["lit", null],
+      ["flame", "worker · 12m"],
+      ["off", null],
+      ["off", null],
+    ]);
     expect(statusLine(detail([u]), u, NOW)).toEqual({ text: "Worker running for 12m (try 1 of 2).", tone: "lamp" });
   });
 
@@ -85,8 +114,23 @@ describe("unit stages and status", () => {
 
 const summary = (id: string, over: Partial<ProjectSummary> & { state?: string; after?: string[]; closedAt?: string | null } = {}): ProjectSummary =>
   ({
-    project: { id, state: over.state ?? "active", after: over.after ?? [], closedAt: over.closedAt ?? null, andonReason: null, createdAt: `2026-09-2${id.length}` },
-    workCounts: {}, running: 0, planning: false, maxInFlight: 3, openGates: 0, blocked: 0, lastLanded: null, summary: null, ...over,
+    project: {
+      id,
+      state: over.state ?? "active",
+      after: over.after ?? [],
+      closedAt: over.closedAt ?? null,
+      andonReason: null,
+      createdAt: `2026-09-2${id.length}`,
+    },
+    workCounts: {},
+    running: 0,
+    planning: false,
+    maxInFlight: 3,
+    openGates: 0,
+    blocked: 0,
+    lastLanded: null,
+    summary: null,
+    ...over,
   }) as ProjectSummary;
 
 describe("layoutScene", () => {
@@ -129,7 +173,13 @@ describe("layoutScene", () => {
 
 describe("mentions and formatting", () => {
   it("maps mention tokens to pages", () => {
-    expect(["kafka-diff", "kafka-diff/U3", "kafka-diff/U3.2", "thread:4", "repo:jsondiff"].map(mentionHref)).toEqual(["/p/kafka-diff", "/p/kafka-diff/u/3", "/p/kafka-diff/u/3/2", "/talk/4", "/repos#jsondiff"]);
+    expect(["kafka-diff", "kafka-diff/U3", "kafka-diff/U3.2", "thread:4", "repo:jsondiff"].map(mentionHref)).toEqual([
+      "/p/kafka-diff",
+      "/p/kafka-diff/u/3",
+      "/p/kafka-diff/u/3/2",
+      "/talk/4",
+      "/repos#jsondiff",
+    ]);
   });
 
   it("finds the mention being typed at the caret", () => {

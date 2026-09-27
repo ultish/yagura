@@ -60,7 +60,9 @@ describe("registering an existing repo", () => {
     const dir = await workingCopy("scratch");
     await expect(registerRepo({ db, boot }, { source: dir })).rejects.toThrow(`${dir} is a working copy; give the repo's git URL instead`);
     await git(["remote", "add", "origin", "git@gitlab.internal:team/scratch.git"], { cwd: dir });
-    await expect(registerRepo({ db, boot }, { source: dir })).rejects.toThrow(`${dir} is a working copy; give the repo's git URL instead (its origin is git@gitlab.internal:team/scratch.git)`);
+    await expect(registerRepo({ db, boot }, { source: dir })).rejects.toThrow(
+      `${dir} is a working copy; give the repo's git URL instead (its origin is git@gitlab.internal:team/scratch.git)`,
+    );
     expect(existsSync(layout(boot).mirror("scratch" as RepoId))).toBe(false);
   });
 

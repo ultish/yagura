@@ -88,7 +88,8 @@ export async function acquireLease(
   let queuedId: LeaseId | null = null;
   if (!granted) {
     queuedId = Number(
-      db.prepare("INSERT INTO leases (environment_id, attempt_id, state, requested_at) VALUES (?, ?, 'queued', ?)").run(env.id, attemptId, now()).lastInsertRowid,
+      db.prepare("INSERT INTO leases (environment_id, attempt_id, state, requested_at) VALUES (?, ?, 'queued', ?)").run(env.id, attemptId, now())
+        .lastInsertRowid,
     ) as LeaseId;
     recordEvent(db, "lease.queued", { attemptId }, { environment: env.id, lease: queuedId });
   }
@@ -108,8 +109,7 @@ export async function acquireLease(
 
 export async function releaseLease(db: Db, boot: Bootstrap, leaseId: LeaseId, state: "released" | "reaped" = "released"): Promise<void> {
   const row = db.prepare("SELECT * FROM leases WHERE id = ?").get(leaseId) as
-    | { environment_id: EnvironmentId; slot: string; vars_json: string; state: string; attempt_id: AttemptId }
-    | undefined;
+    { environment_id: EnvironmentId; slot: string; vars_json: string; state: string; attempt_id: AttemptId } | undefined;
   if (!row || row.state !== "active") return;
   const env = getEnvironment(db, row.environment_id);
   await providerFor(env).destroySlot(env, { id: leaseId, slot: row.slot, vars: JSON.parse(row.vars_json) }, boot);
@@ -119,8 +119,7 @@ export async function releaseLease(db: Db, boot: Bootstrap, leaseId: LeaseId, st
 
 export function activeLease(db: Db, attemptId: AttemptId): Lease | null {
   const row = db.prepare("SELECT * FROM leases WHERE attempt_id = ? AND state = 'active'").get(attemptId) as
-    | { id: LeaseId; environment_id: EnvironmentId; slot: string; vars_json: string }
-    | undefined;
+    { id: LeaseId; environment_id: EnvironmentId; slot: string; vars_json: string } | undefined;
   return row ? { id: row.id, environmentId: row.environment_id, attemptId, slot: row.slot, vars: JSON.parse(row.vars_json) } : null;
 }
 

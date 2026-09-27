@@ -81,15 +81,19 @@ describe("applyDelta", () => {
       db,
       project,
       delta({
-        add: [unit("api", ["app/api/**"], { deps: [{ on: "U1" }] }), unit("store-fix", ["app/store/fix.py"]), unit("docs", ["docs/**"], { deps: [{ on: "api", kind: "needs-source" }] })],
+        add: [
+          unit("api", ["app/api/**"], { deps: [{ on: "U1" }] }),
+          unit("store-fix", ["app/store/fix.py"]),
+          unit("docs", ["docs/**"], { deps: [{ on: "api", kind: "needs-source" }] }),
+        ],
       }),
       null,
     );
-    expect(listDeps(db, project).map((d) => `U${d.unitId}->U${d.dependsOn}:${d.kind}`).sort()).toEqual([
-      "U2->U1:needs-landed",
-      "U3->U1:scope-overlap",
-      "U4->U2:needs-source",
-    ]);
+    expect(
+      listDeps(db, project)
+        .map((d) => `U${d.unitId}->U${d.dependsOn}:${d.kind}`)
+        .sort(),
+    ).toEqual(["U2->U1:needs-landed", "U3->U1:scope-overlap", "U4->U2:needs-source"]);
   });
 
   it("rejects the whole delta on any error, leaving nothing behind", () => {
@@ -123,7 +127,13 @@ describe("applyDelta", () => {
     const r = applyDelta(
       db,
       project,
-      delta({ cancel: [{ unit: "U1", reason: "superseded" }, { unit: "U2", reason: "superseded" }], gates: [{ question: "Keep codes case-sensitive?", options: ["yes", "no"], default: "yes" }] }),
+      delta({
+        cancel: [
+          { unit: "U1", reason: "superseded" },
+          { unit: "U2", reason: "superseded" },
+        ],
+        gates: [{ question: "Keep codes case-sensitive?", options: ["yes", "no"], default: "yes" }],
+      }),
       null,
     );
     expect(getUnitBySeq(db, project, 1).state).toBe("abandoned");

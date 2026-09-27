@@ -26,7 +26,7 @@ It succeeds kurukuru and borrows heavily from upstream pstack (`poteto-mode` pla
 ## 2. Principles
 
 1. **The daemon owns the truth; LLMs propose.** Scheduling, state transitions, leases, verdict acceptance, and landing are deterministic code. LLMs plan, write briefs, do work, and judge evidence. (kurukuru's engine lesson; orchestrate's "a script with a JSON state file keeps its footing".)
-2. **No long-running chat.** The coordinator is a program. The planner is invoked fresh at drain points with a *generated* state snapshot, never an LLM summary of a summary.
+2. **No long-running chat.** The coordinator is a program. The planner is invoked fresh at drain points with a _generated_ state snapshot, never an LLM summary of a summary.
 3. **Proof, not narration.** A unit is verified only when the daemon holds artifacts that prove it, from a verifier that did not write the code, at the current head SHA.
 4. **One writer per resource.** One unit writes one repo through one worktree; one lease per environment slot; one lander per repo.
 5. **The brief is the product.** Workers cannot ask questions. A brief missing a field is not spawnable.
@@ -48,14 +48,14 @@ Project ─────┘ goal, done-predicate, min verdict tier, standing orde
             └─ Verdict    tier + evidence refs, keyed by (repo, head SHA, dep SHAs)
 ```
 
-| Entity | Notes |
-|---|---|
-| **Environment** | Shared across projects. Created in the dashboard, validated by the provider's `doctor` probe before it is selectable. Holds credential *references*, never secrets. |
-| **Repo** | Registered once by URL. Many projects can target it. Holds the forge adapter choice and the qualifier scheme override. |
-| **Project** | `goal`, `predicate` (checkable, e.g. "p95 latency ≤ 80% of baseline on dev-kube", "all 12 units landed ≥ deployed-verified"), `min_tier`, `standing_orders` (numbered lines pasted into every brief), `environment`, `repos[]`, `budget` (wall clock, max attempts, max in-flight). |
-| **Unit** | Types: `plan`, `work`, `verify`, `land`, `release`, `pack` (create/repair a verify pack), `measure`, and the babysit fix types `rebase`, `ci-fix`, `review-triage` (§15). Exactly one writable repo. Declares `write_scope` globs, `deps[]` with kind `needs-source` or `needs-landed`, `acceptance[]`, `verify` recipe, `measurements[]`, `timebox`. |
-| **Attempt** | One execution of a unit by a harness. Retries create new attempts; the unit keeps its identity. |
-| **Verdict** | Tier + artifact refs + the SHAs it was produced at. Voided automatically when any keyed SHA changes. |
+| Entity          | Notes                                                                                                                                                                                                                                                                                                                                                 |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Environment** | Shared across projects. Created in the dashboard, validated by the provider's `doctor` probe before it is selectable. Holds credential _references_, never secrets.                                                                                                                                                                                   |
+| **Repo**        | Registered once by URL. Many projects can target it. Holds the forge adapter choice and the qualifier scheme override.                                                                                                                                                                                                                                |
+| **Project**     | `goal`, `predicate` (checkable, e.g. "p95 latency ≤ 80% of baseline on dev-kube", "all 12 units landed ≥ deployed-verified"), `min_tier`, `standing_orders` (numbered lines pasted into every brief), `environment`, `repos[]`, `budget` (wall clock, max attempts, max in-flight).                                                                   |
+| **Unit**        | Types: `plan`, `work`, `verify`, `land`, `release`, `pack` (create/repair a verify pack), `measure`, and the babysit fix types `rebase`, `ci-fix`, `review-triage` (§15). Exactly one writable repo. Declares `write_scope` globs, `deps[]` with kind `needs-source` or `needs-landed`, `acceptance[]`, `verify` recipe, `measurements[]`, `timebox`. |
+| **Attempt**     | One execution of a unit by a harness. Retries create new attempts; the unit keeps its identity.                                                                                                                                                                                                                                                       |
+| **Verdict**     | Tier + artifact refs + the SHAs it was produced at. Voided automatically when any keyed SHA changes.                                                                                                                                                                                                                                                  |
 
 ### Unit state machine
 
@@ -179,7 +179,7 @@ Parallelism is therefore dynamic (the planner proposes any shape at any drain) b
 
 ## 8a. The watchman: talking to yagura
 
-yagura's front door is a conversation. A developer talks to the **watchman** (*bannin*) to start work or evolve it; the watchman turns the conversation into projects, and reports back when they are done. It serves both ways of working: hand it a finished spec ("here is BUILD_SPEC.md, build it") or grow something conversationally ("prototype a Kafka diff service" … "now ignore timestamp fields").
+yagura's front door is a conversation. A developer talks to the **watchman** (_bannin_) to start work or evolve it; the watchman turns the conversation into projects, and reports back when they are done. It serves both ways of working: hand it a finished spec ("here is BUILD_SPEC.md, build it") or grow something conversationally ("prototype a Kafka diff service" … "now ignore timestamp fields").
 
 ### Flow
 
@@ -195,17 +195,17 @@ yagura's front door is a conversation. A developer talks to the **watchman** (*b
 
 The watchman follows yagura's first principle: no long-lived LLM context. Every message is a fresh harness session whose context is assembled from the store under a fixed token budget (default ~40k tokens, a setting).
 
-| Stored | Content |
-|---|---|
-| `threads` | title, autonomy, linked projects, state |
-| `thread_messages` | every human and watchman message, verbatim; FTS-indexed |
-| `thread_decisions` | one structured record per decision (text, source message, superseded-by) |
-| `thread_questions` | open questions; resolved with the answering message |
-| `proposals` | the proposed change set, its state (pending, applied, edited, discarded), and what applying it created |
-| `projects/<p>/spec.md` | the living spec the watchman maintains, in addressable sections |
-| reports | done/blocked summaries, generated from records |
+| Stored                 | Content                                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------------------------------ |
+| `threads`              | title, autonomy, linked projects, state                                                                |
+| `thread_messages`      | every human and watchman message, verbatim; FTS-indexed                                                |
+| `thread_decisions`     | one structured record per decision (text, source message, superseded-by)                               |
+| `thread_questions`     | open questions; resolved with the answering message                                                    |
+| `proposals`            | the proposed change set, its state (pending, applied, edited, discarded), and what applying it created |
+| `projects/<p>/spec.md` | the living spec the watchman maintains, in addressable sections                                        |
+| reports                | done/blocked summaries, generated from records                                                         |
 
-**Context assembly, in priority order:** (1) watchman instructions and standing orders; (2) all *active* decisions and open questions; (3) a generated status of each linked project; (4) the spec sections relevant to the message (by heading), never a whole large spec; (5) the most recent messages verbatim, trimmed oldest-first to fit; (6) nothing older — the watchman can pull an older detail with `yagura thread search`.
+**Context assembly, in priority order:** (1) watchman instructions and standing orders; (2) all _active_ decisions and open questions; (3) a generated status of each linked project; (4) the spec sections relevant to the message (by heading), never a whole large spec; (5) the most recent messages verbatim, trimmed oldest-first to fit; (6) nothing older — the watchman can pull an older detail with `yagura thread search`.
 
 **Every turn ends with structured records** alongside the reply: decisions added or superseded, questions opened or resolved, spec section edits, and an optional proposal. yagura validates them (schema, references) and stores them atomically. A decision made 200 messages ago is still exactly in `thread_decisions`; nothing important depends on recalling or summarizing old messages.
 
@@ -238,11 +238,11 @@ A unit is **ready** when: deps satisfied (`needs-source` → upstream has a verd
 
 ```ts
 interface HarnessAdapter {
-  id: string                               // "claude", "codex", "grok", "custom"
-  command(brief: RenderedBrief, opts: RunOpts): { argv: string[]; env: Record<string,string>; stdin?: string }
-  parse(line: string): HarnessEvent | null // stream → text/tool/cost/usage events
-  finalMessage(events: HarnessEvent[]): string | null
-  permissions: PermissionMapper            // yagura policy → harness flags
+  id: string; // "claude", "codex", "grok", "custom"
+  command(brief: RenderedBrief, opts: RunOpts): { argv: string[]; env: Record<string, string>; stdin?: string };
+  parse(line: string): HarnessEvent | null; // stream → text/tool/cost/usage events
+  finalMessage(events: HarnessEvent[]): string | null;
+  permissions: PermissionMapper; // yagura policy → harness flags
 }
 ```
 
@@ -274,53 +274,81 @@ What yagura does own:
 ### Manifest
 
 ```json
-{ "name": "pstack-claude",
+{
+  "name": "pstack-claude",
   "requires": { "pstack@pstack-claude": ">=0.5.0", "cursor-team-kit@pstack-claude": ">=0.1.1" },
   "roles": {
-    "worker":   { "entry": "pstack:poteto-mode",
-                  "playbooks": ["bug-fix", "feature", "refactoring", "perf-issue", "hillclimb",
-                                "prototype", "visual-parity", "runtime-forensics", "trace-forensics",
-                                "investigation", "authoring-a-skill"],
-                  "skills": ["cursor-team-kit:deslop", "pstack:no-comments"] },
-    "verifier": { "entry": "pstack:poteto-mode",
-                  "skills": ["pstack:principle-prove-it-works", "pstack:blast-radius", "pstack:interrogate",
-                             "cursor-team-kit:control-ui", "cursor-team-kit:control-cli",
-                             "cursor-team-kit:verify-this"] },
-    "planner":  { "skills": ["pstack:figure-it-out", "pstack:architect",
-                             "pstack:principle-sequence-verifiable-units"],
-                  "playbooks": ["multi-phase-plan"] },
-    "pack":     { "skills": ["pstack:create-verification-skill", "pstack:maintain-verification-skill",
-                             "cursor-team-kit:control-ui", "cursor-team-kit:control-cli"] },
-    "rebase":   { "skills": ["cursor-team-kit:fix-merge-conflicts"] },
-    "ci-fix":   { "entry": "pstack:poteto-mode", "playbooks": ["bug-fix"],
-                  "skills": ["cursor-team-kit:fix-ci"] },
-    "review-triage": { "entry": "pstack:poteto-mode",
-                       "references": ["plugins/pstack/skills/poteto-mode/references/bugbot-triage.md"] }
+    "worker": {
+      "entry": "pstack:poteto-mode",
+      "playbooks": [
+        "bug-fix",
+        "feature",
+        "refactoring",
+        "perf-issue",
+        "hillclimb",
+        "prototype",
+        "visual-parity",
+        "runtime-forensics",
+        "trace-forensics",
+        "investigation",
+        "authoring-a-skill"
+      ],
+      "skills": ["cursor-team-kit:deslop", "pstack:no-comments"]
+    },
+    "verifier": {
+      "entry": "pstack:poteto-mode",
+      "skills": [
+        "pstack:principle-prove-it-works",
+        "pstack:blast-radius",
+        "pstack:interrogate",
+        "cursor-team-kit:control-ui",
+        "cursor-team-kit:control-cli",
+        "cursor-team-kit:verify-this"
+      ]
+    },
+    "planner": { "skills": ["pstack:figure-it-out", "pstack:architect", "pstack:principle-sequence-verifiable-units"], "playbooks": ["multi-phase-plan"] },
+    "pack": {
+      "skills": ["pstack:create-verification-skill", "pstack:maintain-verification-skill", "cursor-team-kit:control-ui", "cursor-team-kit:control-cli"]
+    },
+    "rebase": { "skills": ["cursor-team-kit:fix-merge-conflicts"] },
+    "ci-fix": { "entry": "pstack:poteto-mode", "playbooks": ["bug-fix"], "skills": ["cursor-team-kit:fix-ci"] },
+    "review-triage": { "entry": "pstack:poteto-mode", "references": ["plugins/pstack/skills/poteto-mode/references/bugbot-triage.md"] }
   },
-  "replacedByDaemon": ["pstack:orchestrate", "pstack:autopilot-full", "pstack:autopilot-stack",
-                       "pstack:shipping", "pstack:babysit", "pstack:opening-a-pr",
-                       "pstack:autonomous-run", "pstack:pause-safely", "pstack:session-pickup",
-                       "pstack:worktree-cleanup", "pstack:show-me-your-work",
-                       "cursor-team-kit:new-branch-and-pr", "cursor-team-kit:review-and-ship",
-                       "cursor-team-kit:get-pr-comments"] }
+  "replacedByDaemon": [
+    "pstack:orchestrate",
+    "pstack:autopilot-full",
+    "pstack:autopilot-stack",
+    "pstack:shipping",
+    "pstack:babysit",
+    "pstack:opening-a-pr",
+    "pstack:autonomous-run",
+    "pstack:pause-safely",
+    "pstack:session-pickup",
+    "pstack:worktree-cleanup",
+    "pstack:show-me-your-work",
+    "cursor-team-kit:new-branch-and-pr",
+    "cursor-team-kit:review-and-ship",
+    "cursor-team-kit:get-pr-comments"
+  ]
+}
 ```
 
 The planner picks a playbook per unit from the role's allowed list; the daemon renders METHOD from the manifest. Model routing inside pstack's fan-out skills comes from the developer's `pstack-models.md`; yagura only chooses the top-level model per role (§16). Some skills use Claude-only features (the Agent tool for swarm/arena, `/loop`); roles that need them run on the Claude harness, or the overlay for another harness tells the worker to skip fan-out.
 
 ### Roles
 
-| Role | pstack it uses |
-|---|---|
-| Worker | poteto-mode work playbooks; all principles; architect, tdd, no-comments, unslop, deslop; swarm/arena inside its own worktree and timebox |
-| Verifier | prove-it-works, blast-radius, interrogate lenses, control-ui / control-cli / verify-this, plus the repo's verify pack |
-| Planner | figure-it-out, multi-phase-plan, sequence-verifiable-units, architect, principles |
-| Pack unit | create-verification-skill, maintain-verification-skill, control-ui / control-cli |
-| Rebase / CI-fix / review-triage (§15) | fix-merge-conflicts; bug-fix playbook + fix-ci; bugbot-triage rubric |
-| **Replaced by the daemon** | orchestrate, autopilot-*, shipping, babysit, opening-a-pr, autonomous-run, pause-safely, session-pickup, worktree-cleanup, show-me-your-work; cursor-team-kit's new-branch-and-pr, review-and-ship, get-pr-comments |
+| Role                                  | pstack it uses                                                                                                                                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Worker                                | poteto-mode work playbooks; all principles; architect, tdd, no-comments, unslop, deslop; swarm/arena inside its own worktree and timebox                                                                            |
+| Verifier                              | prove-it-works, blast-radius, interrogate lenses, control-ui / control-cli / verify-this, plus the repo's verify pack                                                                                               |
+| Planner                               | figure-it-out, multi-phase-plan, sequence-verifiable-units, architect, principles                                                                                                                                   |
+| Pack unit                             | create-verification-skill, maintain-verification-skill, control-ui / control-cli                                                                                                                                    |
+| Rebase / CI-fix / review-triage (§15) | fix-merge-conflicts; bug-fix playbook + fix-ci; bugbot-triage rubric                                                                                                                                                |
+| **Replaced by the daemon**            | orchestrate, autopilot-*, shipping, babysit, opening-a-pr, autonomous-run, pause-safely, session-pickup, worktree-cleanup, show-me-your-work; cursor-team-kit's new-branch-and-pr, review-and-ship, get-pr-comments |
 
 ### Role overlays
 
-pstack playbooks assume the agent is its own orchestrator: poteto-mode ends every playbook with *Opening a PR*, babysit runs a `/loop`, show-me-your-work keeps its own trail. Inside yagura that competes with the daemon. yagura ships small **overlay skills** — `yagura-worker`, `yagura-verifier`, `yagura-planner`, `yagura-pack`, `yagura-ci-fix`, `yagura-review-triage` — as a plugin in `YAGURA_SKILLS_DIR`, loaded alongside the developer's pstack in every session (§10). Each says:
+pstack playbooks assume the agent is its own orchestrator: poteto-mode ends every playbook with _Opening a PR_, babysit runs a `/loop`, show-me-your-work keeps its own trail. Inside yagura that competes with the daemon. yagura ships small **overlay skills** — `yagura-worker`, `yagura-verifier`, `yagura-planner`, `yagura-pack`, `yagura-ci-fix`, `yagura-review-triage` — as a plugin in `YAGURA_SKILLS_DIR`, loaded alongside the developer's pstack in every session (§10). Each says:
 
 - You are running inside yagura as role X. Use pstack with playbook Y.
 - Skip every landing, PR, merge, loop, babysit, and decision-trail step; the daemon owns them.
@@ -331,12 +359,12 @@ pstack itself is never edited, so upstream updates drop in unchanged. Overlays a
 
 ## 12. Environments and providers
 
-| Provider | create slot | connection vars | teardown |
-|---|---|---|---|
+| Provider         | create slot                                                                                                                 | connection vars                                                        | teardown                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
 | `kube-namespace` | `mode: create` → `kubectl create ns yg-…` + labels; `mode: pool` → lease one of a configured list of pre-created namespaces | `YAGURA_NAMESPACE`, `KUBECONTEXT`, `YAGURA_BASE_URL` (ingress pattern) | create: delete namespace · pool: delete only yagura-labelled resources, keep the namespace |
-| `docker-compose` | project name `yg-…`, allocated ports | `COMPOSE_PROJECT_NAME`, ports | `compose down -v` |
-| `local-process` | allocate ports + data dir | ports, `YAGURA_DATA_DIR` | kill process group, rm dir |
-| `ios-sim` | clone simulator | `SIM_UDID` | delete clone |
+| `docker-compose` | project name `yg-…`, allocated ports                                                                                        | `COMPOSE_PROJECT_NAME`, ports                                          | `compose down -v`                                                                          |
+| `local-process`  | allocate ports + data dir                                                                                                   | ports, `YAGURA_DATA_DIR`                                               | kill process group, rm dir                                                                 |
+| `ios-sim`        | clone simulator                                                                                                             | `SIM_UDID`                                                             | delete clone                                                                               |
 
 Whether a developer can create namespaces varies, so `kube-namespace` supports both modes per environment. In pool mode capacity = pool size. A pool limits **concurrent live verifications**, not agents: workers, builds, and unit-level checks still run in parallel, and only lease-requiring verify steps queue for a free namespace.
 
@@ -369,13 +397,13 @@ The project's `min_tier` gates landing. `verifier-blocked` is never a pass.
 
 Only a code fault sends a unit back to work; environment and verifier problems never burn a work attempt.
 
-| Outcome | Target unit | Next |
-|---|---|---|
-| `verifier-failed` with a cited failing head run, or a pack check that passes on trunk and fails on head | `verifying → rejected → ready` | new work attempt with the verifier's findings in its brief; counts toward `max_attempts`, then `blocked` |
-| `verifier-blocked` (environment broken) | stays `verifying` | re-verify when the environment's doctor passes; repeated → `blocked` + gate |
-| pass below `min_tier` | stays `verifying` | a stronger verify unit; if none is possible (no proven pack) → `blocked` + a `pack` unit proposed |
-| verifier attempt died with no verdict, or its verdict is invalid (cites unrecorded or tampered runs, or its scenario also passes on trunk and so proves nothing) | stays `verifying` | retry the verify unit; after `verify.max_retries` (2) → `blocked` |
-| pass ≥ `min_tier` | `verifying → verified` | waits for the lander; `needs-source` dependents may start |
+| Outcome                                                                                                                                                          | Target unit                    | Next                                                                                                     |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `verifier-failed` with a cited failing head run, or a pack check that passes on trunk and fails on head                                                          | `verifying → rejected → ready` | new work attempt with the verifier's findings in its brief; counts toward `max_attempts`, then `blocked` |
+| `verifier-blocked` (environment broken)                                                                                                                          | stays `verifying`              | re-verify when the environment's doctor passes; repeated → `blocked` + gate                              |
+| pass below `min_tier`                                                                                                                                            | stays `verifying`              | a stronger verify unit; if none is possible (no proven pack) → `blocked` + a `pack` unit proposed        |
+| verifier attempt died with no verdict, or its verdict is invalid (cites unrecorded or tampered runs, or its scenario also passes on trunk and so proves nothing) | stays `verifying`              | retry the verify unit; after `verify.max_retries` (2) → `blocked`                                        |
+| pass ≥ `min_tier`                                                                                                                                                | `verifying → verified`         | waits for the lander; `needs-source` dependents may start                                                |
 
 `verified` is a distinct state because it is the trigger for `needs-source` dependents, the queue for serialized landing and `merge: human`, and the state a voided verdict falls back from. Daemon-run units (`land`, `release`) pass through `handed_off` like every other unit; the UI labels it "completed" for them.
 
@@ -417,14 +445,14 @@ pstack-claude's `plugins/pstack/skills/poteto-mode/scripts/watch-pr` (see its `d
 
 Order per MR: **conflicts → review threads → CI**, because the first two push and restart CI. All known fixes for one MR batch into one push wave.
 
-| Event | Daemon action |
-|---|---|
-| `conflict` | Create a `rebase` unit (worker, scope = the MR's own write scope). Never rebases shared history itself unless it is a clean mechanical rebase. |
-| `new-threads` | Create one `review-triage` unit per wave: for each thread, **fix** (red-first proof, in this MR), **dismiss** (concrete disproof posted to the thread), or **ask** (becomes a gate). Replies are posted by the daemon from the handoff, via the API with the body as data. Security / auth / data / migration findings are never dismissed without a gate. |
-| `pipeline-failed` | **Classify before retrying.** Failure outside the diff's files and the base is stale (`git merge-base --is-ancestor`) → `rebase` unit, not a retry. Infra/flake signature → one fresh pipeline (not a job retry). Identical second failure → it was never flake → `ci-fix` unit with the failing job logs in CONTEXT. Failure in the diff's own code → `ci-fix` unit. |
-| push from any fix unit | New head SHA → verdict voided → re-verify per the patch-id rule below → watcher re-armed. |
-| `approved` / human review pending | A wait, not a blocker. Shown on the dashboard; nothing is spawned. |
-| `merged` | Advance the frontier; void and re-queue dependent verdicts; start the retro watch. |
+| Event                             | Daemon action                                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `conflict`                        | Create a `rebase` unit (worker, scope = the MR's own write scope). Never rebases shared history itself unless it is a clean mechanical rebase.                                                                                                                                                                                                                        |
+| `new-threads`                     | Create one `review-triage` unit per wave: for each thread, **fix** (red-first proof, in this MR), **dismiss** (concrete disproof posted to the thread), or **ask** (becomes a gate). Replies are posted by the daemon from the handoff, via the API with the body as data. Security / auth / data / migration findings are never dismissed without a gate.            |
+| `pipeline-failed`                 | **Classify before retrying.** Failure outside the diff's files and the base is stale (`git merge-base --is-ancestor`) → `rebase` unit, not a retry. Infra/flake signature → one fresh pipeline (not a job retry). Identical second failure → it was never flake → `ci-fix` unit with the failing job logs in CONTEXT. Failure in the diff's own code → `ci-fix` unit. |
+| push from any fix unit            | New head SHA → verdict voided → re-verify per the patch-id rule below → watcher re-armed.                                                                                                                                                                                                                                                                             |
+| `approved` / human review pending | A wait, not a blocker. Shown on the dashboard; nothing is spawned.                                                                                                                                                                                                                                                                                                    |
+| `merged`                          | Advance the frontier; void and re-queue dependent verdicts; start the retro watch.                                                                                                                                                                                                                                                                                    |
 
 Budgets: fix units count against the unit's attempt budget; after 2 failed fix waves on the same MR it becomes a gate.
 
@@ -475,28 +503,28 @@ Settings are layered; a narrower layer overrides a wider one: **global → envir
 
 A few settings must be known before the database opens. They come from environment variables or `~/.yagura/yagura.yaml`, and are shown read-only in the UI:
 
-| Bootstrap | Default | Purpose |
-|---|---|---|
-| `YAGURA_HOME` | `~/.yagura` | store, worktrees, artifacts, logs |
-| `YAGURA_PACKS_DIR` | `$YAGURA_HOME/packs` | pack manifests (role mappings); skills themselves come from the harness's installed plugins |
-| `YAGURA_SKILLS_DIR` | bundled with yagura | yagura's own overlay skills (`yagura-worker`, …); override to develop them |
-| `YAGURA_BIND` / `YAGURA_PORT` | `127.0.0.1` / `7300` | dashboard + API listener |
-| `YAGURA_TOKEN_FILE` | `$YAGURA_HOME/token` | dashboard/API auth when bound beyond localhost |
+| Bootstrap                     | Default              | Purpose                                                                                     |
+| ----------------------------- | -------------------- | ------------------------------------------------------------------------------------------- |
+| `YAGURA_HOME`                 | `~/.yagura`          | store, worktrees, artifacts, logs                                                           |
+| `YAGURA_PACKS_DIR`            | `$YAGURA_HOME/packs` | pack manifests (role mappings); skills themselves come from the harness's installed plugins |
+| `YAGURA_SKILLS_DIR`           | bundled with yagura  | yagura's own overlay skills (`yagura-worker`, …); override to develop them                  |
+| `YAGURA_BIND` / `YAGURA_PORT` | `127.0.0.1` / `7300` | dashboard + API listener                                                                    |
+| `YAGURA_TOKEN_FILE`           | `$YAGURA_HOME/token` | dashboard/API auth when bound beyond localhost                                              |
 
 ### Global (Settings tab)
 
-| Group | Settings |
-|---|---|
-| **Concurrency** | `max_parallel_agents` (host-wide cap on running harness processes); `max_parallel_per_harness` (endpoint rate limits); `max_parallel_verifies` (heavy local builds); `planner_concurrency` |
-| **Harnesses** | per harness: binary path, extra args, permission mode, env refs (e.g. `ANTHROPIC_BASE_URL`), enabled; **default harness per role** (worker / verifier / planner / …); optional **model per role** (unset = harness default) |
-| **Packs** | active pack manifest; required plugin versions; overlay version; doctor status of the harness setup (plugins installed/enabled, `pstack-models.md` present, its models reachable) |
-| **Timeouts & retries** | default timebox per unit type; max attempts per unit; fix-wave cap per MR (§15); stall timeout (no stream progress) |
-| **Git** | agent commit identity (name/email), commit message convention (e.g. Conventional Commits), branch naming (`yg/<project>/<unit>`), mirror refresh interval |
-| **Forge** | `glab` / `gh` paths, token refs per host, watcher poll interval, flake signatures (regexes classed as infra) |
-| **Storage** | worktree retention (delete N days after terminal), artifact and log retention, disk-usage warning threshold |
-| **Budgets** | optional daily token/cost ceiling where the harness reports usage; action at ceiling (pause spawns / gate) |
-| **Notifications** | optional webhook or email relay inside the network for gates, andon, project done |
-| **Security** | allowed bind addresses, token rotation, secret-ref backends (file, env, OS keychain) |
+| Group                  | Settings                                                                                                                                                                                                                    |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Concurrency**        | `max_parallel_agents` (host-wide cap on running harness processes); `max_parallel_per_harness` (endpoint rate limits); `max_parallel_verifies` (heavy local builds); `planner_concurrency`                                  |
+| **Harnesses**          | per harness: binary path, extra args, permission mode, env refs (e.g. `ANTHROPIC_BASE_URL`), enabled; **default harness per role** (worker / verifier / planner / …); optional **model per role** (unset = harness default) |
+| **Packs**              | active pack manifest; required plugin versions; overlay version; doctor status of the harness setup (plugins installed/enabled, `pstack-models.md` present, its models reachable)                                           |
+| **Timeouts & retries** | default timebox per unit type; max attempts per unit; fix-wave cap per MR (§15); stall timeout (no stream progress)                                                                                                         |
+| **Git**                | agent commit identity (name/email), commit message convention (e.g. Conventional Commits), branch naming (`yg/<project>/<unit>`), mirror refresh interval                                                                   |
+| **Forge**              | `glab` / `gh` paths, token refs per host, watcher poll interval, flake signatures (regexes classed as infra)                                                                                                                |
+| **Storage**            | worktree retention (delete N days after terminal), artifact and log retention, disk-usage warning threshold                                                                                                                 |
+| **Budgets**            | optional daily token/cost ceiling where the harness reports usage; action at ceiling (pause spawns / gate)                                                                                                                  |
+| **Notifications**      | optional webhook or email relay inside the network for gates, andon, project done                                                                                                                                           |
+| **Security**           | allowed bind addresses, token rotation, secret-ref backends (file, env, OS keychain)                                                                                                                                        |
 
 ### Environment
 

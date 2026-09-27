@@ -11,7 +11,9 @@ function packStatus(v: RepoView): { text: string; tone: string } {
   if (!v.pack) return { text: "Not mirrored yet; yagura reads the verify pack on the first run.", tone: "muted" };
   if (!v.pack.ok) return { text: `No usable verify pack: ${v.pack.reason}. Verification stays blocked until one lands.`, tone: "bell" };
   const checks = v.pack.checks.map((c) => `${c.name} (${c.tier})`).join(", ");
-  return v.repo.packStatus === "proven" ? { text: `Verify pack proven: ${checks}.`, tone: "pine" } : { text: `Verify pack on trunk: ${checks}.`, tone: "muted" };
+  return v.repo.packStatus === "proven"
+    ? { text: `Verify pack proven: ${checks}.`, tone: "pine" }
+    : { text: `Verify pack on trunk: ${checks}.`, tone: "muted" };
 }
 
 function AddRepo({ onAdded }: { onAdded: () => void }) {
@@ -49,19 +51,38 @@ function AddRepo({ onAdded }: { onAdded: () => void }) {
         <label htmlFor="repo-source" className="sr-only">
           Git URL
         </label>
-        <input id="repo-source" className="mono" value={source} onChange={(e) => setSource(e.target.value)} placeholder="git@gitlab:team/billing.git" style={{ ...field, flexGrow: 1, minWidth: 260, fontSize: 13 }} />
+        <input
+          id="repo-source"
+          className="mono"
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          placeholder="git@gitlab:team/billing.git"
+          style={{ ...field, flexGrow: 1, minWidth: 260, fontSize: 13 }}
+        />
         <label htmlFor="repo-id" className="sr-only">
           Repo id
         </label>
-        <input id="repo-id" className="mono" value={id} onChange={(e) => setId(e.target.value)} placeholder={suggested ? `id: ${suggested}` : "id"} style={{ ...field, width: 180, fontSize: 13 }} />
+        <input
+          id="repo-id"
+          className="mono"
+          value={id}
+          onChange={(e) => setId(e.target.value)}
+          placeholder={suggested ? `id: ${suggested}` : "id"}
+          style={{ ...field, width: 180, fontSize: 13 }}
+        />
         <button className="btn lamp" type="submit" disabled={action.busy || !source.trim()}>
           {action.busy ? "Reading…" : "Add repo"}
         </button>
       </div>
       <div className="muted" style={{ fontSize: 13 }}>
-        yagura clones it into its own mirror and reads its default branch and verify pack. Agents work in worktrees of that mirror; verified work is pushed back to this URL.
+        yagura clones it into its own mirror and reads its default branch and verify pack. Agents work in worktrees of that mirror; verified work is pushed back
+        to this URL.
       </div>
-      {action.error && <div className="s-bell" style={{ fontSize: 13 }}>{action.error}</div>}
+      {action.error && (
+        <div className="s-bell" style={{ fontSize: 13 }}>
+          {action.error}
+        </div>
+      )}
       {added && (
         <div className="s-pine" style={{ fontSize: 13.5, display: "flex", flexDirection: "column", gap: 4 }}>
           <span>
@@ -112,7 +133,11 @@ export function Repos() {
               <div key={v.repo.id} id={`repo-${v.repo.id}`} style={hash === v.repo.id ? { background: "var(--line2)" } : undefined}>
                 <Row
                   seq={v.repo.id}
-                  goal={<span className="mono" style={{ fontSize: 14, overflowWrap: "anywhere" }}>{v.repo.url}</span>}
+                  goal={
+                    <span className="mono" style={{ fontSize: 14, overflowWrap: "anywhere" }}>
+                      {v.repo.url}
+                    </span>
+                  }
                   status={s.text}
                   tone={s.tone}
                   facts={
@@ -124,7 +149,11 @@ export function Repos() {
                       <span>{v.landedCount} landed</span>
                       {v.lastLanded && (
                         <span>
-                          last {sha(v.lastLanded.sha)} · <Link to={`/p/${v.lastLanded.projectId}/u/${v.lastLanded.seq}`}>{v.lastLanded.projectId} U{v.lastLanded.seq}</Link> · {clock(v.lastLanded.at)}
+                          last {sha(v.lastLanded.sha)} ·{" "}
+                          <Link to={`/p/${v.lastLanded.projectId}/u/${v.lastLanded.seq}`}>
+                            {v.lastLanded.projectId} U{v.lastLanded.seq}
+                          </Link>{" "}
+                          · {clock(v.lastLanded.at)}
                         </span>
                       )}
                       {v.projects.length ? (
@@ -143,7 +172,12 @@ export function Repos() {
                     </>
                   }
                   actions={
-                    <button className="btn" type="button" aria-expanded={settings === v.repo.id} onClick={() => setSettings(settings === v.repo.id ? null : v.repo.id)}>
+                    <button
+                      className="btn"
+                      type="button"
+                      aria-expanded={settings === v.repo.id}
+                      onClick={() => setSettings(settings === v.repo.id ? null : v.repo.id)}
+                    >
                       Settings
                     </button>
                   }

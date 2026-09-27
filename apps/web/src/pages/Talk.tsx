@@ -16,7 +16,16 @@ const ROLE = {
 interface ProposalBody {
   summary: string;
   repos?: { id: string; description?: string }[];
-  projects?: { id: string; goal: string; predicate: string; merge?: string; minTier?: string; after?: string[]; environment?: string | null; units?: { key: string; goal: string }[] }[];
+  projects?: {
+    id: string;
+    goal: string;
+    predicate: string;
+    merge?: string;
+    minTier?: string;
+    after?: string[];
+    environment?: string | null;
+    units?: { key: string; goal: string }[];
+  }[];
   amend?: { project: string; units: { key: string; goal: string }[] }[];
 }
 
@@ -62,7 +71,11 @@ function ProposalCard({ p, onEdit }: { p: Proposal; onEdit: (text: string) => vo
           )),
         )}
       </ul>
-      {p.state === "failed" && <div className="s-bell" style={{ fontSize: 13, marginTop: 8 }}>{String((p.result as { error?: string } | null)?.error ?? "failed")}</div>}
+      {p.state === "failed" && (
+        <div className="s-bell" style={{ fontSize: 13, marginTop: 8 }}>
+          {String((p.result as { error?: string } | null)?.error ?? "failed")}
+        </div>
+      )}
       {pending && (
         <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
           <button className="btn bell" type="button" disabled={action.busy} onClick={() => action.run(() => api(`/api/proposals/${p.id}/apply`, { body: {} }))}>
@@ -76,7 +89,11 @@ function ProposalCard({ p, onEdit }: { p: Proposal; onEdit: (text: string) => vo
           </button>
         </div>
       )}
-      {action.error && <div className="s-bell" style={{ fontSize: 13, marginTop: 8 }}>{action.error}</div>}
+      {action.error && (
+        <div className="s-bell" style={{ fontSize: 13, marginTop: 8 }}>
+          {action.error}
+        </div>
+      )}
     </div>
   );
 }
@@ -111,7 +128,19 @@ function ThreadList({ current }: { current: number | null }) {
           {title}
         </div>
         {items.map((t) => (
-          <Link key={t.id} to={`/talk/${t.id}`} aria-current={t.id === current ? "page" : undefined} style={{ display: "block", textDecoration: "none", color: t.state === "open" ? "var(--text)" : "var(--muted)", background: t.id === current ? "var(--panel)" : "transparent", borderRadius: 4, padding: "9px 10px" }}>
+          <Link
+            key={t.id}
+            to={`/talk/${t.id}`}
+            aria-current={t.id === current ? "page" : undefined}
+            style={{
+              display: "block",
+              textDecoration: "none",
+              color: t.state === "open" ? "var(--text)" : "var(--muted)",
+              background: t.id === current ? "var(--panel)" : "transparent",
+              borderRadius: 4,
+              padding: "9px 10px",
+            }}
+          >
             <div style={{ fontSize: 14 }}>{t.title}</div>
             <div className="mono muted" style={{ fontSize: 11.5, marginTop: 2 }}>
               {t.busy ? "replying…" : t.projects.join(", ") || "no projects"}
@@ -121,12 +150,34 @@ function ThreadList({ current }: { current: number | null }) {
       </>
     );
   return (
-    <nav aria-label="Conversations" style={{ width: 250, flexShrink: 0, borderRight: "1px solid var(--line)", padding: "18px 16px", display: "flex", flexDirection: "column", gap: 2, position: "sticky", top: 0, alignSelf: "flex-start", maxHeight: "100vh", overflowY: "auto" }}>
+    <nav
+      aria-label="Conversations"
+      style={{
+        width: 250,
+        flexShrink: 0,
+        borderRight: "1px solid var(--line)",
+        padding: "18px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 2,
+        position: "sticky",
+        top: 0,
+        alignSelf: "flex-start",
+        maxHeight: "100vh",
+        overflowY: "auto",
+      }}
+    >
       <button className="btn lamp" type="button" onClick={() => navigate("/talk")} style={{ marginBottom: 6 }}>
         New conversation
       </button>
-      {section("OPEN", list.filter((t) => t.state === "open"))}
-      {section("CLOSED", list.filter((t) => t.state !== "open"))}
+      {section(
+        "OPEN",
+        list.filter((t) => t.state === "open"),
+      )}
+      {section(
+        "CLOSED",
+        list.filter((t) => t.state !== "open"),
+      )}
     </nav>
   );
 }
@@ -134,14 +185,43 @@ function ThreadList({ current }: { current: number | null }) {
 function Ledger({ v }: { v: ThreadView }) {
   const active = v.decisions.filter((d) => d.supersededBy === null).length;
   const open = v.questions.filter((q) => q.answer === null);
-  const dot = (s: ProjectSummary) => (needsYou(s) ? "var(--bell)" : s.running || s.planning ? "var(--lamp)" : s.project.state === "closed" ? "var(--pine)" : "var(--beacon-off-line)");
+  const dot = (s: ProjectSummary) =>
+    needsYou(s) ? "var(--bell)" : s.running || s.planning ? "var(--lamp)" : s.project.state === "closed" ? "var(--pine)" : "var(--beacon-off-line)";
   return (
-    <aside aria-label="Thread records" style={{ width: 360, flexShrink: 0, borderLeft: "1px solid var(--line)", padding: "18px 22px 48px", display: "flex", flexDirection: "column", gap: 22, position: "sticky", top: 0, alignSelf: "flex-start", maxHeight: "100vh", overflowY: "auto" }}>
+    <aside
+      aria-label="Thread records"
+      style={{
+        width: 360,
+        flexShrink: 0,
+        borderLeft: "1px solid var(--line)",
+        padding: "18px 22px 48px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 22,
+        position: "sticky",
+        top: 0,
+        alignSelf: "flex-start",
+        maxHeight: "100vh",
+        overflowY: "auto",
+      }}
+    >
       <div>
         <h2 className="h2">Projects</h2>
         {v.projects.length === 0 && <div className="empty">None yet. Say Go on a proposal.</div>}
         {v.projects.map((s) => (
-          <Link key={s.project.id} to={`/p/${s.project.id}`} style={{ display: "flex", gap: 10, alignItems: "center", padding: "8px 0", borderTop: "1px solid var(--line2)", textDecoration: "none", color: "var(--text)" }}>
+          <Link
+            key={s.project.id}
+            to={`/p/${s.project.id}`}
+            style={{
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              padding: "8px 0",
+              borderTop: "1px solid var(--line2)",
+              textDecoration: "none",
+              color: "var(--text)",
+            }}
+          >
             <span style={{ width: 10, height: 10, borderRadius: 5, background: dot(s), flexShrink: 0 }} />
             <span className="mono" style={{ fontSize: 13 }}>
               {s.project.id}
@@ -160,11 +240,26 @@ function Ledger({ v }: { v: ThreadView }) {
           </span>
         </div>
         <div style={{ borderTop: "1px solid var(--line2)", paddingTop: 4 }}>
-          {v.decisions.length === 0 && <div className="muted" style={{ fontSize: 13, padding: "6px 0" }}>Nothing settled yet.</div>}
+          {v.decisions.length === 0 && (
+            <div className="muted" style={{ fontSize: 13, padding: "6px 0" }}>
+              Nothing settled yet.
+            </div>
+          )}
           {v.decisions.map((d) => {
             const sup = d.supersededBy !== null;
             return (
-              <div key={d.id} style={{ display: "flex", gap: 10, padding: "5px 0", fontSize: 13, lineHeight: 1.45, color: sup ? "var(--faint)" : "var(--text)", textDecoration: sup ? "line-through" : "none" }}>
+              <div
+                key={d.id}
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  padding: "5px 0",
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                  color: sup ? "var(--faint)" : "var(--text)",
+                  textDecoration: sup ? "line-through" : "none",
+                }}
+              >
                 <span className="mono" style={{ fontSize: 12, color: sup ? "var(--faint)" : "var(--amber)", width: 34, flexShrink: 0 }}>
                   D{d.id}
                 </span>
@@ -214,8 +309,20 @@ function Composer({ threadId, busy, initial, draftKey }: { threadId: number | nu
           the watchman is reading the records and replying…
         </div>
       )}
-      <MentionInput value={text} onChange={setText} onSubmit={() => void send()} label="Message the watchman" placeholder="Message the watchman" disabled={action.busy || busy} autoFocus />
-      {action.error && <div className="s-bell" style={{ fontSize: 13, marginTop: 6 }}>{action.error}</div>}
+      <MentionInput
+        value={text}
+        onChange={setText}
+        onSubmit={() => void send()}
+        label="Message the watchman"
+        placeholder="Message the watchman"
+        disabled={action.busy || busy}
+        autoFocus
+      />
+      {action.error && (
+        <div className="s-bell" style={{ fontSize: 13, marginTop: 6 }}>
+          {action.error}
+        </div>
+      )}
     </div>
   );
 }
@@ -253,12 +360,15 @@ export function Talk({ threadId }: { threadId: number | null }) {
               Talk to the watch
             </h1>
             <p className="muted" style={{ maxWidth: 640, fontSize: 15, lineHeight: 1.6 }}>
-              Describe what you want built or changed. The watchman asks only what it must, records every decision, and proposes projects for you to start with Go. Mention anything with @: a project, a unit like @orders/U3, one agent run like @orders/U3.2, a thread, or a repo.
+              Describe what you want built or changed. The watchman asks only what it must, records every decision, and proposes projects for you to start with
+              Go. Mention anything with @: a project, a unit like @orders/U3, one agent run like @orders/U3.2, a thread, or a repo.
             </p>
           </div>
         ) : (
           <>
-            <div style={{ padding: "18px 32px 12px", display: "flex", alignItems: "baseline", gap: 14, borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}>
+            <div
+              style={{ padding: "18px 32px 12px", display: "flex", alignItems: "baseline", gap: 14, borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}
+            >
               <h1 className="serif" style={{ margin: 0, fontSize: 26, fontWeight: 600 }}>
                 {v?.thread.title ?? "…"}
               </h1>
@@ -266,7 +376,11 @@ export function Talk({ threadId }: { threadId: number | null }) {
                 thread {threadId} · autonomy
               </span>
               {v && (
-                <span role="radiogroup" aria-label="Autonomy" style={{ display: "inline-flex", border: "1px solid var(--btnline)", borderRadius: 999, overflow: "hidden" }}>
+                <span
+                  role="radiogroup"
+                  aria-label="Autonomy"
+                  style={{ display: "inline-flex", border: "1px solid var(--btnline)", borderRadius: 999, overflow: "hidden" }}
+                >
                   {(["propose", "go"] as const).map((a) => (
                     <button
                       key={a}
@@ -277,7 +391,14 @@ export function Talk({ threadId }: { threadId: number | null }) {
                       disabled={autonomy.busy}
                       onClick={() => autonomy.run(() => api(`/api/threads/${threadId}/autonomy`, { body: { autonomy: a } }))}
                       className="mono"
-                      style={{ fontSize: 12, border: 0, padding: "4px 10px", cursor: "pointer", background: v.thread.autonomy === a ? "var(--lamp)" : "transparent", color: v.thread.autonomy === a ? "#141018" : "var(--muted)" }}
+                      style={{
+                        fontSize: 12,
+                        border: 0,
+                        padding: "4px 10px",
+                        cursor: "pointer",
+                        background: v.thread.autonomy === a ? "var(--lamp)" : "transparent",
+                        color: v.thread.autonomy === a ? "#141018" : "var(--muted)",
+                      }}
                     >
                       {a}
                     </button>
@@ -286,14 +407,29 @@ export function Talk({ threadId }: { threadId: number | null }) {
               )}
             </div>
             <div style={{ flexGrow: 1, padding: "0 32px" }}>
-              {view.error && <div className="s-bell" style={{ padding: "12px 0" }}>{view.error}</div>}
+              {view.error && (
+                <div className="s-bell" style={{ padding: "12px 0" }}>
+                  {view.error}
+                </div>
+              )}
               {v && v.messages.length > messages.length && (
-                <button type="button" className="mono" onClick={() => setAll(true)} style={{ fontSize: 11.5, padding: "10px 0", background: "none", border: 0, color: "var(--amber)", cursor: "pointer" }}>
+                <button
+                  type="button"
+                  className="mono"
+                  onClick={() => setAll(true)}
+                  style={{ fontSize: 11.5, padding: "10px 0", background: "none", border: 0, color: "var(--amber)", cursor: "pointer" }}
+                >
                   {v.messages.length - messages.length} earlier messages · show
                 </button>
               )}
               {messages.map((m) => (
-                <Message key={m.id} m={m} proposals={v!.proposals.filter((p) => p.messageId === m.id)} known={known} onEdit={(t) => setDraft({ text: t, key: Date.now() })} />
+                <Message
+                  key={m.id}
+                  m={m}
+                  proposals={v!.proposals.filter((p) => p.messageId === m.id)}
+                  known={known}
+                  onEdit={(t) => setDraft({ text: t, key: Date.now() })}
+                />
               ))}
               <div ref={bottom} />
             </div>

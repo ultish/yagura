@@ -13,11 +13,28 @@ import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { runWorkUnit } from "./runner.js";
-import { addEnvironment, addProject, addRepo, addUnit, getUnit, getUnitBySeq, listAttempts, listUnits, openStore, setProjectEnvironment, transitionUnit, type Db } from "./store.js";
+import {
+  addEnvironment,
+  addProject,
+  addRepo,
+  addUnit,
+  getUnit,
+  getUnitBySeq,
+  listAttempts,
+  listUnits,
+  openStore,
+  setProjectEnvironment,
+  transitionUnit,
+  type Db,
+} from "./store.js";
 import { runVerifyUnit } from "./verify.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
-const fake: HarnessAdapter = { id: "claude", command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs")], stdin: run.prompt }), parse: parseClaudeLine };
+const fake: HarnessAdapter = {
+  id: "claude",
+  command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs")], stdin: run.prompt }),
+  parse: parseClaudeLine,
+};
 const tsx = pathToFileURL(join(dirname(createRequire(import.meta.url).resolve("tsx/package.json")), "dist/loader.mjs")).href;
 const cli = [process.execPath, "--import", tsx, fixtures("evidence-shim.ts")];
 

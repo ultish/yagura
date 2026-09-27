@@ -30,10 +30,7 @@ describe("claude stream-json parser (real transcript)", () => {
   });
 
   it("drops empty thinking blocks and marks other system events ignored", () => {
-    expect(events.filter((e) => e.kind === "text").map((e) => e.kind === "text" && e.text)).toEqual([
-      "I'll read a.txt and then run ls.",
-      "DONE",
-    ]);
+    expect(events.filter((e) => e.kind === "text").map((e) => e.kind === "text" && e.text)).toEqual(["I'll read a.txt and then run ls.", "DONE"]);
     expect(events.some((e) => e.kind === "ignored" && e.type === "system:hook_started")).toBe(true);
   });
 });

@@ -125,7 +125,9 @@ function checkLayer(key: string, scope: SettingScope): void {
   if (scope === "global") return;
   const layers = SETTING_LAYERS[key as SettingKey];
   if (!layers.includes(scope))
-    throw new SettingNotLayered(`${key} cannot be set per ${scope}; ${layers.length ? `it can be set globally or per ${layers.join(" or ")}` : "it is global only"}`);
+    throw new SettingNotLayered(
+      `${key} cannot be set per ${scope}; ${layers.length ? `it can be set globally or per ${layers.join(" or ")}` : "it is global only"}`,
+    );
 }
 
 function schemaFor(key: string): z.ZodTypeAny {
@@ -181,13 +183,15 @@ export interface SettingInfo {
 }
 
 export function describeSettings(db: Db, ctx: SettingsContext = {}, scope: OverrideScope | null = null): SettingInfo[] {
-  return (Object.keys(SETTINGS) as SettingKey[]).filter((key) => !scope || SETTING_LAYERS[key].includes(scope)).map((key) => ({
-    key,
-    ...resolveSetting(db, key, ctx),
-    default: SETTINGS[key].parse(undefined),
-    description: SETTINGS[key].description ?? "",
-    layers: SETTING_LAYERS[key],
-  }));
+  return (Object.keys(SETTINGS) as SettingKey[])
+    .filter((key) => !scope || SETTING_LAYERS[key].includes(scope))
+    .map((key) => ({
+      key,
+      ...resolveSetting(db, key, ctx),
+      default: SETTINGS[key].parse(undefined),
+      description: SETTINGS[key].description ?? "",
+      layers: SETTING_LAYERS[key],
+    }));
 }
 
 type ScopedValues = Record<string, Record<string, unknown>>;
@@ -199,7 +203,12 @@ export interface SettingsFile {
 }
 
 export function exportSettings(db: Db): string {
-  const rows = db.prepare("SELECT scope, scope_id, key, value_json FROM settings ORDER BY scope, scope_id, key").all() as { scope: SettingScope; scope_id: string; key: string; value_json: string }[];
+  const rows = db.prepare("SELECT scope, scope_id, key, value_json FROM settings ORDER BY scope, scope_id, key").all() as {
+    scope: SettingScope;
+    scope_id: string;
+    key: string;
+    value_json: string;
+  }[];
   const out: SettingsFile = {};
   for (const r of rows) {
     const value = JSON.parse(r.value_json);
@@ -227,7 +236,8 @@ export function importSettings(db: Db, text: string): number {
   const writes: [SettingScope, string, string, unknown][] = [];
   for (const [key, value] of Object.entries(parsed.data.global ?? {})) writes.push(["global", "", key, value]);
   for (const scope of ["environment", "repo", "project"] as const)
-    for (const [id, entries] of Object.entries(parsed.data[scope] ?? {})) for (const [key, value] of Object.entries(entries)) writes.push([scope, id, key, value]);
+    for (const [id, entries] of Object.entries(parsed.data[scope] ?? {}))
+      for (const [key, value] of Object.entries(entries)) writes.push([scope, id, key, value]);
   for (const [scope, id, key, value] of writes) {
     const schema = (SETTINGS as Record<string, z.ZodTypeAny>)[key];
     const where = scope === "global" ? `global.${key}` : `${scope}.${id}.${key}`;

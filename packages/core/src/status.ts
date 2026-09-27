@@ -30,7 +30,9 @@ export function generateStatus(db: Db, boot: Bootstrap, projectId: ProjectId, si
   });
 
   const notes = units.filter((u) => u.notes.length).map((u) => `- U${u.seq}: ${u.notes.map(cell).join(" / ")}`);
-  const gates = listGates(db, projectId, "open").map((g) => `- gate ${g.id} (${g.kind}${g.unitId ? `, U${bySeq.get(g.unitId)}` : ""}): ${g.question} [${g.options.join(" | ")}]`);
+  const gates = listGates(db, projectId, "open").map(
+    (g) => `- gate ${g.id} (${g.kind}${g.unitId ? `, U${bySeq.get(g.unitId)}` : ""}): ${g.question} [${g.options.join(" | ")}]`,
+  );
 
   const events = db
     .prepare(
@@ -62,7 +64,9 @@ export function generateStatus(db: Db, boot: Bootstrap, projectId: ProjectId, si
   const handoffs = units
     .filter((u) => changed.has(u.id))
     .map((u) => {
-      const last = listAttempts(db, u.id).filter((a) => a.endedAt).at(-1);
+      const last = listAttempts(db, u.id)
+        .filter((a) => a.endedAt)
+        .at(-1);
       const path = last ? paths.handoff(projectId, u.seq, last.n) : null;
       if (!path || !existsSync(path)) return null;
       const text = readFileSync(path, "utf8");

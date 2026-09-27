@@ -54,7 +54,9 @@ export async function renderReport(ctx: { db: Db; boot: Bootstrap }, threadId: n
     }
   }
 
-  const gates = listGates(db, projectId, "open").filter((g) => g.kind !== "report").map((g) => `- gate ${g.id}: ${g.question} [${g.options.join(" | ")}]`);
+  const gates = listGates(db, projectId, "open")
+    .filter((g) => g.kind !== "report")
+    .map((g) => `- gate ${g.id}: ${g.question} [${g.options.join(" | ")}]`);
   const questions = listQuestions(db, threadId, { openOnly: true }).map((q) => `- Q${q.id}: ${q.text}`);
   const section = (title: string, lines: string[]) => (lines.length ? `\n\n### ${title}\n${lines.join("\n")}` : "");
   return `${headline}${section("Landed", landed)}${section("Blocked", blocked)}${section("Still open", open)}${section("How to run it", run)}${section("Waiting on you", [...gates, ...questions])}`;
@@ -68,6 +70,12 @@ export async function postReport(ctx: { db: Db; boot: Bootstrap }, threadId: num
     const thread = getThread(db, threadId);
     setThreadReported(db, threadId, { ...thread.reported, [projectId]: reportKey(r) });
     const verb = r.kind === "closed" ? "is done" : r.kind === "andon" ? "has stopped" : "is stuck";
-    addGate(db, { projectId, kind: "report", question: `${projectId} ${verb}; report in thread ${threadId} (message ${message.id})`, options: ["seen"], defaultOption: "seen" });
+    addGate(db, {
+      projectId,
+      kind: "report",
+      question: `${projectId} ${verb}; report in thread ${threadId} (message ${message.id})`,
+      options: ["seen"],
+      defaultOption: "seen",
+    });
   })();
 }

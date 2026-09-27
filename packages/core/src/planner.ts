@@ -25,7 +25,8 @@ export function lastDrainEventId(db: Db, projectId: ProjectId): number {
 }
 
 export function latestDelta(db: Db, projectId: ProjectId): PlanDelta | null {
-  const row = db.prepare("SELECT delta_json FROM drains WHERE project_id = ? AND applied = 1 ORDER BY id DESC LIMIT 1").get(projectId) as { delta_json: string } | undefined;
+  const row = db.prepare("SELECT delta_json FROM drains WHERE project_id = ? AND applied = 1 ORDER BY id DESC LIMIT 1").get(projectId) as
+    { delta_json: string } | undefined;
   return row ? (JSON.parse(row.delta_json) as PlanDelta) : null;
 }
 
@@ -137,7 +138,12 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
     }
     const text = session.final && !session.final.isError && !session.timedOut ? session.final.text : null;
     if (text) write(paths.handoff(projectId, unit.seq, attempt.n), text);
-    updateAttempt(db, attempt.id, { state: text ? "handed_off" : "failed", endedAt: now(), exitCode: session.exitCode, failureMode: text ? null : session.timedOut ? "timebox" : "unknown" });
+    updateAttempt(db, attempt.id, {
+      state: text ? "handed_off" : "failed",
+      endedAt: now(),
+      exitCode: session.exitCode,
+      failureMode: text ? null : session.timedOut ? "timebox" : "unknown",
+    });
     if (!text) {
       transitionUnit(db, unit.id, "failed", { drain: drainId });
       return finish("failed", "planner ended without a final message", null);

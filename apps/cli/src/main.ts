@@ -161,8 +161,7 @@ function renderEvent(e: HarnessEvent): string | null {
 }
 
 function printRecords(threadId: number, sinceMessageId: number) {
-  for (const d of listDecisions(db, threadId).filter((x) => (x.sourceMessageId ?? 0) > sinceMessageId))
-    console.log(`  decision D${d.id}: ${d.text}`);
+  for (const d of listDecisions(db, threadId).filter((x) => (x.sourceMessageId ?? 0) > sinceMessageId)) console.log(`  decision D${d.id}: ${d.text}`);
   for (const q of listQuestions(db, threadId).filter((x) => (x.sourceMessageId ?? 0) > sinceMessageId)) console.log(`  question Q${q.id}: ${q.text}`);
   for (const q of listQuestions(db, threadId).filter((x) => (x.resolvedMessageId ?? 0) > sinceMessageId)) console.log(`  answered Q${q.id}: ${q.answer}`);
   for (const p of listProposals(db, threadId).filter((x) => (x.messageId ?? 0) > sinceMessageId)) {
@@ -207,7 +206,9 @@ async function main() {
           if (values.merge !== "auto" && values.merge !== "human") fail("--merge must be auto or human");
           setMergePolicy(db, id as ProjectId, values.merge as "auto" | "human");
         }
-        console.log(`project ${id}:${values.env ? ` environment → ${values.env}` : ""}${values.merge ? ` merge → ${values.merge}` : ""}${values.issue ? ` refs → ${many(values.issue).join(", ")}` : ""}`);
+        console.log(
+          `project ${id}:${values.env ? ` environment → ${values.env}` : ""}${values.merge ? ` merge → ${values.merge}` : ""}${values.issue ? ` refs → ${many(values.issue).join(", ")}` : ""}`,
+        );
         return;
       }
       if (positionals[0] !== "new" || !id || !values.goal || !values.predicate || !many(values.repo).length) fail(USAGE);
@@ -305,7 +306,9 @@ async function main() {
       const [projectId, seq] = rest;
       if (!projectId || !seq) fail(USAGE);
       const target = getUnitBySeq(db, projectId as ProjectId, Number(seq));
-      const verifyUnit = listUnits(db, target.projectId).filter((u) => u.type === "verify" && u.targetUnitId === target.id && u.state === "ready").at(-1);
+      const verifyUnit = listUnits(db, target.projectId)
+        .filter((u) => u.type === "verify" && u.targetUnitId === target.id && u.state === "ready")
+        .at(-1);
       if (!verifyUnit) fail(`U${target.seq} has no ready verify unit (it is ${target.state})`);
       await reapLeases(db, boot);
       console.log(`verifying ${projectId}/U${target.seq} with U${verifyUnit!.seq}`);
@@ -333,7 +336,9 @@ async function main() {
       const open = listGates(db, project.id, "open");
       console.log(
         `\n${project.id} is ${project.state}${project.andonReason ? ` (andon: ${project.andonReason})` : ""}` +
-          (open.length ? `\nwaiting on ${open.length} gate(s):\n${open.map((g) => `  gate ${g.id}: ${g.question} [${g.options.join(" | ")}]`).join("\n")}` : ""),
+          (open.length
+            ? `\nwaiting on ${open.length} gate(s):\n${open.map((g) => `  gate ${g.id}: ${g.question} [${g.options.join(" | ")}]`).join("\n")}`
+            : ""),
       );
       return;
     }
@@ -357,7 +362,8 @@ async function main() {
           );
         for (const v of t.verifications) {
           console.log(`  verified by U${v.unit.seq} [${v.unit.state}]`);
-          for (const r of v.runs) console.log(`    run:${r.id} ${r.label}@${r.at} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}${r.tampered ? " TAMPERED" : ""}`);
+          for (const r of v.runs)
+            console.log(`    run:${r.id} ${r.label}@${r.at} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}${r.tampered ? " TAMPERED" : ""}`);
         }
         for (const v of t.verdicts) console.log(`  verdict ${v.id}: ${v.tier} @ ${v.headSha.slice(0, 10)}${v.voided ? ` (void: ${v.voidReason})` : " (live)"}`);
         for (const h of t.handoffPaths) console.log(`  handoff ${h}`);
@@ -375,7 +381,9 @@ async function main() {
     case "gates": {
       const [projectId] = rest;
       for (const g of listGates(db, (projectId as ProjectId) ?? null, "open"))
-        console.log(`gate ${g.id} (${g.projectId}, ${g.kind}): ${g.question} [${g.options.join(" | ")}]${g.defaultOption ? ` default ${g.defaultOption}` : ""}`);
+        console.log(
+          `gate ${g.id} (${g.projectId}, ${g.kind}): ${g.question} [${g.options.join(" | ")}]${g.defaultOption ? ` default ${g.defaultOption}` : ""}`,
+        );
       return;
     }
     case "gate": {
@@ -397,7 +405,10 @@ async function main() {
       const { positionals, values } = args({ provider: { type: "string" }, capacity: { type: "string" }, name: { type: "string" } });
       const id = positionals[1];
       if (positionals[0] === "set" && id) {
-        const e = updateEnvironment(db, id as EnvironmentId, { name: values.name, capacity: values.capacity === undefined ? undefined : Number(values.capacity) });
+        const e = updateEnvironment(db, id as EnvironmentId, {
+          name: values.name,
+          capacity: values.capacity === undefined ? undefined : Number(values.capacity),
+        });
         console.log(`environment ${e.id}: ${e.name}, capacity ${e.capacity}`);
         return;
       }
@@ -483,7 +494,9 @@ async function main() {
       const { positionals, values } = args({ thread: { type: "string" }, go: { type: "boolean" } });
       const text = positionals.join(" ").trim();
       if (!text) fail(USAGE);
-      const thread = values.thread ? getThread(db, Number(values.thread)) : createThread(db, { title: text.slice(0, 60), autonomy: values.go ? "go" : "propose" });
+      const thread = values.thread
+        ? getThread(db, Number(values.thread))
+        : createThread(db, { title: text.slice(0, 60), autonomy: values.go ? "go" : "propose" });
       if (values.go && thread.autonomy !== "go") setThreadAutonomy(db, thread.id, "go");
       console.log(`thread ${thread.id} · ${values.go ? "go" : thread.autonomy}`);
       const ctx = { ...agentCtx(), onEvent: (e: HarnessEvent) => (e.kind === "tool_call" ? console.log(renderEvent(e)) : undefined) };
@@ -492,14 +505,16 @@ async function main() {
       if (turn.problem) console.log(`! ${turn.problem}`);
       printRecords(thread.id, turn.human.id);
       if (turn.applied) console.log(`applied proposal ${turn.proposal!.id}: ${JSON.stringify(turn.applied)}`);
-      else if (turn.proposal?.state === "pending") console.log(`proposal ${turn.proposal.id} is waiting: yagura proposal apply ${turn.proposal.id}   (or discard)`);
+      else if (turn.proposal?.state === "pending")
+        console.log(`proposal ${turn.proposal.id} is waiting: yagura proposal apply ${turn.proposal.id}   (or discard)`);
       return;
     }
     case "thread": {
       const { positionals, values } = args({ thread: { type: "string" }, autonomy: { type: "string" } });
       const [sub, ...more] = positionals;
       if (sub === "list" || !sub) {
-        for (const t of listThreads(db)) console.log(`thread ${t.id} [${t.state}, ${t.autonomy}] ${t.title}${t.projects.length ? ` · ${t.projects.join(", ")}` : ""} · ${t.updatedAt}`);
+        for (const t of listThreads(db))
+          console.log(`thread ${t.id} [${t.state}, ${t.autonomy}] ${t.title}${t.projects.length ? ` · ${t.projects.join(", ")}` : ""} · ${t.updatedAt}`);
         return;
       }
       if (sub === "show" && more[0]) {
@@ -507,21 +522,29 @@ async function main() {
         console.log(`thread ${t.id} [${t.state}, ${t.autonomy}] ${t.title}${t.projects.length ? `\nprojects: ${t.projects.join(", ")}` : ""}`);
         for (const m of listMessages(db, t.id)) console.log(`\n── ${m.role} #${m.id} · ${m.createdAt}\n${m.body}`);
         const decisions = listDecisions(db, t.id);
-        if (decisions.length) console.log(`\ndecisions:\n${decisions.map((d) => `  D${d.id}${d.supersededBy ? ` (superseded by D${d.supersededBy})` : ""}: ${d.text}`).join("\n")}`);
+        if (decisions.length)
+          console.log(
+            `\ndecisions:\n${decisions.map((d) => `  D${d.id}${d.supersededBy ? ` (superseded by D${d.supersededBy})` : ""}: ${d.text}`).join("\n")}`,
+          );
         const questions = listQuestions(db, t.id);
-        if (questions.length) console.log(`\nquestions:\n${questions.map((q) => `  Q${q.id}: ${q.text}${q.answer ? ` → ${q.answer}` : " (open)"}`).join("\n")}`);
+        if (questions.length)
+          console.log(`\nquestions:\n${questions.map((q) => `  Q${q.id}: ${q.text}${q.answer ? ` → ${q.answer}` : " (open)"}`).join("\n")}`);
         for (const p of listProposals(db, t.id)) {
           const body = ProposalBody.safeParse(p.body);
-          console.log(`\nproposal ${p.id} [${p.state}]\n${body.success ? describeProposal(body.data) : JSON.stringify(p.body)}${p.result ? `\n→ ${JSON.stringify(p.result)}` : ""}`);
+          console.log(
+            `\nproposal ${p.id} [${p.state}]\n${body.success ? describeProposal(body.data) : JSON.stringify(p.body)}${p.result ? `\n→ ${JSON.stringify(p.result)}` : ""}`,
+          );
         }
         return;
       }
       if (sub === "search" && more.length) {
-        for (const m of searchMessages(db, more.join(" "), values.thread ? Number(values.thread) : undefined)) console.log(`thread ${m.threadId} ${m.role} #${m.id} · ${m.createdAt}: ${m.snippet}`);
+        for (const m of searchMessages(db, more.join(" "), values.thread ? Number(values.thread) : undefined))
+          console.log(`thread ${m.threadId} ${m.role} #${m.id} · ${m.createdAt}: ${m.snippet}`);
         return;
       }
       if (sub === "mentions" && more[0]) {
-        for (const m of messagesMentioning(db, more[0].replace(/^@/, ""))) console.log(`thread ${m.threadId} ${m.role} #${m.messageId} · ${m.createdAt}: ${m.body.split("\n")[0]!.slice(0, 140)}`);
+        for (const m of messagesMentioning(db, more[0].replace(/^@/, "")))
+          console.log(`thread ${m.threadId} ${m.role} #${m.messageId} · ${m.createdAt}: ${m.body.split("\n")[0]!.slice(0, 140)}`);
         return;
       }
       if (sub === "set" && more[0] && (values.autonomy === "go" || values.autonomy === "propose")) {
@@ -545,9 +568,15 @@ async function main() {
       try {
         const result = await applyProposal({ db, boot }, proposal.id);
         addMessage(db, { threadId: proposal.threadId, role: "system", body: `Go: applied proposal ${proposal.id}: ${JSON.stringify(result)}` });
-        console.log(`applied proposal ${proposal.id}: ${JSON.stringify(result)}${daemonPid(boot) ? "" : `\nno daemon is running; start one with \`yagura daemon\` or drive a project with \`yagura drive <project>\``}`);
+        console.log(
+          `applied proposal ${proposal.id}: ${JSON.stringify(result)}${daemonPid(boot) ? "" : `\nno daemon is running; start one with \`yagura daemon\` or drive a project with \`yagura drive <project>\``}`,
+        );
       } catch (e) {
-        addMessage(db, { threadId: proposal.threadId, role: "system", body: `Applying proposal ${proposal.id} failed: ${e instanceof Error ? e.message : String(e)}` });
+        addMessage(db, {
+          threadId: proposal.threadId,
+          role: "system",
+          body: `Applying proposal ${proposal.id} failed: ${e instanceof Error ? e.message : String(e)}`,
+        });
         throw e;
       }
       return;

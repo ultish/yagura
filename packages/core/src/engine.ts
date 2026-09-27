@@ -68,7 +68,8 @@ export class Engine {
   private recoverCrashed(unitId: UnitId, e: unknown): void {
     const unit = getUnit(this.db, unitId);
     recordEvent(this.db, "engine.error", { projectId: unit.projectId, unitId }, { error: e instanceof Error ? e.message : String(e) });
-    for (const a of listAttempts(this.db, unitId)) if (a.state === "running" || a.state === "queued") updateAttempt(this.db, a.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
+    for (const a of listAttempts(this.db, unitId))
+      if (a.state === "running" || a.state === "queued") updateAttempt(this.db, a.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
     if (unit.state === "running") transitionUnit(this.db, unitId, "failed", { reason: "engine error" });
     else if (unit.state === "ready" && unit.type === "verify") transitionUnit(this.db, unitId, "blocked", { reason: "engine error" });
   }
@@ -76,7 +77,8 @@ export class Engine {
   private settleFailures(project: Project): void {
     for (const u of listUnits(this.db, project.id)) {
       if (this.inflight.has(`unit:${u.id}`)) continue;
-      if (u.type === "verify" && u.state === "failed") transitionUnit(this.db, u.id, "abandoned", { reason: "verifier attempt failed; outcome applied to its target" });
+      if (u.type === "verify" && u.state === "failed")
+        transitionUnit(this.db, u.id, "abandoned", { reason: "verifier attempt failed; outcome applied to its target" });
       if (u.type !== "work" || (u.state !== "failed" && u.state !== "rejected")) continue;
       const policy = failurePolicy(u, listAttempts(this.db, u.id));
       transitionUnit(this.db, u.id, policy.action === "retry" ? "ready" : "blocked", { reason: policy.reason });
@@ -89,15 +91,29 @@ export class Engine {
       const key = `land:${u.repoId}`;
       if (this.inflight.has(key)) continue;
       if (project.mergePolicy === "human") {
-        const gate = listGates(this.db, project.id).filter((g) => g.kind === "land" && g.unitId === u.id).at(-1);
+        const gate = listGates(this.db, project.id)
+          .filter((g) => g.kind === "land" && g.unitId === u.id)
+          .at(-1);
         if (!gate || gate.state === "cancelled") {
-          addGate(this.db, { projectId: project.id, unitId: u.id, kind: "land", question: `U${u.seq} is verified. Land it on ${u.repoId}?`, options: ["land", "hold"], defaultOption: "hold" });
+          addGate(this.db, {
+            projectId: project.id,
+            unitId: u.id,
+            kind: "land",
+            question: `U${u.seq} is verified. Land it on ${u.repoId}?`,
+            options: ["land", "hold"],
+            defaultOption: "hold",
+          });
           this.log(`  gate: land U${u.seq}?`);
           continue;
         }
         if (gate.state !== "answered" || gate.answer !== "land") continue;
       }
-      this.start(key, `land U${u.seq}`, () => landUnit(this.ctx, u.id), () => undefined);
+      this.start(
+        key,
+        `land U${u.seq}`,
+        () => landUnit(this.ctx, u.id),
+        () => undefined,
+      );
     }
   }
 
@@ -128,7 +144,11 @@ export class Engine {
       const harness = resolveSetting(this.db, u.type === "verify" ? "role.verifier.harness" : "role.worker.harness", sctx).value;
       if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return;
       if (runningAttempts(this.db, { harness }) >= resolveSetting(this.db, "max_parallel_per_harness").value) return;
-      if (runningAttempts(this.db, { projectId: project.id }) + this.pendingStarts(project.id) >= resolveSetting(this.db, "project.max_in_flight", { projectId: project.id }).value) return;
+      if (
+        runningAttempts(this.db, { projectId: project.id }) + this.pendingStarts(project.id) >=
+        resolveSetting(this.db, "project.max_in_flight", { projectId: project.id }).value
+      )
+        return;
       const run = u.type === "verify" ? () => runVerifyUnit(this.ctx, u.id) : () => runWorkUnit(this.ctx, u.id);
       this.start(`unit:${u.id}`, `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}`, run, (e) => this.recoverCrashed(u.id, e));
     }
@@ -158,7 +178,9 @@ export class Engine {
   private activationDue(project: Project): "activate" | "gate" | null {
     if (project.state !== "framing" || !project.after.every((a) => getProject(this.db, a).state === "closed")) return null;
     if (!project.phaseGate) return "activate";
-    const gate = listGates(this.db, project.id).filter((g) => g.kind === "phase").at(-1);
+    const gate = listGates(this.db, project.id)
+      .filter((g) => g.kind === "phase")
+      .at(-1);
     if (!gate || gate.state === "cancelled") return "gate";
     return gate.state === "answered" && gate.answer === "start" ? "activate" : null;
   }
@@ -166,7 +188,13 @@ export class Engine {
   private activate(project: Project): void {
     const due = this.activationDue(project);
     if (due === "gate") {
-      addGate(this.db, { projectId: project.id, kind: "phase", question: `${project.after.join(", ")} closed. Start ${project.id}: ${project.goal}?`, options: ["start", "hold"], defaultOption: "hold" });
+      addGate(this.db, {
+        projectId: project.id,
+        kind: "phase",
+        question: `${project.after.join(", ")} closed. Start ${project.id}: ${project.goal}?`,
+        options: ["start", "hold"],
+        defaultOption: "hold",
+      });
       this.log(`  gate: start ${project.id}?`);
     }
     if (due !== "activate") return;
@@ -178,7 +206,8 @@ export class Engine {
     if (project.state !== "active" || project.andonReason) return null;
     if ([...this.inflight.keys()].some((k) => k === `plan:${project.id}`)) return null;
     const units = listUnits(this.db, project.id);
-    if (units.some((u) => this.inflight.has(`unit:${u.id}`) || ["ready", "running", "handed_off", "verifying", "verified", "landing"].includes(u.state))) return null;
+    if (units.some((u) => this.inflight.has(`unit:${u.id}`) || ["ready", "running", "handed_off", "verifying", "verified", "landing"].includes(u.state)))
+      return null;
     const blocked = units.filter((u) => u.type === "work" && u.state === "blocked").map((u) => u.seq);
     return blocked.length && !this.planNeeded(project) ? blocked : null;
   }
@@ -200,7 +229,13 @@ export class Engine {
   private report(projects: Project[]): void {
     for (const r of this.dueReports(projects)) {
       const key = `report:${r.threadId}:${r.projectId}`;
-      if (!this.inflight.has(key)) this.start(key, `report ${r.projectId} → thread ${r.threadId}`, () => postReport(this.ctx, r.threadId, r.projectId, r.kind), () => undefined);
+      if (!this.inflight.has(key))
+        this.start(
+          key,
+          `report ${r.projectId} → thread ${r.threadId}`,
+          () => postReport(this.ctx, r.threadId, r.projectId, r.kind),
+          () => undefined,
+        );
     }
   }
 
@@ -217,7 +252,12 @@ export class Engine {
       if (project.andonReason) continue;
       this.land(project);
       if (this.planNeeded(project))
-        this.start(`plan:${project.id}`, `plan ${project.id}`, () => runPlanner(this.ctx, project.id), () => undefined);
+        this.start(
+          `plan:${project.id}`,
+          `plan ${project.id}`,
+          () => runPlanner(this.ctx, project.id),
+          () => undefined,
+        );
       this.spawn(project);
     }
     this.report(this.scope());
@@ -238,9 +278,11 @@ export class Engine {
   }
 
   recoverOrphans(): number {
-    const orphans = this.db
-      .prepare("SELECT a.id, a.pid, a.unit_id FROM attempts a WHERE a.state IN ('running', 'queued')")
-      .all() as { id: number; pid: number | null; unit_id: number }[];
+    const orphans = this.db.prepare("SELECT a.id, a.pid, a.unit_id FROM attempts a WHERE a.state IN ('running', 'queued')").all() as {
+      id: number;
+      pid: number | null;
+      unit_id: number;
+    }[];
     for (const o of orphans) {
       if (o.pid) {
         try {
@@ -280,7 +322,8 @@ export class Engine {
 }
 
 function landApproved(db: Db, projectId: ProjectId, u: Unit): boolean {
-  const gate = listGates(db, projectId).filter((g) => g.kind === "land" && g.unitId === u.id).at(-1);
+  const gate = listGates(db, projectId)
+    .filter((g) => g.kind === "land" && g.unitId === u.id)
+    .at(-1);
   return gate?.state === "answered" && gate.answer === "land";
 }
-

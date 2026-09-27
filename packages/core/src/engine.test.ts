@@ -15,7 +15,11 @@ import { layout } from "./paths.js";
 import { addEnvironment, addProject, addRepo, getProject, listUnits, openStore, setMergePolicy, setProjectEnvironment, type Db } from "./store.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
-const fake: HarnessAdapter = { id: "claude", command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs")], stdin: run.prompt }), parse: parseClaudeLine };
+const fake: HarnessAdapter = {
+  id: "claude",
+  command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs")], stdin: run.prompt }),
+  parse: parseClaudeLine,
+};
 const tsx = pathToFileURL(join(dirname(createRequire(import.meta.url).resolve("tsx/package.json")), "dist/loader.mjs")).href;
 
 let db: Db;
@@ -28,7 +32,10 @@ beforeEach(async () => {
   const seed = join(root, "seed");
   mkdirSync(join(seed, ".agents/verify"), { recursive: true });
   writeFileSync(join(seed, "README.md"), "seed\n");
-  writeFileSync(join(seed, ".agents/verify/verify.json"), JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "test -f README.md", tier: "unit-verified" }] }));
+  writeFileSync(
+    join(seed, ".agents/verify/verify.json"),
+    JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "test -f README.md", tier: "unit-verified" }] }),
+  );
   await git(["init", "--quiet", "-b", "main"], { cwd: seed });
   await commitAll(seed, "init", { name: "t", email: "t@t" });
   origin = join(root, "origin.git");
@@ -68,7 +75,12 @@ describe("Engine", () => {
     expect(at("attempt.started", c!)).toBeGreaterThan(at("unit.landed", a!));
 
     const files = await git(["ls-tree", "-r", "--name-only", "main"], { cwd: origin });
-    expect(files.split("\n").filter((f) => f.startsWith("app/")).sort()).toEqual([`app/a/extra/p-U${work[2]!.seq}.txt`, `app/a/p-U${work[0]!.seq}.txt`, `app/b/p-U${work[1]!.seq}.txt`]);
+    expect(
+      files
+        .split("\n")
+        .filter((f) => f.startsWith("app/"))
+        .sort(),
+    ).toEqual([`app/a/extra/p-U${work[2]!.seq}.txt`, `app/a/p-U${work[0]!.seq}.txt`, `app/b/p-U${work[1]!.seq}.txt`]);
     expect(log.some((l) => l.startsWith("✔ project p closed"))).toBe(true);
   }, 60_000);
 
@@ -84,7 +96,11 @@ describe("Engine", () => {
     await engine.runUntilIdle();
     for (const g of listGates(db, project, "open").filter((x) => x.kind === "land")) answerGate(db, g.id, "land");
     await engine.runUntilIdle();
-    expect(listUnits(db, project).filter((u) => u.type === "work").every((u) => u.state === "landed")).toBe(true);
+    expect(
+      listUnits(db, project)
+        .filter((u) => u.type === "work")
+        .every((u) => u.state === "landed"),
+    ).toBe(true);
   }, 60_000);
 
   it("does not start work while the project's andon is raised", async () => {

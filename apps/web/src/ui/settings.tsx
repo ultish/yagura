@@ -21,7 +21,13 @@ function parsed(s: Setting, text: string): unknown {
   return t === "" && s.default === null ? null : t;
 }
 
-const SOURCE: Record<string, string> = { default: "default", global: "from global", project: "from the project", repo: "from the repo", environment: "from the environment" };
+const SOURCE: Record<string, string> = {
+  default: "default",
+  global: "from global",
+  project: "from the project",
+  repo: "from the repo",
+  environment: "from the environment",
+};
 
 export function SettingRow({ s, scope, scopeId, cap, onSaved }: { s: Setting; scope: SettingScope; scopeId: string; cap?: string; onSaved: () => void }) {
   const [text, setText] = useState(shown(s.value));
@@ -41,7 +47,11 @@ export function SettingRow({ s, scope, scopeId, cap, onSaved }: { s: Setting; sc
           <span>{s.source === scope ? `set ${scope === "global" ? "globally" : "here"}; default ${shown(s.default) || "empty"}` : SOURCE[s.source]}</span>
           {cap && <span className="s-lamp">{cap}</span>}
         </div>
-        {action.error && <div className="s-bell" style={{ fontSize: 13 }}>{action.error}</div>}
+        {action.error && (
+          <div className="s-bell" style={{ fontSize: 13 }}>
+            {action.error}
+          </div>
+        )}
       </div>
       <form
         className="actions"
@@ -79,7 +89,6 @@ export function SettingRow({ s, scope, scopeId, cap, onSaved }: { s: Setting; sc
     </div>
   );
 }
-
 
 export function ScopedSettings({ scope, id }: { scope: Exclude<SettingScope, "global">; id: string }) {
   const { data, error, reload } = useApi<SettingsOverview>(`/api/settings/overview?scope=${scope}&id=${encodeURIComponent(id)}`);

@@ -19,7 +19,11 @@ const GROUPS: { key: Group; title: string; bell?: boolean; collapsed?: boolean }
 function Runs({ d, u }: { d: ProjectDetail; u: UnitView }) {
   const v = verifiersOf(d, u).at(-1);
   if (!v || !u.verdict) return null;
-  return <span className="run ok">verified {u.verdict.tier} by U{v.seq}</span>;
+  return (
+    <span className="run ok">
+      verified {u.verdict.tier} by U{v.seq}
+    </span>
+  );
 }
 
 function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) {
@@ -30,7 +34,9 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
   const gate = openGateFor(d, u);
   const last = latestAttempt(u);
   const running = u.attempts.find((a) => a.state === "running");
-  const verifying = verifiersOf(d, u).flatMap((v) => v.attempts).find((a) => a.state === "running");
+  const verifying = verifiersOf(d, u)
+    .flatMap((v) => v.attempts)
+    .find((a) => a.state === "running");
   const base = `/api/projects/${d.project.id}/units/${u.seq}`;
   const facts = last && (
     <>
@@ -53,9 +59,27 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
       facts={facts}
       extra={
         <>
-          {retrying && <NoteForm label="Retry" placeholder="What should the next try do differently? (optional)" submit={(note) => api(`${base}/retry`, { body: { note } })} onDone={() => setRetrying(false)} />}
-          {stopping && running && <NoteForm label="Stop" placeholder="Note for the next attempt (optional)" submit={(note) => api(`/api/attempts/${running.id}/stop`, { body: { note: note || null } })} onDone={() => setStopping(false)} />}
-          {action.error && <span className="s-bell" style={{ fontSize: 13 }}>{action.error}</span>}
+          {retrying && (
+            <NoteForm
+              label="Retry"
+              placeholder="What should the next try do differently? (optional)"
+              submit={(note) => api(`${base}/retry`, { body: { note } })}
+              onDone={() => setRetrying(false)}
+            />
+          )}
+          {stopping && running && (
+            <NoteForm
+              label="Stop"
+              placeholder="Note for the next attempt (optional)"
+              submit={(note) => api(`/api/attempts/${running.id}/stop`, { body: { note: note || null } })}
+              onDone={() => setStopping(false)}
+            />
+          )}
+          {action.error && (
+            <span className="s-bell" style={{ fontSize: 13 }}>
+              {action.error}
+            </span>
+          )}
         </>
       }
       actions={
@@ -64,7 +88,13 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
           <>
             {gate &&
               gate.options.map((o, i) => (
-                <button key={o} className={`btn${i === 0 ? " bell" : ""}`} type="button" disabled={action.busy} onClick={() => action.run(() => api(`/api/gates/${gate.id}/answer`, { body: { answer: o } }))}>
+                <button
+                  key={o}
+                  className={`btn${i === 0 ? " bell" : ""}`}
+                  type="button"
+                  disabled={action.busy}
+                  onClick={() => action.run(() => api(`/api/gates/${gate.id}/answer`, { body: { answer: o } }))}
+                >
                   {o === "land" ? "Land" : o === "hold" ? "Hold" : o}
                 </button>
               ))}
@@ -108,7 +138,13 @@ function ProjectGates({ d }: { d: ProjectDetail }) {
           status={g.defaultOption ? `Default if nobody answers: ${g.defaultOption}.` : undefined}
           tone={g.kind === "report" ? "pine" : "bell"}
           actions={g.options.map((o, i) => (
-            <button key={o} className={`btn${i === 0 && g.kind !== "report" ? " bell" : ""}`} type="button" disabled={action.busy} onClick={() => action.run(() => api(`/api/gates/${g.id}/answer`, { body: { answer: o } }))}>
+            <button
+              key={o}
+              className={`btn${i === 0 && g.kind !== "report" ? " bell" : ""}`}
+              type="button"
+              disabled={action.busy}
+              onClick={() => action.run(() => api(`/api/gates/${g.id}/answer`, { body: { answer: o } }))}
+            >
               {o}
             </button>
           ))}
@@ -124,8 +160,18 @@ export function Project({ id }: { id: string }) {
   const action = useAction();
   const [andon, setAndon] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  if (error) return <main style={{ padding: 36 }} className="s-bell">{error}</main>;
-  if (!d) return <main style={{ padding: 36 }} className="muted">Loading {id}…</main>;
+  if (error)
+    return (
+      <main style={{ padding: 36 }} className="s-bell">
+        {error}
+      </main>
+    );
+  if (!d)
+    return (
+      <main style={{ padding: 36 }} className="muted">
+        Loading {id}…
+      </main>
+    );
   const p = d.project;
   const work = d.units.filter((u) => u.type === "work");
   const byGroup = (g: Group) => work.filter((u) => groupOf(d, u) === g);
@@ -151,7 +197,12 @@ export function Project({ id }: { id: string }) {
           </h1>
           <div style={{ marginLeft: "auto", display: "flex", gap: 10 }}>
             {p.andonReason ? (
-              <button className="btn" type="button" disabled={action.busy} onClick={() => action.run(() => api(`/api/projects/${p.id}/andon`, { body: { reason: null } }))}>
+              <button
+                className="btn"
+                type="button"
+                disabled={action.busy}
+                onClick={() => action.run(() => api(`/api/projects/${p.id}/andon`, { body: { reason: null } }))}
+              >
                 Clear andon
               </button>
             ) : (
@@ -159,12 +210,25 @@ export function Project({ id }: { id: string }) {
                 Ring andon
               </button>
             )}
-            <button className="btn lamp" type="button" onClick={() => navigate(d.threads.length ? `/talk/${d.threads.at(-1)}?say=${encodeURIComponent(`@${p.id} `)}` : `/talk?say=${encodeURIComponent(`@${p.id} `)}`)}>
+            <button
+              className="btn lamp"
+              type="button"
+              onClick={() =>
+                navigate(d.threads.length ? `/talk/${d.threads.at(-1)}?say=${encodeURIComponent(`@${p.id} `)}` : `/talk?say=${encodeURIComponent(`@${p.id} `)}`)
+              }
+            >
               Add work
             </button>
           </div>
         </div>
-        {andon && <NoteForm label="Ring andon" placeholder="Why stop new work on this project?" submit={(reason) => api(`/api/projects/${p.id}/andon`, { body: { reason: reason || "stopped by operator" } })} onDone={() => setAndon(false)} />}
+        {andon && (
+          <NoteForm
+            label="Ring andon"
+            placeholder="Why stop new work on this project?"
+            submit={(reason) => api(`/api/projects/${p.id}/andon`, { body: { reason: reason || "stopped by operator" } })}
+            onDone={() => setAndon(false)}
+          />
+        )}
         {p.andonReason && <div className="s-bell">Andon: {p.andonReason}. No new agents start until it is cleared.</div>}
         <p style={{ margin: 0, fontSize: 16.5, lineHeight: 1.6, color: "var(--soft)", maxWidth: 820 }}>
           <Inline text={p.goal} />{" "}
@@ -189,8 +253,18 @@ export function Project({ id }: { id: string }) {
         )}
       </section>
       <Beacons d={d} now={now} />
-      <section style={{ padding: "20px 36px 48px", display: "flex", flexDirection: "column", gap: 24, background: "var(--bg2)", borderTop: "1px solid var(--line)" }}>
-        {!work.length && <div className="empty">{d.planning ? "The planner is thinking about the first units." : p.state === "framing" ? `Dark until ${p.after.join(", ")} closes.` : "No units yet."}</div>}
+      <section
+        style={{ padding: "20px 36px 48px", display: "flex", flexDirection: "column", gap: 24, background: "var(--bg2)", borderTop: "1px solid var(--line)" }}
+      >
+        {!work.length && (
+          <div className="empty">
+            {d.planning
+              ? "The planner is thinking about the first units."
+              : p.state === "framing"
+                ? `Dark until ${p.after.join(", ")} closes.`
+                : "No units yet."}
+          </div>
+        )}
         {GROUPS.map((g) => {
           const units = byGroup(g.key);
           const extras = g.key === "bell" ? d.gates.filter((x) => x.state === "open" && !x.unitId).length : 0;
@@ -204,7 +278,13 @@ export function Project({ id }: { id: string }) {
                 </h2>
                 <span className="n">{units.length + extras}</span>
                 {g.collapsed && (
-                  <button type="button" className="mono" onClick={() => setOpen((o) => ({ ...o, [g.key]: !o[g.key] }))} style={{ fontSize: 12, background: "none", border: 0, color: "var(--amber)", cursor: "pointer" }} aria-expanded={shown}>
+                  <button
+                    type="button"
+                    className="mono"
+                    onClick={() => setOpen((o) => ({ ...o, [g.key]: !o[g.key] }))}
+                    style={{ fontSize: 12, background: "none", border: 0, color: "var(--amber)", cursor: "pointer" }}
+                    aria-expanded={shown}
+                  >
                     {shown ? "hide" : "show"}
                   </button>
                 )}
@@ -217,7 +297,13 @@ export function Project({ id }: { id: string }) {
         <div>
           <div className="gh">
             <h2 className="h2">Settings</h2>
-            <button type="button" className="mono" onClick={() => setOpen((o) => ({ ...o, settings: !o.settings }))} style={{ fontSize: 12, background: "none", border: 0, color: "var(--amber)", cursor: "pointer" }} aria-expanded={!!open.settings}>
+            <button
+              type="button"
+              className="mono"
+              onClick={() => setOpen((o) => ({ ...o, settings: !o.settings }))}
+              style={{ fontSize: 12, background: "none", border: 0, color: "var(--amber)", cursor: "pointer" }}
+              aria-expanded={!!open.settings}
+            >
               {open.settings ? "hide" : "show"}
             </button>
           </div>

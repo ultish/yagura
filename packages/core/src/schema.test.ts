@@ -1,17 +1,7 @@
 import { readFileSync } from "node:fs";
 import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it } from "vitest";
-import {
-  ATTEMPT_STATES,
-  FAILURE_MODES,
-  PASS_TIERS,
-  FAIL_TIERS,
-  UNIT_STATES,
-  UNIT_TYPES,
-  UNIT_TRANSITIONS,
-  canTransition,
-  meetsTier,
-} from "./domain.js";
+import { ATTEMPT_STATES, FAILURE_MODES, PASS_TIERS, FAIL_TIERS, UNIT_STATES, UNIT_TYPES, UNIT_TRANSITIONS, canTransition, meetsTier } from "./domain.js";
 
 const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
 const now = "2026-09-26T00:00:00Z";
@@ -22,9 +12,7 @@ beforeEach(() => {
   db = new Database(":memory:");
   db.exec(schema);
   db.prepare("INSERT INTO repos (id, url, default_branch, created_at) VALUES ('testbed', 'file:///tb', 'main', ?)").run(now);
-  db.prepare(
-    "INSERT INTO projects (id, name, goal, predicate, min_tier, created_at) VALUES ('p', 'P', 'g', 'pred', 'unit-verified', ?)",
-  ).run(now);
+  db.prepare("INSERT INTO projects (id, name, goal, predicate, min_tier, created_at) VALUES ('p', 'P', 'g', 'pred', 'unit-verified', ?)").run(now);
 });
 
 function insertUnit(fields: Record<string, unknown>) {
@@ -36,14 +24,21 @@ function insertUnit(fields: Record<string, unknown>) {
 describe("schema", () => {
   it("accepts every TS enum value the SQL CHECKs guard", () => {
     UNIT_TYPES.forEach((type, i) =>
-      insertUnit({ seq: i + 1, type, repo_id: type === "plan" || type === "measure" ? null : "testbed", target_unit_id: ["verify", "rebase", "ci-fix", "review-triage"].includes(type) ? 1 : null }),
+      insertUnit({
+        seq: i + 1,
+        type,
+        repo_id: type === "plan" || type === "measure" ? null : "testbed",
+        target_unit_id: ["verify", "rebase", "ci-fix", "review-triage"].includes(type) ? 1 : null,
+      }),
     );
     UNIT_STATES.forEach((state) => db.prepare("UPDATE units SET state = ? WHERE seq = 1").run(state));
     const attempt = db.prepare("INSERT INTO attempts (unit_id, n, harness) VALUES (1, 1, 'claude')").run().lastInsertRowid;
     ATTEMPT_STATES.forEach((s) => db.prepare("UPDATE attempts SET state = ? WHERE id = ?").run(s, attempt));
     FAILURE_MODES.forEach((m) => db.prepare("UPDATE attempts SET failure_mode = ? WHERE id = ?").run(m, attempt));
     [...PASS_TIERS, ...FAIL_TIERS].forEach((tier, i) =>
-      db.prepare("INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, created_at) VALUES (1, ?, ?, 'testbed', ?, ?)").run(attempt, tier, `sha${i}`, now),
+      db
+        .prepare("INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, created_at) VALUES (1, ?, ?, 'testbed', ?, ?)")
+        .run(attempt, tier, `sha${i}`, now),
     );
   });
 
@@ -105,10 +100,11 @@ describe("unit state machine", () => {
   });
 
   it("can abandon any non-terminal unit and nothing leaves a terminal state", () => {
-    const terminal = Object.entries(UNIT_TRANSITIONS).filter(([, targets]) => targets.length === 0).map(([s]) => s);
+    const terminal = Object.entries(UNIT_TRANSITIONS)
+      .filter(([, targets]) => targets.length === 0)
+      .map(([s]) => s);
     expect(terminal.sort()).toEqual(["abandoned", "done", "landed"]);
-    for (const [state, targets] of Object.entries(UNIT_TRANSITIONS))
-      if (!terminal.includes(state)) expect(targets).toContain("abandoned");
+    for (const [state, targets] of Object.entries(UNIT_TRANSITIONS)) if (!terminal.includes(state)) expect(targets).toContain("abandoned");
   });
 });
 

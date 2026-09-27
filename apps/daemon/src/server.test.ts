@@ -31,8 +31,26 @@ beforeEach(() => {
   boot = { home: mkdtempSync(join(tmpdir(), "yagura-api-")), packsDir: "", skillsDir: "", bind: "0.0.0.0", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
   addRepo(db, { id: "testbed", url: "file:///tb", defaultBranch: "main" });
-  addProject(db, { id: project, name: "Orders", goal: "ship it", predicate: "done", minTier: "unit-verified", repos: ["testbed" as RepoId], refs: ["gitlab#7"] });
-  const unit = addUnit(db, { projectId: project, type: "work", repoId: "testbed" as RepoId, goal: "Implement create", writeScope: ["app/**"], acceptance: ["a"], verify: "v", timeboxSeconds: 60, maxAttempts: 2 });
+  addProject(db, {
+    id: project,
+    name: "Orders",
+    goal: "ship it",
+    predicate: "done",
+    minTier: "unit-verified",
+    repos: ["testbed" as RepoId],
+    refs: ["gitlab#7"],
+  });
+  const unit = addUnit(db, {
+    projectId: project,
+    type: "work",
+    repoId: "testbed" as RepoId,
+    goal: "Implement create",
+    writeScope: ["app/**"],
+    acceptance: ["a"],
+    verify: "v",
+    timeboxSeconds: 60,
+    maxAttempts: 2,
+  });
   transitionUnit(db, unit.id, "ready");
   transitionUnit(db, unit.id, "running");
   const attempt = createAttempt(db, unit.id, "claude", null);
@@ -71,7 +89,10 @@ describe("daemon API", () => {
   });
 
   it("lists running agents against the cap", async () => {
-    expect(await (await get("/api/agents")).json()).toMatchObject({ attempts: [{ state: "running", unit: { seq: 1, goal: "Implement create" } }], caps: { maxParallelAgents: 4, running: 1 } });
+    expect(await (await get("/api/agents")).json()).toMatchObject({
+      attempts: [{ state: "running", unit: { seq: 1, goal: "Implement create" } }],
+      caps: { maxParallelAgents: 4, running: 1 },
+    });
   });
 
   it("returns an agent's log as parsed events, resumable by line", async () => {
@@ -100,7 +121,10 @@ describe("daemon API", () => {
   it("registers an existing repo and lists repos with their pack, projects, and landing queue", async () => {
     const seed = join(boot.home, "seed");
     mkdirSync(join(seed, ".agents/verify"), { recursive: true });
-    writeFileSync(join(seed, ".agents/verify/verify.json"), JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] }));
+    writeFileSync(
+      join(seed, ".agents/verify/verify.json"),
+      JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] }),
+    );
     await git(["init", "--quiet", "-b", "main"], { cwd: seed });
     await commitAll(seed, "init", { name: "t", email: "t@localhost" });
     const origin = join(boot.home, "Billing.git");
@@ -125,14 +149,18 @@ describe("daemon API", () => {
 
   it("creates and edits environments and shows who holds and waits for their slots", async () => {
     expect((await post("/api/environments", { id: "dev", provider: "kube-namespace", capacity: 2 })).status).toBe(400);
-    expect(await (await post("/api/environments", { id: "dev", provider: "local-process", capacity: -1 })).json()).toEqual({ error: "capacity must be a whole number, 0 or more" });
+    expect(await (await post("/api/environments", { id: "dev", provider: "local-process", capacity: -1 })).json()).toEqual({
+      error: "capacity must be a whole number, 0 or more",
+    });
     const created = await post("/api/environments", { id: "dev", provider: "local-process", capacity: 1 });
     expect(created.status).toBe(201);
     expect(await created.json()).toMatchObject({ environment: { id: "dev", name: "dev", capacity: 1 }, implemented: true, active: [], queued: [] });
     expect((await post("/api/environments", { id: "dev", provider: "local-process", capacity: 1 })).status).toBe(409);
 
     const attemptId = (db.prepare("SELECT id FROM attempts").get() as { id: number }).id;
-    db.prepare("INSERT INTO leases (environment_id, attempt_id, slot, state, requested_at, granted_at) VALUES ('dev', ?, 'slot-1', 'active', 't1', 't2')").run(attemptId);
+    db.prepare("INSERT INTO leases (environment_id, attempt_id, slot, state, requested_at, granted_at) VALUES ('dev', ?, 'slot-1', 'active', 't1', 't2')").run(
+      attemptId,
+    );
     db.prepare("INSERT INTO leases (environment_id, attempt_id, state, requested_at) VALUES ('dev', ?, 'queued', 't3')").run(attemptId);
     db.prepare("UPDATE projects SET environment_id = 'dev' WHERE id = 'orders'").run();
     const unit = { projectId: "orders", seq: 1, type: "work", goal: "Implement create" };
@@ -159,9 +187,13 @@ describe("daemon API", () => {
     expect(exported.headers.get("content-type")).toMatch(/yaml/);
     expect(await exported.text()).toBe("global:\n  max_parallel_agents: 6\n");
     expect(await (await post("/api/settings/clear", { scope: "global", key: "max_parallel_agents" })).json()).toEqual({ cleared: true });
-    expect(await (await post("/api/settings/import", { yaml: "global:\n  max_attempts: 0\n" })).json()).toEqual({ error: "global.max_attempts: Number must be greater than 0" });
+    expect(await (await post("/api/settings/import", { yaml: "global:\n  max_attempts: 0\n" })).json()).toEqual({
+      error: "global.max_attempts: Number must be greater than 0",
+    });
     expect(await (await post("/api/settings/import", { yaml: "global:\n  max_attempts: 4\n" })).json()).toEqual({ applied: 1 });
-    expect(await (await post("/api/settings", { scope: "global", key: "max_attempts", value: "lots" })).json()).toEqual({ error: "Expected number, received string" });
+    expect(await (await post("/api/settings", { scope: "global", key: "max_attempts", value: "lots" })).json()).toEqual({
+      error: "Expected number, received string",
+    });
 
     expect(await (await post("/api/settings", { scope: "repo", id: "testbed", key: "timebox.plan_seconds", value: 60 })).json()).toEqual({
       error: "timebox.plan_seconds cannot be set per repo; it can be set globally or per project",

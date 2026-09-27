@@ -8,7 +8,20 @@ import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mer
 import { classifyFailure, parseHandoff, syntheticFailureHandoff } from "./handoff.js";
 import { layout, unitRef } from "./paths.js";
 import { checkScope } from "./scope.js";
-import { addUnit, addUnitNote, createAttempt, getAttempt, getProject, getRepo, getUnit, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
+import {
+  addUnit,
+  addUnitNote,
+  createAttempt,
+  getAttempt,
+  getProject,
+  getRepo,
+  getUnit,
+  now,
+  recordEvent,
+  transitionUnit,
+  updateAttempt,
+  type Db,
+} from "./store.js";
 
 export type { RunContext } from "./agent.js";
 
@@ -22,7 +35,11 @@ export function addVerifyUnit(db: Db, target: Unit): Unit {
     writeScope: [],
     acceptance: target.acceptance,
     verify: target.verify,
-    timeboxSeconds: resolveSetting(db, "timebox.verify_seconds", { projectId: target.projectId, repoId: target.repoId, environmentId: getProject(db, target.projectId).environmentId }).value,
+    timeboxSeconds: resolveSetting(db, "timebox.verify_seconds", {
+      projectId: target.projectId,
+      repoId: target.repoId,
+      environmentId: getProject(db, target.projectId).environmentId,
+    }).value,
     maxAttempts: 1,
   });
   transitionUnit(db, verify.id, "ready");
@@ -143,13 +160,21 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     } else if (head === base) {
       transitionUnit(db, unit.id, "blocked", { reason: "handed off with no commits" });
     } else if (session.missingSkills.length && setting("method.enforce_required_skills")) {
-      addUnitNote(db, unit.id, `Attempt ${attempt.n} skipped required skills (${session.missingSkills.join(", ")}). Load each of them with the Skill tool before doing any work.`);
+      addUnitNote(
+        db,
+        unit.id,
+        `Attempt ${attempt.n} skipped required skills (${session.missingSkills.join(", ")}). Load each of them with the Skill tool before doing any work.`,
+      );
       transitionUnit(db, unit.id, "rejected", { reason: "skipped required skills", missing: session.missingSkills });
     } else {
       await ensureMirror(repo.url, mirror);
       const trunk = await resolveRef(mirror, `origin/${repo.defaultBranch}`);
       if (trunk !== base && !(await mergesCleanly(mirror, trunk, head))) {
-        addUnitNote(db, unit.id, `Attempt ${attempt.n} conflicted with ${repo.defaultBranch} at ${trunk.slice(0, 10)}, which moved while it worked; the next attempt starts from the new trunk.`);
+        addUnitNote(
+          db,
+          unit.id,
+          `Attempt ${attempt.n} conflicted with ${repo.defaultBranch} at ${trunk.slice(0, 10)}, which moved while it worked; the next attempt starts from the new trunk.`,
+        );
         transitionUnit(db, unit.id, "rejected", { reason: "conflicts with trunk", trunk });
       } else queueVerification(db, getUnit(db, unit.id));
     }
@@ -165,7 +190,16 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     const mode = classifyFailure(facts);
     write(
       paths.handoff(project.id, unit.seq, attempt.n),
-      syntheticFailureHandoff({ unit: `${project.id}/U${unit.seq}`, attempt: attempt.n, mode, branch, startedAt, endedAt, lastActivity: session.lastActivity, facts }),
+      syntheticFailureHandoff({
+        unit: `${project.id}/U${unit.seq}`,
+        attempt: attempt.n,
+        mode,
+        branch,
+        startedAt,
+        endedAt,
+        lastActivity: session.lastActivity,
+        facts,
+      }),
     );
     updateAttempt(db, attempt.id, { state: "failed", endedAt, exitCode: session.exitCode, headSha: head, failureMode: mode });
     transitionUnit(db, unit.id, "failed", { attempt: attempt.n, mode });

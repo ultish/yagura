@@ -15,7 +15,16 @@ export function Agents() {
   const past = all.filter((a) => a.state !== "running");
   const row = (a: AgentRow) => {
     const took = a.startedAt ? duration((a.endedAt ? Date.parse(a.endedAt) : now) - Date.parse(a.startedAt)) : "";
-    const outcome = a.state === "running" ? `Running for ${took}.` : a.state === "handed_off" ? `Handed off${a.handoffStatus ? `: ${a.handoffStatus}` : ""} in ${took}.` : a.state === "failed" ? `Failed${a.failureMode ? ` (${a.failureMode})` : ""} after ${took}.` : a.state === "stopped" ? "Stopped by an operator." : "Queued.";
+    const outcome =
+      a.state === "running"
+        ? `Running for ${took}.`
+        : a.state === "handed_off"
+          ? `Handed off${a.handoffStatus ? `: ${a.handoffStatus}` : ""} in ${took}.`
+          : a.state === "failed"
+            ? `Failed${a.failureMode ? ` (${a.failureMode})` : ""} after ${took}.`
+            : a.state === "stopped"
+              ? "Stopped by an operator."
+              : "Queued.";
     return (
       <Row
         key={a.id}

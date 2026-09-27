@@ -57,7 +57,13 @@ export function Tower({ x, y, scale = 1, slots, lit, ringing = false, planner = 
         [-72, -114],
         [-114, -150],
       ].map(([a, b]) => (
-        <path key={a} d={`M${-widthAt(a!)} ${a} L${widthAt(b!)} ${b} M${widthAt(a!)} ${a} L${-widthAt(b!)} ${b}`} style={v(t)} strokeWidth="1.6" opacity=".75" />
+        <path
+          key={a}
+          d={`M${-widthAt(a!)} ${a} L${widthAt(b!)} ${b} M${widthAt(a!)} ${a} L${-widthAt(b!)} ${b}`}
+          style={v(t)}
+          strokeWidth="1.6"
+          opacity=".75"
+        />
       ))}
       <path d="M-9 0 L-7 -168 M9 0 L7 -168" style={v(t)} strokeWidth="1.8" />
       {Array.from({ length: 12 }, (_, i) => -12 - i * 13).map((yy) => (
@@ -70,24 +76,44 @@ export function Tower({ x, y, scale = 1, slots, lit, ringing = false, planner = 
         <g key={i}>
           <rect
             className={p.on ? "shoji" : undefined}
-            style={{ fill: p.on ? "var(--lamp)" : "var(--panel-off)", stroke: p.on ? "#c58a3a" : dim ? "var(--shoji-line-dim)" : "var(--shoji-line)", animationDelay: `${-(i * 1.3 + (x % 7) * 0.4)}s` }}
+            style={{
+              fill: p.on ? "var(--lamp)" : "var(--panel-off)",
+              stroke: p.on ? "#c58a3a" : dim ? "var(--shoji-line-dim)" : "var(--shoji-line)",
+              animationDelay: `${-(i * 1.3 + (x % 7) * 0.4)}s`,
+            }}
             x={p.px}
             y={p.py}
             width={pw}
             height={ph}
             strokeWidth="1"
           />
-          <path d={`M${p.px + pw / 2} ${p.py} L${p.px + pw / 2} ${p.py + ph}`} style={{ stroke: p.on ? "#b77a2e" : dim ? "var(--shoji-line-dim)" : "var(--shoji-line)" }} strokeWidth=".8" />
+          <path
+            d={`M${p.px + pw / 2} ${p.py} L${p.px + pw / 2} ${p.py + ph}`}
+            style={{ stroke: p.on ? "#b77a2e" : dim ? "var(--shoji-line-dim)" : "var(--shoji-line)" }}
+            strokeWidth=".8"
+          />
         </g>
       ))}
       <path d="M-48 -224 L-10 -252 L10 -252 L48 -224 Z" style={{ fill: `var(--${dim ? "roof-dim" : "roof"})`, stroke: `var(--${t})` }} strokeWidth="2" />
       <path d="M-50 -224 L50 -224" style={v(t)} strokeWidth="3.2" />
-      <path d="M-10 -252 L10 -252" style={{ stroke: planner && !dim ? "var(--lamp)" : `var(--${t})` }} strokeWidth={planner && !dim ? 3.5 : 2.5} strokeLinecap="round" />
+      <path
+        d="M-10 -252 L10 -252"
+        style={{ stroke: planner && !dim ? "var(--lamp)" : `var(--${t})` }}
+        strokeWidth={planner && !dim ? 3.5 : 2.5}
+        strokeLinecap="round"
+      />
       {planner && !dim && <circle className="pulse" cx="0" cy="-258" r="3.5" style={f("lamp")} />}
       {ringing && !dim && (
         <>
           <circle className="bellglow" cx="0" cy="-238" r="26" fill="url(#yg-bell)" />
-          <path className="ring" d="M-15 -246 Q-20 -238 -15 -230 M15 -246 Q20 -238 15 -230 M-21 -250 Q-28 -238 -21 -226 M21 -250 Q28 -238 21 -226" style={v("bell")} strokeWidth="1.6" fill="none" strokeLinecap="round" />
+          <path
+            className="ring"
+            d="M-15 -246 Q-20 -238 -15 -230 M15 -246 Q20 -238 15 -230 M-21 -250 Q-28 -238 -21 -226 M21 -250 Q28 -238 21 -226"
+            style={v("bell")}
+            strokeWidth="1.6"
+            fill="none"
+            strokeLinecap="round"
+          />
         </>
       )}
       <g className={ringing && !dim ? "swing" : undefined}>
@@ -119,7 +145,11 @@ export function Castle({ x, y, name, line1, line2, glow }: { x: number; y: numbe
   return (
     <g transform={`translate(${x} ${y})`}>
       <path d="M-110 330 Q-96 250 -84 200 L84 200 Q96 250 110 330 Z" style={{ fill: "var(--stone)", stroke: "var(--stone-line)" }} strokeWidth="1.5" />
-      <path d="M-102 300 L102 300 M-97 270 L97 270 M-92 240 L92 240 M-60 200 L-66 330 M-20 200 L-22 330 M20 200 L22 330 M60 200 L66 330" style={v("stone-line")} strokeWidth="1" />
+      <path
+        d="M-102 300 L102 300 M-97 270 L97 270 M-92 240 L92 240 M-60 200 L-66 330 M-20 200 L-22 330 M20 200 L22 330 M60 200 L66 330"
+        style={v("stone-line")}
+        strokeWidth="1"
+      />
       <rect x="-70" y="120" width="140" height="80" style={f("wall")} />
       {[-58, -24, 8, 42].map((wx, i) => (
         <rect key={wx} x={wx} y="138" width="16" height="12" style={{ fill: glow && i === 1 ? "var(--lamp)" : "#2a2630" }} />

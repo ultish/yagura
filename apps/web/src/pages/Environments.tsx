@@ -48,7 +48,13 @@ function AddEnvironment({ onAdded }: { onAdded: () => void }) {
         <label htmlFor="env-name" className="sr-only">
           Name
         </label>
-        <input id="env-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="name (optional)" style={{ ...field, flexGrow: 1, minWidth: 180 }} />
+        <input
+          id="env-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="name (optional)"
+          style={{ ...field, flexGrow: 1, minWidth: 180 }}
+        />
         <label htmlFor="env-provider" className="sr-only">
           Provider
         </label>
@@ -60,15 +66,28 @@ function AddEnvironment({ onAdded }: { onAdded: () => void }) {
         <label htmlFor="env-capacity" className="muted" style={{ fontSize: 13 }}>
           slots
         </label>
-        <input id="env-capacity" className="mono" type="number" min={0} value={capacity} onChange={(e) => setCapacity(e.target.value)} style={{ ...field, width: 70 }} />
+        <input
+          id="env-capacity"
+          className="mono"
+          type="number"
+          min={0}
+          value={capacity}
+          onChange={(e) => setCapacity(e.target.value)}
+          style={{ ...field, width: 70 }}
+        />
         <button className="btn lamp" type="submit" disabled={action.busy || !id.trim()}>
           Add environment
         </button>
       </div>
       <div className="muted" style={{ fontSize: 13 }}>
-        Verification runs inside a slot of the project's environment. local-process gives each slot a private directory and a free port on this machine. Kubernetes namespaces come later.
+        Verification runs inside a slot of the project's environment. local-process gives each slot a private directory and a free port on this machine.
+        Kubernetes namespaces come later.
       </div>
-      {action.error && <div className="s-bell" style={{ fontSize: 13 }}>{action.error}</div>}
+      {action.error && (
+        <div className="s-bell" style={{ fontSize: 13 }}>
+          {action.error}
+        </div>
+      )}
     </form>
   );
 }
@@ -91,19 +110,41 @@ function EditEnvironment({ v, onDone }: { v: EnvironmentView; onDone: () => void
       <label htmlFor={`name-${v.environment.id}`} className="sr-only">
         Name
       </label>
-      <input id={`name-${v.environment.id}`} autoFocus value={name} onChange={(e) => setName(e.target.value)} style={{ ...field, flexGrow: 1, minWidth: 180 }} />
+      <input
+        id={`name-${v.environment.id}`}
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        style={{ ...field, flexGrow: 1, minWidth: 180 }}
+      />
       <label htmlFor={`cap-${v.environment.id}`} className="muted" style={{ fontSize: 13 }}>
         slots
       </label>
-      <input id={`cap-${v.environment.id}`} className="mono" type="number" min={0} value={capacity} onChange={(e) => setCapacity(e.target.value)} style={{ ...field, width: 70 }} />
+      <input
+        id={`cap-${v.environment.id}`}
+        className="mono"
+        type="number"
+        min={0}
+        value={capacity}
+        onChange={(e) => setCapacity(e.target.value)}
+        style={{ ...field, width: 70 }}
+      />
       <button className="btn sm lamp" type="submit" disabled={action.busy}>
         Save
       </button>
       <button className="btn sm" type="button" onClick={onDone}>
         Never mind
       </button>
-      {Number(capacity) < v.active.length && <span className="muted" style={{ fontSize: 13, width: "100%" }}>Slots in use now keep running; no new ones start until the count drops.</span>}
-      {action.error && <span className="s-bell" style={{ fontSize: 13, width: "100%" }}>{action.error}</span>}
+      {Number(capacity) < v.active.length && (
+        <span className="muted" style={{ fontSize: 13, width: "100%" }}>
+          Slots in use now keep running; no new ones start until the count drops.
+        </span>
+      )}
+      {action.error && (
+        <span className="s-bell" style={{ fontSize: 13, width: "100%" }}>
+          {action.error}
+        </span>
+      )}
     </form>
   );
 }
@@ -164,7 +205,10 @@ export function Environments() {
                 seq={e.id}
                 goal={
                   <>
-                    {e.name} <span className="mono muted" style={{ fontSize: 12.5 }}>{e.provider}</span>
+                    {e.name}{" "}
+                    <span className="mono muted" style={{ fontSize: 12.5 }}>
+                      {e.provider}
+                    </span>
                   </>
                 }
                 status={o.text}

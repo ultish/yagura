@@ -2,7 +2,18 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { clearSetting, describeSettings, exportSettings, importSettings, loadBootstrap, resolveSetting, setSetting, SettingsImportInvalid, UnknownSetting, effectiveSettings } from "./config.js";
+import {
+  clearSetting,
+  describeSettings,
+  exportSettings,
+  importSettings,
+  loadBootstrap,
+  resolveSetting,
+  setSetting,
+  SettingsImportInvalid,
+  UnknownSetting,
+  effectiveSettings,
+} from "./config.js";
 import { IllegalTransition, type ProjectId, type RepoId } from "./domain.js";
 import { addProject, addRepo, addUnit, createAttempt, getUnit, openStore, schemaVersion, transitionUnit, updateAttempt, getAttempt, type Db } from "./store.js";
 import { LATEST_VERSION } from "./migrations.js";
@@ -105,14 +116,18 @@ describe("settings", () => {
 
   it("refuses an override at a layer the setting is never read at", () => {
     expect(() => setSetting(db, "project", project, "max_parallel_agents", 9)).toThrow("max_parallel_agents cannot be set per project; it is global only");
-    expect(() => setSetting(db, "environment", "dev", "max_attempts", 9)).toThrow("max_attempts cannot be set per environment; it can be set globally or per project or repo");
+    expect(() => setSetting(db, "environment", "dev", "max_attempts", 9)).toThrow(
+      "max_attempts cannot be set per environment; it can be set globally or per project or repo",
+    );
     setSetting(db, "environment", "dev", "role.verifier.model", "claude-opus-5-5");
     expect(describeSettings(db, { environmentId: "dev" as never }, "environment").map((s) => [s.key, s.source])).toEqual([
       ["role.verifier.harness", "default"],
       ["role.verifier.model", "environment"],
       ["timebox.verify_seconds", "default"],
     ]);
-    expect(() => importSettings(db, "project:\n  p:\n    watchman.context_tokens: 9000\n")).toThrow("project.p.watchman.context_tokens: watchman.context_tokens cannot be set per project; it is global only");
+    expect(() => importSettings(db, "project:\n  p:\n    watchman.context_tokens: 9000\n")).toThrow(
+      "project.p.watchman.context_tokens: watchman.context_tokens cannot be set per project; it is global only",
+    );
   });
 
   it("clears a layer's value so the next layer shows through", () => {
@@ -127,7 +142,14 @@ describe("settings", () => {
   it("describes every setting with its default and a plain description", () => {
     setSetting(db, "global", "", "max_parallel_agents", 6);
     const info = describeSettings(db);
-    expect(info.find((s) => s.key === "max_parallel_agents")).toEqual({ key: "max_parallel_agents", value: 6, source: "global", default: 4, description: "Most agents running at once, across every project", layers: [] });
+    expect(info.find((s) => s.key === "max_parallel_agents")).toEqual({
+      key: "max_parallel_agents",
+      value: 6,
+      source: "global",
+      default: 4,
+      description: "Most agents running at once, across every project",
+      layers: [],
+    });
     expect(info.filter((s) => !s.description)).toEqual([]);
   });
 
@@ -140,7 +162,9 @@ describe("settings", () => {
     const other = openStore(":memory:");
     setSetting(other, "global", "", "max_attempts", 9);
     expect(importSettings(other, text)).toBe(3);
-    expect(exportSettings(other)).toBe("global:\n  harness.claude.extra_args:\n    - --verbose\n  max_attempts: 9\n  max_parallel_agents: 6\nproject:\n  p:\n    max_attempts: 3\n");
+    expect(exportSettings(other)).toBe(
+      "global:\n  harness.claude.extra_args:\n    - --verbose\n  max_attempts: 9\n  max_parallel_agents: 6\nproject:\n  p:\n    max_attempts: 3\n",
+    );
   });
 
   it("imports nothing when any value in the file is wrong, and says where", () => {

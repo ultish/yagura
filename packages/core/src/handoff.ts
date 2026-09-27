@@ -43,7 +43,10 @@ export function parseHandoff(finalMessage: string): Handoff | null {
     whatIDid: s.get("whatIDid") ?? "",
     measurements: s.get("measurements") ?? "",
     verification: tiers.includes(tier) ? (tier as Tier | "not-verified") : null,
-    evidence: (s.get("evidence") ?? "").split("\n").map((l) => l.replace(/^-\s*/, "").trim()).filter(Boolean),
+    evidence: (s.get("evidence") ?? "")
+      .split("\n")
+      .map((l) => l.replace(/^-\s*/, "").trim())
+      .filter(Boolean),
     notes: s.get("notes") ?? "",
     followUps: s.get("followUps") ?? "",
     raw: text,

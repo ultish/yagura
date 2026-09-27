@@ -63,7 +63,11 @@ describe("thread store", () => {
     addMessage(db, { threadId: other.id, role: "human", body: "kafka elsewhere" });
     expect(listMessages(db, t.id, { lastN: 2 }).map((m) => m.body)).toEqual(["filler 3", "filler 4"]);
     expect(searchMessages(db, "kafka", t.id).map((m) => m.body)).toEqual(["the kafka topic is orders.v2"]);
-    expect(searchMessages(db, "kafka").map((m) => m.threadId).sort()).toEqual([t.id, other.id].sort());
+    expect(
+      searchMessages(db, "kafka")
+        .map((m) => m.threadId)
+        .sort(),
+    ).toEqual([t.id, other.id].sort());
   });
 });
 
@@ -73,7 +77,17 @@ describe("mentions", () => {
     const { messagesMentioning, parseMentions, suggestMentions } = await import("./mentions.js");
     addRepo(db, { id: "r", url: "/r", defaultBranch: "main" });
     addProject(db, { id: "kafka-diff", name: "k", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["r" as never] });
-    const u = addUnit(db, { projectId: "kafka-diff" as never, type: "work", repoId: "r" as never, goal: "ignore timestamps", writeScope: ["a"], acceptance: ["a"], verify: "v", timeboxSeconds: 60, maxAttempts: 2 });
+    const u = addUnit(db, {
+      projectId: "kafka-diff" as never,
+      type: "work",
+      repoId: "r" as never,
+      goal: "ignore timestamps",
+      writeScope: ["a"],
+      acceptance: ["a"],
+      verify: "v",
+      timeboxSeconds: 60,
+      maxAttempts: 2,
+    });
     createAttempt(db, u.id, "claude", null);
     const t = createThread(db, { title: "diffing" });
     expect(parseMentions("see @kafka-diff/U1.1, @kafka-diff and me@mail.com @ghost")).toEqual(["kafka-diff/U1.1", "kafka-diff", "ghost"]);

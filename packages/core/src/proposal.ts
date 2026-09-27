@@ -81,11 +81,16 @@ export function validateProposal(db: Db, threadId: number, p: ProposalBody): voi
   const earlier = new Set<string>();
   for (const proj of p.projects) {
     if (projectExists(proj.id) || earlier.has(proj.id)) throw new ProposalInvalid(`project ${proj.id} already exists`);
-    for (const r of proj.repos) if (!repoExists(r) && !newRepos.has(r)) throw new ProposalInvalid(`${proj.id}: repo ${r} is neither registered nor created by this proposal`);
-    for (const a of proj.after) if (!projectExists(a) && !earlier.has(a)) throw new ProposalInvalid(`${proj.id}: after ${a}, which is neither an existing project nor listed earlier in this proposal`);
-    if (proj.environment && !db.prepare("SELECT 1 FROM environments WHERE id = ?").get(proj.environment)) throw new ProposalInvalid(`${proj.id}: environment ${proj.environment} does not exist`);
+    for (const r of proj.repos)
+      if (!repoExists(r) && !newRepos.has(r)) throw new ProposalInvalid(`${proj.id}: repo ${r} is neither registered nor created by this proposal`);
+    for (const a of proj.after)
+      if (!projectExists(a) && !earlier.has(a))
+        throw new ProposalInvalid(`${proj.id}: after ${a}, which is neither an existing project nor listed earlier in this proposal`);
+    if (proj.environment && !db.prepare("SELECT 1 FROM environments WHERE id = ?").get(proj.environment))
+      throw new ProposalInvalid(`${proj.id}: environment ${proj.environment} does not exist`);
     if (!proj.environment) defaultEnvironment(db);
-    for (const u of proj.units) if (!proj.repos.includes(u.repo)) throw new ProposalInvalid(`${proj.id}: unit ${u.key} uses repo ${u.repo}, which is not one of the project's repos`);
+    for (const u of proj.units)
+      if (!proj.repos.includes(u.repo)) throw new ProposalInvalid(`${proj.id}: unit ${u.key} uses repo ${u.repo}, which is not one of the project's repos`);
     earlier.add(proj.id);
   }
   const linked = new Set(getThread(db, threadId).projects as string[]);
@@ -211,7 +216,14 @@ export function describeProposal(body: ProposalBody): string {
         : `- new repo ${r.id}${r.description ? `: ${r.description}` : ""} (checks: ${r.verifyPack.checks.map((c) => c.name).join(", ")})`,
     );
   for (const p of body.projects) {
-    const facts = [`repos ${p.repos.join(", ")}`, `merge ${p.merge}`, `min ${p.minTier}`, p.after.length ? `after ${p.after.join(", ")}` : "", p.phaseGate ? "phase gate" : "", p.environment ? `env ${p.environment}` : ""];
+    const facts = [
+      `repos ${p.repos.join(", ")}`,
+      `merge ${p.merge}`,
+      `min ${p.minTier}`,
+      p.after.length ? `after ${p.after.join(", ")}` : "",
+      p.phaseGate ? "phase gate" : "",
+      p.environment ? `env ${p.environment}` : "",
+    ];
     lines.push(`- project ${p.id}: ${p.goal}`, `  done when: ${p.predicate}`, `  ${facts.filter(Boolean).join(" · ")}`);
     for (const u of p.units) lines.push(`  - unit ${u.key}: ${u.goal}`);
   }

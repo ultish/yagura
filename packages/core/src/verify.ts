@@ -11,7 +11,20 @@ import { acquireLease, releaseLease } from "./leases.js";
 import { parsePack } from "./pack.js";
 import { addVerifyUnit } from "./runner.js";
 import { layout } from "./paths.js";
-import { addUnitNote, createAttempt, getAttempt, getProject, getRepo, getUnit, listAttempts, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
+import {
+  addUnitNote,
+  createAttempt,
+  getAttempt,
+  getProject,
+  getRepo,
+  getUnit,
+  listAttempts,
+  now,
+  recordEvent,
+  transitionUnit,
+  updateAttempt,
+  type Db,
+} from "./store.js";
 import { CHECK_LABEL, decideVerdict, type VerdictDecision } from "./verdict.js";
 
 export interface VerifyResult {
@@ -21,7 +34,9 @@ export interface VerifyResult {
 }
 
 function latestWorkAttempt(db: Db, target: Unit): Attempt {
-  const a = listAttempts(db, target.id).filter((x) => x.state === "handed_off" && x.headSha && x.baseSha).at(-1);
+  const a = listAttempts(db, target.id)
+    .filter((x) => x.state === "handed_off" && x.headSha && x.baseSha)
+    .at(-1);
   if (!a) throw new Error(`U${target.seq} has no handed-off attempt to verify`);
   return a;
 }
@@ -29,14 +44,21 @@ function latestWorkAttempt(db: Db, target: Unit): Attempt {
 function failedVerifications(db: Db, target: Unit): number {
   return (
     db
-      .prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'verify.outcome' AND unit_id = ? AND json_extract(data_json, '$.outcome') IN ('invalid', 'env-blocked')")
+      .prepare(
+        "SELECT COUNT(*) AS n FROM events WHERE type = 'verify.outcome' AND unit_id = ? AND json_extract(data_json, '$.outcome') IN ('invalid', 'env-blocked')",
+      )
       .get(target.id) as { n: number }
   ).n;
 }
 
 function applyOutcome(db: Db, target: Unit, decision: VerdictDecision, verifySeq: number): void {
   const maxRetries = resolveSetting(db, "verify.max_retries", { projectId: target.projectId }).value;
-  recordEvent(db, "verify.outcome", { projectId: target.projectId, unitId: target.id }, { outcome: decision.outcome, reason: decision.reason, tier: decision.tier, verifyUnit: verifySeq });
+  recordEvent(
+    db,
+    "verify.outcome",
+    { projectId: target.projectId, unitId: target.id },
+    { outcome: decision.outcome, reason: decision.reason, tier: decision.tier, verifyUnit: verifySeq },
+  );
   switch (decision.outcome) {
     case "verified":
       transitionUnit(db, target.id, "verified", { tier: decision.tier });
@@ -53,7 +75,8 @@ function applyOutcome(db: Db, target: Unit, decision: VerdictDecision, verifySeq
       return;
     case "env-blocked":
     case "invalid":
-      if (failedVerifications(db, target) >= maxRetries) transitionUnit(db, target.id, "blocked", { reason: `verification did not reach a verdict ${maxRetries} times: ${decision.reason}` });
+      if (failedVerifications(db, target) >= maxRetries)
+        transitionUnit(db, target.id, "blocked", { reason: `verification did not reach a verdict ${maxRetries} times: ${decision.reason}` });
       else addVerifyUnit(db, target);
   }
 }
@@ -99,7 +122,14 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
   const pack = parsePack(await readFileAt(mirror, `origin/${repo.defaultBranch}`, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath);
   if (!pack.ok) {
     updateAttempt(db, attempt.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
-    const decision: VerdictDecision = { outcome: "below-min", tier: null, reason: `cannot verify: ${pack.reason}`, trunkOutcome: null, headOutcome: null, citedRunIds: [] };
+    const decision: VerdictDecision = {
+      outcome: "below-min",
+      tier: null,
+      reason: `cannot verify: ${pack.reason}`,
+      trunkOutcome: null,
+      headOutcome: null,
+      citedRunIds: [],
+    };
     return finish(decision, false);
   }
 
@@ -107,7 +137,13 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
   try {
     for (const check of pack.pack.checks)
       for (const at of ["base", "head"] as const)
-        await runEvidence(db, boot, { attemptId: attempt.id, at, label: CHECK_LABEL(check.name), command: check.command, timeoutSeconds: check.timeoutSeconds });
+        await runEvidence(db, boot, {
+          attemptId: attempt.id,
+          at,
+          label: CHECK_LABEL(check.name),
+          command: check.command,
+          timeoutSeconds: check.timeoutSeconds,
+        });
     const runs = listEvidenceRuns(db, attempt.id);
     const outcomeOf = (name: string, at: "base" | "head") => {
       const r = runs.filter((x) => x.label === CHECK_LABEL(name) && x.at === at).at(-1);
@@ -155,12 +191,25 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     const stop = stopRequested(db, attempt.id);
     if (stop.stopped) {
       updateAttempt(db, attempt.id, { state: "stopped", endedAt: now(), exitCode: session.exitCode });
-      const decision: VerdictDecision = { outcome: "invalid", tier: null, reason: `stopped by operator${stop.note ? `: ${stop.note}` : ""}`, trunkOutcome: null, headOutcome: null, citedRunIds: [] };
+      const decision: VerdictDecision = {
+        outcome: "invalid",
+        tier: null,
+        reason: `stopped by operator${stop.note ? `: ${stop.note}` : ""}`,
+        trunkOutcome: null,
+        headOutcome: null,
+        citedRunIds: [],
+      };
       return finish(decision, false);
     }
     const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
     if (final?.text) write(paths.handoff(project.id, unit.seq, attempt.n), final.text);
-    const decision = decideVerdict({ handoff, runs: listEvidenceRuns(db, attempt.id), checks: pack.pack.checks, playbook: target.playbook, minTier: project.minTier });
+    const decision = decideVerdict({
+      handoff,
+      runs: listEvidenceRuns(db, attempt.id),
+      checks: pack.pack.checks,
+      playbook: target.playbook,
+      minTier: project.minTier,
+    });
     updateAttempt(db, attempt.id, {
       state: handoff ? "handed_off" : "failed",
       endedAt: now(),
@@ -183,8 +232,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
         ) as VerdictId;
         for (const runId of decision.citedRunIds) {
           const r = db.prepare("SELECT stdout_artifact_id, stderr_artifact_id FROM evidence_runs WHERE id = ?").get(runId) as
-            | { stdout_artifact_id: number | null; stderr_artifact_id: number | null }
-            | undefined;
+            { stdout_artifact_id: number | null; stderr_artifact_id: number | null } | undefined;
           for (const artifact of [r?.stdout_artifact_id, r?.stderr_artifact_id])
             if (artifact) db.prepare("INSERT OR IGNORE INTO verdict_artifacts (verdict_id, artifact_id) VALUES (?, ?)").run(id, artifact);
         }

@@ -9,7 +9,10 @@ import { BellRow, useAction } from "../ui/rows";
 function Legend() {
   const item = { display: "inline-flex", alignItems: "center", gap: 8 } as const;
   return (
-    <div className="mono" style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "center", padding: "8px 36px", fontSize: 11.5, color: "var(--muted)" }}>
+    <div
+      className="mono"
+      style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "center", padding: "8px 36px", fontSize: 11.5, color: "var(--muted)" }}
+    >
       <span style={item}>
         <span style={{ width: 8, height: 12, background: "var(--lamp)" }} />
         shōji lit: an agent at work
@@ -43,8 +46,20 @@ function TalkBox() {
       <h2 className="h2" style={{ marginBottom: 8 }}>
         Talk to the watch
       </h2>
-      <MentionInput value={text} onChange={setText} onSubmit={() => void send()} label="Talk to the watch" placeholder="What should yagura build or change?" disabled={action.busy} hint="@ mentions a project, unit or run · Enter sends" />
-      {action.error && <div className="s-bell" style={{ fontSize: 13, marginTop: 6 }}>{action.error}</div>}
+      <MentionInput
+        value={text}
+        onChange={setText}
+        onSubmit={() => void send()}
+        label="Talk to the watch"
+        placeholder="What should yagura build or change?"
+        disabled={action.busy}
+        hint="@ mentions a project, unit or run · Enter sends"
+      />
+      {action.error && (
+        <div className="s-bell" style={{ fontSize: 13, marginTop: 6 }}>
+          {action.error}
+        </div>
+      )}
     </div>
   );
 }
@@ -63,7 +78,19 @@ function Lanterns({ now }: { now: number }) {
       </div>
       {running.length === 0 && <div className="empty">No agents at work.</div>}
       {running.map((a) => (
-        <Link key={a.id} to={`/a/${a.id}`} style={{ display: "flex", gap: 12, alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--line2)", color: "var(--text)", textDecoration: "none" }}>
+        <Link
+          key={a.id}
+          to={`/a/${a.id}`}
+          style={{
+            display: "flex",
+            gap: 12,
+            alignItems: "center",
+            padding: "10px 0",
+            borderTop: "1px solid var(--line2)",
+            color: "var(--text)",
+            textDecoration: "none",
+          }}
+        >
           <span className="shoji" style={{ width: 12, height: 16, borderRadius: 2, background: "var(--lamp)", flexShrink: 0 }} />
           <span style={{ flexGrow: 1, minWidth: 0 }}>
             <span style={{ display: "block", fontSize: 14.5 }}>
@@ -95,7 +122,11 @@ function Conversations() {
       </div>
       {list.length === 0 && <div className="empty">None yet.</div>}
       {list.map((t) => (
-        <Link key={t.id} to={`/talk/${t.id}`} style={{ display: "block", padding: "9px 0", borderTop: "1px solid var(--line2)", color: "var(--text)", textDecoration: "none" }}>
+        <Link
+          key={t.id}
+          to={`/talk/${t.id}`}
+          style={{ display: "block", padding: "9px 0", borderTop: "1px solid var(--line2)", color: "var(--text)", textDecoration: "none" }}
+        >
           <span style={{ fontSize: 14.5 }}>{t.title}</span>
           <span className="mono muted" style={{ display: "block", fontSize: 12 }}>
             {t.busy ? "watchman is replying…" : t.projects.join(", ") || "no projects yet"}
@@ -127,9 +158,21 @@ export function Home() {
           <WatchStrip projects={projects.data} now={now} />
         </div>
       )}
-      <div ref={sceneRef} style={{ overflow: "hidden" }}>{projects.data ? <Watch projects={projects.data} now={now} /> : <div style={{ height: 286 }} />}</div>
+      <div ref={sceneRef} style={{ overflow: "hidden" }}>
+        {projects.data ? <Watch projects={projects.data} now={now} /> : <div style={{ height: 286 }} />}
+      </div>
       <Legend />
-      <div style={{ display: "flex", gap: 48, padding: "20px 36px 48px", borderTop: "1px solid var(--line)", background: "var(--bg2)", flexWrap: "wrap", minHeight: "60vh" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 48,
+          padding: "20px 36px 48px",
+          borderTop: "1px solid var(--line)",
+          background: "var(--bg2)",
+          flexWrap: "wrap",
+          minHeight: "60vh",
+        }}
+      >
         <section aria-labelledby="bell" style={{ flex: "1 1 520px", minWidth: 0 }}>
           <div className="gh">
             <h2 id="bell" className="h2" style={{ color: "var(--bell-text)" }}>

@@ -29,7 +29,9 @@ export function liveVerdict(db: Db, unitId: UnitId): LiveVerdict | null {
   const tiers = PASS_TIERS.map(() => "?").join(", ");
   return (
     (db
-      .prepare(`SELECT id, attempt_id, tier, head_sha, patch_id FROM verdicts WHERE unit_id = ? AND voided_at IS NULL AND tier IN (${tiers}) ORDER BY id DESC LIMIT 1`)
+      .prepare(
+        `SELECT id, attempt_id, tier, head_sha, patch_id FROM verdicts WHERE unit_id = ? AND voided_at IS NULL AND tier IN (${tiers}) ORDER BY id DESC LIMIT 1`,
+      )
       .get(unitId, ...PASS_TIERS) as LiveVerdict | undefined) ?? null
   );
 }
@@ -89,12 +91,18 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
     if (!verdict.patch_id || squashedPatch !== verdict.patch_id)
       return block(`landing onto ${repo.defaultBranch} changed the patch; the new head needs re-verification`);
     db.transaction(() => {
-      db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), `landed as ${landed}; patch-id unchanged, carried forward`, verdict.id);
+      db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(
+        now(),
+        `landed as ${landed}; patch-id unchanged, carried forward`,
+        verdict.id,
+      );
       db.prepare(
         `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, created_at)
          SELECT unit_id, attempt_id, tier, repo_id, ?, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, ? FROM verdicts WHERE id = ?`,
       ).run(landed, now(), verdict.id);
-      db.prepare("INSERT INTO verdict_artifacts (verdict_id, artifact_id) SELECT last_insert_rowid(), artifact_id FROM verdict_artifacts WHERE verdict_id = ?").run(verdict.id);
+      db.prepare(
+        "INSERT INTO verdict_artifacts (verdict_id, artifact_id) SELECT last_insert_rowid(), artifact_id FROM verdict_artifacts WHERE verdict_id = ?",
+      ).run(verdict.id);
     })();
   } finally {
     await removeWorktree(mirror, wt).catch(() => undefined);

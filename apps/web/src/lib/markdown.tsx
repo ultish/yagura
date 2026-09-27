@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { Link } from "../ui/Link";
 import { mentionHref } from "./mention";
 
-
 function inline(text: string, known: ReadonlySet<string> | null, key: string): ReactNode[] {
   const out: ReactNode[] = [];
   const re = /(`[^`]+`)|(\*\*(?:[^*]|\*(?!\*))+?\*\*)|(?<![\w@])@(thread:\d+|repo:[a-z][a-z0-9-]*|[a-z][a-z0-9-]*(?:\/U\d+(?:\.\d+)?)?)/g;
@@ -18,8 +17,18 @@ function inline(text: string, known: ReadonlySet<string> | null, key: string): R
       const project = token.split(/[/:]/)[0]!;
       const href = mentionHref(token);
       const trusted = token.includes(":") || !known || known.has(project);
-      if (href && trusted) out.push(<Link key={k} className="mention" to={href}>@{token}</Link>);
-      else if (trusted) out.push(<span key={k} className="mention">@{token}</span>);
+      if (href && trusted)
+        out.push(
+          <Link key={k} className="mention" to={href}>
+            @{token}
+          </Link>,
+        );
+      else if (trusted)
+        out.push(
+          <span key={k} className="mention">
+            @{token}
+          </span>,
+        );
       else out.push(`@${token}`);
       if (token.length < m[3]!.length) out.push(m[3]!.slice(token.length));
     }

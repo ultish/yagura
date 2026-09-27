@@ -92,8 +92,13 @@ export function extractDelta(message: string): Extracted {
     return { ok: false, reason: `plan delta is not valid JSON: ${e instanceof Error ? e.message : String(e)}` };
   }
   const parsed = PlanDelta.safeParse(json);
-  if (!parsed.success) return { ok: false, reason: `plan delta does not match the schema: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}` };
-  for (const g of parsed.data.gates) if (!g.options.includes(g.default)) return { ok: false, reason: `gate "${g.question}": default must be one of its options` };
+  if (!parsed.success)
+    return {
+      ok: false,
+      reason: `plan delta does not match the schema: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`,
+    };
+  for (const g of parsed.data.gates)
+    if (!g.options.includes(g.default)) return { ok: false, reason: `gate "${g.question}": default must be one of its options` };
   return { ok: true, delta: parsed.data };
 }
 
@@ -102,7 +107,10 @@ export class PlanRejected extends Error {}
 const TERMINAL = new Set(["landed", "done", "abandoned"]);
 
 function scopeBase(glob: string): string[] {
-  return picomatch.scan(glob).base.split("/").filter((s) => s && s !== ".");
+  return picomatch
+    .scan(glob)
+    .base.split("/")
+    .filter((s) => s && s !== ".");
 }
 
 export function scopesOverlap(a: string[], b: string[]): boolean {
@@ -203,7 +211,8 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
 
     for (const r of delta.retry) {
       const u = unitRef(r.unit, "retry");
-      if (!["blocked", "failed", "rejected"].includes(u.state)) throw new PlanRejected(`retry: ${r.unit} is ${u.state}; only blocked, failed, or rejected units can be retried`);
+      if (!["blocked", "failed", "rejected"].includes(u.state))
+        throw new PlanRejected(`retry: ${r.unit} is ${u.state}; only blocked, failed, or rejected units can be retried`);
       addUnitNote(db, u.id, `Planner: ${r.note}`);
       bumpMaxAttempts(db, u.id, listAttempts(db, u.id).length + 1);
       transitionUnit(db, u.id, "ready", { by: "planner", drain: drainId });

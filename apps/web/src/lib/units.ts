@@ -85,7 +85,9 @@ export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: 
       return { text: "Handed off; verification is queued.", tone: "info" };
     case "verifying": {
       const v = verifier && running(verifier.attempts);
-      return v ? { text: `U${verifier!.seq} is verifying (${elapsed(v, now)}).`, tone: "lamp" } : { text: `Verification queued${verifier ? ` (U${verifier.seq})` : ""}.`, tone: "info" };
+      return v
+        ? { text: `U${verifier!.seq} is verifying (${elapsed(v, now)}).`, tone: "lamp" }
+        : { text: `Verification queued${verifier ? ` (U${verifier.seq})` : ""}.`, tone: "info" };
     }
     case "verified":
       return openGateFor(d, u)

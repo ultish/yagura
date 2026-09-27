@@ -1,5 +1,19 @@
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
-import type { Attempt, Environment, EvidenceRun, Gate, Project, Proposal, Repo, SettingInfo, Thread, ThreadDecision, ThreadMessage, ThreadQuestion, Unit } from "@yagura/core";
+import type {
+  Attempt,
+  Environment,
+  EvidenceRun,
+  Gate,
+  Project,
+  Proposal,
+  Repo,
+  SettingInfo,
+  Thread,
+  ThreadDecision,
+  ThreadMessage,
+  ThreadQuestion,
+  Unit,
+} from "@yagura/core";
 
 export type { Attempt, Environment, EvidenceRun, Gate, Project, Proposal, Repo, SettingInfo, Thread, ThreadDecision, ThreadMessage, ThreadQuestion, Unit };
 
@@ -99,8 +113,24 @@ export type HarnessEvent =
   | { kind: "ignored"; type: string };
 
 export type BellItem =
-  | { kind: "gate"; id: string; projectId: string; unit: { seq: number; goal: string } | null; gate: { id: number; kind: string; question: string; options: string[]; defaultOption: string | null }; at: string }
-  | { kind: "blocked"; id: string; projectId: string; unit: { seq: number; goal: string }; reason: string | null; attempts: number; maxAttempts: number; at: string }
+  | {
+      kind: "gate";
+      id: string;
+      projectId: string;
+      unit: { seq: number; goal: string } | null;
+      gate: { id: number; kind: string; question: string; options: string[]; defaultOption: string | null };
+      at: string;
+    }
+  | {
+      kind: "blocked";
+      id: string;
+      projectId: string;
+      unit: { seq: number; goal: string };
+      reason: string | null;
+      attempts: number;
+      maxAttempts: number;
+      at: string;
+    }
   | { kind: "proposal"; id: string; threadId: number; threadTitle: string; proposalId: number; summary: string; at: string };
 
 export interface ThreadView {
