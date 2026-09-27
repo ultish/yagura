@@ -71,7 +71,7 @@ import {
 
 const USAGE = `yagura — agent orchestration
 
-  yagura repo add <path | git URL> [--id <id>]   mirror an existing repo; default branch and verify pack are read from it
+  yagura repo add <git URL> [--id <id>]   mirror an existing repo; default branch and verify pack are read from it
   yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified] [--issue <ref>...]
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>

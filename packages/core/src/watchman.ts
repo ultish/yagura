@@ -208,7 +208,7 @@ Reply to the developer in plain prose. Then end your final message with exactly 
     "summary": "what applying this starts and why",
     "repos": [
       { "id": "kafka-diff", "description": "one line", "verifyPack": { "provider": "local-process", "checks": [{ "name": "unit", "command": "python3 -m unittest -v", "tier": "unit-verified" }] } },
-      { "id": "billing", "existing": "/path/to/billing or git URL" }
+      { "id": "billing", "existing": "git@gitlab.internal:team/billing.git" }
     ],
     "projects": [{
       "id": "kafka-diff", "goal": "…", "predicate": "checkable done condition", "repos": ["kafka-diff"],

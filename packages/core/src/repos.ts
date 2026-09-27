@@ -52,26 +52,24 @@ async function remoteHead(url: string): Promise<{ defaultBranch: string; trunk: 
   return { defaultBranch: branch, trunk: sha as Sha };
 }
 
-async function workingCopyNotes(url: string, branch: string): Promise<string[]> {
-  if (isUrl(url) || !existsSync(url)) return [];
-  if ((await git(["rev-parse", "--is-bare-repository"], { cwd: url }).catch(() => "true")) === "true") return [];
+// A working copy would be the landing target, and git refuses a push to its checked-out branch.
+async function refuseWorkingCopy(url: string): Promise<void> {
+  if (isUrl(url) || !existsSync(url)) return;
+  if ((await git(["rev-parse", "--is-bare-repository"], { cwd: url }).catch(() => "true")) === "true") return;
   const origin = await git(["remote", "get-url", "origin"], { cwd: url }).catch(() => "");
-  return [
-    `${url} is a working copy, so landing pushes to its ${branch} and git refuses while ${branch} is checked out there` +
-      (origin ? `; register its remote (${origin}) instead to land there` : "; register a bare repo instead to land"),
-  ];
+  throw new RepoUnusable(`${url} is a working copy; give the repo's git URL instead${origin ? ` (its origin is ${origin})` : ""}`);
 }
 
 export async function inspectRepo(source: string, mirror?: string): Promise<RepoInspection> {
   const url = resolveSource(source);
+  await refuseWorkingCopy(url);
   const { defaultBranch, trunk } = await remoteHead(url);
   const gitDir = mirror ?? mkdtempSync(join(tmpdir(), "yagura-inspect-"));
   try {
     if (mirror) await ensureMirror(url, gitDir);
     else await git(["clone", "--bare", "--quiet", "--depth", "1", "--branch", defaultBranch, url, gitDir]);
     const pack = parsePack(await readFileAt(gitDir, trunk, `${PACK_PATH}/verify.json`), PACK_PATH);
-    const notes = await workingCopyNotes(url, defaultBranch);
-    if (!pack.ok) notes.push(`${pack.reason}; verification stays env-blocked until a pack lands on ${defaultBranch}`);
+    const notes = pack.ok ? [] : [`${pack.reason}; verification stays env-blocked until a pack lands on ${defaultBranch}`];
     return { url, defaultBranch, trunk, pack, notes };
   } finally {
     if (!mirror) rmSync(gitDir, { recursive: true, force: true });

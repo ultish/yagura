@@ -46,9 +46,9 @@ function AddRepo({ onAdded }: { onAdded: () => void }) {
     >
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <label htmlFor="repo-source" className="sr-only">
-          Local path or git URL
+          Git URL
         </label>
-        <input id="repo-source" className="mono" value={source} onChange={(e) => setSource(e.target.value)} placeholder="~/Developer/billing or git@gitlab:team/billing.git" style={{ ...field, flexGrow: 1, minWidth: 260, fontSize: 13 }} />
+        <input id="repo-source" className="mono" value={source} onChange={(e) => setSource(e.target.value)} placeholder="git@gitlab:team/billing.git" style={{ ...field, flexGrow: 1, minWidth: 260, fontSize: 13 }} />
         <label htmlFor="repo-id" className="sr-only">
           Repo id
         </label>
@@ -58,7 +58,7 @@ function AddRepo({ onAdded }: { onAdded: () => void }) {
         </button>
       </div>
       <div className="muted" style={{ fontSize: 13 }}>
-        yagura mirrors it and reads its default branch and verify pack. It never writes to the path you give; agents work in yagura's own worktrees, and landing pushes to it.
+        yagura clones it into its own mirror and reads its default branch and verify pack. Agents work in worktrees of that mirror; verified work is pushed back to this URL.
       </div>
       {action.error && <div className="s-bell" style={{ fontSize: 13 }}>{action.error}</div>}
       {added && (

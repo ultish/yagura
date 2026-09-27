@@ -50,15 +50,18 @@ describe("registering an existing repo", () => {
     expect(await resolveRef(layout(boot).mirror("billing" as RepoId), "origin/trunk")).toBe(inspection.trunk);
   });
 
-  it("registers a working copy without a pack, and says landing and verification will not work yet", async () => {
+  it("registers a repo without a pack, and says verification will not work yet", async () => {
+    const { repo, inspection } = await registerRepo({ db, boot }, { source: await bare("scratch"), id: "notes" });
+    expect(repo).toMatchObject({ id: "notes", defaultBranch: "main", packStatus: "missing" });
+    expect(inspection.notes).toEqual(["no verify pack at .agents/verify/verify.json; verification stays env-blocked until a pack lands on main"]);
+  });
+
+  it("refuses a working copy and points at its origin, without mirroring", async () => {
     const dir = await workingCopy("scratch");
-    const { repo, inspection } = await registerRepo({ db, boot }, { source: dir, id: "notes" });
-    expect(repo).toMatchObject({ id: "notes", url: dir, defaultBranch: "main", packStatus: "missing" });
-    expect(inspection.notes).toEqual([
-      `${dir} is a working copy, so landing pushes to its main and git refuses while main is checked out there; register a bare repo instead to land`,
-      "no verify pack at .agents/verify/verify.json; verification stays env-blocked until a pack lands on main",
-    ]);
-    expect(await git(["status", "--porcelain"], { cwd: dir })).toBe("");
+    await expect(registerRepo({ db, boot }, { source: dir })).rejects.toThrow(`${dir} is a working copy; give the repo's git URL instead`);
+    await git(["remote", "add", "origin", "git@gitlab.internal:team/scratch.git"], { cwd: dir });
+    await expect(registerRepo({ db, boot }, { source: dir })).rejects.toThrow(`${dir} is a working copy; give the repo's git URL instead (its origin is git@gitlab.internal:team/scratch.git)`);
+    expect(existsSync(layout(boot).mirror("scratch" as RepoId))).toBe(false);
   });
 
   it("reports an unparseable pack as missing with the reason", async () => {

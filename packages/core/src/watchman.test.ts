@@ -212,7 +212,9 @@ describe("watchman turns", () => {
     write(join(seed, "README.md"), "# x\n");
     await git(["init", "--quiet", "-b", "main"], { cwd: seed });
     await commitAll(seed, "init", { name: "t", email: "t@localhost" });
-    const packless = await runWatchmanTurn(ctx, t.id, `register nopack ${seed}`);
+    const bare = join(boot.home, "..", "nopack.git");
+    await git(["clone", "--quiet", "--bare", seed, bare]);
+    const packless = await runWatchmanTurn(ctx, t.id, `register nopack ${bare}`);
     expect(packless.problem).toBe("proposal: repo nopack: no verify pack at .agents/verify/verify.json, so nopack-work could never be verified; propose the repo alone and ask the developer to add a verify pack, or leave the project out");
     expect(listProposals(db, t.id)).toEqual([]);
   });
