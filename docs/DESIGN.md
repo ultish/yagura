@@ -357,6 +357,18 @@ pstack playbooks assume the agent is its own orchestrator: poteto-mode ends ever
 
 pstack itself is never edited, so upstream updates drop in unchanged. Overlays are versioned with yagura, since they encode yagura's contracts.
 
+### Project skills and stack knowledge (decided 2026-09-27; planned)
+
+How to build a kind of project (a Kotlin Spring Boot service with the developer's version catalog, Gradle plugin, helm values, skaffold) is know-how, and its home is **harness skills**, like the developer's own `setup-gradle`. yagura does not reimplement them as templates; it names them, makes sure they are used, gives them the environment's facts, and proves their result.
+
+- **Skills by purpose, as layered settings** (global, repo, project): `skills.scaffold` (the unit that creates a new project skeleton), `skills.work` (every worker), `skills.pack` (writing the verify pack), and optionally `skills.verify`. The watchman fills them from the conversation ("wire this up as a Spring Boot Kotlin service with setup-gradle"); the project's Settings panel edits them. Briefs name them in METHOD, and an attempt that skips one is rejected, the same enforcement as pstack's required skills.
+- **Scaffold units.** The first unit of a new project, whose job is the skeleton, run with `skills.scaffold`.
+- **Reference repos.** A project can name registered repos that already do it right; briefs point at them (kurukuru's `reference_project`).
+- **The doctor checks installed skills.** A project that names a skill not installed where agents run fails its doctor before any agent starts.
+- **Skills yagura writes, from examples, never from nothing.** A skill written from scratch is a guess every future agent would follow confidently. yagura writes one only from evidence: repos the developer points at ("make a skill from billing and orders", the way `setup-gradle` itself was made) or a scaffold that yagura already verified and landed. A skill-writing unit reads them and writes `setup-…` with scripts where possible. yagura then proves it: it applies the skill to an empty scratch repo, and the result must build offline, pass its verify pack on the environment, and match the examples where it matters. A proven skill waits at a gate for the developer's approval, because it changes every later agent, then goes into yagura's own skills directory (git-versioned, loaded into every session). Existing skills can be re-proven against the current repos to catch drift.
+- **Conventions become checks.** What a skill promises and a machine can check (the catalog exists, the build points at the mirror, `./gradlew --offline assemble` passes) becomes a pack check, so it holds on every change, not just when the skill ran.
+- **Named stacks later.** A stack (e.g. `spring-kotlin`: skills `[setup-gradle]`, needs components `kube`, `registry`, `helm`, `skaffold`) can bundle this once there are several projects to compare; yagura would refuse a project whose environment lacks a component its stack needs.
+
 ## 12. Environments and providers
 
 | Provider         | create slot                                                                                                                 | connection vars                                                        | teardown                                                                                   |
@@ -371,6 +383,16 @@ Whether a developer can create namespaces varies, so `kube-namespace` supports b
 An environment = provider + access refs + capacity + **conventions** + **artifact-version scheme**. Creating one runs the provider `doctor` (reach cluster, create+delete a probe namespace, pull from the registry); an environment that never passed `doctor` is not selectable. Editing a shared environment lists dependent projects and re-runs `doctor`. `profile.md` is the prose for agents; checkable conventions compile into `doctor` assertions (kurukuru's `setup-conformance` idea).
 
 **As built (`kube-namespace`, 2026-09-27; `kube.ts`).** Settings (`providerConfig`, validated per provider): `context` (default: the current context, pinned into each slot when it is created), `mode` `create` or `pool`, `pool` (namespace names; capacity cannot exceed it), `prefix` (default `yg`), `kubectl` (the binary), `baseUrl` (an ingress pattern with `{namespace}`). Create mode makes `yg-<env>-<lease>` labelled `yagura=1`, `yagura/env`, `yagura/lease`, and on release deletes it only if it still carries `yagura=1`, refusing otherwise. Pool mode leases `pool[slot]` and on release deletes only `yagura=1`-labelled resources in it. A slot's variables are `YAGURA_SLOT`, `YAGURA_LEASE_DIR`, `YAGURA_NAMESPACE`, `KUBECONTEXT`, `YAGURA_LABEL`, and `YAGURA_BASE_URL` when set; the pack contract tells pack writers to pass `--context "$KUBECONTEXT"` and label what they deploy. Every provider has a doctor (`doctorEnvironment`, results in `environments.doctor_json`, migration 7): kube reaches the cluster, then creates and deletes a labelled probe namespace (create mode) or checks it can create pods in each pool namespace; local-process checks its directories and ports. Adding an environment (CLI `env add`, the Environments page) runs the doctor, and `env doctor` / Run doctor re-runs it. An environment whose doctor fails cannot be chosen for a project, and one other than local-process must have passed (`assertSelectable`).
+
+### Environment components (decided 2026-09-27; planned)
+
+An environment describes the machine verification runs on, once, for every repo that uses it. It is built from **components** that yagura ships, each a small typed form: `kube` (context, namespace mode, slots), `registry` (push address from the dev box, pull address from the cluster, e.g. `localhost:5000` / `hostname:5000`), `helm`, `skaffold`, `kafka` (bootstrap address from inside the cluster and from the dev box), `maven-mirror`, and `custom` (any `NAME = value`). Each component turns its fields into **values** (e.g. `REGISTRY_PUSH`, `REGISTRY_PULL`, `KAFKA_BOOTSTRAP_CLUSTER`, `KAFKA_BOOTSTRAP_LOCAL`) and **checks** (the registry answers `/v2/`, `helm version`, the kafka port opens from this box) with plain code, no agent. An environment also has **notes**: prose for agents that no check can express ("dependencies run in the cluster; verify by exec'ing into the app pod"), the only advisory part.
+
+- **Values reach every command and agent.** They are exported to pack commands in a slot and to worker, pack-writer, and verifier sessions, so generated config (skaffold, helm values) references the environment rather than hard-coded addresses, and one pack works unchanged on a teammate's machine.
+- **Checks are the doctor.** The provider doctor plus every component's checks; a failing check blocks selection as today.
+- **Set up by form or by conversation.** The Environments page offers the components as a form, prefilled by probing the machine with plain commands (kube contexts, whether `localhost:5000` answers, which of helm, skaffold, gradle are installed); every value is editable afterwards in the UI. Or the developer describes the setup to the watchman, which proposes an environment with the same fields (a proposal kind), applied on Go. The watchman fills the form; it does not write scripts.
+- **Keep policy.** Per environment, overridable per project: `never` (today), `failed`, or `always`, and an expiry (default 2 hours). A kept slot skips the pack teardown and namespace deletion, leaves the last deployed side running, stops counting against capacity, and is deleted when it expires or from a Delete button; the Environments and agent pages show kept namespaces with a ready `kubectl --context … -n …` line. Default suggested for small clusters: `failed`, 2 hours.
+- **Repos stay separate.** How one repo builds and deploys is its verify pack, written by a pack unit against the environment's component values (the brief lists them) and proven by yagura on the real cluster. Stack skills (§11 "Project skills") guide how.
 
 ## 13. Verification
 
@@ -538,7 +560,7 @@ A few settings must be known before the database opens. They come from environme
 
 ### Environment
 
-Provider settings, capacity (leases), access refs, conventions, **artifact-version qualifier scheme**, lease timeout, teardown policy (always / keep on failure for debugging).
+Provider settings, capacity (leases), components with their values and checks, notes, **artifact-version qualifier scheme**, lease timeout, keep policy (`never` / `failed` / `always` with an expiry; §12 "Environment components").
 
 ### Repo
 
@@ -645,3 +667,5 @@ Answers to the questions this design left open (2026-09-26):
 2. **Kube namespaces:** configurable per environment, `create` or `pool` mode; a pool caps concurrent live verifications, not agents (§12).
 3. **Models:** the harness default applies unless a model is set per role in yagura (§10, §16).
 4. **GitLab:** one MR per unit (§15).
+5. **Environments and stack knowledge (2026-09-27, user):** environment values are editable in the UI; environments are composed from components (kube, registry with push and pull addresses, helm, skaffold, kafka with cluster and local addresses, …) and can be set up by form or through the watchman; a kept-namespace policy is configurable (`never` / `failed` / `always`). How to build a kind of project lives in harness skills, named per purpose in project settings; yagura writes new skills only from example repos or proven results, proves them, and asks before using them (§11 "Project skills", §12 "Environment components").
+6. **Forges (2026-09-27, user):** repos can use GitHub (`gh`) or GitLab (`glab`), configured per repo with its host; GitHub is built and proven first on a private sandbox repo, GitLab on the dev VM.
