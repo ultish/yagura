@@ -61,6 +61,10 @@ import {
   resolveSetting,
   runWorkUnit,
   setSetting,
+  clearSetting,
+  exportSettings,
+  importSettings,
+  updateEnvironment,
   transitionUnit,
   type HarnessEvent,
   type PassTier,
@@ -78,6 +82,7 @@ const USAGE = `yagura — agent orchestration
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
   yagura repo set <id> --url <url>
   yagura env add <id> --provider local-process [--capacity 2] [--name <text>]
+  yagura env set <id> [--capacity <n>] [--name <text>]
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...]
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
   yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go
@@ -97,7 +102,10 @@ const USAGE = `yagura — agent orchestration
   yagura show <project> [unit#]
   yagura logs <project> <unit#> [--attempt <n>]
   yagura settings [--project <id>] [--repo <id>]
-  yagura set <key> <json> [--scope global|environment|repo|project] [--id <scope id>]`;
+  yagura settings export > settings.yaml     every explicitly set value, by layer
+  yagura settings import <file.yaml>         set every value in the file (others are kept)
+  yagura set <key> <json> [--scope global|environment|repo|project] [--id <scope id>]
+  yagura unset <key> [--scope global|environment|repo|project] [--id <scope id>]   back to the next layer's value`;
 
 const [command, ...rest] = process.argv.slice(2);
 if (command === "evidence") {
@@ -386,11 +394,16 @@ async function main() {
       return;
     }
     case "env": {
-      const { positionals, values } = args({ provider: { type: "string" }, capacity: { type: "string", default: "1" }, name: { type: "string" } });
+      const { positionals, values } = args({ provider: { type: "string" }, capacity: { type: "string" }, name: { type: "string" } });
       const id = positionals[1];
+      if (positionals[0] === "set" && id) {
+        const e = updateEnvironment(db, id as EnvironmentId, { name: values.name, capacity: values.capacity === undefined ? undefined : Number(values.capacity) });
+        console.log(`environment ${e.id}: ${e.name}, capacity ${e.capacity}`);
+        return;
+      }
       if (positionals[0] !== "add" || !id || !values.provider) fail(USAGE);
       if (!(PROVIDERS as readonly string[]).includes(values.provider!)) fail(`--provider must be one of ${PROVIDERS.join(", ")}`);
-      const e = addEnvironment(db, { id: id!, name: values.name ?? id!, provider: values.provider as Provider, capacity: Number(values.capacity) });
+      const e = addEnvironment(db, { id: id!, name: values.name ?? id!, provider: values.provider as Provider, capacity: Number(values.capacity ?? "1") });
       console.log(`environment ${e.id}: ${e.provider}, capacity ${e.capacity}`);
       return;
     }
@@ -440,7 +453,13 @@ async function main() {
       return;
     }
     case "settings": {
-      const { values } = args({ project: { type: "string" }, repo: { type: "string" } });
+      const { positionals, values } = args({ project: { type: "string" }, repo: { type: "string" } });
+      if (positionals[0] === "export") return void process.stdout.write(exportSettings(db));
+      if (positionals[0] === "import") {
+        if (!positionals[1]) fail(USAGE);
+        console.log(`set ${importSettings(db, readFileSync(positionals[1]!, "utf8"))} value(s)`);
+        return;
+      }
       const all = effectiveSettings(db, { projectId: (values.project as ProjectId) ?? null, repoId: (values.repo as RepoId) ?? null });
       for (const [k, { value, source }] of Object.entries(all)) console.log(`  ${k.padEnd(32)} ${JSON.stringify(value).padEnd(24)} (${source})`);
       return;
@@ -451,6 +470,13 @@ async function main() {
       if (!key || json === undefined) fail(USAGE);
       setSetting(db, values.scope as SettingScope, values.id as string, key!, JSON.parse(json!));
       console.log(`${key} = ${json} (${values.scope}${values.id ? ` ${values.id}` : ""})`);
+      return;
+    }
+    case "unset": {
+      const { positionals, values } = args({ scope: { type: "string", default: "global" }, id: { type: "string", default: "" } });
+      if (!positionals[0]) fail(USAGE);
+      const cleared = clearSetting(db, values.scope as SettingScope, values.id as string, positionals[0]!);
+      console.log(cleared ? `${positionals[0]} cleared (${values.scope}${values.id ? ` ${values.id}` : ""})` : `${positionals[0]} was not set there`);
       return;
     }
     case "talk": {

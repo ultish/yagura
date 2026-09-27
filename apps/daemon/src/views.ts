@@ -1,5 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
+  getEnvironment,
+  PROVIDERS_IMPL,
+  runningAttempts as runningCount,
+  type EnvironmentId,
   getRepo,
   layout,
   parsePack,
@@ -160,5 +164,41 @@ export async function repoView(db: Db, boot: Bootstrap, repoId: RepoId) {
     landingQueue: units.filter((u) => u.state === "verified").map(ref),
     landedCount: landed.length,
     lastLanded: landed[0] ? { ...ref(landed[0]), sha: landed[0].landed_sha as string } : null,
+  };
+}
+
+export function environmentView(db: Db, id: EnvironmentId) {
+  const env = getEnvironment(db, id);
+  const leases = db
+    .prepare(
+      `SELECT l.state, l.slot, l.attempt_id, l.requested_at, l.granted_at, u.project_id, u.seq, u.type, u.goal
+       FROM leases l JOIN attempts a ON a.id = l.attempt_id JOIN units u ON u.id = a.unit_id
+       WHERE l.environment_id = ? AND l.state IN ('active', 'queued') ORDER BY l.id`,
+    )
+    .all(id) as Row[];
+  const holder = (l: Row) => ({
+    attemptId: l.attempt_id as number,
+    unit: { projectId: l.project_id as string, seq: l.seq as number, type: l.type as string, goal: l.goal as string },
+  });
+  return {
+    environment: env,
+    implemented: !!PROVIDERS_IMPL[env.provider],
+    active: leases.filter((l) => l.state === "active").map((l) => ({ ...holder(l), slot: l.slot as string, since: l.granted_at as string })),
+    queued: leases.filter((l) => l.state === "queued").map((l) => ({ ...holder(l), since: l.requested_at as string })),
+    projects: db.prepare("SELECT id, state FROM projects WHERE environment_id = ? ORDER BY created_at").all(id) as { id: string; state: string }[],
+  };
+}
+
+export function capCounts(db: Db) {
+  const harnesses = db.prepare("SELECT harness, COUNT(*) AS n FROM attempts WHERE state = 'running' GROUP BY harness").all() as { harness: string; n: number }[];
+  const projects = (db.prepare("SELECT id FROM projects WHERE state != 'closed' ORDER BY created_at").all() as { id: ProjectId }[]).map(({ id }) => ({
+    id,
+    running: runningCount(db, { projectId: id }),
+    limit: resolveSetting(db, "project.max_in_flight", { projectId: id }).value,
+  }));
+  return {
+    max_parallel_agents: { running: runningCount(db), limit: resolveSetting(db, "max_parallel_agents").value },
+    max_parallel_per_harness: { limit: resolveSetting(db, "max_parallel_per_harness").value, byHarness: Object.fromEntries(harnesses.map((h) => [h.harness, h.n])) },
+    "project.max_in_flight": projects,
   };
 }

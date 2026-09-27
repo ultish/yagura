@@ -58,9 +58,19 @@ import {
   type SettingScope,
   registerRepo,
   RepoUnusable,
+  addEnvironment,
+  clearSetting,
+  describeSettings,
+  exportSettings,
+  importSettings,
+  PROVIDERS_IMPL,
+  SettingsImportInvalid,
+  updateEnvironment,
+  type EnvironmentId,
+  type Provider,
   suggestRepoId,
 } from "@yagura/core";
-import { attemptDetail, bell, projectSummary, repoView, unitView } from "./views.js";
+import { attemptDetail, bell, capCounts, environmentView, projectSummary, repoView, unitView } from "./views.js";
 
 export interface ServerOptions {
   db: Db;
@@ -127,7 +137,11 @@ export function createApp(opts: ServerOptions): Hono {
     return next();
   });
 
-  app.onError((e, c) => c.json({ error: e.message }, /not found/.test(e.message) ? 404 : 400));
+  app.onError((e, c) => {
+    const issues = (e as { issues?: { path: (string | number)[]; message: string }[] }).issues;
+    const message = issues ? issues.map((i) => (i.path.length ? `${i.path.join(".")}: ${i.message}` : i.message)).join("; ") : e.message;
+    return c.json({ error: message }, /not found/.test(message) ? 404 : 400);
+  });
 
   app.get("/api/health", (c) => c.json({ ok: true, home: boot.home }));
 
@@ -237,7 +251,23 @@ export function createApp(opts: ServerOptions): Hono {
     return c.json(getProject(db, c.req.param("id") as ProjectId));
   });
 
-  app.get("/api/environments", (c) => c.json(db.prepare("SELECT * FROM environments ORDER BY id").all()));
+  app.get("/api/environments", (c) =>
+    c.json((db.prepare("SELECT id FROM environments ORDER BY id").all() as { id: EnvironmentId }[]).map((e) => environmentView(db, e.id))),
+  );
+  app.post("/api/environments", async (c) => {
+    const b = (await c.req.json()) as { id?: string; name?: string; provider?: string; capacity?: number };
+    if (!b.id || !/^[a-z][a-z0-9-]{1,39}$/.test(b.id)) return c.json({ error: "id must be lowercase words joined by dashes, e.g. dev-2" }, 400);
+    if (!PROVIDERS_IMPL[b.provider as Provider]) return c.json({ error: `provider ${b.provider} is not available yet; use ${Object.keys(PROVIDERS_IMPL).join(", ")}` }, 400);
+    if (!Number.isInteger(b.capacity) || b.capacity! < 0) return c.json({ error: "capacity must be a whole number, 0 or more" }, 400);
+    if (db.prepare("SELECT 1 FROM environments WHERE id = ?").get(b.id)) return c.json({ error: `environment ${b.id} already exists` }, 409);
+    addEnvironment(db, { id: b.id, name: b.name?.trim() || b.id, provider: b.provider as Provider, capacity: b.capacity! });
+    return c.json(environmentView(db, b.id as EnvironmentId), 201);
+  });
+  app.post("/api/environments/:id", async (c) => {
+    const b = (await c.req.json()) as { name?: string; capacity?: number };
+    updateEnvironment(db, c.req.param("id") as EnvironmentId, b);
+    return c.json(environmentView(db, c.req.param("id") as EnvironmentId));
+  });
   app.get("/api/repos", async (c) => {
     const ids = (db.prepare("SELECT id FROM repos ORDER BY id").all() as { id: RepoId }[]).map((r) => r.id);
     return c.json(await Promise.all(ids.map((id) => repoView(db, boot, id))));
@@ -258,6 +288,21 @@ export function createApp(opts: ServerOptions): Hono {
   app.get("/api/settings", (c) =>
     c.json(effectiveSettings(db, { projectId: (c.req.query("project") as ProjectId) ?? null, repoId: (c.req.query("repo") as never) ?? null })),
   );
+  app.get("/api/settings/overview", (c) => c.json({ settings: describeSettings(db), caps: capCounts(db) }));
+  app.post("/api/settings/clear", async (c) => {
+    const b = (await c.req.json()) as { scope: SettingScope; id?: string; key: string };
+    return c.json({ cleared: clearSetting(db, b.scope, b.id ?? "", b.key) });
+  });
+  app.get("/api/settings/export", (c) => c.body(exportSettings(db), 200, { "content-type": "text/yaml; charset=utf-8", "content-disposition": 'attachment; filename="yagura-settings.yaml"' }));
+  app.post("/api/settings/import", async (c) => {
+    const b = (await c.req.json()) as { yaml?: string };
+    try {
+      return c.json({ applied: importSettings(db, b.yaml ?? "") });
+    } catch (e) {
+      if (e instanceof SettingsImportInvalid) return c.json({ error: e.message }, 400);
+      throw e;
+    }
+  });
   app.post("/api/settings", async (c) => {
     const b = (await c.req.json()) as { scope: SettingScope; id?: string; key: string; value: unknown };
     setSetting(db, b.scope, b.id ?? "", b.key, b.value);

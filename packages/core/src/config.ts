@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import type { EnvironmentId, ProjectId, RepoId, SettingScope } from "./domain.js";
 import { now, type Db } from "./store.js";
@@ -44,32 +44,32 @@ export function loadBootstrap(env: NodeJS.ProcessEnv = process.env): Bootstrap {
 }
 
 export const SETTINGS = {
-  max_parallel_agents: z.number().int().positive().default(4),
-  max_parallel_per_harness: z.number().int().positive().default(4),
-  "project.max_in_flight": z.number().int().positive().default(3),
-  "timebox.plan_seconds": z.number().int().positive().default(900),
-  "harness.claude.bin": z.string().default("claude"),
-  "harness.claude.permission_mode": z.string().default("bypassPermissions"),
-  "harness.claude.extra_args": z.array(z.string()).default([]),
-  "role.worker.harness": z.string().default("claude"),
-  "role.worker.model": z.string().nullable().default(null),
-  "role.verifier.harness": z.string().default("claude"),
-  "role.verifier.model": z.string().nullable().default(null),
-  "role.planner.harness": z.string().default("claude"),
-  "role.planner.model": z.string().nullable().default(null),
-  "role.watchman.harness": z.string().default("claude"),
-  "role.watchman.model": z.string().nullable().default(null),
-  "timebox.watchman_seconds": z.number().int().positive().default(900),
-  "watchman.context_tokens": z.number().int().min(4000).default(40000),
-  "timebox.work_seconds": z.number().int().positive().default(1800),
-  "timebox.verify_seconds": z.number().int().positive().default(1200),
-  "verify.max_retries": z.number().int().positive().default(2),
-  max_attempts: z.number().int().positive().default(2),
-  "git.author_name": z.string().default("yagura"),
-  "git.author_email": z.string().default("yagura@localhost"),
-  "git.branch_prefix": z.string().default("yg"),
-  "yagura.url": z.string().url().nullable().default(null),
-  "method.enforce_required_skills": z.boolean().default(true),
+  max_parallel_agents: z.number().int().positive().default(4).describe("Most agents running at once, across every project"),
+  max_parallel_per_harness: z.number().int().positive().default(4).describe("Most agents running at once on one harness (claude, …)"),
+  "project.max_in_flight": z.number().int().positive().default(3).describe("Most agents running at once in one project"),
+  "timebox.plan_seconds": z.number().int().positive().default(900).describe("How long a planner may run before it is stopped"),
+  "harness.claude.bin": z.string().default("claude").describe("The claude executable yagura runs"),
+  "harness.claude.permission_mode": z.string().default("bypassPermissions").describe("Permission mode passed to claude"),
+  "harness.claude.extra_args": z.array(z.string()).default([]).describe("Extra arguments added to every claude run"),
+  "role.worker.harness": z.string().default("claude").describe("Harness that runs workers"),
+  "role.worker.model": z.string().nullable().default(null).describe("Model for workers (empty: the harness default)"),
+  "role.verifier.harness": z.string().default("claude").describe("Harness that runs verifiers"),
+  "role.verifier.model": z.string().nullable().default(null).describe("Model for verifiers (empty: the harness default)"),
+  "role.planner.harness": z.string().default("claude").describe("Harness that runs planners"),
+  "role.planner.model": z.string().nullable().default(null).describe("Model for planners (empty: the harness default)"),
+  "role.watchman.harness": z.string().default("claude").describe("Harness that runs the watchman"),
+  "role.watchman.model": z.string().nullable().default(null).describe("Model for the watchman (empty: the harness default)"),
+  "timebox.watchman_seconds": z.number().int().positive().default(900).describe("How long one watchman turn may run"),
+  "watchman.context_tokens": z.number().int().min(4000).default(40000).describe("Size budget for the watchman's brief"),
+  "timebox.work_seconds": z.number().int().positive().default(1800).describe("How long a worker may run before it is stopped"),
+  "timebox.verify_seconds": z.number().int().positive().default(1200).describe("How long a verifier may run before it is stopped"),
+  "verify.max_retries": z.number().int().positive().default(2).describe("Fresh verify runs after an invalid or blocked verdict"),
+  max_attempts: z.number().int().positive().default(2).describe("Tries a unit gets before it blocks"),
+  "git.author_name": z.string().default("yagura").describe("Author name on landed commits"),
+  "git.author_email": z.string().default("yagura@localhost").describe("Author email on landed commits"),
+  "git.branch_prefix": z.string().default("yg").describe("Prefix for unit branches"),
+  "yagura.url": z.string().url().nullable().default(null).describe("Dashboard URL linked from commit trailers"),
+  "method.enforce_required_skills": z.boolean().default(true).describe("Reject work that skipped a required skill"),
 } satisfies Record<string, z.ZodTypeAny>;
 
 export type SettingKey = keyof typeof SETTINGS;
@@ -119,4 +119,77 @@ export function effectiveSettings(db: Db, ctx: SettingsContext = {}): Record<Set
     SettingKey,
     { value: unknown; source: SettingSource }
   >;
+}
+
+export function clearSetting(db: Db, scope: SettingScope, scopeId: string, key: string): boolean {
+  schemaFor(key);
+  return db.prepare("DELETE FROM settings WHERE scope = ? AND scope_id = ? AND key = ?").run(scope, scope === "global" ? "" : scopeId, key).changes > 0;
+}
+
+export interface SettingInfo {
+  key: SettingKey;
+  value: unknown;
+  source: SettingSource;
+  default: unknown;
+  description: string;
+}
+
+export function describeSettings(db: Db, ctx: SettingsContext = {}): SettingInfo[] {
+  return (Object.keys(SETTINGS) as SettingKey[]).map((key) => ({
+    key,
+    ...resolveSetting(db, key, ctx),
+    default: SETTINGS[key].parse(undefined),
+    description: SETTINGS[key].description ?? "",
+  }));
+}
+
+type ScopedValues = Record<string, Record<string, unknown>>;
+export interface SettingsFile {
+  global?: Record<string, unknown>;
+  environment?: ScopedValues;
+  repo?: ScopedValues;
+  project?: ScopedValues;
+}
+
+export function exportSettings(db: Db): string {
+  const rows = db.prepare("SELECT scope, scope_id, key, value_json FROM settings ORDER BY scope, scope_id, key").all() as { scope: SettingScope; scope_id: string; key: string; value_json: string }[];
+  const out: SettingsFile = {};
+  for (const r of rows) {
+    const value = JSON.parse(r.value_json);
+    if (r.scope === "global") (out.global ??= {})[r.key] = value;
+    else ((out[r.scope] ??= {})[r.scope_id] ??= {})[r.key] = value;
+  }
+  return stringifyYaml(out);
+}
+
+export class SettingsImportInvalid extends Error {}
+
+export function importSettings(db: Db, text: string): number {
+  let doc: unknown;
+  try {
+    doc = parseYaml(text) ?? {};
+  } catch (e) {
+    throw new SettingsImportInvalid(`not valid YAML: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const values = z.record(z.unknown());
+  const parsed = z
+    .object({ global: values.optional(), environment: z.record(values).optional(), repo: z.record(values).optional(), project: z.record(values).optional() })
+    .strict()
+    .safeParse(doc);
+  if (!parsed.success) throw new SettingsImportInvalid(parsed.error.issues.map((i) => `${i.path.join(".") || "file"}: ${i.message}`).join("; "));
+  const writes: [SettingScope, string, string, unknown][] = [];
+  for (const [key, value] of Object.entries(parsed.data.global ?? {})) writes.push(["global", "", key, value]);
+  for (const scope of ["environment", "repo", "project"] as const)
+    for (const [id, entries] of Object.entries(parsed.data[scope] ?? {})) for (const [key, value] of Object.entries(entries)) writes.push([scope, id, key, value]);
+  for (const [scope, id, key, value] of writes) {
+    const schema = (SETTINGS as Record<string, z.ZodTypeAny>)[key];
+    const where = scope === "global" ? `global.${key}` : `${scope}.${id}.${key}`;
+    if (!schema) throw new SettingsImportInvalid(`${where}: unknown setting`);
+    const check = schema.safeParse(value);
+    if (!check.success) throw new SettingsImportInvalid(`${where}: ${check.error.issues.map((i) => i.message).join("; ")}`);
+  }
+  db.transaction(() => {
+    for (const [scope, id, key, value] of writes) setSetting(db, scope, id, key, value);
+  })();
+  return writes.length;
 }

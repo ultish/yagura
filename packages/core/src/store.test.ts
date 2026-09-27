@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { loadBootstrap, resolveSetting, setSetting, UnknownSetting, effectiveSettings } from "./config.js";
+import { clearSetting, describeSettings, exportSettings, importSettings, loadBootstrap, resolveSetting, setSetting, SettingsImportInvalid, UnknownSetting, effectiveSettings } from "./config.js";
 import { IllegalTransition, type ProjectId, type RepoId } from "./domain.js";
 import { addProject, addRepo, addUnit, createAttempt, getUnit, openStore, schemaVersion, transitionUnit, updateAttempt, getAttempt, type Db } from "./store.js";
 import { LATEST_VERSION } from "./migrations.js";
@@ -99,6 +99,42 @@ describe("settings", () => {
   it("validates values and rejects unknown keys", () => {
     expect(() => setSetting(db, "global", "", "max_parallel_agents", 0)).toThrow();
     expect(() => setSetting(db, "global", "", "max_parallel_agent", 3)).toThrow(UnknownSetting);
+  });
+
+  it("clears a layer's value so the next layer shows through", () => {
+    setSetting(db, "global", "", "max_attempts", 5);
+    setSetting(db, "project", project, "max_attempts", 3);
+    expect(clearSetting(db, "project", project, "max_attempts")).toBe(true);
+    expect(clearSetting(db, "project", project, "max_attempts")).toBe(false);
+    expect(resolveSetting(db, "max_attempts", { projectId: project })).toEqual({ value: 5, source: "global" });
+    expect(() => clearSetting(db, "global", "", "nope")).toThrow(UnknownSetting);
+  });
+
+  it("describes every setting with its default and a plain description", () => {
+    setSetting(db, "global", "", "max_parallel_agents", 6);
+    const info = describeSettings(db);
+    expect(info.find((s) => s.key === "max_parallel_agents")).toEqual({ key: "max_parallel_agents", value: 6, source: "global", default: 4, description: "Most agents running at once, across every project" });
+    expect(info.filter((s) => !s.description)).toEqual([]);
+  });
+
+  it("exports explicit values by layer as YAML and imports them into another store", () => {
+    setSetting(db, "global", "", "max_parallel_agents", 6);
+    setSetting(db, "global", "", "harness.claude.extra_args", ["--verbose"]);
+    setSetting(db, "project", project, "max_attempts", 3);
+    const text = exportSettings(db);
+    expect(text).toBe("global:\n  harness.claude.extra_args:\n    - --verbose\n  max_parallel_agents: 6\nproject:\n  p:\n    max_attempts: 3\n");
+    const other = openStore(":memory:");
+    setSetting(other, "global", "", "max_attempts", 9);
+    expect(importSettings(other, text)).toBe(3);
+    expect(exportSettings(other)).toBe("global:\n  harness.claude.extra_args:\n    - --verbose\n  max_attempts: 9\n  max_parallel_agents: 6\nproject:\n  p:\n    max_attempts: 3\n");
+  });
+
+  it("imports nothing when any value in the file is wrong, and says where", () => {
+    expect(() => importSettings(db, "global:\n  max_parallel_agents: 6\n  max_attempts: 0\n")).toThrow("global.max_attempts: Number must be greater than 0");
+    expect(() => importSettings(db, "repo:\n  testbed:\n    colour: red\n")).toThrow("repo.testbed.colour: unknown setting");
+    expect(() => importSettings(db, "globals: {}\n")).toThrow(/Unrecognized key/);
+    expect(() => importSettings(db, "global: [\n")).toThrow(SettingsImportInvalid);
+    expect(resolveSetting(db, "max_parallel_agents").source).toBe("default");
   });
 
   it("lists every setting with its effective value", () => {

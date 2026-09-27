@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore } from "react";
-import type { Attempt, EvidenceRun, Gate, Project, Proposal, Repo, Thread, ThreadDecision, ThreadMessage, ThreadQuestion, Unit } from "@yagura/core";
+import type { Attempt, Environment, EvidenceRun, Gate, Project, Proposal, Repo, SettingInfo, Thread, ThreadDecision, ThreadMessage, ThreadQuestion, Unit } from "@yagura/core";
 
-export type { Attempt, EvidenceRun, Gate, Project, Proposal, Repo, Thread, ThreadDecision, ThreadMessage, ThreadQuestion, Unit };
+export type { Attempt, Environment, EvidenceRun, Gate, Project, Proposal, Repo, SettingInfo, Thread, ThreadDecision, ThreadMessage, ThreadQuestion, Unit };
 
 export interface ProjectSummary {
   project: Project;
@@ -24,6 +24,29 @@ export interface RepoView {
   landedCount: number;
   lastLanded: { projectId: string; seq: number; goal: string; at: string; sha: string } | null;
   notes?: string[];
+}
+
+interface SlotHolder {
+  attemptId: number;
+  since: string;
+  unit: { projectId: string; seq: number; type: string; goal: string };
+}
+
+export interface EnvironmentView {
+  environment: Environment;
+  implemented: boolean;
+  active: (SlotHolder & { slot: string })[];
+  queued: SlotHolder[];
+  projects: { id: string; state: string }[];
+}
+
+export interface SettingsOverview {
+  settings: SettingInfo[];
+  caps: {
+    max_parallel_agents: { running: number; limit: number };
+    max_parallel_per_harness: { limit: number; byHarness: Record<string, number> };
+    "project.max_in_flight": { id: string; running: number; limit: number }[];
+  };
 }
 
 export interface UnitView extends Unit {

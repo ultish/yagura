@@ -376,6 +376,16 @@ export function getEnvironment(db: Db, id: EnvironmentId): Environment {
   };
 }
 
+export function updateEnvironment(db: Db, id: EnvironmentId, patch: { name?: string; capacity?: number }): Environment {
+  const before = getEnvironment(db, id);
+  if (patch.capacity !== undefined && (!Number.isInteger(patch.capacity) || patch.capacity < 0)) throw new Error("capacity must be a whole number, 0 or more");
+  if (patch.name !== undefined && !patch.name.trim()) throw new Error("name must not be empty");
+  const next = { name: patch.name?.trim() ?? before.name, capacity: patch.capacity ?? before.capacity };
+  db.prepare("UPDATE environments SET name = ?, capacity = ? WHERE id = ?").run(next.name, next.capacity, id);
+  recordEvent(db, "environment.updated", {}, { environment: id, from: { name: before.name, capacity: before.capacity }, to: next });
+  return getEnvironment(db, id);
+}
+
 export function setProjectEnvironment(db: Db, projectId: ProjectId, environmentId: EnvironmentId | null): void {
   if (environmentId) getEnvironment(db, environmentId);
   db.prepare("UPDATE projects SET environment_id = ? WHERE id = ?").run(environmentId, projectId);

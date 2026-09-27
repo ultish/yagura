@@ -123,6 +123,47 @@ describe("daemon API", () => {
     expect(repos[1]).toMatchObject({ trunk: null, pack: null, projects: [{ id: "orders", state: "active" }], landingQueue: [], landedCount: 0 });
   });
 
+  it("creates and edits environments and shows who holds and waits for their slots", async () => {
+    expect((await post("/api/environments", { id: "dev", provider: "kube-namespace", capacity: 2 })).status).toBe(400);
+    expect(await (await post("/api/environments", { id: "dev", provider: "local-process", capacity: -1 })).json()).toEqual({ error: "capacity must be a whole number, 0 or more" });
+    const created = await post("/api/environments", { id: "dev", provider: "local-process", capacity: 1 });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({ environment: { id: "dev", name: "dev", capacity: 1 }, implemented: true, active: [], queued: [] });
+    expect((await post("/api/environments", { id: "dev", provider: "local-process", capacity: 1 })).status).toBe(409);
+
+    const attemptId = (db.prepare("SELECT id FROM attempts").get() as { id: number }).id;
+    db.prepare("INSERT INTO leases (environment_id, attempt_id, slot, state, requested_at, granted_at) VALUES ('dev', ?, 'slot-1', 'active', 't1', 't2')").run(attemptId);
+    db.prepare("INSERT INTO leases (environment_id, attempt_id, state, requested_at) VALUES ('dev', ?, 'queued', 't3')").run(attemptId);
+    db.prepare("UPDATE projects SET environment_id = 'dev' WHERE id = 'orders'").run();
+    const unit = { projectId: "orders", seq: 1, type: "work", goal: "Implement create" };
+    expect(await (await post("/api/environments/dev", { name: "Dev box", capacity: 3 })).json()).toMatchObject({
+      environment: { name: "Dev box", capacity: 3 },
+      active: [{ attemptId, slot: "slot-1", since: "t2", unit }],
+      queued: [{ attemptId, since: "t3", unit }],
+      projects: [{ id: "orders", state: "active" }],
+    });
+    expect(await (await post("/api/environments/dev", { capacity: 1.5 })).json()).toEqual({ error: "capacity must be a whole number, 0 or more" });
+    expect((await (await get("/api/environments")).json()) as unknown[]).toHaveLength(1);
+  });
+
+  it("describes settings with live cap counts, and clears, exports, and imports them", async () => {
+    await post("/api/settings", { scope: "global", key: "max_parallel_agents", value: 6 });
+    const overview = (await (await get("/api/settings/overview")).json()) as { settings: { key: string }[]; caps: unknown };
+    expect(overview.settings.find((s) => s.key === "max_parallel_agents")).toMatchObject({ value: 6, source: "global", default: 4 });
+    expect(overview.caps).toEqual({
+      max_parallel_agents: { running: 1, limit: 6 },
+      max_parallel_per_harness: { limit: 4, byHarness: { claude: 1 } },
+      "project.max_in_flight": [{ id: "orders", running: 1, limit: 3 }],
+    });
+    const exported = await get("/api/settings/export");
+    expect(exported.headers.get("content-type")).toMatch(/yaml/);
+    expect(await exported.text()).toBe("global:\n  max_parallel_agents: 6\n");
+    expect(await (await post("/api/settings/clear", { scope: "global", key: "max_parallel_agents" })).json()).toEqual({ cleared: true });
+    expect(await (await post("/api/settings/import", { yaml: "global:\n  max_attempts: 0\n" })).json()).toEqual({ error: "global.max_attempts: Number must be greater than 0" });
+    expect(await (await post("/api/settings/import", { yaml: "global:\n  max_attempts: 4\n" })).json()).toEqual({ applied: 1 });
+    expect(await (await post("/api/settings", { scope: "global", key: "max_attempts", value: "lots" })).json()).toEqual({ error: "Expected number, received string" });
+  });
+
   it("searches handoffs and traces issue refs", async () => {
     expect(await (await get("/api/search?q=PaymentService")).json()).toMatchObject([{ kind: "handoff", attemptId: 1, projectId: "orders" }]);
     expect(await (await get("/api/trace/gitlab%237")).json()).toMatchObject({ projects: [{ id: "orders" }], units: [{ unit: { seq: 1 } }] });
