@@ -73,6 +73,41 @@ export const SETTINGS = {
 } satisfies Record<string, z.ZodTypeAny>;
 
 export type SettingKey = keyof typeof SETTINGS;
+export type OverrideScope = Exclude<SettingScope, "global">;
+
+const P: readonly OverrideScope[] = ["project"];
+const PR: readonly OverrideScope[] = ["project", "repo"];
+const PRE: readonly OverrideScope[] = ["project", "repo", "environment"];
+
+// The layers each setting is read at; an override anywhere else would never take effect.
+export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
+  max_parallel_agents: [],
+  max_parallel_per_harness: [],
+  "project.max_in_flight": P,
+  "timebox.plan_seconds": P,
+  "harness.claude.bin": P,
+  "harness.claude.permission_mode": P,
+  "harness.claude.extra_args": P,
+  "role.worker.harness": PR,
+  "role.worker.model": PR,
+  "role.verifier.harness": PRE,
+  "role.verifier.model": PRE,
+  "role.planner.harness": P,
+  "role.planner.model": P,
+  "role.watchman.harness": [],
+  "role.watchman.model": [],
+  "timebox.watchman_seconds": [],
+  "watchman.context_tokens": [],
+  "timebox.work_seconds": PR,
+  "timebox.verify_seconds": PRE,
+  "verify.max_retries": P,
+  max_attempts: PR,
+  "git.author_name": PR,
+  "git.author_email": PR,
+  "git.branch_prefix": PR,
+  "yagura.url": PR,
+  "method.enforce_required_skills": PR,
+};
 export type SettingValue<K extends SettingKey> = z.output<(typeof SETTINGS)[K]>;
 export type SettingSource = SettingScope | "default";
 
@@ -83,6 +118,15 @@ export interface SettingsContext {
 }
 
 export class UnknownSetting extends Error {}
+export class SettingNotLayered extends Error {}
+
+function checkLayer(key: string, scope: SettingScope): void {
+  schemaFor(key);
+  if (scope === "global") return;
+  const layers = SETTING_LAYERS[key as SettingKey];
+  if (!layers.includes(scope))
+    throw new SettingNotLayered(`${key} cannot be set per ${scope}; ${layers.length ? `it can be set globally or per ${layers.join(" or ")}` : "it is global only"}`);
+}
 
 function schemaFor(key: string): z.ZodTypeAny {
   const schema = (SETTINGS as Record<string, z.ZodTypeAny>)[key];
@@ -91,6 +135,7 @@ function schemaFor(key: string): z.ZodTypeAny {
 }
 
 export function setSetting(db: Db, scope: SettingScope, scopeId: string, key: string, value: unknown): void {
+  checkLayer(key, scope);
   const parsed = schemaFor(key).parse(value);
   db.prepare(
     `INSERT INTO settings (scope, scope_id, key, value_json, updated_at) VALUES (?, ?, ?, ?, ?)
@@ -132,14 +177,16 @@ export interface SettingInfo {
   source: SettingSource;
   default: unknown;
   description: string;
+  layers: readonly OverrideScope[];
 }
 
-export function describeSettings(db: Db, ctx: SettingsContext = {}): SettingInfo[] {
-  return (Object.keys(SETTINGS) as SettingKey[]).map((key) => ({
+export function describeSettings(db: Db, ctx: SettingsContext = {}, scope: OverrideScope | null = null): SettingInfo[] {
+  return (Object.keys(SETTINGS) as SettingKey[]).filter((key) => !scope || SETTING_LAYERS[key].includes(scope)).map((key) => ({
     key,
     ...resolveSetting(db, key, ctx),
     default: SETTINGS[key].parse(undefined),
     description: SETTINGS[key].description ?? "",
+    layers: SETTING_LAYERS[key],
   }));
 }
 
@@ -185,6 +232,11 @@ export function importSettings(db: Db, text: string): number {
     const schema = (SETTINGS as Record<string, z.ZodTypeAny>)[key];
     const where = scope === "global" ? `global.${key}` : `${scope}.${id}.${key}`;
     if (!schema) throw new SettingsImportInvalid(`${where}: unknown setting`);
+    try {
+      checkLayer(key, scope);
+    } catch (e) {
+      throw new SettingsImportInvalid(`${where}: ${(e as Error).message}`);
+    }
     const check = schema.safeParse(value);
     if (!check.success) throw new SettingsImportInvalid(`${where}: ${check.error.issues.map((i) => i.message).join("; ")}`);
   }

@@ -90,15 +90,29 @@ describe("store", () => {
 describe("settings", () => {
   it("resolves the narrowest layer and reports where the value came from", () => {
     expect(resolveSetting(db, "max_parallel_agents")).toEqual({ value: 4, source: "default" });
-    setSetting(db, "global", "", "max_parallel_agents", 8);
-    setSetting(db, "project", project, "max_parallel_agents", 2);
-    expect(resolveSetting(db, "max_parallel_agents")).toEqual({ value: 8, source: "global" });
-    expect(resolveSetting(db, "max_parallel_agents", { projectId: project, repoId: "testbed" as RepoId })).toEqual({ value: 2, source: "project" });
+    setSetting(db, "global", "", "max_attempts", 8);
+    setSetting(db, "repo", "testbed", "max_attempts", 4);
+    setSetting(db, "project", project, "max_attempts", 2);
+    expect(resolveSetting(db, "max_attempts")).toEqual({ value: 8, source: "global" });
+    expect(resolveSetting(db, "max_attempts", { repoId: "testbed" as RepoId })).toEqual({ value: 4, source: "repo" });
+    expect(resolveSetting(db, "max_attempts", { projectId: project, repoId: "testbed" as RepoId })).toEqual({ value: 2, source: "project" });
   });
 
   it("validates values and rejects unknown keys", () => {
     expect(() => setSetting(db, "global", "", "max_parallel_agents", 0)).toThrow();
     expect(() => setSetting(db, "global", "", "max_parallel_agent", 3)).toThrow(UnknownSetting);
+  });
+
+  it("refuses an override at a layer the setting is never read at", () => {
+    expect(() => setSetting(db, "project", project, "max_parallel_agents", 9)).toThrow("max_parallel_agents cannot be set per project; it is global only");
+    expect(() => setSetting(db, "environment", "dev", "max_attempts", 9)).toThrow("max_attempts cannot be set per environment; it can be set globally or per project or repo");
+    setSetting(db, "environment", "dev", "role.verifier.model", "claude-opus-5-5");
+    expect(describeSettings(db, { environmentId: "dev" as never }, "environment").map((s) => [s.key, s.source])).toEqual([
+      ["role.verifier.harness", "default"],
+      ["role.verifier.model", "environment"],
+      ["timebox.verify_seconds", "default"],
+    ]);
+    expect(() => importSettings(db, "project:\n  p:\n    watchman.context_tokens: 9000\n")).toThrow("project.p.watchman.context_tokens: watchman.context_tokens cannot be set per project; it is global only");
   });
 
   it("clears a layer's value so the next layer shows through", () => {
@@ -113,7 +127,7 @@ describe("settings", () => {
   it("describes every setting with its default and a plain description", () => {
     setSetting(db, "global", "", "max_parallel_agents", 6);
     const info = describeSettings(db);
-    expect(info.find((s) => s.key === "max_parallel_agents")).toEqual({ key: "max_parallel_agents", value: 6, source: "global", default: 4, description: "Most agents running at once, across every project" });
+    expect(info.find((s) => s.key === "max_parallel_agents")).toEqual({ key: "max_parallel_agents", value: 6, source: "global", default: 4, description: "Most agents running at once, across every project", layers: [] });
     expect(info.filter((s) => !s.description)).toEqual([]);
   });
 

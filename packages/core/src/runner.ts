@@ -22,7 +22,7 @@ export function addVerifyUnit(db: Db, target: Unit): Unit {
     writeScope: [],
     acceptance: target.acceptance,
     verify: target.verify,
-    timeboxSeconds: resolveSetting(db, "timebox.verify_seconds", { projectId: target.projectId }).value,
+    timeboxSeconds: resolveSetting(db, "timebox.verify_seconds", { projectId: target.projectId, repoId: target.repoId, environmentId: getProject(db, target.projectId).environmentId }).value,
     maxAttempts: 1,
   });
   transitionUnit(db, verify.id, "ready");

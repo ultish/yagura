@@ -2,8 +2,7 @@ import { useRef, useState } from "react";
 import { api, streamUrl, useApi, type SettingsOverview } from "../api";
 import { Link } from "../ui/Link";
 import { useAction } from "../ui/rows";
-
-type Setting = SettingsOverview["settings"][number];
+import { SettingRow } from "../ui/settings";
 
 const GROUPS: { title: string; test: (key: string) => boolean }[] = [
   { title: "Limits", test: (k) => k.startsWith("max_") || k === "project.max_in_flight" || k === "verify.max_retries" },
@@ -11,79 +10,6 @@ const GROUPS: { title: string; test: (key: string) => boolean }[] = [
   { title: "Agents and models", test: (k) => k.startsWith("role.") || k.startsWith("harness.") || k.startsWith("watchman.") || k.startsWith("method.") },
   { title: "Git and links", test: (k) => k.startsWith("git.") || k.startsWith("yagura.") },
 ];
-
-const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "5px 8px", fontSize: 13 } as const;
-
-function shown(value: unknown): string {
-  if (value === null) return "";
-  if (Array.isArray(value)) return value.join(" ");
-  return String(value);
-}
-
-function parsed(s: Setting, text: string): unknown {
-  const t = text.trim();
-  if (typeof s.default === "number") return t === "" ? null : Number(t);
-  if (typeof s.default === "boolean") return t === "true";
-  if (Array.isArray(s.default)) return t ? t.split(/\s+/) : [];
-  return t === "" && s.default === null ? null : t;
-}
-
-function SettingRow({ s, cap, onSaved }: { s: Setting; cap?: string; onSaved: () => void }) {
-  const [text, setText] = useState(shown(s.value));
-  const action = useAction();
-  const dirty = text !== shown(s.value);
-  const save = () => action.run(async () => (await api("/api/settings", { body: { scope: "global", key: s.key, value: parsed(s, text) } }), onSaved()));
-  const reset = () => action.run(async () => (await api("/api/settings/clear", { body: { scope: "global", key: s.key } }), onSaved()));
-  const id = `setting-${s.key.replace(/\W+/g, "-")}`;
-  return (
-    <div className="item" style={{ alignItems: "center" }}>
-      <div className="body">
-        <label htmlFor={id} className="goal" style={{ fontSize: 15 }}>
-          {s.description}
-        </label>
-        <div className="facts">
-          <span>{s.key}</span>
-          <span>{s.source === "default" ? "default" : `set ${s.source === "global" ? "globally" : `per ${s.source}`}; default ${shown(s.default) || "empty"}`}</span>
-          {cap && <span className="s-lamp">{cap}</span>}
-        </div>
-        {action.error && <div className="s-bell" style={{ fontSize: 13 }}>{action.error}</div>}
-      </div>
-      <form
-        className="actions"
-        style={{ alignItems: "center" }}
-        onSubmit={(e) => {
-          e.preventDefault();
-          void save();
-        }}
-      >
-        {typeof s.default === "boolean" ? (
-          <select id={id} className="mono" value={text} onChange={(e) => setText(e.target.value)} style={field}>
-            <option>true</option>
-            <option>false</option>
-          </select>
-        ) : (
-          <input
-            id={id}
-            className="mono"
-            type={typeof s.default === "number" ? "number" : "text"}
-            value={text}
-            placeholder={s.default === null ? "empty" : undefined}
-            onChange={(e) => setText(e.target.value)}
-            style={{ ...field, width: typeof s.default === "number" ? 90 : 220 }}
-          />
-        )}
-        <button className="btn sm lamp" type="submit" disabled={!dirty || action.busy}>
-          Save
-        </button>
-        {s.source === "global" && (
-          <button className="btn sm" type="button" disabled={action.busy} onClick={() => void reset()}>
-            Reset
-          </button>
-        )}
-      </form>
-    </div>
-  );
-}
 
 function Transfer({ onImported }: { onImported: () => void }) {
   const file = useRef<HTMLInputElement>(null);
@@ -141,7 +67,7 @@ export function Settings() {
         Settings
       </h1>
       <div className="muted" style={{ fontSize: 14, marginTop: -12 }}>
-        These are the global values. A project, repo, or environment can override one with <span className="mono">yagura set --scope</span>; the narrowest layer wins.
+        These are the global values. Some can be overridden on a project, repo, or environment page; the narrowest layer wins.
       </div>
       <Transfer onImported={reload} />
       {error && <div className="s-bell">{error}</div>}
@@ -171,7 +97,7 @@ export function Settings() {
                 <h2 className="h2">{g.title}</h2>
               </div>
               {list.map((s) => (
-                <SettingRow key={`${s.key}:${JSON.stringify(s.value)}:${s.source}`} s={s} cap={capText[s.key]} onSaved={reload} />
+                <SettingRow key={`${s.key}:${JSON.stringify(s.value)}:${s.source}`} s={s} scope="global" scopeId="" cap={capText[s.key]} onSaved={reload} />
               ))}
             </section>
           );

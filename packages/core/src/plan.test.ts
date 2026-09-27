@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ProjectId, RepoId } from "./domain.js";
 import { applyDelta, extractDelta, PlanRejected, scopesOverlap, type PlanDelta } from "./plan.js";
+import { setSetting } from "./config.js";
 import { addProject, addRepo, getUnitBySeq, listDeps, listGates, listUnits, openStore, transitionUnit, type Db } from "./store.js";
 
 let db: Db;
@@ -28,6 +29,20 @@ const delta = (d: Record<string, unknown>): PlanDelta => {
   if (!r.ok) throw new Error(r.reason);
   return r.delta;
 };
+
+describe("unit defaults", () => {
+  it("takes timebox and tries from the repo layer, and the project layer over it", () => {
+    db.prepare("INSERT INTO project_repos (project_id, repo_id) VALUES (?, 'other')").run(project);
+    setSetting(db, "repo", "svc", "max_attempts", 5);
+    setSetting(db, "repo", "svc", "timebox.work_seconds", 600);
+    setSetting(db, "project", project, "timebox.work_seconds", 300);
+    applyDelta(db, project, delta({ add: [unit("a", ["a/**"]), unit("b", ["b/**"], { repo: "other" })] }), null);
+    expect(listUnits(db, project).map((u) => [u.repoId, u.maxAttempts, u.timeboxSeconds])).toEqual([
+      ["svc", 5, 300],
+      ["other", 2, 300],
+    ]);
+  });
+});
 
 describe("extractDelta", () => {
   it("takes the last json block and fills defaults", () => {

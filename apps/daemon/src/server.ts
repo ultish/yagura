@@ -288,7 +288,13 @@ export function createApp(opts: ServerOptions): Hono {
   app.get("/api/settings", (c) =>
     c.json(effectiveSettings(db, { projectId: (c.req.query("project") as ProjectId) ?? null, repoId: (c.req.query("repo") as never) ?? null })),
   );
-  app.get("/api/settings/overview", (c) => c.json({ settings: describeSettings(db), caps: capCounts(db) }));
+  app.get("/api/settings/overview", (c) => {
+    const scope = c.req.query("scope") as SettingScope | undefined;
+    const id = c.req.query("id") ?? "";
+    if (!scope || scope === "global") return c.json({ settings: describeSettings(db), caps: capCounts(db) });
+    const ctx = { projectId: scope === "project" ? (id as ProjectId) : null, repoId: scope === "repo" ? (id as RepoId) : null, environmentId: scope === "environment" ? (id as EnvironmentId) : null };
+    return c.json({ settings: describeSettings(db, ctx, scope), caps: capCounts(db) });
+  });
   app.post("/api/settings/clear", async (c) => {
     const b = (await c.req.json()) as { scope: SettingScope; id?: string; key: string };
     return c.json({ cleared: clearSetting(db, b.scope, b.id ?? "", b.key) });

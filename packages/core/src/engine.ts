@@ -122,13 +122,13 @@ export class Engine {
       transitionUnit(this.db, s.unit.id, "blocked", { reason: s.reason });
       this.log(`  U${s.unit.seq} blocked: ${s.reason}`);
     }
-    const cap = (key: Parameters<typeof resolveSetting>[1]) => resolveSetting(this.db, key, { projectId: project.id }).value as number;
     for (const u of r.ready) {
       if (this.inflight.has(`unit:${u.id}`)) continue;
-      const harness = resolveSetting(this.db, u.type === "verify" ? "role.verifier.harness" : "role.worker.harness", { projectId: project.id }).value;
-      if (runningAttempts(this.db) + this.pendingStarts() >= cap("max_parallel_agents")) return;
-      if (runningAttempts(this.db, { harness }) >= cap("max_parallel_per_harness")) return;
-      if (runningAttempts(this.db, { projectId: project.id }) + this.pendingStarts(project.id) >= cap("project.max_in_flight")) return;
+      const sctx = { projectId: project.id, repoId: u.repoId, environmentId: u.type === "verify" ? project.environmentId : null };
+      const harness = resolveSetting(this.db, u.type === "verify" ? "role.verifier.harness" : "role.worker.harness", sctx).value;
+      if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return;
+      if (runningAttempts(this.db, { harness }) >= resolveSetting(this.db, "max_parallel_per_harness").value) return;
+      if (runningAttempts(this.db, { projectId: project.id }) + this.pendingStarts(project.id) >= resolveSetting(this.db, "project.max_in_flight", { projectId: project.id }).value) return;
       const run = u.type === "verify" ? () => runVerifyUnit(this.ctx, u.id) : () => runWorkUnit(this.ctx, u.id);
       this.start(`unit:${u.id}`, `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}`, run, (e) => this.recoverCrashed(u.id, e));
     }

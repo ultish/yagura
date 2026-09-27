@@ -3,6 +3,7 @@ import { api, useApi, type RepoView } from "../api";
 import { clock, plural, sha } from "../lib/format";
 import { Link } from "../ui/Link";
 import { Row, useAction } from "../ui/rows";
+import { ScopedSettings } from "../ui/settings";
 
 const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "7px 10px" } as const;
 
@@ -79,6 +80,7 @@ function AddRepo({ onAdded }: { onAdded: () => void }) {
 
 export function Repos() {
   const { data, error, reload } = useApi<RepoView[]>("/api/repos");
+  const [settings, setSettings] = useState<string | null>(null);
   const hash = typeof location !== "undefined" ? decodeURIComponent(location.hash.slice(1)) : "";
 
   useEffect(() => {
@@ -140,20 +142,28 @@ export function Repos() {
                       )}
                     </>
                   }
+                  actions={
+                    <button className="btn" type="button" aria-expanded={settings === v.repo.id} onClick={() => setSettings(settings === v.repo.id ? null : v.repo.id)}>
+                      Settings
+                    </button>
+                  }
                   extra={
-                    v.landingQueue.length > 0 && (
-                      <div className="s-lamp" style={{ fontSize: 13.5 }}>
-                        {plural(v.landingQueue.length, "verified unit")} waiting to land:{" "}
-                        {v.landingQueue.map((u, i) => (
-                          <span key={`${u.projectId}-${u.seq}`}>
-                            {i ? ", " : ""}
-                            <Link to={`/p/${u.projectId}/u/${u.seq}`}>
-                              {u.projectId} U{u.seq}
-                            </Link>
-                          </span>
-                        ))}
-                      </div>
-                    )
+                    <>
+                      {settings === v.repo.id && <ScopedSettings scope="repo" id={v.repo.id} />}
+                      {v.landingQueue.length > 0 && (
+                        <div className="s-lamp" style={{ fontSize: 13.5 }}>
+                          {plural(v.landingQueue.length, "verified unit")} waiting to land:{" "}
+                          {v.landingQueue.map((u, i) => (
+                            <span key={`${u.projectId}-${u.seq}`}>
+                              {i ? ", " : ""}
+                              <Link to={`/p/${u.projectId}/u/${u.seq}`}>
+                                {u.projectId} U{u.seq}
+                              </Link>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   }
                 />
               </div>

@@ -162,6 +162,15 @@ describe("daemon API", () => {
     expect(await (await post("/api/settings/import", { yaml: "global:\n  max_attempts: 0\n" })).json()).toEqual({ error: "global.max_attempts: Number must be greater than 0" });
     expect(await (await post("/api/settings/import", { yaml: "global:\n  max_attempts: 4\n" })).json()).toEqual({ applied: 1 });
     expect(await (await post("/api/settings", { scope: "global", key: "max_attempts", value: "lots" })).json()).toEqual({ error: "Expected number, received string" });
+
+    expect(await (await post("/api/settings", { scope: "repo", id: "testbed", key: "timebox.plan_seconds", value: 60 })).json()).toEqual({
+      error: "timebox.plan_seconds cannot be set per repo; it can be set globally or per project",
+    });
+    await post("/api/settings", { scope: "repo", id: "testbed", key: "max_attempts", value: 5 });
+    const repo = (await (await get("/api/settings/overview?scope=repo&id=testbed")).json()) as { settings: { key: string; value: unknown; source: string }[] };
+    expect(repo.settings.find((s) => s.key === "max_attempts")).toMatchObject({ value: 5, source: "repo" });
+    expect(repo.settings.find((s) => s.key === "timebox.work_seconds")).toMatchObject({ source: "default" });
+    expect(repo.settings.some((s) => s.key === "timebox.plan_seconds")).toBe(false);
   });
 
   it("searches handoffs and traces issue refs", async () => {

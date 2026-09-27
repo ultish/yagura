@@ -154,9 +154,10 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
     }
 
     const created = new Map<string, Unit>();
-    const timebox = resolveSetting(db, "timebox.work_seconds", { projectId }).value;
-    const maxAttempts = resolveSetting(db, "max_attempts", { projectId }).value;
     for (const a of delta.add) {
+      const sctx = { projectId, repoId: a.repo as RepoId };
+      const timebox = resolveSetting(db, "timebox.work_seconds", sctx).value;
+      const maxAttempts = resolveSetting(db, "max_attempts", sctx).value;
       const unit = addUnit(db, {
         projectId,
         type: "work",

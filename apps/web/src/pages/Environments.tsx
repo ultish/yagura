@@ -3,6 +3,7 @@ import { api, useApi, useNow, type EnvironmentView } from "../api";
 import { clock, plural, since } from "../lib/format";
 import { Link } from "../ui/Link";
 import { Row, useAction } from "../ui/rows";
+import { ScopedSettings } from "../ui/settings";
 
 const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "7px 10px", fontSize: 13 } as const;
 const PROVIDERS = ["local-process"];
@@ -134,6 +135,7 @@ function Holders({ v }: { v: EnvironmentView }) {
 export function Environments() {
   const { data, error, reload } = useApi<EnvironmentView[]>("/api/environments");
   const [editing, setEditing] = useState<string | null>(null);
+  const [settings, setSettings] = useState<string | null>(null);
   return (
     <main style={{ padding: "26px 36px 48px", display: "flex", flexDirection: "column", gap: 24 }}>
       <h1 className="serif" style={{ margin: 0, fontSize: 34, fontWeight: 600 }}>
@@ -197,14 +199,20 @@ export function Environments() {
                         }}
                       />
                     )}
+                    {settings === e.id && <ScopedSettings scope="environment" id={e.id} />}
                   </>
                 }
                 actions={
-                  editing !== e.id && (
-                    <button className="btn" type="button" onClick={() => setEditing(e.id)}>
-                      Edit
+                  <>
+                    <button className="btn" type="button" aria-expanded={settings === e.id} onClick={() => setSettings(settings === e.id ? null : e.id)}>
+                      Settings
                     </button>
-                  )
+                    {editing !== e.id && (
+                      <button className="btn" type="button" onClick={() => setEditing(e.id)}>
+                        Edit
+                      </button>
+                    )}
+                  </>
                 }
               />
             );

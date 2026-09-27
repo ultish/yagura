@@ -6,6 +6,7 @@ import { Inline } from "../lib/markdown";
 import { Beacons } from "../scene/Beacons";
 import { Link } from "../ui/Link";
 import { NoteForm, Row, useAction } from "../ui/rows";
+import { ScopedSettings } from "../ui/settings";
 
 const GROUPS: { key: Group; title: string; bell?: boolean; collapsed?: boolean }[] = [
   { key: "bell", title: "The bell · needs you", bell: true },
@@ -213,6 +214,15 @@ export function Project({ id }: { id: string }) {
             </div>
           );
         })}
+        <div>
+          <div className="gh">
+            <h2 className="h2">Settings</h2>
+            <button type="button" className="mono" onClick={() => setOpen((o) => ({ ...o, settings: !o.settings }))} style={{ fontSize: 12, background: "none", border: 0, color: "var(--amber)", cursor: "pointer" }} aria-expanded={!!open.settings}>
+              {open.settings ? "hide" : "show"}
+            </button>
+          </div>
+          {open.settings && <ScopedSettings scope="project" id={p.id} />}
+        </div>
       </section>
     </main>
   );
