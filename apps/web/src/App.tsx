@@ -91,7 +91,7 @@ function Routes() {
   if (path === "/environments") return <Environments />;
   if (path === "/settings") return <Settings />;
   if ((m = /^\/talk(?:\/(\d+))?\/?$/.exec(path))) return <Talk threadId={m[1] ? Number(m[1]) : null} />;
-  if ((m = /^\/a\/(\d+)\/?$/.exec(path))) return <Agent attemptId={Number(m[1])} />;
+  if ((m = /^\/a\/(\d+)\/?$/.exec(path))) return <Agent key={m[1]} attemptId={Number(m[1])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)(?:\/(\d+))?\/?$/.exec(path)))
     return <UnitAgent projectId={m[1]!} seq={Number(m[2])} n={m[3] ? Number(m[3]) : null} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/?$/.exec(path))) return <Project id={m[1]!} />;

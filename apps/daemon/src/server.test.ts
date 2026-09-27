@@ -12,9 +12,11 @@ import {
   git,
   layout,
   openStore,
+  putArtifact,
   parseClaudeLine,
   transitionUnit,
   updateAttempt,
+  type AttemptId,
   type Bootstrap,
   type Db,
   type ProjectId,
@@ -135,6 +137,41 @@ describe("daemon API", () => {
     expect(((await (await get("/api/inbox")).json()) as { resolved: unknown[] }).resolved).toMatchObject([
       { id: planner, state: "answered", answer: "postgres", kind: "planner", unit: null },
     ]);
+  });
+
+  it("serves a run's evidence files as images or plain text only, sandboxed", async () => {
+    const attemptId = (db.prepare("SELECT id FROM attempts").get() as { id: number }).id as AttemptId;
+    const runId = Number(
+      db
+        .prepare(
+          "INSERT INTO evidence_runs (attempt_id, at, sha, label, command, exit_code, timed_out, tampered, duration_ms, created_at) VALUES (?, 'head', 'abc', 'ui', 'sh s.sh', 0, 0, 0, 12, 't')",
+        )
+        .run(attemptId).lastInsertRowid,
+    );
+    const put = (kind: string, label: string, data: string) =>
+      putArtifact(db, boot, { projectId: project, attemptId, kind, label, data: Buffer.from(data), evidenceRunId: runId });
+    put("stdout", "ui@head stdout", "ok\n");
+    put("file", "ui@head shots/home.svg", "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>");
+    const page = put("file", "ui@head report.html", "<script>alert(1)</script>");
+
+    expect(await (await get(`/api/evidence/${runId}`)).json()).toMatchObject({
+      run: { id: runId, label: "ui", at: "head", exitCode: 0 },
+      artifacts: [
+        { kind: "stdout", name: "stdout", contentType: "text/plain; charset=utf-8" },
+        { kind: "file", name: "shots/home.svg", contentType: "image/svg+xml" },
+        { kind: "file", name: "report.html", contentType: "text/plain; charset=utf-8" },
+      ],
+    });
+    const html = await get(`/api/artifacts/${page}?download=1`);
+    expect(
+      Object.fromEntries(["content-type", "content-security-policy", "x-content-type-options", "content-disposition"].map((h) => [h, html.headers.get(h)])),
+    ).toEqual({
+      "content-type": "text/plain; charset=utf-8",
+      "content-security-policy": "sandbox",
+      "x-content-type-options": "nosniff",
+      "content-disposition": 'attachment; filename="report.html"',
+    });
+    expect(await (await get(`/api/attempts/${attemptId}/diff`)).json()).toEqual({ base: null, head: null, text: null, truncated: false });
   });
 
   it("registers an existing repo and lists repos with their pack, projects, and landing queue", async () => {

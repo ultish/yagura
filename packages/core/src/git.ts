@@ -118,3 +118,7 @@ export async function gitWithEnv(args: string[], cwd: string, env: Record<string
     child.stdin?.end(stdin);
   });
 }
+
+export async function diffRange(gitDir: string, base: Sha, head: Sha): Promise<string> {
+  return git(["diff", "--stat", "--patch", "--no-color", base, head], { gitDir });
+}

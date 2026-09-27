@@ -1,5 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
+  diffRange,
+  getAttempt,
+  type AttemptId,
   gateDeadline,
   recentlyResolvedGates,
   getEnvironment,
@@ -254,4 +257,15 @@ export function resolvedGates(db: Db) {
     const unit = g.unitId ? getUnit(db, g.unitId) : null;
     return { ...g, unit: unit ? { seq: unit.seq, goal: unit.goal } : null };
   });
+}
+
+const MAX_DIFF = 2 * 1024 * 1024;
+
+export async function attemptDiff(db: Db, boot: Bootstrap, attemptId: AttemptId) {
+  const attempt = getAttempt(db, attemptId);
+  const unit = getUnit(db, attempt.unitId);
+  if (!unit.repoId || !attempt.baseSha || !attempt.headSha) return { base: attempt.baseSha, head: attempt.headSha, text: null, truncated: false };
+  if (attempt.baseSha === attempt.headSha) return { base: attempt.baseSha, head: attempt.headSha, text: "", truncated: false };
+  const text = await diffRange(layout(boot).mirror(unit.repoId), attempt.baseSha, attempt.headSha).catch(() => null);
+  return { base: attempt.baseSha, head: attempt.headSha, text: text?.slice(0, MAX_DIFF) ?? null, truncated: (text?.length ?? 0) > MAX_DIFF };
 }

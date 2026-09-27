@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
+import { diffLines } from "./diff";
 import { duration, modelName } from "./format";
 import { ifUnanswered } from "./gates";
 import { mentionHref, mentionQuery } from "./mention";
@@ -212,5 +213,10 @@ describe("mentions and formatting", () => {
       "Waits for your answer.",
       null,
     ]);
+  });
+
+  it("classifies diff lines, not mistaking the file headers for changes", () => {
+    const text = " app.py | 2 +-\ndiff --git a/app.py b/app.py\nindex 1..2 100644\n--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n keep";
+    expect(diffLines(text).map((l) => l.kind)).toEqual(["context", "file", "meta", "meta", "meta", "hunk", "del", "add", "context"]);
   });
 });

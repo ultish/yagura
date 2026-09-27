@@ -91,7 +91,19 @@ function engine(role) {
   }
   if (role === "verifier") {
     const file = /^\+\+\+ b\/(.+)$/m.exec(brief)[1];
-    writeFileSync("scenario.sh", `test -f ${file}\n`);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="120"><rect width="360" height="120" fill="#1c2134"/><text x="20" y="66" fill="#ece6da" font-family="monospace" font-size="18">${file}</text></svg>`;
+    writeFileSync(
+      "scenario.sh",
+      [
+        'mkdir -p "$YAGURA_EVIDENCE/notes"',
+        `echo "looked for ${file} at $YAGURA_AT" > "$YAGURA_EVIDENCE/notes/check.txt"`,
+        `printf '%s' '${svg}' > "$YAGURA_EVIDENCE/screen.svg"`,
+        `node -e 'require("fs").writeFileSync(process.env.YAGURA_EVIDENCE + "/pixel.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"))'`,
+        `echo "checking ${file}"`,
+        `test -f ${file}`,
+        "",
+      ].join("\n"),
+    );
     const run = (at) =>
       Number(/run:(\d+)/.exec(execSync(`yagura evidence run --at ${at} --label s -- sh ${process.cwd()}/scenario.sh`, { encoding: "utf8" }))[1]);
     const base = run("base");

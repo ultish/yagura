@@ -4,6 +4,7 @@ import { duration, modelName, tokens } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { buildTimeline, type Step } from "../lib/timeline";
 import { Link } from "../ui/Link";
+import { DiffView, RunView } from "../ui/evidence";
 import { NoteForm, useAction } from "../ui/rows";
 
 function useLog(attemptId: number, live: boolean): LogLine[] {
@@ -182,7 +183,7 @@ function Meter({ label, value, max, text }: { label: string; value: number; max:
   );
 }
 
-function EvidenceGrid({ runs }: { runs: EvidenceRun[] }) {
+function EvidenceGrid({ runs, selected, onPick }: { runs: EvidenceRun[]; selected: number | null; onPick: (runId: number) => void }) {
   const labels = [...new Set(runs.map((r) => r.label))];
   if (!labels.length)
     return (
@@ -195,9 +196,17 @@ function EvidenceGrid({ runs }: { runs: EvidenceRun[] }) {
     if (!r) return <span className="run wait">—</span>;
     const ok = r.exitCode === 0 && !r.timedOut && !r.tampered;
     return (
-      <span className={`run ${ok ? "ok" : "bad"}`} title={r.command}>
+      <button
+        type="button"
+        className={`run ${ok ? "ok" : "bad"}`}
+        title={r.command}
+        aria-label={`r${r.id} ${label} on ${at === "base" ? "trunk" : "head"}: ${r.tampered ? "tampered" : r.timedOut ? "timed out" : ok ? "passed" : `exit ${r.exitCode}`}. Show evidence`}
+        aria-pressed={selected === r.id}
+        onClick={() => onPick(r.id)}
+        style={{ cursor: "pointer", background: selected === r.id ? "var(--panel)" : "transparent" }}
+      >
         r{r.id} {r.tampered ? "tampered" : r.timedOut ? "timed out" : ok ? "✓" : `exit ${r.exitCode}`}
-      </span>
+      </button>
     );
   };
   const shaOf = (at: "base" | "head") => runs.find((r) => r.at === at)?.sha.slice(0, 7) ?? "";
@@ -256,6 +265,8 @@ export function Agent({ attemptId }: { attemptId: number }) {
   const lines = useLog(attemptId, !!live);
   const timeline = useMemo(() => buildTimeline(lines), [lines]);
   const [stopping, setStopping] = useState(false);
+  const [view, setView] = useState<"log" | "diff" | "run">("log");
+  const [picked, setPicked] = useState<number | null>(null);
   const action = useAction();
   if (error)
     return (
@@ -279,6 +290,11 @@ export function Agent({ attemptId }: { attemptId: number }) {
   const window = /1m|\[1m\]/.test(a.model ?? "") ? 1_000_000 : 200_000;
   const verifierRuns = u.type === "verify" ? d.runs : (d.verifications.at(-1)?.attempts.at(-1)?.runs ?? []);
   const lastVerification = d.verifications.at(-1);
+  const tabs: { key: "log" | "diff" | "run"; label: string }[] = [
+    { key: "log", label: "Log" },
+    ...(u.type !== "plan" ? [{ key: "diff" as const, label: "Diff" }] : []),
+    ...(picked !== null ? [{ key: "run" as const, label: `Evidence r${picked}` }] : []),
+  ];
   const briefGoal = d.brief ? /## GOAL\n([\s\S]*?)\n##/.exec(d.brief)?.[1]?.trim() : null;
   const acceptCount = d.brief
     ? (/## ACCEPTANCE\n([\s\S]*?)\n##/
@@ -343,19 +359,38 @@ export function Agent({ attemptId }: { attemptId: number }) {
       </section>
       <div style={{ display: "flex", flexWrap: "wrap", background: "var(--bg2)", minHeight: "70vh" }}>
         <section aria-labelledby="log" style={{ flex: "1 1 600px", minWidth: 0, padding: "10px 36px 48px" }}>
-          <div style={{ display: "flex", gap: 14, alignItems: "baseline", padding: "6px 0 8px" }}>
-            <h2 id="log" className="h2">
-              Log
-            </h2>
-            <span className="mono muted" style={{ fontSize: 12 }}>
-              {live ? "live · " : ""}
-              {timeline.steps.length} steps
-            </span>
+          <div role="tablist" aria-label="What to show" style={{ display: "flex", gap: 22, alignItems: "baseline", padding: "6px 0 8px" }}>
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                id={t.key === "log" ? "log" : undefined}
+                aria-selected={view === t.key}
+                onClick={() => setView(t.key)}
+                className="h2"
+                style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: view === t.key ? "var(--text)" : "var(--muted)" }}
+              >
+                {t.label}
+              </button>
+            ))}
+            {view === "log" && (
+              <span className="mono muted" style={{ fontSize: 12 }}>
+                {live ? "live · " : ""}
+                {timeline.steps.length} steps
+              </span>
+            )}
           </div>
-          {!timeline.steps.length && <div className="empty">{live ? "Waiting for the agent's first words…" : "No log was recorded."}</div>}
-          {timeline.steps.map((s) => (
-            <StepRow key={s.id} step={s} start={start} live={!!live} />
-          ))}
+          {view === "log" && (
+            <>
+              {!timeline.steps.length && <div className="empty">{live ? "Waiting for the agent's first words…" : "No log was recorded."}</div>}
+              {timeline.steps.map((s) => (
+                <StepRow key={s.id} step={s} start={start} live={!!live} />
+              ))}
+            </>
+          )}
+          {view === "diff" && <DiffView attemptId={a.id} />}
+          {view === "run" && picked !== null && <RunView runId={picked} />}
         </section>
         <aside
           style={{
@@ -409,7 +444,14 @@ export function Agent({ attemptId }: { attemptId: number }) {
                     : "filled in by the verifier after hand-off"}
                 {u.verdict ? ` · verdict ${u.verdict.tier}` : ""}
               </div>
-              <EvidenceGrid runs={verifierRuns} />
+              <EvidenceGrid
+                runs={verifierRuns}
+                selected={view === "run" ? picked : null}
+                onPick={(id) => {
+                  setPicked(id);
+                  setView("run");
+                }}
+              />
             </div>
           )}
           <div>
@@ -469,5 +511,5 @@ export function UnitAgent({ projectId, seq, n }: { projectId: string; seq: numbe
         <Link to={`/p/${projectId}`}>Back to {projectId}</Link>
       </main>
     );
-  return <Agent attemptId={attempt.id} />;
+  return <Agent key={attempt.id} attemptId={attempt.id} />;
 }

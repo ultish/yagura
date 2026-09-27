@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { extname, join, relative } from "node:path";
 import type { Bootstrap } from "./config.js";
 import type { ArtifactId, AttemptId, ProjectId, Sha } from "./domain.js";
 import { isPristine, restorePristine } from "./git.js";
@@ -185,4 +185,52 @@ export function readArtifact(db: Db, boot: Bootstrap, id: ArtifactId): Buffer {
     .get(id) as { sha256: string; project_id: ProjectId } | undefined;
   if (!r) throw new Error(`artifact ${id} not found`);
   return readFileSync(join(artifactsDir(boot, r.project_id), r.sha256));
+}
+
+export interface ArtifactInfo {
+  id: ArtifactId;
+  kind: string;
+  name: string;
+  bytes: number;
+  contentType: string;
+}
+
+// Agent-written files are served only as types a browser will not run: images, and everything else as text or a download.
+const INLINE_TYPES: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+};
+
+export function artifactContentType(name: string, data: Buffer): string {
+  const inline = INLINE_TYPES[extname(name).toLowerCase()];
+  if (inline) return inline;
+  return data.subarray(0, 4096).includes(0) ? "application/octet-stream" : "text/plain; charset=utf-8";
+}
+
+export function runArtifacts(db: Db, boot: Bootstrap, runId: number): ArtifactInfo[] {
+  const run = getEvidenceRun(db, runId);
+  const prefix = `${run.label}@${run.at} `;
+  const rows = db.prepare("SELECT id, kind, label, bytes FROM artifacts WHERE evidence_run_id = ? ORDER BY id").all(runId) as {
+    id: ArtifactId;
+    kind: string;
+    label: string;
+    bytes: number;
+  }[];
+  return rows.map((r) => {
+    const name = r.kind === "file" && r.label.startsWith(prefix) ? r.label.slice(prefix.length) : r.kind;
+    return { id: r.id, kind: r.kind, name, bytes: r.bytes, contentType: artifactContentType(name, readArtifact(db, boot, r.id)) };
+  });
+}
+
+export function artifactName(db: Db, id: ArtifactId): string {
+  const r = db
+    .prepare("SELECT a.kind, a.label, e.label AS run_label, e.at FROM artifacts a LEFT JOIN evidence_runs e ON e.id = a.evidence_run_id WHERE a.id = ?")
+    .get(id) as { kind: string; label: string; run_label: string | null; at: string | null } | undefined;
+  if (!r) throw new Error(`artifact ${id} not found`);
+  const prefix = r.run_label ? `${r.run_label}@${r.at} ` : "";
+  return r.kind === "file" && prefix && r.label.startsWith(prefix) ? r.label.slice(prefix.length) : `${r.label.replace(/\W+/g, "-")}.txt`;
 }

@@ -8,11 +8,23 @@ import type { RunContext } from "./agent.js";
 import type { Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
 import { Engine } from "./engine.js";
-import { commitAll, git } from "./git.js";
+import { artifactName, listEvidenceRuns, readArtifact, runArtifacts } from "./evidence.js";
+import { commitAll, diffRange, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
-import { addEnvironment, addProject, addRepo, getProject, listUnits, openStore, setMergePolicy, setProjectEnvironment, type Db } from "./store.js";
+import {
+  addEnvironment,
+  addProject,
+  addRepo,
+  getProject,
+  listAttempts,
+  listUnits,
+  openStore,
+  setMergePolicy,
+  setProjectEnvironment,
+  type Db,
+} from "./store.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
 const fake: HarnessAdapter = {
@@ -82,6 +94,26 @@ describe("Engine", () => {
         .sort(),
     ).toEqual([`app/a/extra/p-U${work[2]!.seq}.txt`, `app/a/p-U${work[0]!.seq}.txt`, `app/b/p-U${work[1]!.seq}.txt`]);
     expect(log.some((l) => l.startsWith("✔ project p closed"))).toBe(true);
+
+    const verifyAttempt = listAttempts(db, listUnits(db, project).find((u) => u.type === "verify" && u.targetUnitId === a)!.id)[0]!;
+    const headRun = listEvidenceRuns(db, verifyAttempt.id).find((r) => r.label === "s" && r.at === "head")!;
+    const artifacts = runArtifacts(db, ctx.boot, headRun.id);
+    expect(artifacts.map((x) => [x.kind, x.name, x.contentType])).toEqual([
+      ["stdout", "stdout", "text/plain; charset=utf-8"],
+      ["stderr", "stderr", "text/plain; charset=utf-8"],
+      ["file", "notes/check.txt", "text/plain; charset=utf-8"],
+      ["file", "pixel.png", "image/png"],
+      ["file", "screen.svg", "image/svg+xml"],
+    ]);
+    const read = (i: number) => readArtifact(db, ctx.boot, artifacts[i]!.id);
+    expect(read(0).toString()).toBe(`checking app/a/p-U${work[0]!.seq}.txt\n`);
+    expect(read(2).toString()).toBe(`looked for app/a/p-U${work[0]!.seq}.txt at head\n`);
+    expect(read(3).subarray(1, 4).toString()).toBe("PNG");
+    expect(artifactName(db, artifacts[4]!.id)).toBe("screen.svg");
+
+    const workAttempt = listAttempts(db, a!)[0]!;
+    const diff = await diffRange(layout(ctx.boot).mirror("testbed" as RepoId), workAttempt.baseSha!, workAttempt.headSha!);
+    expect(diff).toContain(`+++ b/app/a/p-U${work[0]!.seq}.txt\n@@ -0,0 +1 @@\n+work`);
   }, 60_000);
 
   it("stops at a land gate under merge: human and lands once it is answered", async () => {

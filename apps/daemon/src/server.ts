@@ -58,6 +58,10 @@ import {
   type SettingScope,
   registerRepo,
   RepoUnusable,
+  artifactContentType,
+  artifactName,
+  getEvidenceRun,
+  runArtifacts,
   addEnvironment,
   clearSetting,
   describeSettings,
@@ -70,7 +74,7 @@ import {
   type Provider,
   suggestRepoId,
 } from "@yagura/core";
-import { attemptDetail, bell, capCounts, environmentView, projectSummary, repoView, resolvedGates, unitView } from "./views.js";
+import { attemptDetail, attemptDiff, bell, capCounts, environmentView, projectSummary, repoView, resolvedGates, unitView } from "./views.js";
 
 export interface ServerOptions {
   db: Db;
@@ -248,10 +252,21 @@ export function createApp(opts: ServerOptions): Hono {
   });
 
   app.get("/api/artifacts/:id", (c) => {
-    const data = readArtifact(db, boot, Number(c.req.param("id")) as ArtifactId);
-    const text = !data.subarray(0, 4096).includes(0);
-    return c.body(new Uint8Array(data), 200, { "content-type": text ? "text/plain; charset=utf-8" : "application/octet-stream" });
+    const id = Number(c.req.param("id")) as ArtifactId;
+    const data = readArtifact(db, boot, id);
+    const name = artifactName(db, id);
+    return c.body(new Uint8Array(data), 200, {
+      "content-type": artifactContentType(name, data),
+      "content-security-policy": "sandbox",
+      "x-content-type-options": "nosniff",
+      "content-disposition": `${c.req.query("download") ? "attachment" : "inline"}; filename="${name.split("/").pop()!.replace(/"/g, "")}"`,
+    });
   });
+  app.get("/api/evidence/:id", (c) => {
+    const id = Number(c.req.param("id"));
+    return c.json({ run: getEvidenceRun(db, id), artifacts: runArtifacts(db, boot, id) });
+  });
+  app.get("/api/attempts/:id/diff", async (c) => c.json(await attemptDiff(db, boot, Number(c.req.param("id")) as AttemptId)));
 
   app.get("/api/gates", (c) => c.json(listGates(db, null, (c.req.query("state") as never) ?? undefined)));
   app.post("/api/gates/:id/answer", async (c) => {
