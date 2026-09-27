@@ -167,6 +167,7 @@ export interface Environment {
   capacity: number;
   doctorStatus: DoctorStatus;
   doctorCheckedAt: IsoTime | null;
+  doctorChecks: { name: string; ok: boolean; detail: string }[];
   createdAt: IsoTime;
 }
 

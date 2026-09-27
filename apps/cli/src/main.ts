@@ -65,6 +65,8 @@ import {
   exportSettings,
   importSettings,
   updateEnvironment,
+  doctorEnvironment,
+  PROVIDERS_IMPL,
   transitionUnit,
   type HarnessEvent,
   type PassTier,
@@ -81,8 +83,10 @@ const USAGE = `yagura — agent orchestration
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
   yagura repo set <id> --url <url>
-  yagura env add <id> --provider local-process [--capacity 2] [--name <text>]
+  yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
+               [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]   runs the doctor
   yagura env set <id> [--capacity <n>] [--name <text>]
+  yagura env doctor <id>
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...]
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
   yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go
@@ -402,8 +406,25 @@ async function main() {
       return;
     }
     case "env": {
-      const { positionals, values } = args({ provider: { type: "string" }, capacity: { type: "string" }, name: { type: "string" } });
+      const { positionals, values } = args({
+        provider: { type: "string" },
+        capacity: { type: "string" },
+        name: { type: "string" },
+        context: { type: "string" },
+        pool: { type: "string" },
+        "base-url": { type: "string" },
+      });
       const id = positionals[1];
+      const printDoctor = (checks: { name: string; ok: boolean; detail: string }[]) => {
+        for (const c of checks) console.log(`  ${c.ok ? "✓" : "✗"} ${c.name}: ${c.detail}`);
+      };
+      if (positionals[0] === "doctor" && id) {
+        const result = await doctorEnvironment(db, boot, id as EnvironmentId);
+        console.log(`environment ${id}: doctor ${result.ok ? "passing" : "failing"}`);
+        printDoctor(result.checks);
+        if (!result.ok) process.exitCode = 1;
+        return;
+      }
       if (positionals[0] === "set" && id) {
         const e = updateEnvironment(db, id as EnvironmentId, {
           name: values.name,
@@ -414,8 +435,21 @@ async function main() {
       }
       if (positionals[0] !== "add" || !id || !values.provider) fail(USAGE);
       if (!(PROVIDERS as readonly string[]).includes(values.provider!)) fail(`--provider must be one of ${PROVIDERS.join(", ")}`);
-      const e = addEnvironment(db, { id: id!, name: values.name ?? id!, provider: values.provider as Provider, capacity: Number(values.capacity ?? "1") });
-      console.log(`environment ${e.id}: ${e.provider}, capacity ${e.capacity}`);
+      const providerConfig: Record<string, unknown> = {
+        ...(values.context ? { context: values.context } : {}),
+        ...(values.pool ? { mode: "pool", pool: values.pool.split(",").map((n) => n.trim()) } : {}),
+        ...(values["base-url"] ? { baseUrl: values["base-url"] } : {}),
+      };
+      const capacity = Number(values.capacity ?? "1");
+      const impl = PROVIDERS_IMPL[values.provider as Provider];
+      if (!impl) fail(`provider ${values.provider} is not available yet; use ${Object.keys(PROVIDERS_IMPL).join(" or ")}`);
+      const problem = impl!.validateConfig(providerConfig, capacity);
+      if (problem) fail(problem);
+      const e = addEnvironment(db, { id: id!, name: values.name ?? id!, provider: values.provider as Provider, capacity, providerConfig });
+      const result = await doctorEnvironment(db, boot, e.id);
+      console.log(`environment ${e.id}: ${e.provider}, capacity ${e.capacity}, doctor ${result.ok ? "passing" : "failing"}`);
+      printDoctor(result.checks);
+      if (!result.ok) process.exitCode = 1;
       return;
     }
     case "show": {

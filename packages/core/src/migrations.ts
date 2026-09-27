@@ -126,6 +126,10 @@ CREATE INDEX message_refs_ref ON message_refs (ref);
 CREATE INDEX message_refs_project ON message_refs (project_id);
 `,
   },
+  {
+    version: 7,
+    sql: `ALTER TABLE environments ADD COLUMN doctor_json TEXT NOT NULL DEFAULT '[]';`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

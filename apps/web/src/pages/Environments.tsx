@@ -7,7 +7,7 @@ import { Row, useAction } from "../ui/rows";
 import { ScopedSettings } from "../ui/settings";
 
 const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "7px 10px", fontSize: 13 } as const;
-const PROVIDERS = ["local-process"];
+const PROVIDERS = ["local-process", "kube-namespace"];
 
 function occupancy(v: EnvironmentView): { text: string; tone: string } {
   if (!v.implemented) return { text: `The ${v.environment.provider} provider is not built yet, so agents cannot get a slot here.`, tone: "bell" };
@@ -27,13 +27,32 @@ function AddEnvironment({ onAdded }: { onAdded: () => void }) {
   const [name, setName] = useState("");
   const [capacity, setCapacity] = useState("2");
   const [provider, setProvider] = useState(PROVIDERS[0]!);
+  const [context, setContext] = useState("");
+  const [pool, setPool] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
   const action = useAction();
+  const kube = provider === "kube-namespace";
+  const providerConfig = kube
+    ? {
+        ...(context.trim() ? { context: context.trim() } : {}),
+        ...(pool.trim()
+          ? {
+              mode: "pool",
+              pool: pool
+                .split(",")
+                .map((n) => n.trim())
+                .filter(Boolean),
+            }
+          : {}),
+        ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+      }
+    : {};
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         void action.run(async () => {
-          await api("/api/environments", { body: { id: id.trim(), name: name.trim() || undefined, provider, capacity: Number(capacity) } });
+          await api("/api/environments", { body: { id: id.trim(), name: name.trim() || undefined, provider, capacity: Number(capacity), providerConfig } });
           setId("");
           setName("");
           onAdded();
@@ -77,12 +96,50 @@ function AddEnvironment({ onAdded }: { onAdded: () => void }) {
           style={{ ...field, width: 70 }}
         />
         <button className="btn lamp" type="submit" disabled={action.busy || !id.trim()}>
-          Add environment
+          {action.busy ? "Running doctor…" : "Add environment"}
         </button>
       </div>
+      {kube && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <label htmlFor="env-context" className="sr-only">
+            Kube context
+          </label>
+          <input
+            id="env-context"
+            className="mono"
+            value={context}
+            onChange={(e) => setContext(e.target.value)}
+            placeholder="context (default: current)"
+            style={{ ...field, width: 220 }}
+          />
+          <label htmlFor="env-pool" className="sr-only">
+            Namespace pool
+          </label>
+          <input
+            id="env-pool"
+            className="mono"
+            value={pool}
+            onChange={(e) => setPool(e.target.value)}
+            placeholder="pool: ns-a, ns-b (empty: yagura creates namespaces)"
+            style={{ ...field, flexGrow: 1, minWidth: 260 }}
+          />
+          <label htmlFor="env-base-url" className="sr-only">
+            Base URL pattern
+          </label>
+          <input
+            id="env-base-url"
+            className="mono"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="base URL, e.g. http://{namespace}.apps.local"
+            style={{ ...field, width: 300 }}
+          />
+        </div>
+      )}
       <div className="muted" style={{ fontSize: 13 }}>
         Verification runs inside a slot of the project's environment. local-process gives each slot a private directory and a free port on this machine.
-        Kubernetes namespaces come later.
+        kube-namespace gives each slot its own namespace labelled yagura=1 (or one from your pool, where only yagura-labelled resources are deleted). Adding one
+        runs its doctor; a Kubernetes environment is usable once the doctor passes.
       </div>
       {action.error && (
         <div className="s-bell" style={{ fontSize: 13 }}>
@@ -148,6 +205,51 @@ function EditEnvironment({ v, onDone }: { v: EnvironmentView; onDone: () => void
       )}
     </form>
   );
+}
+
+function Doctor({ v, onRan }: { v: EnvironmentView; onRan: () => void }) {
+  const action = useAction();
+  const checks = v.environment.doctorChecks;
+  const failing = v.environment.doctorStatus === "failing";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {checks.length > 0 && (
+        <details open={failing}>
+          <summary className="mono" style={{ fontSize: 12, cursor: "pointer", color: failing ? "var(--bell-text)" : "var(--muted)" }}>
+            {checks.filter((c) => c.ok).length} of {checks.length} doctor checks pass
+          </summary>
+          <div className="facts" style={{ flexDirection: "column", gap: 2, marginTop: 4 }}>
+            {checks.map((c) => (
+              <span key={c.name} className={c.ok ? undefined : "s-bell"}>
+                {c.ok ? "✓" : "✗"} <b>{c.name}</b> {c.detail}
+              </span>
+            ))}
+          </div>
+        </details>
+      )}
+      <div>
+        <button
+          className="btn sm"
+          type="button"
+          disabled={action.busy}
+          onClick={() => void action.run(async () => (await api(`/api/environments/${v.environment.id}/doctor`, { body: {} }), onRan()))}
+        >
+          {action.busy ? "Running doctor…" : "Run doctor"}
+        </button>
+      </div>
+      {action.error && (
+        <span className="s-bell" style={{ fontSize: 13 }}>
+          {action.error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function settingsOf(v: EnvironmentView): string | null {
+  const c = v.environment.providerConfig as { context?: string; mode?: string; pool?: string[]; baseUrl?: string };
+  if (v.environment.provider !== "kube-namespace") return null;
+  return [`context ${c.context ?? "current"}`, c.mode === "pool" ? `pool ${c.pool?.join(", ")}` : "creates namespaces", c.baseUrl].filter(Boolean).join(" · ");
 }
 
 function Holders({ v }: { v: EnvironmentView }) {
@@ -217,6 +319,7 @@ export function Environments() {
                 facts={
                   <>
                     <span>{doctor(v)}</span>
+                    {settingsOf(v) && <span>{settingsOf(v)}</span>}
                     {v.projects.length ? (
                       <span>
                         {v.projects.map((p, i) => (
@@ -235,6 +338,7 @@ export function Environments() {
                 extra={
                   <>
                     <Holders v={v} />
+                    <Doctor v={v} onRan={reload} />
                     {editing === e.id && (
                       <EditEnvironment
                         v={v}

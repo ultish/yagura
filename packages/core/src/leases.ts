@@ -2,6 +2,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import type { Bootstrap } from "./config.js";
+import { createNamespaceSlot, destroyNamespaceSlot, doctorKube, KubeConfig, type DoctorCheck } from "./kube.js";
 import type { AttemptId, Environment, EnvironmentId, IsoTime, LeaseId, Provider } from "./domain.js";
 import { getEnvironment, now, recordEvent, type Db } from "./store.js";
 
@@ -16,6 +17,8 @@ export interface Lease {
 export interface ProviderImpl {
   createSlot(env: Environment, lease: { id: LeaseId; slot: string }, boot: Bootstrap): Promise<Record<string, string>>;
   destroySlot(env: Environment, lease: { id: LeaseId; slot: string; vars: Record<string, string> }, boot: Bootstrap): Promise<void>;
+  doctor(env: Environment, boot: Bootstrap): Promise<DoctorCheck[]>;
+  validateConfig(config: Record<string, unknown>, capacity: number): string | null;
 }
 
 function freePort(): Promise<number> {
@@ -33,6 +36,14 @@ const leaseDir = (boot: Bootstrap, id: LeaseId) => join(boot.home, "leases", Str
 
 export const LEASE_VARS: Partial<Record<Provider, string[]>> = {
   "local-process": ["YAGURA_SLOT", "YAGURA_LEASE_DIR (a private directory)", "YAGURA_PORT (a free port)"],
+  "kube-namespace": [
+    "YAGURA_SLOT",
+    "YAGURA_LEASE_DIR (a private directory on this machine)",
+    "YAGURA_NAMESPACE (the Kubernetes namespace this slot owns)",
+    'KUBECONTEXT (pass it as kubectl --context "$KUBECONTEXT")',
+    "YAGURA_LABEL (yagura=1; put it on everything deploy creates)",
+    "YAGURA_BASE_URL (when the environment sets an ingress pattern)",
+  ],
 };
 
 export const PROVIDERS_IMPL: Partial<Record<Provider, ProviderImpl>> = {
@@ -45,8 +56,50 @@ export const PROVIDERS_IMPL: Partial<Record<Provider, ProviderImpl>> = {
     async destroySlot(_env, lease, boot) {
       rmSync(leaseDir(boot, lease.id), { recursive: true, force: true });
     },
+    async doctor(_env, boot) {
+      const dir = join(boot.home, "leases");
+      mkdirSync(dir, { recursive: true });
+      return [
+        { name: "private directories", ok: true, detail: dir },
+        { name: "free ports", ok: true, detail: `port ${await freePort()} is free` },
+      ];
+    },
+    validateConfig: (config) => (Object.keys(config).length ? `local-process takes no settings (got ${Object.keys(config).join(", ")})` : null),
+  },
+  "kube-namespace": {
+    async createSlot(env, lease, boot) {
+      const dir = leaseDir(boot, lease.id);
+      mkdirSync(dir, { recursive: true });
+      return { YAGURA_SLOT: lease.slot, YAGURA_LEASE_DIR: dir, ...(await createNamespaceSlot(env, lease)) };
+    },
+    async destroySlot(env, lease, boot) {
+      await destroyNamespaceSlot(env, lease.vars);
+      rmSync(leaseDir(boot, lease.id), { recursive: true, force: true });
+    },
+    doctor: (env) => doctorKube(env),
+    validateConfig(config, capacity) {
+      const parsed = KubeConfig.safeParse(config);
+      if (!parsed.success) return parsed.error.issues.map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ");
+      if (parsed.data.mode === "pool" && capacity > parsed.data.pool.length)
+        return `pool mode has ${parsed.data.pool.length} namespace(s), so capacity cannot be ${capacity}`;
+      return null;
+    },
   },
 };
+
+export async function doctorEnvironment(db: Db, boot: Bootstrap, environmentId: EnvironmentId): Promise<{ ok: boolean; checks: DoctorCheck[] }> {
+  const env = getEnvironment(db, environmentId);
+  const checks = await providerFor(env).doctor(env, boot);
+  const ok = checks.length > 0 && checks.every((c) => c.ok);
+  db.prepare("UPDATE environments SET doctor_status = ?, doctor_checked_at = ?, doctor_json = ? WHERE id = ?").run(
+    ok ? "passing" : "failing",
+    now(),
+    JSON.stringify(checks),
+    environmentId,
+  );
+  recordEvent(db, "environment.doctor", {}, { environment: environmentId, ok, failed: checks.filter((c) => !c.ok).map((c) => c.name) });
+  return { ok, checks };
+}
 
 function providerFor(env: Environment): ProviderImpl {
   const impl = PROVIDERS_IMPL[env.provider];

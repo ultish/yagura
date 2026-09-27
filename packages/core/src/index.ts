@@ -34,3 +34,4 @@ export { claudeAdapter, parseClaudeLine } from "./harness/claude.js";
 export * from "./repos.js";
 export * from "./gates.js";
 export * from "./packs.js";
+export * from "./kube.js";

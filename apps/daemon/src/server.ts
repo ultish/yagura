@@ -70,6 +70,8 @@ import {
   PROVIDERS_IMPL,
   SettingsImportInvalid,
   updateEnvironment,
+  doctorEnvironment,
+  getEnvironment,
   type EnvironmentId,
   type Provider,
   suggestRepoId,
@@ -284,17 +286,33 @@ export function createApp(opts: ServerOptions): Hono {
     c.json((db.prepare("SELECT id FROM environments ORDER BY id").all() as { id: EnvironmentId }[]).map((e) => environmentView(db, e.id))),
   );
   app.post("/api/environments", async (c) => {
-    const b = (await c.req.json()) as { id?: string; name?: string; provider?: string; capacity?: number };
+    const b = (await c.req.json()) as { id?: string; name?: string; provider?: string; capacity?: number; providerConfig?: Record<string, unknown> };
     if (!b.id || !/^[a-z][a-z0-9-]{1,39}$/.test(b.id)) return c.json({ error: "id must be lowercase words joined by dashes, e.g. dev-2" }, 400);
     if (!PROVIDERS_IMPL[b.provider as Provider])
       return c.json({ error: `provider ${b.provider} is not available yet; use ${Object.keys(PROVIDERS_IMPL).join(", ")}` }, 400);
     if (!Number.isInteger(b.capacity) || b.capacity! < 0) return c.json({ error: "capacity must be a whole number, 0 or more" }, 400);
     if (db.prepare("SELECT 1 FROM environments WHERE id = ?").get(b.id)) return c.json({ error: `environment ${b.id} already exists` }, 409);
-    addEnvironment(db, { id: b.id, name: b.name?.trim() || b.id, provider: b.provider as Provider, capacity: b.capacity! });
+    const problem = PROVIDERS_IMPL[b.provider as Provider]!.validateConfig(b.providerConfig ?? {}, b.capacity!);
+    if (problem) return c.json({ error: problem }, 400);
+    addEnvironment(db, {
+      id: b.id,
+      name: b.name?.trim() || b.id,
+      provider: b.provider as Provider,
+      capacity: b.capacity!,
+      providerConfig: b.providerConfig ?? {},
+    });
+    await doctorEnvironment(db, boot, b.id as EnvironmentId);
     return c.json(environmentView(db, b.id as EnvironmentId), 201);
+  });
+  app.post("/api/environments/:id/doctor", async (c) => {
+    await doctorEnvironment(db, boot, c.req.param("id") as EnvironmentId);
+    return c.json(environmentView(db, c.req.param("id") as EnvironmentId));
   });
   app.post("/api/environments/:id", async (c) => {
     const b = (await c.req.json()) as { name?: string; capacity?: number };
+    const env = getEnvironment(db, c.req.param("id") as EnvironmentId);
+    const problem = b.capacity === undefined ? null : PROVIDERS_IMPL[env.provider]?.validateConfig(env.providerConfig, b.capacity);
+    if (problem) return c.json({ error: problem }, 400);
     updateEnvironment(db, c.req.param("id") as EnvironmentId, b);
     return c.json(environmentView(db, c.req.param("id") as EnvironmentId));
   });

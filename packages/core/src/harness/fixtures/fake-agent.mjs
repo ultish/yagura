@@ -127,7 +127,10 @@ function engine(role) {
       Number(/run:(\d+)/.exec(execSync(`yagura evidence run --at ${at} --label s -- sh ${process.cwd()}/scenario.sh`, { encoding: "utf8" }))[1]);
     const base = run("base");
     const head = run("head");
-    return finish(`## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Evidence\n- run:${head}\n- run:${base}\n`);
+    const order = ["deployed-verified", "live-local-verified", "e2e-verified", "unit-verified", "build-only"];
+    const listed = [...brief.matchAll(/^- [\w-]+ \(([\w-]+)\): base/gm)].map((m) => m[1]);
+    const tier = order.find((t) => listed.includes(t)) ?? "unit-verified";
+    return finish(`## Status\nsuccess\n\n## Verification\n${tier}\n\n## Evidence\n- run:${head}\n- run:${base}\n`);
   }
 }
 
