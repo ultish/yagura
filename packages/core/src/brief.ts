@@ -116,6 +116,18 @@ success | blocked
 ## Notes, concerns, deviations
 - <anything the planner or the next worker must know>`;
 
+export function packContract(p: { packPath: string; provider: string; leaseVars: string[]; minTier: string; reason: string }): string[] {
+  return [
+    `This is a pack unit. ${p.reason}. Write a verify pack at ${p.packPath}/ so yagura can verify every later change to this repo.`,
+    `${p.packPath}/verify.json: {"provider": "${p.provider}", "doctor"?: cmd, "deploy"?: cmd, "teardown"?: cmd, "checks": [{"name": "unit", "command": cmd, "tier": tier, "timeoutSeconds"?: n}], "features": [{"name", "doc"}], "protected": [globs]}. Check names are lowercase words joined by dashes.`,
+    "Every command runs through sh -c with the repo checkout as its working directory and these variables: YAGURA_AT (base or head), YAGURA_SHA, YAGURA_EVIDENCE (a directory; files written there are kept as evidence), and the slot's variables: " +
+      `${p.leaseVars.join(", ")}. Read nothing else from the machine; put scripts under ${p.packPath}/bin/ and one feature doc per user-facing feature under ${p.packPath}/features/.`,
+    "doctor checks read-only that the environment is worth driving. deploy builds and starts the checkout in the slot; teardown removes only what deploy created. Leave out deploy and teardown when the checks need nothing running.",
+    `Tiers, strongest first: deployed-verified, live-local-verified, e2e-verified, unit-verified, build-only. A check's tier is what its passing proves. This project needs at least ${p.minTier}.`,
+    "yagura proves the pack on your branch head, with no agent: doctor, deploy, every check, then teardown must all exit 0 against the repo as it is now. Run them yourself the same way before you hand off.",
+  ];
+}
+
 export interface VerifyBrief {
   target: { seq: number; goal: string; playbook: string | null; baseSha: string; headSha: string };
   acceptance: string[];
@@ -127,6 +139,7 @@ export interface VerifyBrief {
   scenarioDir: string;
   cli: string;
   leaseVars: Record<string, string>;
+  deploys: boolean;
   timeboxMinutes: number;
   standing: string;
 }
@@ -168,7 +181,7 @@ Write scenario scripts in your scratch directory ${v.scenarioDir} (your working 
     ${v.cli} evidence run --at base --label <name> -- <command>
     ${v.cli} evidence run --at head --label <name> -- <command>
 
-The command runs with the checkout as its working directory and prints a run id (run:<id>), the exit code, and the output. Use the same command on base and head so yagura can pair them. Files written to $YAGURA_EVIDENCE are kept as evidence. ${behaviour}
+The command runs with the checkout as its working directory and prints a run id (run:<id>), the exit code, and the output. Use the same command on base and head so yagura can pair them. Files written to $YAGURA_EVIDENCE are kept as evidence. ${behaviour}${v.deploys ? "\n\nThe verify pack deploys into your slot: before a run on the other side, yagura tears down the deployed side and deploys this one (runs labelled pack:deploy / pack:teardown). Batch your runs by side to avoid redeploying." : ""}
 
 Recipe from the unit: ${v.verifyRecipe}
 

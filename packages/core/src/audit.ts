@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
-import type { Attempt, Project, Unit, VerdictId } from "./domain.js";
+import { BUILD_TYPES_SQL, isBuild, type Attempt, type Project, type Unit, type VerdictId } from "./domain.js";
 import { listEvidenceRuns } from "./evidence.js";
 import { parseHandoff } from "./handoff.js";
 import { layout } from "./paths.js";
@@ -103,7 +103,7 @@ export function findUnitsByCommit(db: Db, sha: string): Unit[] {
     .prepare(
       `SELECT id FROM units WHERE landed_sha LIKE ?
        UNION SELECT unit_id FROM verdicts WHERE head_sha LIKE ?
-       UNION SELECT a.unit_id FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.type = 'work' AND a.head_sha LIKE ?`,
+       UNION SELECT a.unit_id FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.type IN ${BUILD_TYPES_SQL} AND a.head_sha LIKE ?`,
     )
     .all(like, like, like) as { id: number }[];
   return ids.map((r) => getUnit(db, r.id as never));
@@ -114,7 +114,7 @@ export function findByRef(db: Db, ref: string): { projects: Project[]; units: Un
     getProject(db, r.id as never),
   );
   const direct = db.prepare("SELECT u.id FROM units u, json_each(u.refs_json) r WHERE r.value = ?").all(ref) as { id: number }[];
-  const inherited = projects.flatMap((p) => listUnits(db, p.id).filter((u) => u.type === "work"));
+  const inherited = projects.flatMap((p) => listUnits(db, p.id).filter(isBuild));
   const seen = new Set<number>();
   const units = [...direct.map((r) => getUnit(db, r.id as never)), ...inherited].filter((u) => !seen.has(u.id) && seen.add(u.id));
   return { projects, units };

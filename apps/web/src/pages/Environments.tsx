@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, useApi, useNow, type EnvironmentView } from "../api";
+import { roleOf } from "../lib/units";
 import { clock, plural, since } from "../lib/format";
 import { Link } from "../ui/Link";
 import { Row, useAction } from "../ui/rows";
@@ -154,7 +155,7 @@ function Holders({ v }: { v: EnvironmentView }) {
   if (!v.active.length && !v.queued.length) return null;
   const who = (h: EnvironmentView["active"][number] | EnvironmentView["queued"][number]) => (
     <Link to={`/a/${h.attemptId}`}>
-      {h.unit.projectId} U{h.unit.seq} {h.unit.type === "verify" ? "verifier" : h.unit.type === "work" ? "worker" : h.unit.type}
+      {h.unit.projectId} U{h.unit.seq} {roleOf(h.unit.type)}
     </Link>
   );
   return (

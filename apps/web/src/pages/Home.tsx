@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, navigate, useApi, useNow, type AgentRow, type BellItem, type ProjectSummary, type Thread } from "../api";
+import { roleOf } from "../lib/units";
 import { duration, tokens } from "../lib/format";
 import { Watch, WatchStrip } from "../scene/Watch";
 import { Link } from "../ui/Link";
@@ -67,7 +68,7 @@ function TalkBox() {
 function Lanterns({ now }: { now: number }) {
   const agents = useApi<{ attempts: AgentRow[]; caps: { maxParallelAgents: number; running: number } }>("/api/agents?recent=0");
   const running = agents.data?.attempts.filter((a) => a.state === "running") ?? [];
-  const role = (a: AgentRow) => (a.unit.type === "plan" ? "planner" : a.unit.type === "verify" ? "verifier" : "worker");
+  const role = (a: AgentRow) => roleOf(a.unit.type, a.harness);
   return (
     <section aria-labelledby="lanterns">
       <div className="gh">

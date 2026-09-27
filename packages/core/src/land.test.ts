@@ -15,7 +15,19 @@ import { setSetting } from "./config.js";
 import { landUnit } from "./land.js";
 import { layout } from "./paths.js";
 import { runWorkUnit } from "./runner.js";
-import { addEnvironment, addProject, addRepo, addUnit, getUnitBySeq, openStore, setProjectEnvironment, transitionUnit, type Db } from "./store.js";
+import { failurePolicy } from "./schedule.js";
+import {
+  addEnvironment,
+  addProject,
+  addRepo,
+  addUnit,
+  getUnitBySeq,
+  listAttempts,
+  openStore,
+  setProjectEnvironment,
+  transitionUnit,
+  type Db,
+} from "./store.js";
 import { runVerifyUnit } from "./verify.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
@@ -38,7 +50,7 @@ beforeEach(async () => {
   const seed = join(root, "seed");
   mkdirSync(join(seed, "app"), { recursive: true });
   mkdirSync(join(seed, ".agents/verify"), { recursive: true });
-  writeFileSync(join(seed, "app/orders.py"), "x = 1\n");
+  writeFileSync(join(seed, "app/orders.py"), "x = 1\ny = 2\nz = 3\nw = 4\n");
   writeFileSync(join(seed, "README.md"), "readme\n");
   writeFileSync(
     join(seed, ".agents/verify/verify.json"),
@@ -57,7 +69,7 @@ beforeEach(async () => {
   setProjectEnvironment(db, project, "local" as EnvironmentId);
 });
 
-async function verifiedUnit() {
+async function verifiedUnit(workerMode = "success") {
   const work = addUnit(db, {
     projectId: project,
     type: "work",
@@ -71,7 +83,7 @@ async function verifiedUnit() {
     maxAttempts: 2,
   });
   transitionUnit(db, work.id, "ready");
-  process.env.FAKE_MODE = "success";
+  process.env.FAKE_MODE = workerMode;
   await runWorkUnit(ctx, work.id);
   process.env.FAKE_MODE = "verify-pass";
   await runVerifyUnit(ctx, getUnitBySeq(db, project, 2).id);
@@ -134,6 +146,32 @@ describe("landUnit (forge none)", () => {
     expect(trace.verdicts.at(-1)).toMatchObject({ headSha: landedSha, voided: false });
     expect(findByRef(db, "gitlab#42").units.map((u) => u.seq)).toEqual([1]);
     expect(findUnitsByCommit(db, "not-a-sha")).toEqual([]);
+  });
+
+  it("re-verifies a cleanly rebased head whose patch changed, then lands it, without spending a try", async () => {
+    const work = await verifiedUnit("success-line");
+    await advanceTrunk("app/orders.py", "x = 1\ny = 2\nz = 30\nw = 4\n");
+    const before = await originMain();
+    const first = await landUnit(ctx, work.id);
+    expect(first).toMatchObject({ outcome: "reverifying", reason: expect.stringMatching(/^rebased onto main at [0-9a-f]{10} and the patch changed/) });
+    expect(first.unit.state).toBe("verifying");
+    expect(await originMain()).toBe(before);
+    const rebase = listAttempts(db, work.id).at(-1)!;
+    expect(rebase).toMatchObject({ harness: "yagura-rebase", state: "handed_off", baseSha: before, branch: "yg/p/u1-1-rebased-2" });
+    expect(await git(["show", `${rebase.headSha}:app/orders.py`], { cwd: origin }).catch(() => "absent in origin")).toBe("absent in origin");
+    expect(await git(["show", `${rebase.headSha}:app/orders.py`], { gitDir: layout(ctx.boot).mirror("testbed" as RepoId) })).toBe(
+      "# edited by fake agent\ny = 2\nz = 30\nw = 4",
+    );
+
+    process.env.FAKE_MODE = "verify-pass";
+    const verify = getUnitBySeq(db, project, 3);
+    expect(verify).toMatchObject({ type: "verify", targetUnitId: work.id, state: "ready" });
+    await runVerifyUnit(ctx, verify.id);
+    expect(getUnitBySeq(db, project, 1).state).toBe("verified");
+    const second = await landUnit(ctx, work.id);
+    expect(second).toMatchObject({ outcome: "landed", reason: "squashed onto trunk" });
+    expect(await git(["show", "main:app/orders.py"], { cwd: origin })).toBe("# edited by fake agent\ny = 2\nz = 30\nw = 4");
+    expect(failurePolicy(getUnitBySeq(db, project, 1), listAttempts(db, work.id))).toMatchObject({ action: "retry" });
   });
 
   it("blocks instead of landing when trunk conflicts with the change", async () => {

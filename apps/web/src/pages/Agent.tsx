@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, streamUrl, useApi, useNow, type AttemptDetail, type EvidenceRun, type LogLine, type ProjectDetail } from "../api";
+import { roleOf } from "../lib/units";
 import { duration, modelName, tokens } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { buildTimeline, type Step } from "../lib/timeline";
@@ -236,7 +237,8 @@ function EvidenceGrid({ runs, selected, onPick }: { runs: EvidenceRun[]; selecte
 
 function statusOf(d: AttemptDetail, now: number, lastActivity: string | null): { text: string; tone: string } {
   const a = d.attempt;
-  const role = d.unit.type === "verify" ? "Verifier" : d.unit.type === "plan" ? "Planner" : "Worker";
+  const lower = roleOf(d.unit.type, d.attempt.harness);
+  const role = lower[0]!.toUpperCase() + lower.slice(1);
   const took = a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "";
   switch (a.state) {
     case "running":
@@ -282,7 +284,13 @@ export function Agent({ attemptId }: { attemptId: number }) {
     );
   const a = d.attempt;
   const u = d.unit;
-  const role = u.type === "verify" ? "verifier" : u.type === "plan" ? "planner" : "worker";
+  const role = roleOf(u.type, d.attempt.harness);
+  const byYagura =
+    a.harness === "yagura-proof"
+      ? "yagura ran this proof itself, with no agent: the pack's doctor, deploy, checks, and teardown on the pack's own head. Its runs are in the grid."
+      : a.harness === "yagura-rebase"
+        ? "yagura rebased the verified head onto the moved trunk; the patch changed, so this head is verified again. No agent ran."
+        : null;
   const status = statusOf(d, now, timeline.lastActivity);
   const start = a.startedAt ? Date.parse(a.startedAt) : timeline.startedAt;
   const elapsed = a.startedAt ? (a.endedAt ? Date.parse(a.endedAt) : now) - Date.parse(a.startedAt) : 0;
@@ -345,7 +353,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
         </div>
         <div className="facts">
           <span>
-            <b>{modelName(a.model ?? timeline.model)}</b>
+            <b>{byYagura ? "run by yagura, no agent" : modelName(a.model ?? timeline.model)}</b>
             {a.pluginVersions.pstack ? ` · pstack ${a.pluginVersions.pstack}` : ""}
           </span>
           <span>
@@ -383,7 +391,9 @@ export function Agent({ attemptId }: { attemptId: number }) {
           </div>
           {view === "log" && (
             <>
-              {!timeline.steps.length && <div className="empty">{live ? "Waiting for the agent's first words…" : "No log was recorded."}</div>}
+              {!timeline.steps.length && (
+                <div className="empty">{live ? "Waiting for the agent's first words…" : byYagura ? byYagura : "No log was recorded."}</div>
+              )}
               {timeline.steps.map((s) => (
                 <StepRow key={s.id} step={s} start={start} live={!!live} />
               ))}

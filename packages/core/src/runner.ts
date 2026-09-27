@@ -1,14 +1,16 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
-import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
+import { HANDOFF_TEMPLATE, packContract, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
-import type { Attempt, RenderedBrief, Unit, UnitId } from "./domain.js";
+import { isBuild, type Attempt, type RenderedBrief, type Unit, type UnitId } from "./domain.js";
+import { LEASE_VARS } from "./leases.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
 import { classifyFailure, parseHandoff, syntheticFailureHandoff } from "./handoff.js";
 import { layout, unitRef } from "./paths.js";
 import { checkScope } from "./scope.js";
 import {
+  getEnvironment,
   addUnit,
   addUnitNote,
   createAttempt,
@@ -55,7 +57,8 @@ export function queueVerification(db: Db, target: Unit): Unit {
 export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt> {
   const { db, boot } = ctx;
   const unit = getUnit(db, unitId);
-  if (unit.type !== "work") throw new Error(`U${unit.seq} is a ${unit.type} unit; use the runner for its type`);
+  if (!isBuild(unit)) throw new Error(`U${unit.seq} is a ${unit.type} unit; use the runner for its type`);
+  const isPack = unit.type === "pack";
   if (unit.state !== "ready") throw new Error(`U${unit.seq} is ${unit.state}, not ready`);
   if (!unit.repoId || !unit.verify) throw new Error(`U${unit.seq} has no repo or verify recipe`);
 
@@ -79,19 +82,38 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   await addWorktree(mirror, worktree, branch, base);
 
   const standingPath = paths.standingOrders(project.id);
-  const packForbid = `${repo.verifyPackPath}/**`;
+  const packForbid = isPack ? [] : [`${repo.verifyPackPath}/**`];
+  const env = project.environmentId ? getEnvironment(db, project.environmentId) : null;
   const brief: RenderedBrief = {
     goal: unit.goal,
     repo: { id: repo.id, worktree, branch, baseSha: base },
-    scope: { write: unit.writeScope, forbid: [...unit.forbidScope, packForbid] },
-    context: [...unit.context, ...unit.notes.map((n) => `Note from an earlier attempt: ${n}`)],
+    scope: { write: unit.writeScope, forbid: [...unit.forbidScope, ...packForbid] },
+    context: [
+      ...(isPack
+        ? packContract({
+            packPath: repo.verifyPackPath,
+            provider: env?.provider ?? "local-process",
+            leaseVars: LEASE_VARS[env?.provider ?? "local-process"] ?? [],
+            minTier: project.minTier,
+            reason: unit.context[0] ?? "This repo has no usable verify pack on trunk",
+          })
+        : []),
+      ...(isPack ? unit.context.slice(1) : unit.context),
+      ...unit.notes.map((n) => `Note from an earlier attempt: ${n}`),
+    ],
     readonly: [],
     acceptance: unit.acceptance,
     verify: unit.verify,
     env: {},
     timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
-    forbidden: ["no git push, rebase, merge, or branch switching", "nothing outside SCOPE", `do not edit the verify pack at ${repo.verifyPackPath}`],
-    method: `Load the yagura-worker skill first and follow it. Then use pstack:poteto-mode${unit.playbook ? ` with the ${unit.playbook} playbook` : ""}.`,
+    forbidden: [
+      "no git push, rebase, merge, or branch switching",
+      "nothing outside SCOPE",
+      isPack ? "do not change the code the pack verifies" : `do not edit the verify pack at ${repo.verifyPackPath}`,
+    ],
+    method: isPack
+      ? "Load the yagura-pack skill first and follow it."
+      : `Load the yagura-worker skill first and follow it. Then use pstack:poteto-mode${unit.playbook ? ` with the ${unit.playbook} playbook` : ""}.`,
     report: HANDOFF_TEMPLATE,
     standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
   };
@@ -103,7 +125,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base });
 
   const session = await runAgentSession(ctx, {
-    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "worker" }),
+    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: isPack ? "pack" : "worker" }),
     adapter,
     run: {
       prompt: briefText,
@@ -151,7 +173,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       selfTier: handoff.verification === "not-verified" ? null : handoff.verification,
     });
     transitionUnit(db, unit.id, "handed_off", { attempt: attempt.n, status: handoff.status, head, leftovers: leftovers.paths });
-    const violations = checkScope(touched, unit.writeScope, [...unit.forbidScope, packForbid]);
+    const violations = checkScope(touched, unit.writeScope, [...unit.forbidScope, ...packForbid]);
     if (violations.length) {
       updateAttempt(db, attempt.id, { failureMode: "scope" });
       transitionUnit(db, unit.id, "rejected", { reason: "scope", violations });

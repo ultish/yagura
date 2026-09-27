@@ -6,7 +6,7 @@ import { ifUnanswered } from "./gates";
 import { mentionHref, mentionQuery } from "./mention";
 import { layoutScene, subLabel } from "./scene";
 import { buildTimeline } from "./timeline";
-import { groupOf, stages, statusLine } from "./units";
+import { groupOf, isBuild, roleOf, stages, statusLine } from "./units";
 
 const line = (n: number, at: number, events: LogLine["events"]): LogLine => ({ line: n, at, raw: "", events });
 
@@ -218,5 +218,17 @@ describe("mentions and formatting", () => {
   it("classifies diff lines, not mistaking the file headers for changes", () => {
     const text = " app.py | 2 +-\ndiff --git a/app.py b/app.py\nindex 1..2 100644\n--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n keep";
     expect(diffLines(text).map((l) => l.kind)).toEqual(["context", "file", "meta", "meta", "meta", "hunk", "del", "add", "context"]);
+  });
+
+  it("names each agent's role, including yagura's own proof and rebase runs", () => {
+    expect([roleOf("work"), roleOf("pack"), roleOf("verify"), roleOf("verify", "yagura-proof"), roleOf("work", "yagura-rebase"), roleOf("plan")]).toEqual([
+      "worker",
+      "pack writer",
+      "verifier",
+      "pack proof",
+      "rebase",
+      "planner",
+    ]);
+    expect(["work", "pack", "verify", "plan"].map((type) => isBuild({ type }))).toEqual([true, true, false, false]);
   });
 });

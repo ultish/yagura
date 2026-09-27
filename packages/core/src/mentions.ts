@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
-import type { MentionKind, ProjectId } from "./domain.js";
+import { BUILD_TYPES_SQL, type MentionKind, type ProjectId } from "./domain.js";
 import { layout } from "./paths.js";
 import { generateStatus } from "./status.js";
 import { lastDrainEventId } from "./planner.js";
@@ -101,7 +101,7 @@ export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[]
   }[])
     out.push({ token: p.id, kind: "project", label: `project · ${p.state} · ${p.goal}` });
   for (const u of db
-    .prepare("SELECT project_id, seq, state, goal FROM units WHERE type = 'work' AND goal LIKE ? ORDER BY updated_at DESC LIMIT ?")
+    .prepare(`SELECT project_id, seq, state, goal FROM units WHERE type IN ${BUILD_TYPES_SQL} AND goal LIKE ? ORDER BY updated_at DESC LIMIT ?`)
     .all(like, q.length >= 3 ? limit : 0) as { project_id: string; seq: number; state: string; goal: string }[])
     out.push({ token: `${u.project_id}/U${u.seq}`, kind: "unit", label: `${u.state} · ${u.goal}` });
   for (const t of db

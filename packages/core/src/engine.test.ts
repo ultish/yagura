@@ -18,6 +18,7 @@ import {
   addProject,
   addRepo,
   getProject,
+  getRepo,
   listAttempts,
   listUnits,
   openStore,
@@ -114,6 +115,74 @@ describe("Engine", () => {
     const workAttempt = listAttempts(db, a!)[0]!;
     const diff = await diffRange(layout(ctx.boot).mirror("testbed" as RepoId), workAttempt.baseSha!, workAttempt.headSha!);
     expect(diff).toContain(`+++ b/app/a/p-U${work[0]!.seq}.txt\n@@ -0,0 +1 @@\n+work`);
+  }, 60_000);
+
+  it("writes, proves, and lands a verify pack first on a repo without one, then verifies work with it", async () => {
+    const seed = join(mkdtempSync(join(tmpdir(), "yagura-nopack-")), "seed");
+    mkdirSync(seed, { recursive: true });
+    writeFileSync(join(seed, "README.md"), "no pack here\n");
+    await git(["init", "--quiet", "-b", "main"], { cwd: seed });
+    await commitAll(seed, "init", { name: "t", email: "t@t" });
+    const bare = `${seed}.git`;
+    await git(["clone", "--quiet", "--bare", seed, bare]);
+    addRepo(db, { id: "nopack", url: bare, defaultBranch: "main" });
+    const q = "q" as ProjectId;
+    addProject(db, { id: q, name: "Q", goal: "g", predicate: "all files landed", minTier: "unit-verified", repos: ["nopack" as RepoId] });
+    setProjectEnvironment(db, q, "local" as EnvironmentId);
+    setMergePolicy(db, q, "auto");
+
+    await new Engine(ctx, { projectId: q, tickMs: 50 }).runUntilIdle();
+
+    const units = listUnits(db, q);
+    const pack = units.find((u) => u.type === "pack")!;
+    expect(pack).toMatchObject({ seq: 1, state: "landed", repoId: "nopack", goal: "Write a verify pack for nopack" });
+    expect(getRepo(db, "nopack" as RepoId)).toMatchObject({ packStatus: "proven", packProvenSha: pack.landedSha });
+    const proof = units.find((u) => u.type === "verify" && u.targetUnitId === pack.id)!;
+    const proofAttempt = listAttempts(db, proof.id)[0]!;
+    expect(proofAttempt).toMatchObject({ harness: "yagura-proof", skills: [] });
+    expect(listEvidenceRuns(db, proofAttempt.id).map((r) => `${r.label}@${r.at}:${r.exitCode}`)).toEqual([
+      "pack:doctor@head:0",
+      "pack:deploy@head:0",
+      "check:unit@head:0",
+      "pack:teardown@head:0",
+    ]);
+    expect(await git(["show", "main:.agents/verify/verify.json"], { cwd: bare })).toContain('"deploy"');
+
+    const work = units.filter((u) => u.type === "work");
+    expect(work.map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+    const firstWorkVerify = units.find((u) => u.type === "verify" && u.targetUnitId === work[0]!.id)!;
+    const packLanded = db.prepare("SELECT MIN(id) AS id FROM events WHERE type = 'unit.landed' AND unit_id = ?").get(pack.id) as { id: number };
+    const verifyStarted = db.prepare("SELECT MIN(id) AS id FROM events WHERE type = 'attempt.started' AND unit_id = ?").get(firstWorkVerify.id) as {
+      id: number;
+    };
+    expect(verifyStarted.id).toBeGreaterThan(packLanded.id);
+    expect(listEvidenceRuns(db, listAttempts(db, firstWorkVerify.id)[0]!.id).map((r) => r.label)).toContain("pack:deploy");
+    expect(getProject(db, q).state).toBe("closed");
+  }, 60_000);
+
+  it("sends a pack back to its agent when the proof fails", async () => {
+    const seed = join(mkdtempSync(join(tmpdir(), "yagura-badpack-")), "seed");
+    mkdirSync(seed, { recursive: true });
+    writeFileSync(join(seed, "README.md"), "x\n");
+    await git(["init", "--quiet", "-b", "main"], { cwd: seed });
+    await commitAll(seed, "init", { name: "t", email: "t@t" });
+    await git(["clone", "--quiet", "--bare", seed, `${seed}.git`]);
+    addRepo(db, { id: "badpack", url: `${seed}.git`, defaultBranch: "main" });
+    const q = "q" as ProjectId;
+    addProject(db, { id: q, name: "Q", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["badpack" as RepoId] });
+    setProjectEnvironment(db, q, "local" as EnvironmentId);
+    process.env.FAKE_PACK_CHECK = "test -f nothing-here";
+    try {
+      await new Engine(ctx, { projectId: q, tickMs: 50 }).runUntilIdle();
+    } finally {
+      delete process.env.FAKE_PACK_CHECK;
+    }
+    const pack = listUnits(db, q).find((u) => u.type === "pack")!;
+    expect(pack.state).toBe("blocked");
+    expect(pack.notes[0]).toMatch(/rejected the previous attempt: pack checks fail on the repo as it is: unit exit 1/);
+    expect(listAttempts(db, pack.id).map((a) => a.state)).toEqual(["handed_off", "handed_off"]);
+    expect(getRepo(db, "badpack" as RepoId).packStatus).toBe("missing");
+    expect(listUnits(db, q).filter((u) => u.type === "pack")).toHaveLength(1);
   }, 60_000);
 
   it("stops at a land gate under merge: human and lands once it is answered", async () => {

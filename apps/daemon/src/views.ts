@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
+  BUILD_TYPES_SQL,
+  isBuild,
   diffRange,
   getAttempt,
   type AttemptId,
@@ -50,7 +52,7 @@ export function projectSummary(db: Db, projectId: ProjectId) {
   const project = getProject(db, projectId);
   const units = listUnits(db, projectId);
   const counts: Record<string, number> = {};
-  for (const u of units.filter((x) => x.type === "work")) counts[u.state] = (counts[u.state] ?? 0) + 1;
+  for (const u of units.filter(isBuild)) counts[u.state] = (counts[u.state] ?? 0) + 1;
   const lastLanded = units.filter((u) => u.landedSha).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
   return {
     project,
@@ -117,7 +119,7 @@ export function bell(db: Db): BellItem[] {
       at: g.createdAt,
     });
   }
-  for (const u of db.prepare("SELECT id FROM units WHERE type = 'work' AND state = 'blocked' ORDER BY updated_at").all() as { id: number }[]) {
+  for (const u of db.prepare(`SELECT id FROM units WHERE type IN ${BUILD_TYPES_SQL} AND state = 'blocked' ORDER BY updated_at`).all() as { id: number }[]) {
     const unit = getUnit(db, u.id as UnitId);
     items.push({
       kind: "blocked",
@@ -190,7 +192,7 @@ export async function repoView(db: Db, boot: Bootstrap, repoId: RepoId) {
     .all(repoId) as { id: string; state: string }[];
   const units = db
     .prepare(
-      "SELECT project_id, seq, goal, state, landed_sha, updated_at FROM units WHERE repo_id = ? AND type = 'work' AND state IN ('verified', 'landed') ORDER BY updated_at DESC",
+      `SELECT project_id, seq, goal, state, landed_sha, updated_at FROM units WHERE repo_id = ? AND type IN ${BUILD_TYPES_SQL} AND state IN ('verified', 'landed') ORDER BY updated_at DESC`,
     )
     .all(repoId) as Row[];
   const ref = (u: Row) => ({ projectId: u.project_id as string, seq: u.seq as number, goal: u.goal as string, at: u.updated_at as string });

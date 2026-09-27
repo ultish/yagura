@@ -226,7 +226,7 @@ describe("watchman turns", () => {
     expect(again.problem).toBe(`proposal: ${origin} is already registered as repo billing`);
   });
 
-  it("rejects an existing repo it cannot read, or one without a verify pack that a project would build in", async () => {
+  it("rejects an existing repo it cannot read, and accepts one without a verify pack, which gets a pack unit later", async () => {
     const t = createThread(db, { title: "t" });
     const missing = await runWatchmanTurn(ctx, t.id, `register ghost ${join(boot.home, "ghost")}`);
     expect(missing.problem).toMatch(/^proposal: repo ghost: cannot read .*ghost as a git repo/);
@@ -238,10 +238,9 @@ describe("watchman turns", () => {
     const bare = join(boot.home, "..", "nopack.git");
     await git(["clone", "--quiet", "--bare", seed, bare]);
     const packless = await runWatchmanTurn(ctx, t.id, `register nopack ${bare}`);
-    expect(packless.problem).toBe(
-      "proposal: repo nopack: no verify pack at .agents/verify/verify.json, so nopack-work could never be verified; propose the repo alone and ask the developer to add a verify pack, or leave the project out",
-    );
-    expect(listProposals(db, t.id)).toEqual([]);
+    expect(packless.problem).toBeNull();
+    await applyProposal(ctx, packless.proposal!.id);
+    expect(getRepo(db, "nopack" as RepoId).packStatus).toBe("missing");
   });
 
   it("waits at a phase gate before starting the next project in a chain", async () => {

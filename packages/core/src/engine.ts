@@ -1,12 +1,13 @@
 import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
-import type { Project, ProjectId, Unit, UnitId } from "./domain.js";
+import { isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
 import { landUnit } from "./land.js";
 import { reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
+import { ensurePackUnits } from "./packs.js";
 import {
   addGate,
   getProject,
@@ -80,7 +81,7 @@ export class Engine {
       if (this.inflight.has(`unit:${u.id}`)) continue;
       if (u.type === "verify" && u.state === "failed")
         transitionUnit(this.db, u.id, "abandoned", { reason: "verifier attempt failed; outcome applied to its target" });
-      if (u.type !== "work" || (u.state !== "failed" && u.state !== "rejected")) continue;
+      if (!isBuild(u) || (u.state !== "failed" && u.state !== "rejected")) continue;
       const policy = failurePolicy(u, listAttempts(this.db, u.id));
       transitionUnit(this.db, u.id, policy.action === "retry" ? "ready" : "blocked", { reason: policy.reason });
       this.log(`  U${u.seq} ${policy.action === "retry" ? "retries" : "blocked"}: ${policy.reason}`);
@@ -209,7 +210,7 @@ export class Engine {
     const units = listUnits(this.db, project.id);
     if (units.some((u) => this.inflight.has(`unit:${u.id}`) || ["ready", "running", "handed_off", "verifying", "verified", "landing"].includes(u.state)))
       return null;
-    const blocked = units.filter((u) => u.type === "work" && u.state === "blocked").map((u) => u.seq);
+    const blocked = units.filter((u) => isBuild(u) && u.state === "blocked").map((u) => u.seq);
     return blocked.length && !this.planNeeded(project) ? blocked : null;
   }
 
@@ -249,6 +250,7 @@ export class Engine {
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
     for (const project of this.scope().filter((p) => p.state === "active")) {
+      for (const u of await ensurePackUnits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
       this.settleFailures(project);
       if (this.maybeClose(project)) continue;
       if (project.andonReason) continue;
@@ -275,7 +277,7 @@ export class Engine {
       if (this.planNeeded(p)) return false;
       if (readiness(this.db, p.id).ready.length) return false;
       if (listUnits(this.db, p.id).some((u) => u.state === "verified" && (p.mergePolicy === "auto" || landApproved(this.db, p.id, u)))) return false;
-      return !listUnits(this.db, p.id).some((u) => u.type === "work" && (u.state === "failed" || u.state === "rejected"));
+      return !listUnits(this.db, p.id).some((u) => isBuild(u) && (u.state === "failed" || u.state === "rejected"));
     });
   }
 

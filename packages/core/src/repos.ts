@@ -6,7 +6,7 @@ import type { PackStatus, Repo, RepoId, Sha } from "./domain.js";
 import { ensureMirror, git, readFileAt } from "./git.js";
 import { parsePack, type PackLoad } from "./pack.js";
 import { layout } from "./paths.js";
-import { addRepo, type Db } from "./store.js";
+import { addRepo, recordEvent, type Db } from "./store.js";
 
 export const REPO_ID = /^[a-z][a-z0-9-]{1,39}$/;
 const PACK_PATH = ".agents/verify";
@@ -47,6 +47,21 @@ export interface RepoInspection {
 }
 
 export const packStatusOf = (pack: PackLoad): PackStatus => (pack.ok ? "unproven" : "missing");
+
+// Trunk's pack as last read: a proof is kept while a pack still parses, and lost when it no longer does.
+export function syncPackStatus(db: Db, repoId: RepoId, pack: PackLoad): PackStatus {
+  const current = (db.prepare("SELECT pack_status FROM repos WHERE id = ?").get(repoId) as { pack_status: PackStatus }).pack_status;
+  const next: PackStatus = !pack.ok ? "missing" : current === "missing" ? "unproven" : current;
+  if (next !== current) {
+    db.prepare("UPDATE repos SET pack_status = ?, pack_proven_sha = CASE WHEN ? = 'missing' THEN NULL ELSE pack_proven_sha END WHERE id = ?").run(
+      next,
+      next,
+      repoId,
+    );
+    recordEvent(db, "repo.pack_status", {}, { repo: repoId, from: current, to: next, reason: pack.ok ? null : pack.reason });
+  }
+  return next;
+}
 
 async function remoteHead(url: string): Promise<{ defaultBranch: string; trunk: Sha }> {
   let out: string;

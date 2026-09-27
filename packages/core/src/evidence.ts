@@ -4,9 +4,11 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { extname, join, relative } from "node:path";
 import type { Bootstrap } from "./config.js";
 import type { ArtifactId, AttemptId, ProjectId, Sha } from "./domain.js";
-import { isPristine, restorePristine } from "./git.js";
+import { isPristine, readFileAt, restorePristine } from "./git.js";
 import { activeLease } from "./leases.js";
-import { getAttempt, getUnit, now, recordEvent, type Db } from "./store.js";
+import { parsePack, type PackLoad } from "./pack.js";
+import { layout } from "./paths.js";
+import { getAttempt, getRepo, getUnit, now, recordEvent, type Db } from "./store.js";
 
 const MAX_CAPTURE = 5 * 1024 * 1024;
 const KILL_GRACE_MS = 5_000;
@@ -90,11 +92,52 @@ function runShell(
   });
 }
 
-export async function runEvidence(
-  db: Db,
-  boot: Bootstrap,
-  req: { attemptId: AttemptId; at: At; label: string; command: string; timeoutSeconds?: number },
-): Promise<EvidenceRun> {
+type RunRequest = { attemptId: AttemptId; at: At; label: string; command: string; timeoutSeconds?: number };
+
+export const PACK_LABEL = (step: "doctor" | "deploy" | "teardown") => `pack:${step}`;
+const LIFECYCLE_SECONDS = 900;
+
+// A pack unit's proof uses the pack it wrote; everything else uses trunk's, so a change cannot weaken its own checks.
+export async function packForAttempt(db: Db, boot: Bootstrap, attemptId: AttemptId): Promise<PackLoad> {
+  const attempt = getAttempt(db, attemptId);
+  const unit = getUnit(db, attempt.unitId);
+  const target = unit.targetUnitId ? getUnit(db, unit.targetUnitId) : null;
+  const repo = getRepo(db, unit.repoId!);
+  const mirror = layout(boot).mirror(repo.id);
+  const ref = target?.type === "pack" ? attempt.headSha! : `origin/${repo.defaultBranch}`;
+  return parsePack(await readFileAt(mirror, ref, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath);
+}
+
+export function deployedSide(db: Db, attemptId: AttemptId): At | null {
+  const last = db
+    .prepare("SELECT label, at FROM evidence_runs WHERE attempt_id = ? AND label IN (?, ?) ORDER BY id DESC LIMIT 1")
+    .get(attemptId, PACK_LABEL("deploy"), PACK_LABEL("teardown")) as { label: string; at: At } | undefined;
+  return last?.label === PACK_LABEL("deploy") ? last.at : null;
+}
+
+export async function runEvidence(db: Db, boot: Bootstrap, req: RunRequest): Promise<EvidenceRun> {
+  if (!req.label.startsWith("pack:")) {
+    const pack = await packForAttempt(db, boot, req.attemptId);
+    if (pack.ok && pack.pack.deploy) {
+      const side = deployedSide(db, req.attemptId);
+      if (side !== req.at) {
+        if (side && pack.pack.teardown)
+          await captureRun(db, boot, { ...req, at: side, label: PACK_LABEL("teardown"), command: pack.pack.teardown, timeoutSeconds: LIFECYCLE_SECONDS });
+        await captureRun(db, boot, { ...req, label: PACK_LABEL("deploy"), command: pack.pack.deploy, timeoutSeconds: LIFECYCLE_SECONDS });
+      }
+    }
+  }
+  return captureRun(db, boot, req);
+}
+
+export async function teardownDeployed(db: Db, boot: Bootstrap, attemptId: AttemptId): Promise<EvidenceRun | null> {
+  const side = deployedSide(db, attemptId);
+  const pack = side ? await packForAttempt(db, boot, attemptId) : null;
+  if (!side || !pack?.ok || !pack.pack.teardown) return null;
+  return captureRun(db, boot, { attemptId, at: side, label: PACK_LABEL("teardown"), command: pack.pack.teardown, timeoutSeconds: LIFECYCLE_SECONDS });
+}
+
+async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<EvidenceRun> {
   const attempt = getAttempt(db, req.attemptId);
   const unit = getUnit(db, attempt.unitId);
   if (unit.type !== "verify") throw new Error(`attempt ${attempt.id} is not a verify attempt`);

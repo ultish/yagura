@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useApi, useNow, type AgentRow } from "../api";
+import { roleOf } from "../lib/units";
 import { clock, duration, modelName, tokens } from "../lib/format";
 import { Link } from "../ui/Link";
 import { Row } from "../ui/rows";
-
-const ROLE: Record<string, string> = { plan: "planner", work: "worker", verify: "verifier" };
 
 export function Agents() {
   const now = useNow(1000);
@@ -39,7 +38,7 @@ export function Agents() {
         facts={
           <>
             <span>
-              <b>{ROLE[a.unit.type] ?? a.unit.type}</b> · try {a.n}
+              <b>{roleOf(a.unit.type, a.harness)}</b> · try {a.n}
             </span>
             <span>{modelName(a.model)}</span>
             {a.contextPeak > 0 && <span>ctx {tokens(a.contextPeak)}</span>}

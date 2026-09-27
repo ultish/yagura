@@ -1,4 +1,4 @@
-import type { Attempt, FailureMode, ProjectId, Unit } from "./domain.js";
+import { isBuild, spendsAttempt, type Attempt, type FailureMode, type ProjectId, type Unit } from "./domain.js";
 import { listDeps, listUnits, type Db } from "./store.js";
 
 const TERMINAL = new Set(["landed", "done", "abandoned"]);
@@ -16,9 +16,12 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
   const deps = listDeps(db, projectId);
   const result: Readiness = { ready: [], waiting: [], stuck: [] };
   for (const u of units) {
-    if (u.state !== "ready" || (u.type !== "work" && u.type !== "verify")) continue;
+    if (u.state !== "ready" || (!isBuild(u) && u.type !== "verify")) continue;
     if (u.type === "verify") {
-      result.ready.push(u);
+      const target = u.targetUnitId ? byId.get(u.targetUnitId) : undefined;
+      const pack = units.find((p) => p.type === "pack" && p.repoId === u.repoId && !TERMINAL.has(p.state));
+      if (pack && target?.type !== "pack") result.waiting.push({ unit: u, reason: `waiting for the verify pack (U${pack.seq}, now ${pack.state})` });
+      else result.ready.push(u);
       continue;
     }
     let reason: string | null = null;
@@ -45,7 +48,7 @@ const RETRYABLE: ReadonlySet<FailureMode> = new Set(["network", "tool-error", "h
 const NEEDS_SPLIT: ReadonlySet<FailureMode> = new Set(["timebox", "context-exhausted", "oom"]);
 
 export function failurePolicy(unit: Unit, allAttempts: Attempt[]): { action: "retry" | "block"; reason: string } {
-  const attempts = allAttempts.filter((a) => a.state !== "stopped");
+  const attempts = allAttempts.filter(spendsAttempt);
   const last = attempts.at(-1);
   const mode = last?.failureMode ?? "unknown";
   if (attempts.length >= unit.maxAttempts) return { action: "block", reason: `used ${attempts.length} of ${unit.maxAttempts} attempts (last: ${mode})` };

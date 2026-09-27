@@ -1,14 +1,16 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { resolveSetting, type Bootstrap } from "./config.js";
-import { PASS_TIERS } from "./domain.js";
+import { PASS_TIERS, REBASE_HARNESS } from "./domain.js";
 import type { Sha, Unit, UnitId, VerdictId } from "./domain.js";
 import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWorktree, resolveRef } from "./git.js";
 import { layout } from "./paths.js";
-import { getProject, getRepo, getUnit, listAttempts, now, recordEvent, setLandedSha, transitionUnit, type Db } from "./store.js";
+import { markPackProven } from "./packs.js";
+import { addVerifyUnit } from "./runner.js";
+import { createAttempt, getProject, getRepo, getUnit, listAttempts, now, recordEvent, setLandedSha, transitionUnit, updateAttempt, type Db } from "./store.js";
 import { landMessage } from "./audit.js";
 
-export type LandOutcome = "landed" | "blocked";
+export type LandOutcome = "landed" | "blocked" | "reverifying";
 
 export interface LandResult {
   unit: Unit;
@@ -58,6 +60,19 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
   const mirror = paths.mirror(repo.id);
 
   transitionUnit(db, unit.id, "landing", { verdict: verdict.id });
+  const reverify = async (onto: Sha, rebased: Sha): Promise<LandResult> => {
+    const attempt = createAttempt(db, unit.id, REBASE_HARNESS, null);
+    const branch = `${work.branch ?? `yg/${project.id}/u${unit.seq}`}-rebased-${attempt.n}`;
+    await git(["update-ref", `refs/heads/${branch}`, rebased], { gitDir: mirror });
+    const reason = `rebased onto ${repo.defaultBranch} at ${onto.slice(0, 10)} and the patch changed; the rebased head needs re-verification`;
+    db.transaction(() => {
+      updateAttempt(db, attempt.id, { state: "handed_off", baseSha: onto, headSha: rebased, branch, startedAt: now(), endedAt: now() });
+      db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, verdict.id);
+      transitionUnit(db, unit.id, "verifying", { reason, rebasedHead: rebased });
+      addVerifyUnit(db, getUnit(db, unit.id));
+    })();
+    return { unit: getUnit(db, unit.id), outcome: "reverifying", landedSha: null, reason };
+  };
   const block = (reason: string): LandResult => {
     transitionUnit(db, unit.id, "blocked", { reason });
     return { unit: getUnit(db, unit.id), outcome: "blocked", landedSha: null, reason };
@@ -88,8 +103,7 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
     const identity = { GIT_AUTHOR_NAME: author.name, GIT_AUTHOR_EMAIL: author.email, GIT_COMMITTER_NAME: author.name, GIT_COMMITTER_EMAIL: author.email };
     landed = (await gitWithEnv(["commit-tree", tree, "-p", trunk, "-F", "-"], wt, identity, message)) as Sha;
     const squashedPatch = await patchId(wt, trunk, landed);
-    if (!verdict.patch_id || squashedPatch !== verdict.patch_id)
-      return block(`landing onto ${repo.defaultBranch} changed the patch; the new head needs re-verification`);
+    if (!verdict.patch_id || squashedPatch !== verdict.patch_id) return await reverify(trunk, (await git(["rev-parse", "HEAD"], { cwd: wt })) as Sha);
     db.transaction(() => {
       db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(
         now(),
@@ -115,6 +129,7 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
   }
   await ensureMirror(repo.url, mirror);
   setLandedSha(db, unit.id, landed);
+  markPackProven(db, unit, landed);
   transitionUnit(db, unit.id, "landed", { sha: landed, onto: trunk });
   recordEvent(db, "unit.landed", refs, { sha: landed, branch: repo.defaultBranch, rebased: trunk !== work.baseSha, squashedFrom: verdict.head_sha });
   return {

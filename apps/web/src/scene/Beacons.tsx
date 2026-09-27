@@ -1,7 +1,7 @@
 import type { ProjectDetail, UnitView } from "../api";
 import { navigate } from "../api";
 import { sha } from "../lib/format";
-import { stages, type Light, type Stage } from "../lib/units";
+import { type Light, type Stage, isBuild, stages } from "../lib/units";
 import { Castle, SceneDefs } from "./Tower";
 
 const XS = { plan: 456, work: 636, verify: 816, land: 996 } as const;
@@ -67,7 +67,7 @@ function Beacon({ x, y, stage }: { x: number; y: number; stage: Stage }) {
 const reached = (l: Light) => l === "lit" || l === "flame" || l === "bell";
 
 export function visibleUnits(d: ProjectDetail): UnitView[] {
-  const work = d.units.filter((u) => u.type === "work" && u.state !== "abandoned");
+  const work = d.units.filter((u) => isBuild(u) && u.state !== "abandoned");
   const landed = work.filter((u) => u.state === "landed" || u.state === "done");
   const rest = work.filter((u) => u.state !== "landed" && u.state !== "done");
   return [...landed.slice(-4), ...rest];
@@ -79,7 +79,7 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
   const rowY = new Map(units.map((u, i) => [u.id, TOP - 5 + i * ROW]));
   const castleY = height - 408;
   const landedEarlier =
-    d.units.filter((u) => u.type === "work" && (u.state === "landed" || u.state === "done")).length -
+    d.units.filter((u) => isBuild(u) && (u.state === "landed" || u.state === "done")).length -
     units.filter((u) => u.state === "landed" || u.state === "done").length;
   return (
     <svg

@@ -40,11 +40,12 @@ const cli = [process.execPath, "--import", tsx, fixtures("evidence-shim.ts")];
 
 let db: Db;
 let ctx: RunContext;
+let origin: string;
 const project = "p" as ProjectId;
 
 beforeEach(async () => {
   const root = mkdtempSync(join(tmpdir(), "yagura-verify-"));
-  const origin = join(root, "origin");
+  origin = join(root, "origin");
   mkdirSync(join(origin, "app"), { recursive: true });
   mkdirSync(join(origin, ".agents/verify"), { recursive: true });
   writeFileSync(join(origin, "app/orders.py"), "x = 1\n");
@@ -135,5 +136,62 @@ describe("runVerifyUnit", () => {
     expect(runs.filter((r) => r.tampered).map((r) => `${r.label}@${r.at}`)).toEqual(["scenario@head"]);
     expect(result.decision).toMatchObject({ outcome: "invalid", reason: expect.stringMatching(/modified/) });
     expect(target.state).toBe("verifying");
+  });
+});
+
+describe("pack lifecycle scripts", () => {
+  async function setTrunkPack(pack: Record<string, unknown>) {
+    writeFileSync(join(origin, ".agents/verify/verify.json"), JSON.stringify({ provider: "local-process", ...pack }));
+    await commitAll(origin, "pack", { name: "t", email: "t@t" });
+  }
+  const labels = (attemptId: number) => listEvidenceRuns(db, attemptId as never).map((r) => `${r.label}@${r.at}:${r.exitCode}`);
+
+  it("runs doctor once, deploys the side each run needs, and tears down at the end", async () => {
+    await setTrunkPack({
+      doctor: "test -d .",
+      deploy: 'echo "$YAGURA_AT" > "$YAGURA_LEASE_DIR/deployed"',
+      teardown: 'rm "$YAGURA_LEASE_DIR/deployed"',
+      checks: [{ name: "unit", command: 'grep -qx "$YAGURA_AT" "$YAGURA_LEASE_DIR/deployed"', tier: "unit-verified" }],
+    });
+    const { target, result } = await workThenVerify("verify-pass");
+    expect(result.decision).toMatchObject({ outcome: "verified", tier: "unit-verified" });
+    expect(target.state).toBe("verified");
+    expect(labels(result.attempt.id)).toEqual([
+      "pack:doctor@base:0",
+      "pack:deploy@base:0",
+      "check:unit@base:0",
+      "pack:teardown@base:0",
+      "pack:deploy@head:0",
+      "check:unit@head:0",
+      "pack:teardown@head:0",
+      "pack:deploy@base:0",
+      "scenario@base:1",
+      "pack:teardown@base:0",
+      "pack:deploy@head:0",
+      "scenario@head:0",
+      "pack:teardown@head:0",
+    ]);
+  });
+
+  it("stops before the verifier when doctor fails, and blames the environment, not the change", async () => {
+    await setTrunkPack({ doctor: "echo cluster unreachable >&2; exit 3", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] });
+    const { target, result } = await workThenVerify("verify-pass");
+    expect(result.decision).toMatchObject({ outcome: "env-blocked", reason: expect.stringMatching(/^the pack's doctor failed \(run:\d+\)/) });
+    expect(labels(result.attempt.id)).toEqual(["pack:doctor@base:3"]);
+    expect(result.attempt.skills).toEqual([]);
+    expect(target.state).toBe("verifying");
+    expect(
+      listUnits(db, project)
+        .filter((u) => u.type === "verify")
+        .map((u) => u.state),
+    ).toEqual(["failed", "ready"]);
+  });
+
+  it("sends the work back when its head does not deploy while trunk does", async () => {
+    await setTrunkPack({ deploy: 'grep -q "x = 1" app/orders.py', checks: [{ name: "unit", command: "true", tier: "unit-verified" }] });
+    const { target, result } = await workThenVerify("verify-pass");
+    expect(result.decision).toMatchObject({ outcome: "code-fault", reason: expect.stringMatching(/^head does not deploy \(run:\d+\) while trunk does/) });
+    expect(labels(result.attempt.id)).toEqual(["pack:deploy@base:0", "check:unit@base:0", "pack:deploy@head:1", "check:unit@head:0"]);
+    expect(target.state).toBe("ready");
   });
 });

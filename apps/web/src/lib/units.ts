@@ -2,6 +2,12 @@ import type { Attempt } from "@yagura/core";
 import type { ProjectDetail, UnitView } from "../api";
 import { duration, sha } from "./format";
 
+export const isBuild = (u: { type: string }) => u.type === "work" || u.type === "pack";
+
+const ROLES: Record<string, string> = { plan: "planner", work: "worker", verify: "verifier", pack: "pack writer" };
+export const roleOf = (unitType: string, harness?: string) =>
+  harness === "yagura-proof" ? "pack proof" : harness === "yagura-rebase" ? "rebase" : (ROLES[unitType] ?? unitType);
+
 export type StageName = "plan" | "work" | "verify" | "land";
 export type Light = "lit" | "flame" | "bell" | "ember" | "wait" | "off";
 export interface Stage {

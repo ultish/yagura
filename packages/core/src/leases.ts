@@ -31,6 +31,10 @@ function freePort(): Promise<number> {
 
 const leaseDir = (boot: Bootstrap, id: LeaseId) => join(boot.home, "leases", String(id));
 
+export const LEASE_VARS: Partial<Record<Provider, string[]>> = {
+  "local-process": ["YAGURA_SLOT", "YAGURA_LEASE_DIR (a private directory)", "YAGURA_PORT (a free port)"],
+};
+
 export const PROVIDERS_IMPL: Partial<Record<Provider, ProviderImpl>> = {
   "local-process": {
     async createSlot(_env, lease, boot) {

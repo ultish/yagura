@@ -3,12 +3,12 @@ import { dirname, join } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { renderVerifyBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
-import type { Attempt, EnvironmentId, Unit, UnitId, VerdictId } from "./domain.js";
-import { baseWorktree, listEvidenceRuns, runEvidence } from "./evidence.js";
-import { addDetachedWorktree, diffText, ensureMirror, patchId, readFileAt } from "./git.js";
+import { PROOF_HARNESS, spendsAttempt, type Attempt, type EnvironmentId, type Unit, type UnitId, type VerdictId } from "./domain.js";
+import { baseWorktree, listEvidenceRuns, PACK_LABEL, packForAttempt, runEvidence, teardownDeployed } from "./evidence.js";
+import { addDetachedWorktree, diffText, ensureMirror, patchId } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { acquireLease, releaseLease } from "./leases.js";
-import { parsePack } from "./pack.js";
+import { syncPackStatus } from "./repos.js";
 import { addVerifyUnit } from "./runner.js";
 import { layout } from "./paths.js";
 import {
@@ -25,7 +25,7 @@ import {
   updateAttempt,
   type Db,
 } from "./store.js";
-import { CHECK_LABEL, decideVerdict, type VerdictDecision } from "./verdict.js";
+import { CHECK_LABEL, decidePackProof, decideVerdict, lifecycleProblem, type VerdictDecision } from "./verdict.js";
 
 export interface VerifyResult {
   attempt: Attempt;
@@ -66,7 +66,7 @@ function applyOutcome(db: Db, target: Unit, decision: VerdictDecision, verifySeq
     case "code-fault": {
       addUnitNote(db, target.id, `Verifier U${verifySeq} rejected the previous attempt: ${decision.reason}. Read its findings in handoffs/u${verifySeq}.*.md.`);
       transitionUnit(db, target.id, "rejected", { reason: decision.reason });
-      const used = listAttempts(db, target.id).filter((a) => a.state !== "stopped").length;
+      const used = listAttempts(db, target.id).filter(spendsAttempt).length;
       transitionUnit(db, target.id, used < target.maxAttempts ? "ready" : "blocked", { attemptsUsed: used });
       return;
     }
@@ -101,7 +101,8 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
 
   const mirror = paths.mirror(repo.id);
   await ensureMirror(repo.url, mirror);
-  const attempt = createAttempt(db, unit.id, harnessId, setting("role.verifier.model"));
+  const proof = target.type === "pack";
+  const attempt = createAttempt(db, unit.id, proof ? PROOF_HARNESS : harnessId, proof ? null : setting("role.verifier.model"));
   const head = paths.worktree(repo.id, project.id, unit.seq, attempt.n);
   mkdirSync(dirname(head), { recursive: true });
   await addDetachedWorktree(mirror, head, work.headSha!);
@@ -119,7 +120,8 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     return { attempt: getAttempt(db, attempt.id), decision, verdictId: null };
   };
 
-  const pack = parsePack(await readFileAt(mirror, `origin/${repo.defaultBranch}`, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath);
+  const pack = await packForAttempt(db, boot, attempt.id);
+  if (!proof) syncPackStatus(db, repo.id, pack);
   if (!pack.ok) {
     updateAttempt(db, attempt.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
     const decision: VerdictDecision = {
@@ -133,17 +135,52 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     return finish(decision, false);
   }
 
+  const settle = async (decision: VerdictDecision, handedOff: boolean): Promise<VerifyResult> => {
+    let verdictId: VerdictId | null = null;
+    if (decision.tier) {
+      verdictId = db.transaction(() => {
+        const id = Number(
+          db
+            .prepare(
+              `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, trunk_outcome, head_outcome, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            )
+            .run(target.id, attempt.id, decision.tier, repo.id, work.headSha, null, decision.trunkOutcome, decision.headOutcome, now()).lastInsertRowid,
+        ) as VerdictId;
+        for (const runId of decision.citedRunIds) {
+          const r = db.prepare("SELECT stdout_artifact_id, stderr_artifact_id FROM evidence_runs WHERE id = ?").get(runId) as
+            { stdout_artifact_id: number | null; stderr_artifact_id: number | null } | undefined;
+          for (const artifact of [r?.stdout_artifact_id, r?.stderr_artifact_id])
+            if (artifact) db.prepare("INSERT OR IGNORE INTO verdict_artifacts (verdict_id, artifact_id) VALUES (?, ?)").run(id, artifact);
+        }
+        return id;
+      })();
+      db.prepare("UPDATE verdicts SET patch_id = ? WHERE id = ?").run(await patchId(head, work.baseSha!, work.headSha!), verdictId);
+    }
+    return { ...finish(decision, handedOff), verdictId };
+  };
+
   const lease = await acquireLease(db, boot, project.environmentId as EnvironmentId, attempt.id);
   try {
-    for (const check of pack.pack.checks)
-      for (const at of ["base", "head"] as const)
-        await runEvidence(db, boot, {
-          attemptId: attempt.id,
-          at,
-          label: CHECK_LABEL(check.name),
-          command: check.command,
-          timeoutSeconds: check.timeoutSeconds,
-        });
+    const sides = proof ? (["head"] as const) : (["base", "head"] as const);
+    const capture = (at: "base" | "head", label: string, command: string, timeoutSeconds?: number) =>
+      runEvidence(db, boot, { attemptId: attempt.id, at, label, command, timeoutSeconds });
+    if (pack.pack.doctor) await capture(sides[0], PACK_LABEL("doctor"), pack.pack.doctor);
+    for (const check of lifecycleProblem(listEvidenceRuns(db, attempt.id)) ? [] : pack.pack.checks)
+      for (const at of sides) await capture(at, CHECK_LABEL(check.name), check.command, check.timeoutSeconds);
+
+    if (proof) {
+      await teardownDeployed(db, boot, attempt.id);
+      const decision = decidePackProof({ runs: listEvidenceRuns(db, attempt.id), checks: pack.pack.checks, minTier: project.minTier });
+      updateAttempt(db, attempt.id, { state: "handed_off", endedAt: now(), handoffStatus: decision.outcome === "verified" ? "success" : "blocked" });
+      return await settle(decision, true);
+    }
+    const early = lifecycleProblem(listEvidenceRuns(db, attempt.id));
+    if (early) {
+      await teardownDeployed(db, boot, attempt.id);
+      updateAttempt(db, attempt.id, { state: "failed", endedAt: now(), failureMode: "tool-error" });
+      return await settle({ ...early, trunkOutcome: null, headOutcome: null, citedRunIds: [] }, false);
+    }
     const runs = listEvidenceRuns(db, attempt.id);
     const outcomeOf = (name: string, at: "base" | "head") => {
       const r = runs.filter((x) => x.label === CHECK_LABEL(name) && x.at === at).at(-1);
@@ -164,6 +201,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       scenarioDir,
       cli: "yagura",
       leaseVars: lease.vars,
+      deploys: !!pack.pack.deploy,
       timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
       standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
     });
@@ -187,6 +225,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       logPath: paths.log(project.id, unit.seq, attempt.n),
     });
 
+    await teardownDeployed(db, boot, attempt.id);
     const final = session.final;
     const stop = stopRequested(db, attempt.id);
     if (stop.stopped) {
@@ -219,30 +258,9 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       failureMode: handoff ? null : session.timedOut ? "timebox" : "unknown",
     });
 
-    let verdictId: VerdictId | null = null;
-    if (decision.tier) {
-      verdictId = db.transaction(() => {
-        const id = Number(
-          db
-            .prepare(
-              `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, trunk_outcome, head_outcome, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .run(target.id, attempt.id, decision.tier, repo.id, work.headSha, null, decision.trunkOutcome, decision.headOutcome, now()).lastInsertRowid,
-        ) as VerdictId;
-        for (const runId of decision.citedRunIds) {
-          const r = db.prepare("SELECT stdout_artifact_id, stderr_artifact_id FROM evidence_runs WHERE id = ?").get(runId) as
-            { stdout_artifact_id: number | null; stderr_artifact_id: number | null } | undefined;
-          for (const artifact of [r?.stdout_artifact_id, r?.stderr_artifact_id])
-            if (artifact) db.prepare("INSERT OR IGNORE INTO verdict_artifacts (verdict_id, artifact_id) VALUES (?, ?)").run(id, artifact);
-        }
-        return id;
-      })();
-      db.prepare("UPDATE verdicts SET patch_id = ? WHERE id = ?").run(await patchId(head, work.baseSha!, work.headSha!), verdictId);
-    }
-    const result = finish(decision, handoff !== null);
-    return { ...result, verdictId };
+    return await settle(decision, handoff !== null);
   } finally {
+    await teardownDeployed(db, boot, attempt.id).catch(() => null);
     await releaseLease(db, boot, lease.id);
   }
 }

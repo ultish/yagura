@@ -36,6 +36,11 @@ export type MergePolicy = (typeof MERGE_POLICIES)[number];
 export const UNIT_TYPES = ["plan", "work", "verify", "measure", "pack", "rebase", "ci-fix", "review-triage", "land", "release"] as const;
 export type UnitType = (typeof UNIT_TYPES)[number];
 
+// Units that change a repo and land: an agent writes them on a branch, they are verified, and they land on trunk.
+export const BUILD_TYPES: ReadonlySet<UnitType> = new Set(["work", "pack"]);
+export const isBuild = (u: { type: UnitType }) => BUILD_TYPES.has(u.type);
+export const BUILD_TYPES_SQL = `(${[...BUILD_TYPES].map((t) => `'${t}'`).join(", ")})`;
+
 export const ROLES = ["planner", "worker", "verifier", "pack", "rebase", "ci-fix", "review-triage", "watchman"] as const;
 export type Role = (typeof ROLES)[number];
 
@@ -98,6 +103,11 @@ export class IllegalTransition extends Error {
     super(`unit ${unitId}: illegal transition ${from} -> ${to}`);
   }
 }
+
+// An attempt yagura made itself (a rebased head waiting for re-verification) is not a try the unit spent.
+export const REBASE_HARNESS = "yagura-rebase";
+export const PROOF_HARNESS = "yagura-proof";
+export const spendsAttempt = (a: { state: string; harness: string }) => a.state !== "stopped" && a.harness !== REBASE_HARNESS;
 
 export const DEP_KINDS = ["needs-source", "needs-landed", "scope-overlap"] as const;
 export type DepKind = (typeof DEP_KINDS)[number];

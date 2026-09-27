@@ -110,12 +110,6 @@ export async function inspectProposalRepos(p: ProposalBody, mirror?: (id: string
       if (e instanceof RepoUnusable) throw new ProposalInvalid(`repo ${r.id}: ${e.message}`);
       throw e;
     }
-    const pack = out.get(r.id)!.pack;
-    const users = p.projects.filter((proj) => proj.repos.includes(r.id)).map((proj) => proj.id);
-    if (!pack.ok && users.length)
-      throw new ProposalInvalid(
-        `repo ${r.id}: ${pack.reason}, so ${users.join(", ")} could never be verified; propose the repo alone and ask the developer to add a verify pack, or leave the project out`,
-      );
   }
   return out;
 }

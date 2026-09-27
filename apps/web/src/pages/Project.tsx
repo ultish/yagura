@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, navigate, useApi, useNow, type ProjectDetail, type UnitView } from "../api";
 import { modelName, sha, tokens } from "../lib/format";
-import { groupOf, latestAttempt, openGateFor, statusLine, verifiersOf, type Group } from "../lib/units";
+import { type Group, groupOf, isBuild, latestAttempt, openGateFor, statusLine, verifiersOf } from "../lib/units";
 import { Inline } from "../lib/markdown";
 import { Beacons } from "../scene/Beacons";
 import { Link } from "../ui/Link";
@@ -173,7 +173,7 @@ export function Project({ id }: { id: string }) {
       </main>
     );
   const p = d.project;
-  const work = d.units.filter((u) => u.type === "work");
+  const work = d.units.filter(isBuild);
   const byGroup = (g: Group) => work.filter((u) => groupOf(d, u) === g);
   const facts = [
     d.repos.map((r) => `${r.id}@${r.defaultBranch}`).join(", "),

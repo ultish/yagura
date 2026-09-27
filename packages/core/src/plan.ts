@@ -1,7 +1,7 @@
 import picomatch from "picomatch";
 import { z } from "zod";
 import { resolveSetting } from "./config.js";
-import type { ProjectId, RepoId, Unit, UnitId } from "./domain.js";
+import { isBuild, type ProjectId, type RepoId, type Unit, type UnitId } from "./domain.js";
 import {
   addDep,
   addGate,
@@ -196,7 +196,7 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
       }
     }
 
-    const live = listUnits(db, projectId).filter((u) => u.type === "work" && !TERMINAL.has(u.state));
+    const live = listUnits(db, projectId).filter((u) => isBuild(u) && !TERMINAL.has(u.state));
     for (const unit of created.values())
       for (const other of live)
         if (other.id < unit.id && other.repoId === unit.repoId && scopesOverlap(unit.writeScope, other.writeScope))

@@ -1,8 +1,8 @@
 # yagura build status
 
-Updated 2026-09-27 (phase 4 done: daemon, watchman, dashboard with gates, repos, environments, settings, and the evidence viewer).
+Updated 2026-09-27 (phase 4 done; phase 5 part 1 done: pack lifecycle, pack units, rebased-head re-verification).
 
-**Resume here:** phase 5 (DESIGN §19: `kube-namespace` provider, environment doctor, `pack` units that generate and prove a verify pack, the glab forge adapter, the forge watcher with `rebase` / `ci-fix` / `review-triage` units, retro watch). Not started; the order is an open decision for the user. Parts that can be proven on this Mac without a cluster or GitLab: running pack `doctor`/`deploy`/`teardown` (parsed today, never run), `pack` units, and re-verifying a rebased head. Smaller UI follow-ups are listed under "Next for the UI". Run `pnpm dev` (daemon with rebuild-and-restart, dashboard with hot reload on :5173, home `~/.yagura-dev`); for no-cost end-to-end runs point `harness.claude.bin` at the fake agent (CLAUDE.md). The jsondiff and proto proofs below ran in a session scratch home that no longer exists; recreate data with the fake agent or a new real run. Phases are from `DESIGN.md` §19.
+**Resume here:** phase 5's local part is done (below). What is left of phase 5 needs outside systems: the `kube-namespace` provider and the environment's provider doctor (a cluster; the dev VM or a local kind/k3d), and the glab adapter with the forge watcher and `rebase` / `ci-fix` / `review-triage` units (GitLab). The order is the user's call. Smaller local items: a proof run for existing `unproven` packs, `stale` detection, and maintenance pack units. Run `pnpm dev` (daemon with rebuild-and-restart, dashboard with hot reload on :5173, home `~/.yagura-dev`); for no-cost end-to-end runs point `harness.claude.bin` at the fake agent (CLAUDE.md). The jsondiff and proto proofs below ran in a session scratch home that no longer exists; recreate data with the fake agent or a new real run. Phases are from `DESIGN.md` §19.
 
 ## Phase 1 — Core: done
 
@@ -69,6 +69,17 @@ Decided (user, 2026-09-26): phase gates stay off by default (automation first; t
 
 @mentions (DESIGN §8a "Mentions", migration 6 `message_refs`): tokens `@project`, `@project/U3`, `@project/U3.2`, `@thread:4`, `@repo:id` are indexed on every message, described in the watchman brief, searchable (`yagura thread mentions`, `GET /api/mentions/:token/messages`), and completed by `GET /api/mentions?q=`. The `@` autocomplete and mention links are built in `apps/web`.
 
+## Phase 5 — Environments: in progress (local part done)
+
+Built 2026-09-27 (DESIGN §13 "As built (phase 5, local-process)", §15 patch-id rule "As built"):
+
+- Pack lifecycle in every verification: doctor once on trunk, deploy per side with teardown when switching, teardown at the end; a failing doctor or a trunk that will not deploy is the environment's problem, a head that will not deploy is the change's.
+- Pack units: a repo with no usable pack on trunk gets a `pack` unit first; the `yagura-pack` overlay adapts pstack's create-verification-skill; yagura proves the pack with no agent (doctor, deploy, every check, teardown on the pack's own head) and lands it; the repo becomes `proven`. Verifications on that repo wait for it. The watchman no longer rejects a project on a pack-less repo.
+- A clean rebase that changes the patch re-verifies the rebased head (a `yagura-rebase` attempt that costs no try) instead of blocking.
+- Dashboard: pack units count as build units; roles read "pack writer", "pack proof", "rebase"; an agent page for yagura's own runs says no agent ran.
+
+Proof: tests with the fake agent (the lifecycle order of all 13 runs on a verify with doctor, deploy, and teardown; doctor failure stops before the verifier; a head that will not deploy goes back; a pack-less repo gets a pack written, proven in 4 runs, landed, and marked proven before any work is verified, and a failing proof goes back to the pack writer; a clean rebase with a changed patch is re-verified and lands). Live, in a scratch home: `register shop <bare repo with only a README>` in Talk (autonomy go) → the project started with U1 "Write a verify pack for shop" → the proof U6 ran doctor, deploy, check, teardown on head with no agent → U1 waited at a land gate while U3 and U4 were verified-queued behind it → Land from the bell → the repo showed "Verify pack proven" and U3, U4 were verified with the new pack. Found on the way: the final teardown was silently skipped because the attempt was already closed; the repo view, the bell's blocked list, mention search, and trace by head SHA counted only `work` units.
+
 ## Phase 4 — Dashboard: done
 
 Web UI (`apps/web`, DESIGN §17 "As built"), built 2026-09-27 from option F plus round-4 options G1 (talk: threads | conversation | ledger) and H1 (agent: live timeline + facts rail), chosen by the user from real-data mocks on the canvas: The watch, Talk with `@` autocomplete, Project beacons and rows with actions, Agent page, Projects and Agents lists, night and daybreak, collapse-to-strip on scroll. Daemon additions: log line timestamps (`<log>.times`), `/api/bell`, unit retry/cancel, richer summaries and attempt detail, `since=latest` on the event stream, static serving of `apps/web/dist`.
@@ -106,9 +117,8 @@ Build order decided 2026-09-26: (1) watchman — done; (2) project chains and re
 ## Known gaps
 
 - Watchman turns are not attempts, so they do not appear in the Agents view and cannot be stopped from the API; the turn log is at `threads/<id>/turns/<message>.jsonl`. Plan for `apps/web`: show the turn's live log inside the thread. Two turns on one thread are refused only within one daemon process (the CLI does not check).
-- A rebase that changes the patch blocks the unit; re-verifying a rebased head arrives with the babysit units (phase 5).
 - Landing does not void dependents' verdicts, and `needs-source` behaves like `needs-landed` until read-only mounts arrive (phase 6).
-- Pack `doctor`/`deploy`/`teardown` are parsed but not run; deployed verification comes with the `kube-namespace` provider (phase 5).
+- The environment's own provider doctor (DESIGN §12) is not run, so the Environments page still says "doctor not run yet"; pack doctors run in every verification. Existing `unproven` packs get no proof run; `stale` is never set; deployed verification needs the `kube-namespace` provider.
 - `yagura evidence run` trusts `YAGURA_ATTEMPT` plus the attempt being in `running`; a per-attempt token is not added yet.
 - `yagura drive` (one project, foreground) refuses while the daemon runs; it is for debugging only. Normal use is `yagura daemon`, or `pnpm dev` while developing.
 - No wall-clock budget or landing cutoff yet (DESIGN §6).

@@ -1,5 +1,5 @@
 import type { Bootstrap } from "./config.js";
-import type { ProjectId, Unit } from "./domain.js";
+import { isBuild, type ProjectId, type Unit } from "./domain.js";
 import { ensureMirror, readFileAt } from "./git.js";
 import { liveVerdict } from "./land.js";
 import { parsePack } from "./pack.js";
@@ -23,7 +23,7 @@ function blockedReason(db: Db, u: Unit): string {
 export async function renderReport(ctx: { db: Db; boot: Bootstrap }, threadId: number, projectId: ProjectId, r: ReportKind): Promise<string> {
   const { db, boot } = ctx;
   const project = getProject(db, projectId);
-  const work = listUnits(db, projectId).filter((u) => u.type === "work");
+  const work = listUnits(db, projectId).filter(isBuild);
   const headline =
     r.kind === "closed"
       ? `**${project.id} is done.** ${latestDelta(db, projectId)?.summary ?? ""}`.trim()

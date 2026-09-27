@@ -1,5 +1,5 @@
 import { execFileSync, execSync } from "node:child_process";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_MODE;
 const emit = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
@@ -10,6 +10,7 @@ process.stdin.on("end", () => {
   const skills =
     {
       worker: ["yagura:yagura-worker", "pstack:poteto-mode"],
+      pack: ["yagura:yagura-pack"],
       planner: ["yagura:yagura-planner"],
       verifier: ["yagura:yagura-verifier"],
       watchman: ["yagura:yagura-watchman"],
@@ -20,7 +21,11 @@ process.stdin.on("end", () => {
   if (mode === "hang") return setTimeout(() => {}, 60_000);
   if ((mode ?? "").startsWith("verify")) return verify(mode);
   const file = mode === "scope" ? "README.md" : "app/orders.py";
-  writeFileSync(file, `# edited by fake agent\n# brief had GOAL: ${brief.includes("## GOAL")}\n`);
+  if (mode === "success-line") {
+    const lines = readFileSync(file, "utf8").split("\n");
+    lines[0] = "# edited by fake agent";
+    writeFileSync(file, lines.join("\n"));
+  } else writeFileSync(file, `# edited by fake agent\n# brief had GOAL: ${brief.includes("## GOAL")}\n`);
   const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
   g("add", file);
   g("commit", "-q", "-m", "fake agent work");
@@ -79,6 +84,20 @@ function engine(role) {
       ? { add: [unit("a", "app/a/**"), unit("b", "app/b/**"), unit("c", "app/a/extra/**")], summary: "three units" }
       : { done: workRows.every((s) => s === "landed"), summary: workRows.every((s) => s === "landed") ? "all landed" : "waiting" };
     return finish("Plan:\n```json\n" + JSON.stringify(delta) + "\n```");
+  }
+  if (role === "pack") {
+    mkdirSync(".agents/verify", { recursive: true });
+    const pack = {
+      provider: "local-process",
+      doctor: "test -d .",
+      deploy: 'echo up > "$YAGURA_LEASE_DIR/up"',
+      teardown: 'rm "$YAGURA_LEASE_DIR/up"',
+      checks: [{ name: "unit", command: process.env.FAKE_PACK_CHECK ?? 'test -f "$YAGURA_LEASE_DIR/up" && test -f README.md', tier: "unit-verified" }],
+    };
+    writeFileSync(".agents/verify/verify.json", `${JSON.stringify(pack, null, 2)}\n`);
+    execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "add", "-A"]);
+    execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-q", "-m", "verify pack"]);
+    return finish("## Status\nsuccess\n\n## Verification\nunit-verified\n\n## What I did\n- wrote .agents/verify/verify.json\n");
   }
   if (role === "worker") {
     const base = /May write:\n- ([^*\n]+?)\/?\*\*/.exec(brief)[1];

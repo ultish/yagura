@@ -98,6 +98,7 @@ describe("verify pack", () => {
     expect(missingSkills("worker", ["yagura:yagura-worker"])).toEqual(["pstack:poteto-mode"]);
     expect(missingSkills("worker", ["yagura-worker", "pstack:poteto-mode"])).toEqual([]);
     expect(missingSkills("planner", [])).toEqual(["yagura:yagura-planner"]);
-    expect(missingSkills("pack", [])).toEqual([]);
+    expect(missingSkills("pack", [])).toEqual(["yagura:yagura-pack"]);
+    expect(missingSkills("rebase", [])).toEqual([]);
   });
 });

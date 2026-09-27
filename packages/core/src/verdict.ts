@@ -41,6 +41,21 @@ function weaker(a: PassTier, b: PassTier): PassTier {
   return PASS_TIERS.indexOf(a) > PASS_TIERS.indexOf(b) ? a : b;
 }
 
+const lifecycle = (runs: EvidenceRun[], step: string, at?: "base" | "head") => runs.filter((r) => r.label === `pack:${step}` && (!at || r.at === at));
+
+// Trunk that will not deploy or pass doctor is the environment's problem; a head that will not deploy is the change's.
+export function lifecycleProblem(runs: EvidenceRun[]): Pick<VerdictDecision, "outcome" | "reason" | "tier"> | null {
+  const failed = (step: string, at?: "base" | "head") => lifecycle(runs, step, at).find((r) => !passed(r));
+  const doctor = failed("doctor");
+  if (doctor)
+    return { outcome: "env-blocked", tier: "verifier-blocked", reason: `the pack's doctor failed (run:${doctor.id}), so the environment is not worth driving` };
+  const base = failed("deploy", "base");
+  if (base) return { outcome: "env-blocked", tier: "verifier-blocked", reason: `trunk does not deploy (run:${base.id})` };
+  const head = failed("deploy", "head");
+  if (head) return { outcome: "code-fault", tier: "verifier-failed", reason: `head does not deploy (run:${head.id}) while trunk does` };
+  return null;
+}
+
 export function decideVerdict(input: VerdictInput): VerdictDecision {
   const { handoff, runs } = input;
   const decision = (outcome: VerdictOutcome, reason: string, extra: Partial<VerdictDecision> = {}): VerdictDecision => ({
@@ -60,6 +75,8 @@ export function decideVerdict(input: VerdictInput): VerdictDecision {
   if (unknown.length) return decision("invalid", `cites runs yagura did not record for this verification: ${unknown.map((i) => `run:${i}`).join(", ")}`);
   const tampered = runs.filter((r) => r.tampered);
   if (tampered.length) return decision("invalid", `checkouts were modified before runs ${tampered.map((r) => `run:${r.id}`).join(", ")}`);
+  const broken = lifecycleProblem(runs);
+  if (broken) return decision(broken.outcome, broken.reason, { tier: broken.tier });
 
   const checkAt = (name: string, at: "base" | "head") => runs.filter((r) => r.label === CHECK_LABEL(name) && r.at === at).at(-1);
   const regressions = input.checks.filter((c) => {
@@ -98,7 +115,7 @@ export function decideVerdict(input: VerdictInput): VerdictDecision {
       ...summaries,
     });
 
-  const scenarioRuns = cited.map((id) => byId.get(id)!).filter((r) => !r.label.startsWith("check:"));
+  const scenarioRuns = cited.map((id) => byId.get(id)!).filter((r) => !r.label.startsWith("check:") && !r.label.startsWith("pack:"));
   const refactor = REFACTOR_PLAYBOOKS.has(input.playbook ?? "");
   const pairs = scenarioRuns
     .filter((r) => r.at === "head")
@@ -132,4 +149,37 @@ export function decideVerdict(input: VerdictInput): VerdictDecision {
       ...scenarioSummary,
     },
   );
+}
+
+// A pack unit is proven by yagura alone: on the pack's own head, doctor, deploy, every check, and teardown must pass.
+export function decidePackProof(input: { runs: EvidenceRun[]; checks: { name: string; tier: PassTier }[]; minTier: PassTier }): VerdictDecision {
+  const { runs } = input;
+  const at = (label: string) => runs.filter((r) => r.label === label && r.at === "head").at(-1);
+  const summary = input.checks.map((c) => `${c.name} ${outcomeOf(at(CHECK_LABEL(c.name)))}`).join(", ");
+  const result = (outcome: VerdictOutcome, reason: string, tier: Tier | null): VerdictDecision => ({
+    outcome,
+    reason,
+    tier,
+    trunkOutcome: null,
+    headOutcome: summary,
+    citedRunIds: runs.map((r) => r.id),
+  });
+  for (const step of ["doctor", "deploy", "teardown"]) {
+    const r = runs.filter((x) => x.label === `pack:${step}`).find((x) => !passed(x));
+    if (r) return result("code-fault", `the pack's ${step} fails (run:${r.id}, ${outcomeOf(r)})`, "verifier-failed");
+  }
+  const failing = input.checks.filter((c) => {
+    const r = at(CHECK_LABEL(c.name));
+    return !r || !passed(r);
+  });
+  if (failing.length)
+    return result(
+      "code-fault",
+      `pack checks fail on the repo as it is: ${failing.map((c) => `${c.name} ${outcomeOf(at(CHECK_LABEL(c.name)))}`).join(", ")}`,
+      "verifier-failed",
+    );
+  const tier = strongest(input.checks.map((c) => c.tier))!;
+  if (!meetsTier(tier, input.minTier)) return result("below-min", `the pack proves at most ${tier}, below the project's minimum ${input.minTier}`, tier);
+  const steps = ["doctor", "deploy", "teardown"].filter((s) => runs.some((r) => r.label === `pack:${s}`));
+  return result("verified", `pack proven on its head: ${[...steps, `${input.checks.length} check(s)`].join(", ")} pass`, tier);
 }
