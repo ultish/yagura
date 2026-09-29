@@ -6,9 +6,12 @@ import { resolveSetting, setSetting, type Bootstrap } from "./config.js";
 import { PROVIDERS, type EnvironmentId } from "./domain.js";
 import { checkValueName, listValues, setEnvironmentNotes, setValue } from "./envvalues.js";
 import { doctorEnvironment, PROVIDERS_IMPL } from "./leases.js";
+import { applyPreset, PRESETS } from "./presets.js";
 import { addEnvironment, getEnvironment, recordEvent, type Db } from "./store.js";
 
 const TEMPLATE_NAME = /^[a-z][a-z0-9-]{0,39}$/;
+export const ENVIRONMENT_ID = /^[a-z][a-z0-9-]{1,39}$/;
+const Keep = z.object({ policy: z.enum(["never", "failed", "always"]), hours: z.number().positive() }).strict();
 
 export const EnvTemplate = z
   .object({
@@ -18,10 +21,7 @@ export const EnvTemplate = z
     providerConfig: z.record(z.unknown()).default({}),
     capacity: z.number().int().min(0),
     notes: z.string().default(""),
-    keep: z
-      .object({ policy: z.enum(["never", "failed", "always"]), hours: z.number().positive() })
-      .strict()
-      .optional(),
+    keep: Keep.optional(),
     values: z
       .array(
         z
@@ -93,34 +93,85 @@ export function saveTemplate(
   return { template, path };
 }
 
+// What every way of making an environment (form, template, watchman) comes down to.
+export const EnvironmentDraft = z
+  .object({
+    id: z.string().regex(ENVIRONMENT_ID, "environment ids are lowercase words joined by dashes, e.g. dev-2"),
+    name: z.string().optional(),
+    provider: z.enum(PROVIDERS).default("local-process"),
+    providerConfig: z.record(z.unknown()).default({}),
+    capacity: z.number().int().min(0).default(1),
+    notes: z.string().default(""),
+    keep: Keep.optional(),
+    presets: z.array(z.string()).default([]),
+    values: z
+      .array(z.object({ name: z.string(), value: z.string(), note: z.string().default(""), check: z.string().nullable().default(null) }).strict())
+      .default([]),
+  })
+  .strict();
+export type EnvironmentDraft = z.output<typeof EnvironmentDraft>;
+
+export function draftFromTemplate(
+  boot: Bootstrap,
+  name: string,
+  input: { id: string; name?: string; answers?: Record<string, string>; config?: Record<string, unknown> },
+): EnvironmentDraft {
+  const t = getTemplate(boot, name);
+  const answers = input.answers ?? {};
+  const unanswered = t.values.filter((v) => v.ask && !answers[v.name]?.trim()).map((v) => v.name);
+  if (unanswered.length) throw new TemplateInvalid(`template ${name} needs a value for ${unanswered.join(", ")}`);
+  return EnvironmentDraft.parse({
+    id: input.id,
+    name: input.name?.trim() || undefined,
+    provider: t.provider,
+    providerConfig: { ...t.providerConfig, ...(input.config ?? {}) },
+    capacity: t.capacity,
+    notes: t.notes,
+    keep: t.keep,
+    values: t.values.map((v) => ({ name: v.name, value: v.ask ? answers[v.name]!.trim() : v.value, note: v.note, check: v.check })),
+  });
+}
+
+export function checkDraft(db: Db, d: EnvironmentDraft): void {
+  if (db.prepare("SELECT 1 FROM environments WHERE id = ?").get(d.id)) throw new TemplateInvalid(`environment ${d.id} already exists`);
+  const seen = new Set<string>();
+  for (const v of d.values) {
+    checkValueName(v.name);
+    if (seen.has(v.name)) throw new TemplateInvalid(`${v.name} is listed twice`);
+    seen.add(v.name);
+  }
+  const unknown = d.presets.filter((p) => !PRESETS.some((x) => x.id === p));
+  if (unknown.length) throw new TemplateInvalid(`no preset ${unknown.join(", ")}; presets are ${PRESETS.map((p) => p.id).join(", ")}`);
+  const impl = PROVIDERS_IMPL[d.provider];
+  const problem = impl ? impl.validateConfig(d.providerConfig, d.capacity) : `provider ${d.provider} is not available yet`;
+  if (problem) throw new TemplateInvalid(problem);
+}
+
+// Presets go after the draft's own values, so a value the draft sets wins over the preset's example.
+export function createEnvironment(db: Db, d: EnvironmentDraft, source: string): EnvironmentId {
+  checkDraft(db, d);
+  const id = d.id as EnvironmentId;
+  db.transaction(() => {
+    addEnvironment(db, { id, name: d.name?.trim() || id, provider: d.provider, capacity: d.capacity, providerConfig: d.providerConfig });
+    for (const v of d.values) setValue(db, id, { ...v, source });
+    for (const p of d.presets) applyPreset(db, id, p);
+    setEnvironmentNotes(db, id, d.notes);
+    if (d.keep) {
+      setSetting(db, "environment", id, "lease.keep", d.keep.policy);
+      setSetting(db, "environment", id, "lease.keep_hours", d.keep.hours);
+    }
+    recordEvent(db, "environment.created", {}, { environment: id, source });
+  })();
+  return id;
+}
+
 export async function applyTemplate(
   ctx: { db: Db; boot: Bootstrap },
   name: string,
   input: { id: string; name?: string; answers?: Record<string, string>; config?: Record<string, unknown> },
 ): Promise<{ ok: boolean; environmentId: EnvironmentId }> {
-  const { db, boot } = ctx;
-  const t = getTemplate(boot, name);
-  const answers = input.answers ?? {};
-  const unanswered = t.values.filter((v) => v.ask && !answers[v.name]?.trim()).map((v) => v.name);
-  if (unanswered.length) throw new TemplateInvalid(`template ${name} needs a value for ${unanswered.join(", ")}`);
-  for (const v of t.values) checkValueName(v.name);
-  const providerConfig = { ...t.providerConfig, ...(input.config ?? {}) };
-  const impl = PROVIDERS_IMPL[t.provider];
-  const problem = impl ? impl.validateConfig(providerConfig, t.capacity) : `provider ${t.provider} is not available yet`;
-  if (problem) throw new TemplateInvalid(problem);
-  if (db.prepare("SELECT 1 FROM environments WHERE id = ?").get(input.id)) throw new TemplateInvalid(`environment ${input.id} already exists`);
-  const id = input.id as EnvironmentId;
-  db.transaction(() => {
-    addEnvironment(db, { id, name: input.name?.trim() || id, provider: t.provider, capacity: t.capacity, providerConfig });
-    for (const v of t.values)
-      setValue(db, id, { name: v.name, value: v.ask ? answers[v.name]!.trim() : v.value, note: v.note, check: v.check, source: `template ${t.name}` });
-    setEnvironmentNotes(db, id, t.notes);
-    if (t.keep) {
-      setSetting(db, "environment", id, "lease.keep", t.keep.policy);
-      setSetting(db, "environment", id, "lease.keep_hours", t.keep.hours);
-    }
-    recordEvent(db, "template.applied", {}, { template: t.name, environment: id });
-  })();
-  const doctor = await doctorEnvironment(db, boot, id);
+  const id = createEnvironment(ctx.db, draftFromTemplate(ctx.boot, name, input), `template ${name}`);
+  recordEvent(ctx.db, "template.applied", {}, { template: name, environment: id });
+  const doctor = await doctorEnvironment(ctx.db, ctx.boot, id);
   return { ok: doctor.ok, environmentId: id };
 }

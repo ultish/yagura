@@ -15,7 +15,11 @@ const ROLE = {
 
 interface ProposalBody {
   summary: string;
-  repos?: { id: string; description?: string }[];
+  repos?: { id: string; description?: string; existing?: string }[];
+  environments?: (
+    | { id: string; template: string; answers?: Record<string, string> }
+    | { id: string; provider?: string; capacity?: number; presets?: string[]; values?: { name: string; value: string; check?: string | null }[] }
+  )[];
   projects?: {
     id: string;
     goal: string;
@@ -45,8 +49,44 @@ function ProposalCard({ p, onEdit }: { p: Proposal; onEdit: (text: string) => vo
       <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 14, display: "flex", flexDirection: "column", gap: 4 }}>
         {body.repos?.map((r) => (
           <li key={`r${r.id}`}>
-            new repo <span className="mono">{r.id}</span>
-            {r.description ? `: ${r.description}` : ""}
+            {r.existing ? "existing" : "new"} repo <span className="mono">{r.id}</span>
+            {r.existing ? `: ${r.existing}` : r.description ? `: ${r.description}` : ""}
+          </li>
+        ))}
+        {body.environments?.map((e) => (
+          <li key={`e${e.id}`}>
+            environment <span className="mono">{e.id}</span>
+            {"template" in e ? (
+              <>
+                {" "}
+                from template <span className="mono">{e.template}</span>
+                {e.answers && Object.keys(e.answers).length ? (
+                  <div className="facts" style={{ marginTop: 2 }}>
+                    {Object.entries(e.answers).map(([k, v]) => (
+                      <span key={k} className="mono">
+                        {k}={v}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </>
+            ) : (
+              <>
+                {" "}
+                ({e.provider ?? "local-process"}, {e.capacity ?? 1} {(e.capacity ?? 1) === 1 ? "slot" : "slots"})
+                <div className="facts" style={{ marginTop: 2 }}>
+                  {e.values?.map((v) => (
+                    <span key={v.name} className="mono">
+                      {v.name}={v.value}
+                      {v.check ? <span title={v.check}> · checked</span> : null}
+                    </span>
+                  ))}
+                  {e.presets?.map((p) => (
+                    <span key={p}>preset {p}</span>
+                  ))}
+                </div>
+              </>
+            )}
           </li>
         ))}
         {body.projects?.map((pr) => (

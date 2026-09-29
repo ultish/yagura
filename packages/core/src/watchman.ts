@@ -2,7 +2,11 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import { runAgentSession, write, type RunContext, type SessionRecorder } from "./agent.js";
 import { resolveSetting } from "./config.js";
-import { PASS_TIERS, type ProjectId } from "./domain.js";
+import { PASS_TIERS, type Environment, type EnvironmentId, type ProjectId } from "./domain.js";
+import { listValues } from "./envvalues.js";
+import { PROVIDERS_IMPL } from "./leases.js";
+import { PRESETS } from "./presets.js";
+import { listTemplates } from "./templates.js";
 import { describeMention, resolveMentions } from "./mentions.js";
 import { missingSkills } from "./pack.js";
 import { layout } from "./paths.js";
@@ -19,7 +23,7 @@ import {
 } from "./proposal.js";
 import { editSpec, readSpec, relevantSections, renderSpec, writeSpec, type Spec } from "./spec.js";
 import { generateStatus } from "./status.js";
-import { getProject, recordEvent, type Db } from "./store.js";
+import { getEnvironment, getProject, recordEvent, type Db } from "./store.js";
 import {
   addDecision,
   addMessage,
@@ -227,6 +231,11 @@ Reply to the developer in plain prose. Then end your final message with exactly 
       { "id": "kafka-diff", "description": "one line", "verifyPack": { "provider": "local-process", "checks": [{ "name": "unit", "command": "python3 -m unittest -v", "tier": "unit-verified" }] } },
       { "id": "billing", "existing": "git@gitlab.internal:team/billing.git" }
     ],
+    "environments": [
+      { "id": "vm", "provider": "kube-namespace", "providerConfig": { "context": "rancher-desktop" }, "capacity": 1, "notes": "dependencies run in the cluster",
+        "presets": ["helm"], "values": [{ "name": "REDIS_URL", "value": "redis://vm.internal:6379", "note": "Redis from this machine", "check": "redis-cli -u \\"$REDIS_URL\\" ping" }] },
+      { "id": "vm2", "template": "spring-kube", "answers": { "REGISTRY_PULL": "vm2.internal:5000" } }
+    ],
     "projects": [{
       "id": "kafka-diff", "goal": "…", "predicate": "checkable done condition", "repos": ["kafka-diff"],
       "environment": null, "merge": "auto", "minTier": "unit-verified", "after": [], "phaseGate": false,
@@ -239,13 +248,34 @@ Reply to the developer in plain prose. Then end your final message with exactly 
 `;
 }
 
-function catalog(db: Db): string {
+function catalog(db: Db, boot: RunContext["boot"]): string {
   const repos = db.prepare("SELECT id, url, default_branch FROM repos ORDER BY id").all() as { id: string; url: string; default_branch: string }[];
-  const envs = db.prepare("SELECT id, provider, capacity FROM environments ORDER BY id").all() as { id: string; provider: string; capacity: number }[];
+  const envs = (db.prepare("SELECT id FROM environments ORDER BY id").all() as { id: EnvironmentId }[]).map((e) => getEnvironment(db, e.id));
   const projects = db.prepare("SELECT id, state FROM projects ORDER BY created_at").all() as { id: string; state: string }[];
+  const envLine = (e: Environment) => {
+    const values = listValues(db, e.id).map((v) => v.name);
+    return `${e.id} (${e.provider}, ${e.capacity} slots, doctor ${e.doctorStatus}${values.length ? `, values ${values.join(" ")}` : ""})`;
+  };
+  const templates = listTemplates(boot).flatMap((t) =>
+    t.template
+      ? [
+          `${t.template.name}${
+            t.template.values.some((v) => v.ask)
+              ? ` (asks ${t.template.values
+                  .filter((v) => v.ask)
+                  .map((v) => v.name)
+                  .join(", ")})`
+              : ""
+          }`,
+        ]
+      : [],
+  );
   return [
     `- repos: ${repos.map((r) => `${r.id} (${r.url}, ${r.default_branch})`).join("; ") || "(none)"}`,
-    `- environments: ${envs.map((e) => `${e.id} (${e.provider}, ${e.capacity} slots)`).join("; ") || `(none; a project with environment null gets a new local-process "local")`}`,
+    `- environments: ${envs.map(envLine).join("; ") || `(none; a project with environment null gets a new local-process "local")`}`,
+    `- environment presets: ${PRESETS.map((p) => `${p.id} (${p.values.map((v) => v.name).join(", ")})`).join("; ")}`,
+    `- environment templates: ${templates.join("; ") || "(none)"}`,
+    `- environment providers: ${Object.keys(PROVIDERS_IMPL).join(", ")}`,
     `- existing project ids (taken): ${projects.map((p) => `${p.id} [${p.state}]`).join(", ") || "(none)"}`,
     `- tiers, strongest first: ${PASS_TIERS.join(", ")}`,
     `- unit playbooks: ${WORK_PLAYBOOKS.join(", ")}`,
@@ -281,7 +311,7 @@ export function buildWatchmanBrief(
     .join("\n\n");
   const standingPath = `${paths.thread(threadId)}/standing-orders.md`;
   const standing = existsSync(standingPath) ? readFileSync(standingPath, "utf8").trim() : "";
-  const cat = catalog(db);
+  const cat = catalog(db, boot);
   const mentioned = resolveMentions(db, message.body)
     .map((m) => `### @${m.ref}\n${truncateTo(describeMention(db, boot, m), 2000, `… (truncated; ask yagura for more)`)}`)
     .join("\n\n");
@@ -374,7 +404,7 @@ export function storeTurn(
       throw new RecordsRejected(`spec edit for ${s.project}, which is not a project of this thread (put a new project's spec in its proposal)`);
   if (records.proposal) {
     try {
-      validateProposal(db, threadId, records.proposal);
+      validateProposal(db, boot, threadId, records.proposal);
     } catch (e) {
       if (e instanceof ProposalInvalid) throw new RecordsRejected(`proposal: ${e.message}`);
       throw e;

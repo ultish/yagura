@@ -147,6 +147,24 @@ function watchman() {
     const proposal = { summary: `work in ${id}`, repos: [{ id, existing }], projects: [{ id: `${id}-work`, goal: "g", predicate: "p", repos: [id] }] };
     return finish(`Registering it.\n\n\`\`\`yagura\n${JSON.stringify({ proposal })}\n\`\`\``);
   }
+  // "set up env <id> [from <template>] [preset <p>] NAME=value …"
+  const setup = /^set up env (\S+)(.*)$/.exec(asked);
+  if (setup) {
+    const [, id, rest] = setup;
+    const words = rest.trim().split(/\s+/).filter(Boolean);
+    const pairs = Object.fromEntries(words.filter((w) => w.includes("=")).map((w) => w.split(/=(.*)/).slice(0, 2)));
+    const template = words[words.indexOf("from") + 1];
+    const presets = words.flatMap((w, i) => (words[i - 1] === "preset" ? [w] : []));
+    const environment = words.includes("from")
+      ? { id, template, answers: pairs }
+      : {
+          id,
+          notes: "set up by conversation",
+          presets,
+          values: Object.entries(pairs).map(([name, value]) => ({ name, value, note: `${name} as the developer gave it`, check: `test -n "$${name}"` })),
+        };
+    return finish(`Setting up ${id}.\n\n\`\`\`yagura\n${JSON.stringify({ proposal: { summary: `environment ${id}`, environments: [environment] } })}\n\`\`\``);
+  }
   const pack = { provider: "local-process", checks: [{ name: "unit", command: "test -f README.md", tier: "unit-verified" }] };
   const project = (id, after) => ({
     id,

@@ -59,6 +59,7 @@ import {
   registerRepo,
   RepoUnusable,
   applyTemplate,
+  ENVIRONMENT_ID,
   deleteKept,
   deleteValue,
   listTemplates,
@@ -299,7 +300,7 @@ export function createApp(opts: ServerOptions): Hono {
   );
   app.post("/api/environments", async (c) => {
     const b = (await c.req.json()) as { id?: string; name?: string; provider?: string; capacity?: number; providerConfig?: Record<string, unknown> };
-    if (!b.id || !/^[a-z][a-z0-9-]{1,39}$/.test(b.id)) return c.json({ error: "id must be lowercase words joined by dashes, e.g. dev-2" }, 400);
+    if (!b.id || !ENVIRONMENT_ID.test(b.id)) return c.json({ error: "id must be lowercase words joined by dashes, e.g. dev-2" }, 400);
     if (!PROVIDERS_IMPL[b.provider as Provider])
       return c.json({ error: `provider ${b.provider} is not available yet; use ${Object.keys(PROVIDERS_IMPL).join(", ")}` }, 400);
     if (!Number.isInteger(b.capacity) || b.capacity! < 0) return c.json({ error: "capacity must be a whole number, 0 or more" }, 400);

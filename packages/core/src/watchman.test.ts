@@ -6,7 +6,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RunContext } from "./agent.js";
 import type { Bootstrap } from "./config.js";
-import type { ProjectId, RepoId } from "./domain.js";
+import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
+import { resolveSetting } from "./config.js";
+import { listValues } from "./envvalues.js";
+import { saveTemplate } from "./templates.js";
 import { Engine } from "./engine.js";
 import { write } from "./agent.js";
 import { commitAll, git } from "./git.js";
@@ -15,7 +18,7 @@ import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { applyProposal } from "./proposal.js";
 import { editSpec, parseSpec, relevantSections, renderSpec } from "./spec.js";
-import { addProject, addRepo, getProject, getRepo, listGates, listUnits, openStore, type Db } from "./store.js";
+import { addProject, addRepo, getEnvironment, getProject, getRepo, listGates, listUnits, openStore, type Db } from "./store.js";
 import { createThread, getProposal, getThread, linkThreadProject, listDecisions, listMessages, listProposals, listQuestions } from "./threads.js";
 import { assembleContext, parseReply, runWatchmanTurn, storeTurn, TurnRecords, type ContextParts } from "./watchman.js";
 
@@ -165,7 +168,7 @@ describe("watchman turns", () => {
   it("goes from a message to two chained projects built, landed, and reported back", async () => {
     const t = createThread(db, { title: "t", autonomy: "go" });
     const turn = await runWatchmanTurn(ctx, t.id, "prototype a chain");
-    expect(turn.applied).toEqual({ repos: ["proto"], projects: ["proto-a", "proto-b"], units: {}, environment: "local" });
+    expect(turn.applied).toEqual({ repos: ["proto"], projects: ["proto-a", "proto-b"], environments: ["local"], units: {} });
     expect(getProject(db, "proto-b" as ProjectId).state).toBe("framing");
     expect(readFileSync(layout(boot).spec("proto-a" as ProjectId), "utf8")).toContain("## Scope");
 
@@ -273,4 +276,74 @@ describe("watchman turns", () => {
     await engine.runUntilIdle();
     expect(getProject(db, "g2" as ProjectId).state).toBe("closed");
   }, 60_000);
+
+  it("proposes environments with values, checks, presets, and templates, and keeps one whose doctor fails without starting its projects", async () => {
+    const t = createThread(db, { title: "t" });
+    const pack = { provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] };
+    const propose = (proposal: unknown) => () => storeTurn(ctx, t.id, { body: "ok", turnLog: null, records: TurnRecords.parse({ proposal }) });
+    const box = {
+      id: "box",
+      notes: "deps in the cluster",
+      keep: { policy: "failed", hours: 1 },
+      presets: ["kafka"],
+      values: [
+        { name: "FLAG_URL", value: "http://flag.internal", note: "feature flags", check: 'test "$FLAG_URL" = http://flag.internal' },
+        { name: "KAFKA_BOOTSTRAP_LOCAL", value: "box.internal:30092" },
+      ],
+    };
+    expect(propose({ summary: "s", environments: [{ ...box, values: [{ name: "yagura_x", value: "v" }] }] })).toThrow(
+      /environment box: yagura_x: names are UPPER_CASE/,
+    );
+    expect(propose({ summary: "s", environments: [{ id: "kp", provider: "kube-namespace", providerConfig: { mode: "pool" }, capacity: 1 }] })).toThrow(
+      /environment kp: /,
+    );
+    expect(propose({ summary: "s", environments: [{ id: "t", template: "nope" }] })).toThrow(/environment t: no template named nope/);
+
+    const { proposal } = propose({
+      summary: "box and a project on it",
+      repos: [{ id: "box-repo", verifyPack: pack }],
+      environments: [box],
+      projects: [{ id: "on-box", goal: "g", predicate: "p", repos: ["box-repo"], environment: "box" }],
+    })();
+    const { buildWatchmanBrief } = await import("./watchman.js");
+    expect(await applyProposal(ctx, proposal!.id)).toEqual({ repos: ["box-repo"], environments: ["box"], projects: ["on-box"], units: {} });
+    expect(getProject(db, "on-box" as ProjectId).environmentId).toBe("box");
+    const env = getEnvironment(db, "box" as EnvironmentId);
+    expect([env.doctorStatus, env.notes]).toEqual(["passing", "deps in the cluster"]);
+    expect(listValues(db, "box" as EnvironmentId).map((v) => [v.name, v.source, v.last?.ok ?? null])).toEqual([
+      ["FLAG_URL", "watchman", true],
+      ["KAFKA_BOOTSTRAP_LOCAL", "watchman", null],
+      ["KAFKA_BOOTSTRAP_CLUSTER", "kafka", null],
+    ]);
+    expect(resolveSetting(db, "lease.keep", { environmentId: "box" as EnvironmentId }).value).toBe("failed");
+    const brief = buildWatchmanBrief(ctx, t.id, listMessages(db, t.id).at(-1)!).text;
+    expect(brief).toContain("box (local-process, 1 slots, doctor passing, values FLAG_URL KAFKA_BOOTSTRAP_LOCAL KAFKA_BOOTSTRAP_CLUSTER)");
+
+    saveTemplate(db, boot, "box" as EnvironmentId, { name: "box-shape", ask: ["FLAG_URL"] });
+    expect(buildWatchmanBrief(ctx, t.id, listMessages(db, t.id).at(-1)!).text).toContain("- environment templates: box-shape (asks FLAG_URL)");
+    expect(propose({ summary: "s", environments: [{ id: "box2", template: "box-shape" }] })).toThrow(/needs a value for FLAG_URL/);
+    expect(propose({ summary: "s", projects: [{ id: "p2", goal: "g", predicate: "p", repos: ["box-repo"] }], environments: [{ ...box, id: "xx" }] })).toThrow(
+      /several environments exist \(box, xx\); name one/,
+    );
+
+    const broken = propose({
+      summary: "a machine whose flag service is down",
+      environments: [{ id: "box2", template: "box-shape", answers: { FLAG_URL: "http://elsewhere" } }],
+      projects: [{ id: "on-box2", goal: "g", predicate: "p", repos: ["box-repo"], environment: "box2" }],
+    })().proposal!;
+    await expect(applyProposal(ctx, broken.id)).rejects.toThrow(
+      /environment box2 failed its doctor \(value FLAG_URL: exit 1\), so on-box2 did not start\. It was created/,
+    );
+    expect(getEnvironment(db, "box2" as EnvironmentId).doctorStatus).toBe("failing");
+    expect(listValues(db, "box2" as EnvironmentId).map((v) => [v.name, v.value, v.source])).toEqual([
+      ["FLAG_URL", "http://elsewhere", "template box-shape"],
+      ["KAFKA_BOOTSTRAP_LOCAL", "box.internal:30092", "template box-shape"],
+      ["KAFKA_BOOTSTRAP_CLUSTER", "kafka.kafka.svc:9092", "template box-shape"],
+    ]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM projects WHERE id = 'on-box2'").get()).toEqual({ n: 0 });
+    expect(getProposal(db, broken.id).state).toBe("failed");
+    expect(propose({ summary: "s", projects: [{ id: "p3", goal: "g", predicate: "p", repos: ["box-repo"], environment: "box2" }] })).toThrow(
+      /p3: environment box2 failed its doctor/,
+    );
+  });
 });

@@ -11,18 +11,32 @@ import { layout } from "./paths.js";
 import { applyDelta, PlanDelta, PlanRejected, PlanUnit } from "./plan.js";
 import { checkRepoFree, inspectRepo, packStatusOf, REPO_ID, RepoUnusable, resolveSource, type RepoInspection } from "./repos.js";
 import { parseSpec, writeSpec } from "./spec.js";
-import { addEnvironment, addProject, addRepo, getProject, recordEvent, setProjectState, type Db } from "./store.js";
+import { ValueInvalid } from "./envvalues.js";
+import { doctorEnvironment } from "./leases.js";
+import { addEnvironment, addProject, addRepo, assertSelectable, getEnvironment, getProject, recordEvent, setProjectState, type Db } from "./store.js";
+import { checkDraft, createEnvironment, draftFromTemplate, EnvironmentDraft, TemplateInvalid } from "./templates.js";
 import { getProposal, getThread, linkThreadProject, resolveProposal } from "./threads.js";
 
 const Slug = z.string().regex(REPO_ID, "ids are lowercase words joined by dashes, e.g. kafka-diff");
 const NewRepo = z.object({ id: Slug, description: z.string().default(""), verifyPack: VerifyPack }).strict();
 const ExistingRepo = z.object({ id: Slug, existing: z.string().min(1) }).strict();
 type ExistingRepo = z.output<typeof ExistingRepo>;
+const FromTemplate = z
+  .object({
+    id: z.string(),
+    name: z.string().optional(),
+    template: z.string(),
+    answers: z.record(z.string()).default({}),
+    providerConfig: z.record(z.unknown()).default({}),
+  })
+  .strict();
+type ProposedEnvironment = EnvironmentDraft | z.output<typeof FromTemplate>;
 
 export const ProposalBody = z
   .object({
     summary: z.string().min(1),
     repos: z.array(z.union([NewRepo, ExistingRepo])).default([]),
+    environments: z.array(z.union([FromTemplate, EnvironmentDraft])).default([]),
     projects: z
       .array(
         z
@@ -47,7 +61,7 @@ export const ProposalBody = z
     amend: z.array(z.object({ project: z.string(), units: z.array(PlanUnit).min(1), reopen: z.boolean().default(true) }).strict()).default([]),
   })
   .strict()
-  .refine((p) => p.repos.length + p.projects.length + p.amend.length > 0, "a proposal must create or change something");
+  .refine((p) => p.repos.length + p.environments.length + p.projects.length + p.amend.length > 0, "a proposal must create or change something");
 export type ProposalBody = z.output<typeof ProposalBody>;
 
 export class ProposalInvalid extends Error {}
@@ -56,14 +70,38 @@ const isExisting = (r: ProposalBody["repos"][number]): r is ExistingRepo => "exi
 
 const DEFAULT_ENVIRONMENT = "local";
 
-function defaultEnvironment(db: Db): string {
-  const envs = db.prepare("SELECT id FROM environments ORDER BY id").all() as { id: string }[];
-  if (envs.length === 1) return envs[0]!.id;
+function defaultEnvironment(db: Db, proposed: string[]): string {
+  const envs = [...(db.prepare("SELECT id FROM environments ORDER BY id").all() as { id: string }[]).map((e) => e.id), ...proposed];
+  if (envs.length === 1) return envs[0]!;
   if (envs.length === 0) return DEFAULT_ENVIRONMENT;
-  throw new ProposalInvalid(`several environments exist (${envs.map((e) => e.id).join(", ")}); name one`);
+  throw new ProposalInvalid(`several environments exist (${envs.join(", ")}); name one`);
 }
 
-export function validateProposal(db: Db, threadId: number, p: ProposalBody): void {
+function draftOf(boot: Bootstrap, e: ProposedEnvironment): EnvironmentDraft {
+  return "template" in e ? draftFromTemplate(boot, e.template, { id: e.id, name: e.name, answers: e.answers, config: e.providerConfig }) : e;
+}
+
+function environmentDrafts(db: Db, boot: Bootstrap, p: ProposalBody): EnvironmentDraft[] {
+  const drafts: EnvironmentDraft[] = [];
+  for (const e of p.environments) {
+    try {
+      const d = draftOf(boot, e);
+      if (drafts.some((x) => x.id === d.id)) throw new ProposalInvalid(`environment ${d.id} is listed twice`);
+      checkDraft(db, d);
+      drafts.push(d);
+    } catch (err) {
+      if (err instanceof TemplateInvalid || err instanceof ValueInvalid || err instanceof z.ZodError)
+        throw new ProposalInvalid(
+          `environment ${e.id}: ${err instanceof z.ZodError ? err.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : err.message}`,
+        );
+      throw err;
+    }
+  }
+  return drafts;
+}
+
+export function validateProposal(db: Db, boot: Bootstrap, threadId: number, p: ProposalBody): void {
+  const newEnvs = environmentDrafts(db, boot, p).map((d) => d.id);
   const repoExists = (id: string) => !!db.prepare("SELECT 1 FROM repos WHERE id = ?").get(id);
   const projectExists = (id: string) => !!db.prepare("SELECT 1 FROM projects WHERE id = ?").get(id);
   const newRepos = new Set<string>();
@@ -86,9 +124,16 @@ export function validateProposal(db: Db, threadId: number, p: ProposalBody): voi
     for (const a of proj.after)
       if (!projectExists(a) && !earlier.has(a))
         throw new ProposalInvalid(`${proj.id}: after ${a}, which is neither an existing project nor listed earlier in this proposal`);
-    if (proj.environment && !db.prepare("SELECT 1 FROM environments WHERE id = ?").get(proj.environment))
-      throw new ProposalInvalid(`${proj.id}: environment ${proj.environment} does not exist`);
-    if (!proj.environment) defaultEnvironment(db);
+    if (proj.environment && !newEnvs.includes(proj.environment)) {
+      if (!db.prepare("SELECT 1 FROM environments WHERE id = ?").get(proj.environment))
+        throw new ProposalInvalid(`${proj.id}: environment ${proj.environment} does not exist`);
+      try {
+        assertSelectable(getEnvironment(db, proj.environment as EnvironmentId));
+      } catch (e) {
+        throw new ProposalInvalid(`${proj.id}: ${(e as Error).message}`);
+      }
+    }
+    if (!proj.environment) defaultEnvironment(db, newEnvs);
     for (const u of proj.units)
       if (!proj.repos.includes(u.repo)) throw new ProposalInvalid(`${proj.id}: unit ${u.key} uses repo ${u.repo}, which is not one of the project's repos`);
     earlier.add(proj.id);
@@ -132,9 +177,9 @@ async function createLocalRepo(boot: Bootstrap, db: Db, r: z.output<typeof NewRe
 
 export interface ApplyProposalResult {
   repos: string[];
+  environments: string[];
   projects: string[];
   units: Record<string, string[]>;
-  environment: string | null;
 }
 
 export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId: number): Promise<ApplyProposalResult> {
@@ -143,12 +188,31 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
   if (proposal.state !== "pending") throw new Error(`proposal ${proposalId} is ${proposal.state}`);
   const body = ProposalBody.parse(proposal.body);
   try {
-    validateProposal(db, proposal.threadId, body);
+    validateProposal(db, boot, proposal.threadId, body);
+    const drafts = environmentDrafts(db, boot, body);
+    const created: string[] = [];
+    // Created before the projects, and kept if their doctor fails, so the developer can fix a value on the Environments page.
+    for (const [i, d] of drafts.entries()) {
+      const e = body.environments[i]!;
+      const id = createEnvironment(db, d, "template" in e ? `template ${e.template}` : "watchman");
+      created.push(id);
+      const doctor = await doctorEnvironment(db, boot, id);
+      const used = body.projects.filter((p) => p.environment === id).map((p) => p.id);
+      if (!doctor.ok && used.length)
+        throw new ProposalInvalid(
+          `environment ${id} failed its doctor (${doctor.checks
+            .filter((c) => !c.ok)
+            .map((c) => `${c.name}: ${c.detail}`)
+            .join(
+              "; ",
+            )}), so ${used.join(", ")} did not start. It was created: fix it on the Environments page, then propose the projects with environment ${id}`,
+        );
+    }
     const existing = await inspectProposalRepos(body, (id) => layout(boot).mirror(id as RepoId));
     const bares = new Map<string, string>();
     for (const r of body.repos) if (!isExisting(r)) bares.set(r.id, await createLocalRepo(boot, db, r));
     const result = db.transaction((): ApplyProposalResult => {
-      const out: ApplyProposalResult = { repos: [], projects: [], units: {}, environment: null };
+      const out: ApplyProposalResult = { repos: [], environments: created, projects: [], units: {} };
       for (const r of body.repos) {
         const seen = existing.get(r.id);
         if (seen) addRepo(db, { id: r.id, url: seen.url, defaultBranch: seen.defaultBranch, packStatus: packStatusOf(seen.pack) });
@@ -156,10 +220,10 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
         out.repos.push(r.id);
       }
       for (const p of body.projects) {
-        const env = p.environment ?? defaultEnvironment(db);
+        const env = p.environment ?? defaultEnvironment(db, []);
         if (!db.prepare("SELECT 1 FROM environments WHERE id = ?").get(env)) {
           addEnvironment(db, { id: env, name: env, provider: "local-process", capacity: 2 });
-          out.environment = env;
+          out.environments.push(env);
         }
         const project = addProject(db, {
           id: p.id,
@@ -209,6 +273,15 @@ export function describeProposal(body: ProposalBody): string {
         ? `- existing repo ${r.id}: ${r.existing}`
         : `- new repo ${r.id}${r.description ? `: ${r.description}` : ""} (checks: ${r.verifyPack.checks.map((c) => c.name).join(", ")})`,
     );
+  for (const e of body.environments) {
+    if ("template" in e) {
+      const answered = Object.keys(e.answers);
+      lines.push(`- environment ${e.id} from template ${e.template}${answered.length ? ` (answers: ${answered.join(", ")})` : ""}`);
+      continue;
+    }
+    const parts = [...e.values.map((v) => (v.check ? `${v.name} (checked)` : v.name)), ...e.presets.map((p) => `preset ${p}`)];
+    lines.push(`- environment ${e.id} (${e.provider}, ${e.capacity} slots)${parts.length ? `: ${parts.join(", ")}` : ""}`);
+  }
   for (const p of body.projects) {
     const facts = [
       `repos ${p.repos.join(", ")}`,
