@@ -141,6 +141,9 @@ function rebaseOrBlock(l: Landing, trunk: Sha, conflict: string): LandResult {
   return { unit: getUnit(l.db, l.unit.id), outcome: "rebasing", landedSha: null, reason };
 }
 
+// git and gh put the command first and the reason last.
+const lastLine = (message: string) => message.trim().split("\n").filter(Boolean).at(-1) ?? message;
+
 function block(l: Landing, reason: string): LandResult {
   transitionUnit(l.db, l.unit.id, "blocked", { reason });
   return { unit: getUnit(l.db, l.unit.id), outcome: "blocked", landedSha: null, reason };
@@ -230,7 +233,12 @@ async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, 
   const { db } = l;
   const branch = `${resolveSetting(db, "git.branch_prefix", { projectId: l.project.id, repoId: l.repo.id }).value}/${l.project.id}/u${l.unit.seq}`;
   try {
-    await git(["push", "--quiet", "--force", "origin", `${squash.landed}:refs/heads/${branch}`], { gitDir: l.mirror });
+    const push = () => git(["push", "--quiet", "--force", "origin", `${squash.landed}:refs/heads/${branch}`], { gitDir: l.mirror });
+    // GitHub sometimes refuses a push for a moment; one retry separates that from a real rejection.
+    await push().catch(async () => {
+      await new Promise((r) => setTimeout(r, 2000));
+      await push();
+    });
     const existing = getMergeRequest(db, l.unit.id);
     const pr =
       (existing?.state === "open" ? { number: existing.number, url: existing.url } : null) ??
@@ -250,7 +258,7 @@ async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, 
     return { unit: getUnit(db, l.unit.id), outcome: "proposed", landedSha: null, reason: `pull request #${pr.number}: ${pr.url}` };
   } catch (e) {
     if (e instanceof ForgeError || (e as { code?: unknown }).code !== undefined)
-      return block(l, `could not open the pull request: ${(e as Error).message.split("\n")[0]}`);
+      return block(l, `could not open the pull request: ${lastLine((e as Error).message)}`);
     throw e;
   }
 }
@@ -346,7 +354,14 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
     setMergeState(db, unit.id, "closed", project.id, { number: mr.number, reason: "closed on the forge" });
     return block(l, `pull request #${mr.number} was closed without merging`);
   }
-  if (status.headSha !== mr.headSha) return block(l, `pull request #${mr.number}'s branch moved to ${status.headSha.slice(0, 10)} outside yagura`);
+  if (status.headSha !== mr.headSha) {
+    // Right after a push the forge can still report a head yagura pushed earlier; only a head yagura never pushed is someone else's.
+    const ours = db
+      .prepare("SELECT 1 FROM events WHERE type = 'pr.pushed' AND unit_id = ? AND json_extract(data_json, '$.head') = ?")
+      .get(unit.id, status.headSha);
+    if (ours) return { unit, outcome: "waiting", landedSha: null, reason: `the forge still shows the earlier push ${status.headSha.slice(0, 10)}` };
+    return block(l, `pull request #${mr.number}'s branch moved to ${status.headSha.slice(0, 10)} outside yagura`);
+  }
   if (status.merge === "behind" || status.merge === "conflict") {
     const squash = await squashOntoTrunk(l);
     if (squash.kind === "conflict")

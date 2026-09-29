@@ -2,7 +2,7 @@ import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
 import { markMergeChecked, openMergeRequests } from "./forge.js";
-import { landUnit, watchMergeRequest } from "./land.js";
+import { landUnit, watchMergeRequest, type LandResult } from "./land.js";
 import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
@@ -44,6 +44,7 @@ const PLAN_TRIGGERS = ["landed", "blocked", "abandoned"];
 
 export class Engine {
   private readonly inflight = new Map<string, Promise<void>>();
+  private readonly landingSaid = new Map<UnitId, string>();
   private readonly log: (line: string) => void;
 
   constructor(
@@ -122,7 +123,7 @@ export class Engine {
       this.start(
         key,
         `land U${u.seq}`,
-        () => landUnit(this.ctx, u.id),
+        () => landUnit(this.ctx, u.id).then((r) => this.logLanding(u, r)),
         () => undefined,
       );
     }
@@ -135,13 +136,22 @@ export class Engine {
       this.start(
         key,
         `watch pull request #${mr.number} for U${u.seq}`,
-        () => watchMergeRequest(this.ctx, u.id),
+        () => watchMergeRequest(this.ctx, u.id).then((r) => this.logLanding(u, r)),
         (e) => {
           markMergeChecked(this.db, u.id);
           this.log(`  ✗ pull request #${mr.number}: ${e instanceof Error ? e.message : String(e)}`);
         },
       );
     }
+  }
+
+  // A pull request is polled every few seconds; say what it is waiting for only when that changes.
+  private logLanding(u: Unit, r: LandResult | null): void {
+    if (!r) return;
+    const line = `${r.outcome}: ${r.reason}`;
+    if (this.landingSaid.get(u.id) === line) return;
+    this.landingSaid.set(u.id, line);
+    this.log(`  U${u.seq} ${line}`);
   }
 
   private planNeeded(project: Project): boolean {

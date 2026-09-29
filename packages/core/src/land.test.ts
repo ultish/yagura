@@ -369,6 +369,28 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "landed", landedSha: await originMain() });
   });
 
+  it("waits while the forge still shows an earlier yagura push, and blocks on a head yagura never pushed", async () => {
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit("success-line");
+    await landUnit(ctx, work.id);
+    const earlier = getMergeRequest(db, work.id)!.headSha;
+    await advanceTrunk("README.md", "moved\n");
+    await watchMergeRequest(ctx, work.id);
+    const later = getMergeRequest(db, work.id)!.headSha;
+    await git(["update-ref", "refs/heads/yg/p/u1", earlier], { cwd: origin });
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({
+      outcome: "waiting",
+      reason: `the forge still shows the earlier push ${earlier.slice(0, 10)}`,
+    });
+    await git(["update-ref", "refs/heads/yg/p/u1", later], { cwd: origin });
+    const stranger = await git(["commit-tree", `${later}^{tree}`, "-p", later, "-m", "someone else"], { cwd: origin });
+    await git(["update-ref", "refs/heads/yg/p/u1", stranger], { cwd: origin });
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({
+      outcome: "blocked",
+      reason: `pull request #1's branch moved to ${stranger.slice(0, 10)} outside yagura`,
+    });
+  });
+
   it("blocks when the pull request is closed on the forge", async () => {
     const work = await verifiedUnit();
     await landUnit(ctx, work.id);
