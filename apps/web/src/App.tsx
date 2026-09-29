@@ -52,7 +52,7 @@ function Header() {
           yagura
         </span>
       </Link>
-      <nav aria-label="Main" style={{ display: "flex", gap: 26 }}>
+      <nav aria-label="Main" style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", flex: "1 1 180px", minWidth: 0 }}>
         {NAV.map((n) => (
           <Link
             key={n.to}

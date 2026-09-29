@@ -66,6 +66,22 @@ import {
   importSettings,
   updateEnvironment,
   doctorEnvironment,
+  applyPreset,
+  applyTemplate,
+  deleteValue,
+  environmentNotes,
+  getEnvironment,
+  listTemplates,
+  listValues,
+  PRESETS,
+  runCheck,
+  saveTemplate,
+  setEnvironmentNotes,
+  setValue,
+  suggestCheck,
+  templatesDir,
+  valueMap,
+  type EnvValue,
   PROVIDERS_IMPL,
   transitionUnit,
   type HarnessEvent,
@@ -87,6 +103,17 @@ const USAGE = `yagura — agent orchestration
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]   runs the doctor
   yagura env set <id> [--capacity <n>] [--name <text>]
   yagura env doctor <id>
+  yagura env values <id>
+  yagura env value set <id> <NAME> <value> [--note <text>] [--check <cmd>] [--clear-check]
+  yagura env value rm <id> <NAME>
+  yagura env preset <id> <preset>          add that preset's values; names already set are left alone
+  yagura env presets
+  yagura env notes <id> | notes set <id> --text <text>
+  yagura env suggest <NAME> <value>        a check yagura would offer; nothing is saved
+  yagura env try <id> --check <cmd> [--name <NAME> --value <text>]
+  yagura template list
+  yagura template save <env> <name> [--description <text>] [--ask <NAME>...]
+  yagura template apply <name> --id <new env> [--name <text>] [--answer <NAME=value>...]
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...]
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
   yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go
@@ -143,6 +170,23 @@ const fail = (msg: string): never => {
   console.error(msg);
   process.exit(1);
 };
+
+function printValue(v: EnvValue): void {
+  console.log(`${v.name}=${v.value}  (${v.source})`);
+  if (v.note) console.log(`  ${v.note}`);
+  console.log(`  check: ${v.check ?? "none"}`);
+  if (v.last) console.log(`  last: ${v.last.ok ? "✓" : "✗"} ${v.last.detail}`);
+}
+
+function answersOf(raw: string[]): Record<string, string> {
+  const answers: Record<string, string> = {};
+  for (const entry of raw) {
+    const at = entry.indexOf("=");
+    if (at <= 0) fail(`--answer must be NAME=value, got ${entry}`);
+    answers[entry.slice(0, at)] = entry.slice(at + 1);
+  }
+  return answers;
+}
 
 function renderEvent(e: HarnessEvent): string | null {
   const indent = e.kind !== "session" && e.kind !== "final" && e.kind !== "ignored" && e.kind !== "usage" && e.parentId ? "    " : "  ";
@@ -397,6 +441,51 @@ async function main() {
       console.log(`gate ${g.id} answered: ${g.answer}`);
       return;
     }
+    case "template": {
+      const { positionals, values } = args({
+        description: { type: "string" },
+        ask: { type: "string", multiple: true },
+        answer: { type: "string", multiple: true },
+        id: { type: "string" },
+        name: { type: "string" },
+      });
+      const [sub, first, second] = positionals;
+      if (sub === "list" || !sub) {
+        const found = listTemplates(boot);
+        if (!found.length) {
+          console.log(`no templates in ${templatesDir(boot)}`);
+          return;
+        }
+        for (const item of found) {
+          if (item.template) console.log(`${item.template.name}  ${item.template.description}  (${item.file})`);
+          else console.log(`${item.file}: ${item.error}`);
+        }
+        return;
+      }
+      if (sub === "save" && first && second) {
+        const saved = saveTemplate(db, boot, first as EnvironmentId, {
+          name: second,
+          description: values.description,
+          ask: many(values.ask),
+        });
+        const asks = saved.template.values.filter((v) => v.ask).map((v) => v.name);
+        console.log(`saved ${saved.template.name} to ${saved.path}${asks.length ? `; applying asks for ${asks.join(", ")}` : ""}`);
+        return;
+      }
+      if (sub === "apply" && first && values.id) {
+        const result = await applyTemplate({ db, boot }, first, {
+          id: values.id,
+          name: values.name,
+          answers: answersOf(many(values.answer)),
+        });
+        const created = getEnvironment(db, result.environmentId);
+        console.log(`environment ${created.id}: ${created.provider}, doctor ${result.ok ? "passing" : "failing"}`);
+        for (const c of created.doctorChecks) console.log(`  ${c.ok ? "✓" : "✗"} ${c.name}: ${c.detail}`);
+        if (!result.ok) process.exitCode = 1;
+        return;
+      }
+      fail(USAGE);
+    }
     case "land": {
       const [projectId, seq] = rest;
       if (!projectId || !seq) fail(USAGE);
@@ -413,19 +502,25 @@ async function main() {
         context: { type: "string" },
         pool: { type: "string" },
         "base-url": { type: "string" },
+        note: { type: "string" },
+        check: { type: "string" },
+        "clear-check": { type: "boolean" },
+        text: { type: "string" },
+        value: { type: "string" },
       });
-      const id = positionals[1];
+      const [sub, a, b, ...more] = positionals;
+      const id = a;
       const printDoctor = (checks: { name: string; ok: boolean; detail: string }[]) => {
         for (const c of checks) console.log(`  ${c.ok ? "✓" : "✗"} ${c.name}: ${c.detail}`);
       };
-      if (positionals[0] === "doctor" && id) {
+      if (sub === "doctor" && id) {
         const result = await doctorEnvironment(db, boot, id as EnvironmentId);
         console.log(`environment ${id}: doctor ${result.ok ? "passing" : "failing"}`);
         printDoctor(result.checks);
         if (!result.ok) process.exitCode = 1;
         return;
       }
-      if (positionals[0] === "set" && id) {
+      if (sub === "set" && id) {
         const e = updateEnvironment(db, id as EnvironmentId, {
           name: values.name,
           capacity: values.capacity === undefined ? undefined : Number(values.capacity),
@@ -433,7 +528,78 @@ async function main() {
         console.log(`environment ${e.id}: ${e.name}, capacity ${e.capacity}`);
         return;
       }
-      if (positionals[0] !== "add" || !id || !values.provider) fail(USAGE);
+      if (sub === "values" && id) {
+        getEnvironment(db, id as EnvironmentId);
+        const notes = environmentNotes(db, id as EnvironmentId);
+        const listed = listValues(db, id as EnvironmentId);
+        if (notes) console.log(notes);
+        if (!listed.length) console.log(`environment ${id} has no values`);
+        for (const v of listed) printValue(v);
+        return;
+      }
+      if (sub === "value" && a === "set" && b && more.length >= 2) {
+        if (values["clear-check"] && values.check !== undefined) fail("pass either --check or --clear-check");
+        const name = more[0]!;
+        const value = more.slice(1).join(" ");
+        const existing = listValues(db, b as EnvironmentId).find((v) => v.name === name);
+        const saved = setValue(db, b as EnvironmentId, {
+          name,
+          value,
+          note: values.note !== undefined ? values.note : (existing?.note ?? ""),
+          check: values["clear-check"] ? null : values.check !== undefined ? values.check : (existing?.check ?? null),
+        });
+        printValue(saved);
+        if (!saved.check) {
+          const suggestion = suggestCheck(saved.name, saved.value);
+          if (suggestion) console.log(`suggested check, not saved: ${suggestion}`);
+        }
+        return;
+      }
+      if (sub === "value" && a === "rm" && b && more.length === 1) {
+        const name = more[0]!;
+        const gone = deleteValue(db, b as EnvironmentId, name);
+        console.log(gone ? `removed ${name} from ${b}` : `${name} is not a value of ${b}`);
+        if (!gone) process.exitCode = 1;
+        return;
+      }
+      if (sub === "preset" && id && b) {
+        const result = applyPreset(db, id as EnvironmentId, b);
+        console.log(result.added.length ? `added ${result.added.join(", ")}` : `added nothing to ${id}`);
+        if (result.skipped.length) console.log(`left existing: ${result.skipped.join(", ")}`);
+        return;
+      }
+      if (sub === "presets") {
+        for (const preset of PRESETS) console.log(`${preset.id.padEnd(14)} ${preset.values.map((v) => v.name).join(", ")}`);
+        return;
+      }
+      if (sub === "notes" && a === "set" && b) {
+        const text = values.text;
+        if (typeof text !== "string") fail("env notes set needs --text");
+        else setEnvironmentNotes(db, b as EnvironmentId, text);
+        console.log(`environment ${b} notes saved`);
+        return;
+      }
+      if (sub === "notes" && id && a !== "set") {
+        getEnvironment(db, id as EnvironmentId);
+        const notes = environmentNotes(db, id as EnvironmentId);
+        console.log(notes || `environment ${id} has no notes`);
+        return;
+      }
+      if (sub === "suggest" && a) {
+        const value = [b, ...more].filter((part) => part !== undefined).join(" ");
+        if (!value) fail(USAGE);
+        const suggestion = suggestCheck(a, value);
+        console.log(suggestion ?? `no suggestion for ${a}`);
+        return;
+      }
+      if (sub === "try" && id && values.check) {
+        const overlay = values.name && values.value !== undefined ? { [values.name]: values.value } : {};
+        const result = await runCheck(values.check, { ...valueMap(db, id as EnvironmentId), ...overlay });
+        console.log(`${result.ok ? "✓" : "✗"} ${result.detail}`);
+        if (!result.ok) process.exitCode = 1;
+        return;
+      }
+      if (sub !== "add" || !id || !values.provider) fail(USAGE);
       if (!(PROVIDERS as readonly string[]).includes(values.provider!)) fail(`--provider must be one of ${PROVIDERS.join(", ")}`);
       const providerConfig: Record<string, unknown> = {
         ...(values.context ? { context: values.context } : {}),

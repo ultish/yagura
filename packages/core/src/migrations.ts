@@ -130,6 +130,27 @@ CREATE INDEX message_refs_project ON message_refs (project_id);
     version: 7,
     sql: `ALTER TABLE environments ADD COLUMN doctor_json TEXT NOT NULL DEFAULT '[]';`,
   },
+  {
+    version: 8,
+    sql: `
+CREATE TABLE environment_values (
+  environment_id TEXT NOT NULL REFERENCES environments (id),
+  name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  check_cmd TEXT,
+  source TEXT NOT NULL DEFAULT 'you',
+  position INTEGER NOT NULL,
+  last_ok INTEGER,
+  last_detail TEXT,
+  last_checked_at TEXT,
+  PRIMARY KEY (environment_id, name)
+);
+ALTER TABLE environments ADD COLUMN notes TEXT NOT NULL DEFAULT '';
+ALTER TABLE leases ADD COLUMN kept_until TEXT;
+ALTER TABLE leases ADD COLUMN kept_reason TEXT;
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

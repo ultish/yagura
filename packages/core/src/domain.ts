@@ -168,6 +168,7 @@ export interface Environment {
   doctorStatus: DoctorStatus;
   doctorCheckedAt: IsoTime | null;
   doctorChecks: { name: string; ok: boolean; detail: string }[];
+  notes: string;
   createdAt: IsoTime;
 }
 
@@ -289,6 +290,7 @@ export interface RenderedBrief {
   acceptance: string[];
   verify: string;
   env: Record<string, string>;
+  envNotes?: Record<string, string>;
   timeboxMinutes: number;
   forbidden: string[];
   method: string;

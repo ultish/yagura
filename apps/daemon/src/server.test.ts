@@ -230,6 +230,48 @@ describe("daemon API", () => {
     expect((await (await get("/api/environments")).json()) as unknown[]).toHaveLength(1);
   });
 
+  it("edits an environment's values, adds a preset, suggests and tries checks, and saves and applies a template", async () => {
+    await post("/api/environments", { id: "box", provider: "local-process", capacity: 1 });
+    await post("/api/environments/box/values", { name: "REDIS_URL", value: "redis://hostname:6379", note: "redis from this box" });
+    expect(await (await post("/api/environments/box/values", { name: "yagura_x", value: "v" })).json()).toEqual({
+      error: "yagura_x: names are UPPER_CASE letters, digits, and _",
+    });
+    expect(await (await post("/api/environments/box/presets/registry", {})).json()).toEqual({ added: ["REGISTRY_PUSH", "REGISTRY_PULL"], skipped: [] });
+    expect(await (await post("/api/environments/box/presets/registry", {})).json()).toEqual({ added: [], skipped: ["REGISTRY_PUSH", "REGISTRY_PULL"] });
+    expect(await (await get("/api/check-suggestion?name=REDIS_URL&value=redis%3A%2F%2Fhostname%3A6379")).json()).toEqual({
+      check: 'redis-cli -u "$REDIS_URL" ping',
+    });
+    expect(await (await post("/api/environments/box/try-check", { command: 'echo "$REDIS_URL"' })).json()).toEqual({
+      ok: true,
+      detail: "redis://hostname:6379",
+    });
+    expect(await (await post("/api/environments/box/try-check", { command: 'echo "$NEW"', name: "NEW", value: "unsaved" })).json()).toEqual({
+      ok: true,
+      detail: "unsaved",
+    });
+    await post("/api/environments/box/notes", { notes: "deps in cluster" });
+    await post("/api/environments/box/values/REGISTRY_PULL/delete", {});
+    const detail = (await (await get("/api/environments/box")).json()) as {
+      values: { name: string; source: string }[];
+      environment: { notes: string };
+      keep: unknown;
+      presets: unknown[];
+    };
+    expect(detail.values.map((v) => [v.name, v.source])).toEqual([
+      ["REDIS_URL", "you"],
+      ["REGISTRY_PUSH", "registry"],
+    ]);
+    expect(detail).toMatchObject({ environment: { notes: "deps in cluster" }, keep: { policy: { value: "never", source: "default" }, hours: { value: 2 } } });
+    expect(detail.presets.length).toBeGreaterThan(3);
+
+    expect((await post("/api/environments/box/template", { name: "box-shape", ask: ["REDIS_URL"] })).status).toBe(201);
+    expect(((await (await get("/api/templates")).json()) as { template: { name: string } }[]).map((t) => t.template.name)).toEqual(["box-shape"]);
+    expect(await (await post("/api/templates/box-shape/apply", { id: "box2" })).json()).toEqual({ error: "template box-shape needs a value for REDIS_URL" });
+    const applied = await post("/api/templates/box-shape/apply", { id: "box2", answers: { REDIS_URL: "redis://box2:6379" } });
+    expect(applied.status).toBe(201);
+    expect(await applied.json()).toMatchObject({ environmentId: "box2" });
+  });
+
   it("describes settings with live cap counts, and clears, exports, and imports them", async () => {
     await post("/api/settings", { scope: "global", key: "max_parallel_agents", value: 6 });
     const overview = (await (await get("/api/settings/overview")).json()) as { settings: { key: string }[]; caps: unknown };

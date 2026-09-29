@@ -58,6 +58,18 @@ import {
   type SettingScope,
   registerRepo,
   RepoUnusable,
+  applyTemplate,
+  deleteKept,
+  deleteValue,
+  listTemplates,
+  applyPreset,
+  PRESETS,
+  runCheck,
+  saveTemplate,
+  setEnvironmentNotes,
+  setValue,
+  suggestCheck,
+  valueMap,
   artifactContentType,
   artifactName,
   getEvidenceRun,
@@ -76,7 +88,7 @@ import {
   type Provider,
   suggestRepoId,
 } from "@yagura/core";
-import { attemptDetail, attemptDiff, bell, capCounts, environmentView, projectSummary, repoView, resolvedGates, unitView } from "./views.js";
+import { attemptDetail, attemptDiff, bell, capCounts, environmentDetail, environmentView, projectSummary, repoView, resolvedGates, unitView } from "./views.js";
 
 export interface ServerOptions {
   db: Db;
@@ -303,6 +315,37 @@ export function createApp(opts: ServerOptions): Hono {
     });
     await doctorEnvironment(db, boot, b.id as EnvironmentId);
     return c.json(environmentView(db, b.id as EnvironmentId), 201);
+  });
+  app.get("/api/environments/:id", (c) => c.json(environmentDetail(db, c.req.param("id") as EnvironmentId)));
+  app.post("/api/environments/:id/values", async (c) => {
+    const b = (await c.req.json()) as { name: string; value: string; note?: string; check?: string | null; replaces?: string; source?: string };
+    return c.json(setValue(db, c.req.param("id") as EnvironmentId, b));
+  });
+  app.post("/api/environments/:id/values/:name/delete", (c) => c.json({ deleted: deleteValue(db, c.req.param("id") as EnvironmentId, c.req.param("name")) }));
+  app.post("/api/environments/:id/presets/:preset", (c) => {
+    if (!PRESETS.some((p) => p.id === c.req.param("preset"))) return c.json({ error: `no preset ${c.req.param("preset")}` }, 404);
+    return c.json(applyPreset(db, c.req.param("id") as EnvironmentId, c.req.param("preset")));
+  });
+  app.get("/api/check-suggestion", (c) => c.json({ check: suggestCheck(c.req.query("name") ?? "", c.req.query("value") ?? "") }));
+  app.post("/api/environments/:id/try-check", async (c) => {
+    const b = (await c.req.json()) as { command: string; name?: string; value?: string };
+    const values = { ...valueMap(db, c.req.param("id") as EnvironmentId), ...(b.name && b.value !== undefined ? { [b.name]: b.value } : {}) };
+    return c.json(await runCheck(b.command, values));
+  });
+  app.post("/api/environments/:id/notes", async (c) => {
+    setEnvironmentNotes(db, c.req.param("id") as EnvironmentId, ((await c.req.json()) as { notes: string }).notes ?? "");
+    return c.json({ ok: true });
+  });
+  app.post("/api/leases/:id/delete-kept", async (c) => c.json({ deleted: await deleteKept(db, boot, Number(c.req.param("id")) as never) }));
+  app.get("/api/templates", (c) => c.json(listTemplates(boot)));
+  app.post("/api/environments/:id/template", async (c) => {
+    const b = (await c.req.json()) as { name: string; description?: string; ask?: string[] };
+    return c.json(saveTemplate(db, boot, c.req.param("id") as EnvironmentId, b), 201);
+  });
+  app.post("/api/templates/:name/apply", async (c) => {
+    const b = (await c.req.json()) as { id: string; name?: string; answers?: Record<string, string> };
+    const result = await applyTemplate({ db, boot }, c.req.param("name"), b);
+    return c.json({ ...result, view: environmentView(db, result.environmentId) }, 201);
   });
   app.post("/api/environments/:id/doctor", async (c) => {
     await doctorEnvironment(db, boot, c.req.param("id") as EnvironmentId);

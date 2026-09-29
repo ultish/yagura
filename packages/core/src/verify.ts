@@ -5,9 +5,10 @@ import { renderVerifyBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { PROOF_HARNESS, spendsAttempt, type Attempt, type EnvironmentId, type Unit, type UnitId, type VerdictId } from "./domain.js";
 import { baseWorktree, listEvidenceRuns, PACK_LABEL, packForAttempt, runEvidence, teardownDeployed } from "./evidence.js";
+import { environmentNotes, listValues } from "./envvalues.js";
 import { addDetachedWorktree, diffText, ensureMirror, patchId } from "./git.js";
 import { parseHandoff } from "./handoff.js";
-import { acquireLease, releaseLease } from "./leases.js";
+import { acquireLease, keepable, keepLease, releaseLease } from "./leases.js";
 import { syncPackStatus } from "./repos.js";
 import { addVerifyUnit } from "./runner.js";
 import { layout } from "./paths.js";
@@ -15,6 +16,7 @@ import {
   addUnitNote,
   createAttempt,
   getAttempt,
+  getEnvironment,
   getProject,
   getRepo,
   getUnit,
@@ -161,6 +163,14 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
   };
 
   const lease = await acquireLease(db, boot, project.environmentId as EnvironmentId, attempt.id);
+  const keepPolicy = resolveSetting(db, "lease.keep", { projectId: project.id, environmentId: project.environmentId }).value;
+  let kept: string | null = null;
+  const endSlot = async (outcome: VerdictDecision["outcome"] | "stopped") => {
+    const what = keepable(getEnvironment(db, project.environmentId as EnvironmentId));
+    if (what && (keepPolicy === "always" || (keepPolicy === "failed" && outcome !== "verified")))
+      kept = `${keepPolicy === "always" ? "kept as always" : "kept because verification did not pass"} (${outcome})`;
+    if (!kept || what === "directory") await teardownDeployed(db, boot, attempt.id);
+  };
   try {
     const sides = proof ? (["head"] as const) : (["base", "head"] as const);
     const capture = (at: "base" | "head", label: string, command: string, timeoutSeconds?: number) =>
@@ -177,7 +187,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     }
     const early = lifecycleProblem(listEvidenceRuns(db, attempt.id));
     if (early) {
-      await teardownDeployed(db, boot, attempt.id);
+      await endSlot(early.outcome);
       updateAttempt(db, attempt.id, { state: "failed", endedAt: now(), failureMode: "tool-error" });
       return await settle({ ...early, trunkOutcome: null, headOutcome: null, citedRunIds: [] }, false);
     }
@@ -201,6 +211,12 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       scenarioDir,
       cli: "yagura",
       leaseVars: lease.vars,
+      envNotes: Object.fromEntries(
+        listValues(db, project.environmentId as EnvironmentId)
+          .map((v) => [v.name, v.note])
+          .filter(([, n]) => n),
+      ),
+      environmentNotes: environmentNotes(db, project.environmentId),
       deploys: !!pack.pack.deploy,
       timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
       standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
@@ -225,10 +241,10 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       logPath: paths.log(project.id, unit.seq, attempt.n),
     });
 
-    await teardownDeployed(db, boot, attempt.id);
     const final = session.final;
     const stop = stopRequested(db, attempt.id);
     if (stop.stopped) {
+      await endSlot("stopped");
       updateAttempt(db, attempt.id, { state: "stopped", endedAt: now(), exitCode: session.exitCode });
       const decision: VerdictDecision = {
         outcome: "invalid",
@@ -249,6 +265,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       playbook: target.playbook,
       minTier: project.minTier,
     });
+    await endSlot(decision.outcome);
     updateAttempt(db, attempt.id, {
       state: handoff ? "handed_off" : "failed",
       endedAt: now(),
@@ -260,7 +277,10 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
 
     return await settle(decision, handoff !== null);
   } finally {
-    await teardownDeployed(db, boot, attempt.id).catch(() => null);
-    await releaseLease(db, boot, lease.id);
+    if (kept) keepLease(db, lease.id, resolveSetting(db, "lease.keep_hours", { projectId: project.id, environmentId: project.environmentId }).value, kept);
+    else {
+      await teardownDeployed(db, boot, attempt.id).catch(() => null);
+      await releaseLease(db, boot, lease.id);
+    }
   }
 }

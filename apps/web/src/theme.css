@@ -248,6 +248,8 @@ textarea {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 18px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-family: "JetBrains Mono", monospace;
   font-size: 12px;
   color: var(--muted);

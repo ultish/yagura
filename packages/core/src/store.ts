@@ -374,6 +374,7 @@ export function getEnvironment(db: Db, id: EnvironmentId): Environment {
     doctorStatus: r.doctor_status as Environment["doctorStatus"],
     doctorCheckedAt: (r.doctor_checked_at as IsoTime | null) ?? null,
     doctorChecks: JSON.parse(r.doctor_json as string),
+    notes: r.notes as string,
     createdAt: r.created_at as IsoTime,
   };
 }

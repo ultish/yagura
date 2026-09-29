@@ -4,13 +4,26 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Bootstrap } from "./config.js";
-import type { ProjectId, RepoId } from "./domain.js";
+import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { runWorkUnit } from "./runner.js";
-import { addProject, addRepo, addUnit, getUnit, getUnitBySeq, listAttempts, openStore, transitionUnit, type Db } from "./store.js";
+import { setEnvironmentNotes, setValue } from "./envvalues.js";
+import {
+  addEnvironment,
+  addProject,
+  addRepo,
+  addUnit,
+  getUnit,
+  getUnitBySeq,
+  listAttempts,
+  openStore,
+  setProjectEnvironment,
+  transitionUnit,
+  type Db,
+} from "./store.js";
 
 const fakeAgent = fileURLToPath(new URL("./harness/fixtures/fake-agent.mjs", import.meta.url));
 const fake: HarnessAdapter = {
@@ -84,6 +97,22 @@ describe("runWorkUnit", () => {
     expect(attempt).toMatchObject({ state: "handed_off", failureMode: "scope" });
     const ev = db.prepare("SELECT data_json FROM events WHERE type = 'unit.state' ORDER BY id DESC LIMIT 1").get() as { data_json: string };
     expect(JSON.parse(ev.data_json).violations).toEqual([{ path: "README.md", reason: "outside-write-scope" }]);
+  });
+
+  it("gives the agent the environment's values with their notes, and rejects work that writes one literally", async () => {
+    addEnvironment(db, { id: "dev", name: "dev", provider: "local-process", capacity: 1 });
+    setProjectEnvironment(db, project, "dev" as EnvironmentId);
+    setEnvironmentNotes(db, "dev" as EnvironmentId, "deps run in the cluster");
+    setValue(db, "dev" as EnvironmentId, { name: "MARKER", value: "edited by fake agent", note: "the text every fake edit starts with" });
+    const { unit, attempt, paths } = await run("success");
+    const brief = readFileSync(paths.brief(project, unit.seq, attempt.n), "utf8");
+    expect(brief).toContain("## ENV\n- MARKER=edited by fake agent (the text every fake edit starts with)\n");
+    expect(brief).toContain("- About this environment: deps run in the cluster");
+    expect(unit.state).toBe("rejected");
+    expect(attempt).toMatchObject({ state: "handed_off", failureMode: "scope" });
+    expect(unit.notes).toEqual([
+      'Attempt 1 wrote environment values literally: app/orders.py has "edited by fake agent", use $MARKER. Read values from the environment by name.',
+    ]);
   });
 
   it("blocks the unit when the agent hands off blocked", async () => {

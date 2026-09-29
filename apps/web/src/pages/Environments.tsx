@@ -5,6 +5,7 @@ import { clock, plural, since } from "../lib/format";
 import { Link } from "../ui/Link";
 import { Row, useAction } from "../ui/rows";
 import { ScopedSettings } from "../ui/settings";
+import { EnvironmentValues, NewFromTemplate } from "./environment-values";
 
 const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "7px 10px", fontSize: 13 } as const;
 const PROVIDERS = ["local-process", "kube-namespace"];
@@ -280,6 +281,7 @@ export function Environments() {
   const { data, error, reload } = useApi<EnvironmentView[]>("/api/environments");
   const [editing, setEditing] = useState<string | null>(null);
   const [settings, setSettings] = useState<string | null>(null);
+  const [valuesFor, setValuesFor] = useState<string | null>(null);
   return (
     <main style={{ padding: "26px 36px 48px", display: "flex", flexDirection: "column", gap: 24 }}>
       <h1 className="serif" style={{ margin: 0, fontSize: 34, fontWeight: 600 }}>
@@ -290,6 +292,7 @@ export function Environments() {
           <h2 className="h2">Add an environment</h2>
         </div>
         <AddEnvironment onAdded={reload} />
+        <NewFromTemplate onAdded={reload} />
       </section>
       {error && <div className="s-bell">{error}</div>}
       {data && (
@@ -349,10 +352,14 @@ export function Environments() {
                       />
                     )}
                     {settings === e.id && <ScopedSettings scope="environment" id={e.id} />}
+                    {valuesFor === e.id && <EnvironmentValues id={e.id} onChanged={reload} />}
                   </>
                 }
                 actions={
                   <>
+                    <button className="btn" type="button" aria-expanded={valuesFor === e.id} onClick={() => setValuesFor(valuesFor === e.id ? null : e.id)}>
+                      Values
+                    </button>
                     <button className="btn" type="button" aria-expanded={settings === e.id} onClick={() => setSettings(settings === e.id ? null : e.id)}>
                       Settings
                     </button>

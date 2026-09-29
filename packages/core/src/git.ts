@@ -122,3 +122,14 @@ export async function gitWithEnv(args: string[], cwd: string, env: Record<string
 export async function diffRange(gitDir: string, base: Sha, head: Sha): Promise<string> {
   return git(["diff", "--stat", "--patch", "--no-color", base, head], { gitDir });
 }
+
+export async function addedLines(worktree: string, base: Sha): Promise<{ path: string; line: string }[]> {
+  const out = await git(["diff", "--unified=0", "--no-color", "--no-renames", base, "HEAD"], { cwd: worktree });
+  const lines: { path: string; line: string }[] = [];
+  let path = "";
+  for (const l of out.split("\n")) {
+    if (l.startsWith("+++ ")) path = l.startsWith("+++ b/") ? l.slice(6) : "";
+    else if (l.startsWith("+") && path) lines.push({ path, line: l.slice(1) });
+  }
+  return lines;
+}

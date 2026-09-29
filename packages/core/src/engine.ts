@@ -2,7 +2,7 @@ import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
 import { landUnit } from "./land.js";
-import { reapLeases } from "./leases.js";
+import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
@@ -247,6 +247,8 @@ export class Engine {
 
   async tick(): Promise<void> {
     if (this.inflight.size === 0) await reapLeases(this.db, this.ctx.boot);
+    const expired = await reapKept(this.db, this.ctx.boot);
+    if (expired) this.log(`  deleted ${expired} kept slot(s) past their time`);
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
     for (const project of this.scope().filter((p) => p.state === "active")) {

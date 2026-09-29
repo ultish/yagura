@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -7,7 +7,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { RunContext } from "./agent.js";
 import type { Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId, Unit } from "./domain.js";
+import { setSetting } from "./config.js";
 import { listEvidenceRuns } from "./evidence.js";
+import { reapKept } from "./leases.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
@@ -193,5 +195,26 @@ describe("pack lifecycle scripts", () => {
     expect(result.decision).toMatchObject({ outcome: "code-fault", reason: expect.stringMatching(/^head does not deploy \(run:\d+\) while trunk does/) });
     expect(labels(result.attempt.id)).toEqual(["pack:deploy@base:0", "check:unit@base:0", "pack:deploy@head:1", "check:unit@head:0"]);
     expect(target.state).toBe("ready");
+  });
+
+  it("keeps a failed local verification's slot directory after its teardown when the keep policy says so, and deletes it when its time is up", async () => {
+    await setTrunkPack({
+      deploy: 'grep -q "x = 1" app/orders.py && touch "$YAGURA_LEASE_DIR/up-$YAGURA_AT"',
+      teardown: 'rm -f "$YAGURA_LEASE_DIR"/up-*',
+      checks: [{ name: "unit", command: "true", tier: "unit-verified" }],
+    });
+    setSetting(db, "project", project, "lease.keep", "failed");
+    const { result } = await workThenVerify("verify-pass");
+    expect(result.decision.outcome).toBe("code-fault");
+    expect(labels(result.attempt.id).at(-1)).toBe("pack:teardown@head:0");
+    const lease = db.prepare("SELECT id, state, vars_json, kept_until, kept_reason FROM leases").get() as Record<string, string>;
+    expect(lease).toMatchObject({ state: "released", kept_reason: "kept because verification did not pass (code-fault)" });
+    expect(Date.parse(lease.kept_until!) - Date.now()).toBeGreaterThan(1.9 * 3_600_000);
+    const dir = JSON.parse(lease.vars_json!).YAGURA_LEASE_DIR as string;
+    expect(readdirSync(dir)).toEqual([]);
+    expect(await reapKept(db, ctx.boot)).toBe(0);
+    expect(await reapKept(db, ctx.boot, Date.now() + 3 * 3_600_000)).toBe(1);
+    expect(existsSync(dir)).toBe(false);
+    expect(db.prepare("SELECT kept_until FROM leases").get()).toEqual({ kept_until: null });
   });
 });

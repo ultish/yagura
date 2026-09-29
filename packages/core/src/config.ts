@@ -70,6 +70,9 @@ export const SETTINGS = {
   "git.branch_prefix": z.string().default("yg").describe("Prefix for unit branches"),
   "yagura.url": z.string().url().nullable().default(null).describe("Dashboard URL linked from commit trailers"),
   "method.enforce_required_skills": z.boolean().default(true).describe("Reject work that skipped a required skill"),
+  "values.literal_allowed": z.array(z.string()).default(["**/*.md", "docs/**"]).describe("Files where an environment value may appear literally (globs)"),
+  "lease.keep": z.enum(["never", "failed", "always"]).default("never").describe("Keep what a verification deployed afterwards"),
+  "lease.keep_hours": z.number().positive().default(2).describe("Hours a kept namespace or slot lives before it is deleted"),
   "gates.timeout_hours": z.number().positive().nullable().default(24).describe("Hours before an unanswered question takes its default (empty: never)"),
 } satisfies Record<string, z.ZodTypeAny>;
 
@@ -79,6 +82,7 @@ export type OverrideScope = Exclude<SettingScope, "global">;
 const P: readonly OverrideScope[] = ["project"];
 const PR: readonly OverrideScope[] = ["project", "repo"];
 const PRE: readonly OverrideScope[] = ["project", "repo", "environment"];
+const PE: readonly OverrideScope[] = ["project", "environment"];
 
 // The layers each setting is read at; an override anywhere else would never take effect.
 export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
@@ -109,6 +113,9 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "yagura.url": PR,
   "method.enforce_required_skills": PR,
   "gates.timeout_hours": P,
+  "values.literal_allowed": PR,
+  "lease.keep": PE,
+  "lease.keep_hours": PE,
 };
 export type SettingValue<K extends SettingKey> = z.output<(typeof SETTINGS)[K]>;
 export type SettingSource = SettingScope | "default";

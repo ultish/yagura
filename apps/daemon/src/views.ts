@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import {
   BUILD_TYPES_SQL,
+  listValues,
+  PRESETS,
   isBuild,
   diffRange,
   getAttempt,
@@ -8,6 +10,7 @@ import {
   gateDeadline,
   recentlyResolvedGates,
   getEnvironment,
+  keepable,
   PROVIDERS_IMPL,
   runningAttempts as runningCount,
   type EnvironmentId,
@@ -231,6 +234,41 @@ export function environmentView(db: Db, id: EnvironmentId) {
     active: leases.filter((l) => l.state === "active").map((l) => ({ ...holder(l), slot: l.slot as string, since: l.granted_at as string })),
     queued: leases.filter((l) => l.state === "queued").map((l) => ({ ...holder(l), since: l.requested_at as string })),
     projects: db.prepare("SELECT id, state FROM projects WHERE environment_id = ? ORDER BY created_at").all(id) as { id: string; state: string }[],
+    kept: (
+      db
+        .prepare(
+          `SELECT l.id, l.slot, l.vars_json, l.kept_until, l.kept_reason, l.attempt_id, u.project_id, u.seq, u.goal
+           FROM leases l JOIN attempts a ON a.id = l.attempt_id JOIN units u ON u.id = a.unit_id
+           WHERE l.environment_id = ? AND l.kept_until IS NOT NULL ORDER BY l.id`,
+        )
+        .all(id) as Row[]
+    ).map((l) => {
+      const vars = JSON.parse(l.vars_json as string) as Record<string, string>;
+      return {
+        leaseId: l.id as number,
+        attemptId: l.attempt_id as number,
+        unit: { projectId: l.project_id as string, seq: l.seq as number, goal: l.goal as string },
+        until: l.kept_until as string,
+        reason: (l.kept_reason as string) ?? "",
+        namespace: vars.YAGURA_NAMESPACE ?? null,
+        context: vars.KUBECONTEXT ?? null,
+        leaseDir: vars.YAGURA_LEASE_DIR ?? null,
+      };
+    }),
+  };
+}
+
+export function environmentDetail(db: Db, id: EnvironmentId) {
+  const sctx = { environmentId: id };
+  return {
+    ...environmentView(db, id),
+    values: listValues(db, id),
+    keep: {
+      policy: resolveSetting(db, "lease.keep", sctx),
+      hours: resolveSetting(db, "lease.keep_hours", sctx),
+      keeps: keepable(getEnvironment(db, id)),
+    },
+    presets: PRESETS,
   };
 }
 

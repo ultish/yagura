@@ -45,7 +45,7 @@ const list = (items: string[], empty = "(none)") => (items.length ? items.map((i
 export function renderBrief(b: RenderedBrief): string {
   const missing = missingBriefFields(b);
   if (missing.length) throw new UnfillableBrief(missing);
-  const env = Object.entries(b.env).map(([k, v]) => `${k}=${v}`);
+  const env = Object.entries(b.env).map(([k, v]) => `${k}=${v}${b.envNotes?.[k] ? ` (${b.envNotes[k]})` : ""}`);
   return `# yagura brief
 
 You are running inside yagura. You cannot ask questions: everything you need is below. Work only in your worktree, stay inside SCOPE, and end with the handoff in REPORT as your final message.
@@ -121,7 +121,7 @@ export function packContract(p: { packPath: string; provider: string; leaseVars:
     `This is a pack unit. ${p.reason}. Write a verify pack at ${p.packPath}/ so yagura can verify every later change to this repo.`,
     `${p.packPath}/verify.json: {"provider": "${p.provider}", "doctor"?: cmd, "deploy"?: cmd, "teardown"?: cmd, "checks": [{"name": "unit", "command": cmd, "tier": tier, "timeoutSeconds"?: n}], "features": [{"name", "doc"}], "protected": [globs]}. Check names are lowercase words joined by dashes.`,
     "Every command runs through sh -c with the repo checkout as its working directory and these variables: YAGURA_AT (base or head), YAGURA_SHA, YAGURA_EVIDENCE (a directory; files written there are kept as evidence), and the slot's variables: " +
-      `${p.leaseVars.join(", ")}. Read nothing else from the machine; put scripts under ${p.packPath}/bin/ and one feature doc per user-facing feature under ${p.packPath}/features/.`,
+      `${p.leaseVars.join(", ")}, plus the environment's values under ENV (use them by name; a literal copy of a value in a file is rejected). Read nothing else from the machine; put scripts under ${p.packPath}/bin/ and one feature doc per user-facing feature under ${p.packPath}/features/.`,
     "doctor checks read-only that the environment is worth driving. deploy builds and starts the checkout in the slot; teardown removes only what deploy created. Leave out deploy and teardown when the checks need nothing running.",
     `Tiers, strongest first: deployed-verified, live-local-verified, e2e-verified, unit-verified, build-only. A check's tier is what its passing proves. This project needs at least ${p.minTier}.`,
     "yagura proves the pack on your branch head, with no agent: doctor, deploy, every check, then teardown must all exit 0 against the repo as it is now. Run them yourself the same way before you hand off.",
@@ -139,6 +139,8 @@ export interface VerifyBrief {
   scenarioDir: string;
   cli: string;
   leaseVars: Record<string, string>;
+  envNotes: Record<string, string>;
+  environmentNotes: string;
   deploys: boolean;
   timeboxMinutes: number;
   standing: string;
@@ -186,7 +188,7 @@ The command runs with the checkout as its working directory and prints a run id 
 Recipe from the unit: ${v.verifyRecipe}
 
 ## ENV
-${list(Object.entries(v.leaseVars).map(([k, val]) => `${k}=${val}`))}
+${list(Object.entries(v.leaseVars).map(([k, val]) => `${k}=${val}${v.envNotes[k] ? ` (${v.envNotes[k]})` : ""}`))}${v.environmentNotes.trim() ? `\n\nAbout this environment: ${v.environmentNotes.trim()}` : ""}
 
 ## TIMEBOX
 ${v.timeboxMinutes} minutes.

@@ -46,12 +46,51 @@ interface SlotHolder {
   unit: { projectId: string; seq: number; type: string; goal: string };
 }
 
+export interface KeptSlot {
+  leaseId: number;
+  attemptId: number;
+  unit: { projectId: string; seq: number; goal: string };
+  until: string;
+  reason: string;
+  namespace: string | null;
+  context: string | null;
+  leaseDir: string | null;
+}
+
+export interface EnvValueView {
+  name: string;
+  value: string;
+  note: string;
+  check: string | null;
+  source: string;
+  last: { ok: boolean; detail: string; at: string } | null;
+}
+
 export interface EnvironmentView {
   environment: Environment;
   implemented: boolean;
   active: (SlotHolder & { slot: string })[];
   queued: SlotHolder[];
   projects: { id: string; state: string }[];
+  kept: KeptSlot[];
+}
+
+export interface EnvironmentDetail extends EnvironmentView {
+  values: EnvValueView[];
+  keep: { policy: { value: "never" | "failed" | "always"; source: string }; hours: { value: number; source: string }; keeps: "deployed" | "directory" | null };
+  presets: { id: string; label: string }[];
+}
+
+export interface EnvTemplateFile {
+  template: {
+    name: string;
+    description: string;
+    provider: string;
+    capacity: number;
+    values: { name: string; value: string; note: string; ask: boolean }[];
+  } | null;
+  file: string;
+  error: string | null;
 }
 
 export interface SettingsOverview {

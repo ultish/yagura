@@ -124,6 +124,8 @@ describe("settings", () => {
       ["role.verifier.harness", "default"],
       ["role.verifier.model", "environment"],
       ["timebox.verify_seconds", "default"],
+      ["lease.keep", "default"],
+      ["lease.keep_hours", "default"],
     ]);
     expect(() => importSettings(db, "project:\n  p:\n    watchman.context_tokens: 9000\n")).toThrow(
       "project.p.watchman.context_tokens: watchman.context_tokens cannot be set per project; it is global only",

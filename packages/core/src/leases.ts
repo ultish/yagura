@@ -2,7 +2,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import type { Bootstrap } from "./config.js";
-import { createNamespaceSlot, destroyNamespaceSlot, doctorKube, KubeConfig, type DoctorCheck } from "./kube.js";
+import { createNamespaceSlot, destroyNamespaceSlot, doctorKube, KubeConfig, kubeConfig, type DoctorCheck } from "./kube.js";
+import { checkValues, valueMap } from "./envvalues.js";
 import type { AttemptId, Environment, EnvironmentId, IsoTime, LeaseId, Provider } from "./domain.js";
 import { getEnvironment, now, recordEvent, type Db } from "./store.js";
 
@@ -89,7 +90,7 @@ export const PROVIDERS_IMPL: Partial<Record<Provider, ProviderImpl>> = {
 
 export async function doctorEnvironment(db: Db, boot: Bootstrap, environmentId: EnvironmentId): Promise<{ ok: boolean; checks: DoctorCheck[] }> {
   const env = getEnvironment(db, environmentId);
-  const checks = await providerFor(env).doctor(env, boot);
+  const checks = [...(await providerFor(env).doctor(env, boot)), ...(await checkValues(db, environmentId))];
   const ok = checks.length > 0 && checks.every((c) => c.ok);
   db.prepare("UPDATE environments SET doctor_status = ?, doctor_checked_at = ?, doctor_json = ? WHERE id = ?").run(
     ok ? "passing" : "failing",
@@ -158,7 +159,7 @@ export async function acquireLease(
     await new Promise((r) => setTimeout(r, opts.pollMs ?? 2000));
     granted = tryGrant(db, env, attemptId, queuedId);
   }
-  const vars = await providerFor(env).createSlot(env, granted, boot);
+  const vars = { ...valueMap(db, env.id), ...(await providerFor(env).createSlot(env, granted, boot)) };
   db.prepare("UPDATE leases SET vars_json = ? WHERE id = ?").run(JSON.stringify(vars), granted.id);
   recordEvent(db, "lease.granted", { attemptId }, { environment: env.id, lease: granted.id, slot: granted.slot });
   return { id: granted.id, environmentId: env.id, attemptId, slot: granted.slot, vars };
@@ -172,6 +173,41 @@ export async function releaseLease(db: Db, boot: Bootstrap, leaseId: LeaseId, st
   await providerFor(env).destroySlot(env, { id: leaseId, slot: row.slot, vars: JSON.parse(row.vars_json) }, boot);
   db.prepare("UPDATE leases SET state = ?, released_at = ? WHERE id = ?").run(state, now() as IsoTime, leaseId);
   recordEvent(db, `lease.${state}`, { attemptId: row.attempt_id }, { lease: leaseId, slot: row.slot });
+}
+
+// A pool namespace is reused by the next lease of its slot, so keeping it would hand the next verification a dirty one.
+// Deleting a local slot later cannot stop what deploy started there, so its teardown still runs and only the directory stays.
+export function keepable(env: Environment): "deployed" | "directory" | null {
+  if (env.provider === "local-process") return "directory";
+  return kubeConfig(env).mode === "create" ? "deployed" : null;
+}
+
+export function keepLease(db: Db, leaseId: LeaseId, hours: number, reason: string): void {
+  const row = db.prepare("SELECT state, attempt_id, slot FROM leases WHERE id = ?").get(leaseId) as
+    { state: string; attempt_id: AttemptId; slot: string } | undefined;
+  if (!row || row.state !== "active") return;
+  const until = new Date(Date.now() + hours * 3_600_000).toISOString();
+  db.prepare("UPDATE leases SET state = 'released', released_at = ?, kept_until = ?, kept_reason = ? WHERE id = ?").run(now(), until, reason, leaseId);
+  recordEvent(db, "lease.kept", { attemptId: row.attempt_id }, { lease: leaseId, slot: row.slot, until, reason });
+}
+
+export async function deleteKept(db: Db, boot: Bootstrap, leaseId: LeaseId): Promise<boolean> {
+  const row = db.prepare("SELECT environment_id, slot, vars_json, attempt_id, kept_until FROM leases WHERE id = ?").get(leaseId) as
+    { environment_id: EnvironmentId; slot: string; vars_json: string; attempt_id: AttemptId; kept_until: string | null } | undefined;
+  if (!row?.kept_until) return false;
+  const env = getEnvironment(db, row.environment_id);
+  await providerFor(env).destroySlot(env, { id: leaseId, slot: row.slot, vars: JSON.parse(row.vars_json) }, boot);
+  db.prepare("UPDATE leases SET kept_until = NULL WHERE id = ?").run(leaseId);
+  recordEvent(db, "lease.kept_deleted", { attemptId: row.attempt_id }, { lease: leaseId, slot: row.slot });
+  return true;
+}
+
+export async function reapKept(db: Db, boot: Bootstrap, at = Date.now()): Promise<number> {
+  const due = (db.prepare("SELECT id, kept_until FROM leases WHERE kept_until IS NOT NULL").all() as { id: LeaseId; kept_until: string }[]).filter(
+    (r) => Date.parse(r.kept_until) <= at,
+  );
+  for (const r of due) await deleteKept(db, boot, r.id).catch(() => false);
+  return due.length;
 }
 
 export function activeLease(db: Db, attemptId: AttemptId): Lease | null {

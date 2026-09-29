@@ -3,9 +3,10 @@ import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { HANDOFF_TEMPLATE, packContract, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
-import { isBuild, type Attempt, type RenderedBrief, type Unit, type UnitId } from "./domain.js";
+import { isBuild, type Attempt, type EnvironmentId, type RenderedBrief, type Unit, type UnitId } from "./domain.js";
+import { environmentNotes, hardCodedValues, listValues, valueMap } from "./envvalues.js";
 import { LEASE_VARS } from "./leases.js";
-import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
+import { addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
 import { classifyFailure, parseHandoff, syntheticFailureHandoff } from "./handoff.js";
 import { layout, unitRef } from "./paths.js";
 import { checkScope } from "./scope.js";
@@ -84,6 +85,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   const standingPath = paths.standingOrders(project.id);
   const packForbid = isPack ? [] : [`${repo.verifyPackPath}/**`];
   const env = project.environmentId ? getEnvironment(db, project.environmentId) : null;
+  const envValues = valueMap(db, project.environmentId);
   const brief: RenderedBrief = {
     goal: unit.goal,
     repo: { id: repo.id, worktree, branch, baseSha: base },
@@ -100,11 +102,17 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         : []),
       ...(isPack ? unit.context.slice(1) : unit.context),
       ...unit.notes.map((n) => `Note from an earlier attempt: ${n}`),
+      ...(environmentNotes(db, project.environmentId) ? [`About this environment: ${environmentNotes(db, project.environmentId)}`] : []),
     ],
     readonly: [],
     acceptance: unit.acceptance,
     verify: unit.verify,
-    env: {},
+    env: envValues,
+    envNotes: Object.fromEntries(
+      listValues(db, project.environmentId as EnvironmentId)
+        .map((v) => [v.name, v.note])
+        .filter(([, n]) => n),
+    ),
     timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
     forbidden: [
       "no git push, rebase, merge, or branch switching",
@@ -137,7 +145,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       extraArgs: setting("harness.claude.extra_args"),
     },
     cwd: worktree,
-    env: {},
+    env: envValues,
     timeboxSeconds: unit.timeboxSeconds,
     logPath: paths.log(project.id, unit.seq, attempt.n),
   });
@@ -174,9 +182,18 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     });
     transitionUnit(db, unit.id, "handed_off", { attempt: attempt.n, status: handoff.status, head, leftovers: leftovers.paths });
     const violations = checkScope(touched, unit.writeScope, [...unit.forbidScope, ...packForbid]);
+    const literals = hardCodedValues(await addedLines(worktree, base), envValues, setting("values.literal_allowed"));
     if (violations.length) {
       updateAttempt(db, attempt.id, { failureMode: "scope" });
       transitionUnit(db, unit.id, "rejected", { reason: "scope", violations });
+    } else if (literals.length) {
+      updateAttempt(db, attempt.id, { failureMode: "scope" });
+      addUnitNote(
+        db,
+        unit.id,
+        `Attempt ${attempt.n} wrote environment values literally: ${literals.map((l) => `${l.path} has "${l.value}", use $${l.name}`).join("; ")}. Read values from the environment by name.`,
+      );
+      transitionUnit(db, unit.id, "rejected", { reason: "hard-coded environment values", literals });
     } else if (handoff.status === "blocked") {
       transitionUnit(db, unit.id, "blocked", { reason: "agent reported blocked" });
     } else if (head === base) {
