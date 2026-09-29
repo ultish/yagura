@@ -73,6 +73,7 @@ export function parseClaudeLine(line: string): HarnessEvent[] {
 
 export const claudeAdapter: HarnessAdapter = {
   id: "claude",
+  canResume: true,
   command(run: HarnessRun) {
     const argv = [
       run.bin ?? "claude",
@@ -85,6 +86,7 @@ export const claudeAdapter: HarnessAdapter = {
       ...run.pluginDirs.flatMap((d) => ["--plugin-dir", d]),
       ...run.addDirs.flatMap((d) => ["--add-dir", d]),
       ...(run.model ? ["--model", run.model] : []),
+      ...(run.resume ? ["--resume", run.resume] : []),
       ...run.extraArgs,
     ];
     return { argv, stdin: run.prompt };

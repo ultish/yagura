@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RunContext } from "./agent.js";
 import type { Bootstrap } from "./config.js";
-import type { EnvironmentId, ProjectId, RepoId, Unit } from "./domain.js";
+import { spendsAttempt, type EnvironmentId, type ProjectId, type RepoId, type Unit } from "./domain.js";
 import { setSetting } from "./config.js";
 import { listEvidenceRuns } from "./evidence.js";
 import { reapKept } from "./leases.js";
@@ -27,6 +27,7 @@ import {
   openStore,
   setProjectEnvironment,
   transitionUnit,
+  updateAttempt,
   type Db,
 } from "./store.js";
 import { runVerifyUnit } from "./verify.js";
@@ -34,7 +35,8 @@ import { runVerifyUnit } from "./verify.js";
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
 const fake: HarnessAdapter = {
   id: "claude",
-  command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs")], stdin: run.prompt }),
+  canResume: true,
+  command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs"), ...(run.resume ? ["--resume", run.resume] : [])], stdin: run.prompt }),
   parse: parseClaudeLine,
 };
 const tsx = pathToFileURL(join(dirname(createRequire(import.meta.url).resolve("tsx/package.json")), "dist/loader.mjs")).href;
@@ -216,5 +218,91 @@ describe("pack lifecycle scripts", () => {
     expect(await reapKept(db, ctx.boot, Date.now() + 3 * 3_600_000)).toBe(1);
     expect(existsSync(dir)).toBe(false);
     expect(db.prepare("SELECT kept_until FROM leases").get()).toEqual({ kept_until: null });
+  });
+});
+
+describe("resume on rejection", () => {
+  const attemptsOf = (u: Unit) => listAttempts(db, u.id);
+  const rework = async (u: Unit, mode = "success") => {
+    process.env.FAKE_MODE = mode;
+    await runWorkUnit(ctx, u.id);
+    return attemptsOf(u).at(-1)!;
+  };
+  const freshReasons = () =>
+    (db.prepare("SELECT data_json FROM events WHERE type = 'attempt.fresh' ORDER BY id").all() as { data_json: string }[]).map(
+      (e) => (JSON.parse(e.data_json) as { reason: string }).reason,
+    );
+
+  it("resumes the rejected worker's session in its own worktree with the verifier's findings, then verifies again", async () => {
+    const { target } = await workThenVerify("verify-fail");
+    expect(target.state).toBe("ready");
+    const first = attemptsOf(target)[0]!;
+    expect(first).toMatchObject({ rejection: "code-fault", sessionId: "s1" });
+    const second = await rework(target);
+    expect(second).toMatchObject({
+      resumesAttemptId: first.id,
+      sessionId: "s1",
+      worktreePath: first.worktreePath,
+      branch: first.branch,
+      baseSha: first.baseSha,
+      state: "handed_off",
+      missingSkills: [],
+    });
+    const prompt = readFileSync(layout(ctx.boot).brief(project, target.seq, 2), "utf8");
+    expect(prompt).toContain("This is attempt 2 of p/U1, resuming your own session from attempt 1.");
+    expect(prompt).toMatch(
+      /- run:\d+ scenario on your head: exit 1 \(trunk: exit 1\)\n  command: sh (\S+scenario\.sh)\n  \1:\n  ```\n  grep -q 'never there' app\/orders\.py\n  ```\n  \(no output\)/,
+    );
+    expect(prompt).toContain("## VERIFIER'S REPORT\n## Status\nsuccess\n\n## Verification\nverifier-failed");
+    expect(prompt).not.toContain("## GOAL");
+    expect(readFileSync(join(first.worktreePath!, "app/orders.py"), "utf8")).toContain("# fixed after findings: true");
+    expect(getUnit(db, target.id).state).toBe("verifying");
+    process.env.FAKE_MODE = "verify-pass";
+    const again = await runVerifyUnit(ctx, getUnitBySeq(db, project, 3).id);
+    expect(again.decision.outcome).toBe("verified");
+  });
+
+  it("starts fresh after one resumed round, when the session was near its context limit, and when resuming is off", async () => {
+    const { target } = await workThenVerify("verify-fail");
+    db.prepare("UPDATE units SET max_attempts = 5 WHERE id = ?").run(target.id);
+    await rework(target);
+    process.env.FAKE_MODE = "verify-fail";
+    await runVerifyUnit(ctx, getUnitBySeq(db, project, 3).id);
+    const third = await rework(target);
+    expect(third.resumesAttemptId).toBeNull();
+    expect(third.worktreePath).not.toBe(attemptsOf(target)[0]!.worktreePath);
+    expect(readFileSync(layout(ctx.boot).brief(project, target.seq, 3), "utf8")).toContain("## GOAL");
+
+    process.env.FAKE_MODE = "verify-fail";
+    await runVerifyUnit(ctx, getUnitBySeq(db, project, 4).id);
+    updateAttempt(db, third.id, { contextPeak: 150_000 });
+    expect((await rework(target)).resumesAttemptId).toBeNull();
+
+    process.env.FAKE_MODE = "verify-fail";
+    await runVerifyUnit(ctx, getUnitBySeq(db, project, 5).id);
+    setSetting(db, "project", project, "work.resume_on_rejection", false);
+    expect((await rework(target)).resumesAttemptId).toBeNull();
+    expect(freshReasons()).toEqual([
+      "attempt 2 was already a resumed round",
+      "attempt 3 peaked at 75% of its context window",
+      "attempt 4 is not resumed: resume on rejection is off",
+    ]);
+  });
+
+  it("falls back to a fresh attempt at no extra try when the session cannot be resumed", async () => {
+    const { target } = await workThenVerify("verify-fail");
+    process.env.FAKE_RESUME = "missing";
+    try {
+      await rework(target);
+    } finally {
+      delete process.env.FAKE_RESUME;
+    }
+    const [first, resume, fresh] = attemptsOf(target);
+    expect(resume).toMatchObject({ resumesAttemptId: first!.id, sessionId: null, state: "failed", failureMode: "harness-error" });
+    expect(fresh).toMatchObject({ resumesAttemptId: null, state: "handed_off" });
+    expect(attemptsOf(target).filter(spendsAttempt)).toHaveLength(2);
+    const failed = db.prepare("SELECT data_json FROM events WHERE type = 'attempt.resume_failed'").get() as { data_json: string };
+    expect(JSON.parse(failed.data_json).reason).toBe("resuming attempt 1's session failed to start: No conversation found with session ID: s1");
+    expect(getUnit(db, target.id).state).toBe("verifying");
   });
 });

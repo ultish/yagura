@@ -28,7 +28,8 @@ import {
 const fakeAgent = fileURLToPath(new URL("./harness/fixtures/fake-agent.mjs", import.meta.url));
 const fake: HarnessAdapter = {
   id: "claude",
-  command: (run) => ({ argv: [process.execPath, fakeAgent], stdin: run.prompt }),
+  canResume: true,
+  command: (run) => ({ argv: [process.execPath, fakeAgent, ...(run.resume ? ["--resume", run.resume] : [])], stdin: run.prompt }),
   parse: parseClaudeLine,
 };
 

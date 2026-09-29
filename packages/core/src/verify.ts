@@ -53,7 +53,7 @@ function failedVerifications(db: Db, target: Unit): number {
   ).n;
 }
 
-function applyOutcome(db: Db, target: Unit, decision: VerdictDecision, verifySeq: number): void {
+function applyOutcome(db: Db, target: Unit, work: Attempt, decision: VerdictDecision, verifySeq: number): void {
   const maxRetries = resolveSetting(db, "verify.max_retries", { projectId: target.projectId }).value;
   recordEvent(
     db,
@@ -66,6 +66,7 @@ function applyOutcome(db: Db, target: Unit, decision: VerdictDecision, verifySeq
       transitionUnit(db, target.id, "verified", { tier: decision.tier });
       return;
     case "code-fault": {
+      updateAttempt(db, work.id, { rejection: "code-fault" });
       addUnitNote(db, target.id, `Verifier U${verifySeq} rejected the previous attempt: ${decision.reason}. Read its findings in handoffs/u${verifySeq}.*.md.`);
       transitionUnit(db, target.id, "rejected", { reason: decision.reason });
       const used = listAttempts(db, target.id).filter(spendsAttempt).length;
@@ -118,7 +119,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       transitionUnit(db, unit.id, "handed_off", { outcome: decision.outcome });
       transitionUnit(db, unit.id, "done");
     } else transitionUnit(db, unit.id, "failed", { outcome: decision.outcome });
-    applyOutcome(db, target, decision, unit.seq);
+    applyOutcome(db, target, work, decision, unit.seq);
     return { attempt: getAttempt(db, attempt.id), decision, verdictId: null };
   };
 

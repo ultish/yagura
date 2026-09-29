@@ -38,3 +38,4 @@ export * from "./kube.js";
 export * from "./envvalues.js";
 export * from "./presets.js";
 export * from "./templates.js";
+export * from "./resume.js";

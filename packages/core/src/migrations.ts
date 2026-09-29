@@ -151,6 +151,14 @@ ALTER TABLE leases ADD COLUMN kept_until TEXT;
 ALTER TABLE leases ADD COLUMN kept_reason TEXT;
 `,
   },
+  {
+    version: 9,
+    sql: `
+ALTER TABLE attempts ADD COLUMN session_id TEXT;
+ALTER TABLE attempts ADD COLUMN resumes_attempt_id INTEGER REFERENCES attempts (id);
+ALTER TABLE attempts ADD COLUMN rejection TEXT CHECK (rejection IN ('code-fault', 'literals', 'scope', 'skills', 'conflict'));
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

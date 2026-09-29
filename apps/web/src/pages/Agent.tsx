@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, streamUrl, useApi, useNow, type AttemptDetail, type EvidenceRun, type LogLine, type ProjectDetail } from "../api";
+import { api, streamUrl, useApi, useNow, type Attempt, type AttemptDetail, type EvidenceRun, type LogLine, type ProjectDetail } from "../api";
 import { roleOf } from "../lib/units";
 import { duration, modelName, tokens } from "../lib/format";
 import { Markdown } from "../lib/markdown";
@@ -250,15 +250,25 @@ function statusOf(d: AttemptDetail, now: number, lastActivity: string | null): {
       return { text: `Queued${d.waiting ? `: ${d.waiting}` : ""}.`, tone: "muted" };
     case "handed_off":
       return {
-        text: `Handed off${a.handoffStatus ? `: ${a.handoffStatus}` : ""} after ${took}.${a.missingSkills.length ? ` Skipped ${a.missingSkills.join(", ")}, so yagura rejected it.` : ""}`,
-        tone: a.missingSkills.length ? "bell" : a.handoffStatus === "success" ? "pine" : "info",
+        text: `Handed off${a.handoffStatus ? `: ${a.handoffStatus}` : ""} after ${took}.${a.missingSkills.length ? ` Skipped ${a.missingSkills.join(", ")}, so yagura rejected it.` : a.rejection ? ` Sent back: ${REJECTION_LABEL[a.rejection]}.` : ""}`,
+        tone: a.missingSkills.length || a.rejection ? "bell" : a.handoffStatus === "success" ? "pine" : "info",
       };
     case "failed":
+      if (a.resumesAttemptId && !a.sessionId)
+        return { text: "Could not resume the earlier session, so yagura started a fresh try. This one did not count as a try.", tone: "muted" };
       return { text: `Failed${a.failureMode ? ` (${a.failureMode})` : ""} after ${took}.`, tone: "bell" };
     case "stopped":
       return { text: `Stopped by an operator${a.stopNote ? `: ${a.stopNote}` : ""}.`, tone: "muted" };
   }
 }
+
+const REJECTION_LABEL: Record<NonNullable<Attempt["rejection"]>, string> = {
+  "code-fault": "verification failed",
+  literals: "hard-coded values",
+  scope: "out of scope",
+  skills: "skipped skills",
+  conflict: "trunk conflict",
+};
 
 export function Agent({ attemptId }: { attemptId: number }) {
   const now = useNow(1000);
@@ -318,6 +328,12 @@ export function Agent({ attemptId }: { attemptId: number }) {
             {u.projectId}
           </Link>{" "}
           · U{u.seq} · {role} · attempt {a.n}
+          {a.resumesAttemptId && (
+            <>
+              {" "}
+              · resumes <Link to={`/a/${a.resumesAttemptId}`}>try {u.attempts.find((x) => x.id === a.resumesAttemptId)?.n ?? "?"}</Link>
+            </>
+          )}
           {d.target && (
             <>
               {" "}
@@ -419,20 +435,29 @@ export function Agent({ attemptId }: { attemptId: number }) {
             <Meter label="timebox" value={elapsed} max={d.timeboxSeconds * 1000} text={`${duration(elapsed)} of ${duration(d.timeboxSeconds * 1000)}`} />
           </div>
           <div>
-            <h2 className="h2">Brief</h2>
-            {briefGoal && <div style={{ fontSize: 13.5, marginTop: 6 }}>{briefGoal.split("\n")[0]}</div>}
-            <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-              {acceptCount ? `${acceptCount} acceptance lines · ` : ""}verify <span className="mono">{u.verify ?? "—"}</span>
-            </div>
-            {u.notes.length > 0 && (
-              <div style={{ fontSize: 13, marginTop: 4 }} className="s-lamp">
-                Notes: {u.notes.join(" / ")}
+            <h2 className="h2">{a.resumesAttemptId ? "Resumed" : "Brief"}</h2>
+            {a.resumesAttemptId ? (
+              <div style={{ fontSize: 13.5, marginTop: 6 }}>
+                Same session, worktree, and branch as try {u.attempts.find((x) => x.id === a.resumesAttemptId)?.n ?? "?"}; yagura sent the rejection and its
+                findings instead of a new brief.
               </div>
+            ) : (
+              <>
+                {briefGoal && <div style={{ fontSize: 13.5, marginTop: 6 }}>{briefGoal.split("\n")[0]}</div>}
+                <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
+                  {acceptCount ? `${acceptCount} acceptance lines · ` : ""}verify <span className="mono">{u.verify ?? "—"}</span>
+                </div>
+                {u.notes.length > 0 && (
+                  <div style={{ fontSize: 13, marginTop: 4 }} className="s-lamp">
+                    Notes: {u.notes.join(" / ")}
+                  </div>
+                )}
+              </>
             )}
             {d.brief && (
               <details style={{ marginTop: 6 }}>
                 <summary className="mono" style={{ fontSize: 12, cursor: "pointer", color: "var(--amber)" }}>
-                  the whole brief
+                  {a.resumesAttemptId ? "what yagura sent" : "the whole brief"}
                 </summary>
                 <pre
                   className="mono"
@@ -476,7 +501,14 @@ export function Agent({ attemptId }: { attemptId: number }) {
                   ) : (
                     <Link to={`/a/${x.id}`}>
                       try {x.n} · {x.state}
-                      {x.missingSkills.length ? ` · skipped ${x.missingSkills.join(", ")}` : x.failureMode ? ` · ${x.failureMode}` : ""}
+                      {x.resumesAttemptId ? " · resumed" : ""}
+                      {x.rejection
+                        ? ` · rejected: ${REJECTION_LABEL[x.rejection]}`
+                        : x.missingSkills.length
+                          ? ` · skipped ${x.missingSkills.join(", ")}`
+                          : x.failureMode
+                            ? ` · ${x.failureMode}`
+                            : ""}
                     </Link>
                   )}
                 </div>

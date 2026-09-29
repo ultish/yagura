@@ -3,7 +3,8 @@ import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { HANDOFF_TEMPLATE, packContract, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
-import { isBuild, type Attempt, type EnvironmentId, type RenderedBrief, type Unit, type UnitId } from "./domain.js";
+import { isBuild, type Attempt, type EnvironmentId, type Rejection, type RenderedBrief, type Unit, type UnitId } from "./domain.js";
+import { chooseResume, rejectionFindings, renderResumePrompt } from "./resume.js";
 import { environmentNotes, hardCodedValues, listValues, valueMap } from "./envvalues.js";
 import { LEASE_VARS } from "./leases.js";
 import { addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
@@ -19,6 +20,7 @@ import {
   getProject,
   getRepo,
   getUnit,
+  listAttempts,
   now,
   recordEvent,
   transitionUnit,
@@ -74,13 +76,24 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
 
   const mirror = paths.mirror(repo.id);
   await ensureMirror(repo.url, mirror);
-  const base = await resolveRef(mirror, `origin/${repo.defaultBranch}`);
+  const choice = chooseResume(listAttempts(db, unit.id), {
+    enabled: setting("work.resume_on_rejection"),
+    canResume: adapter.canResume,
+    maxContext: setting("work.resume_max_context"),
+  });
+  const from = choice.resume && existsSync(choice.resume.worktreePath!) ? choice.resume : null;
+  const fresh = choice.fresh ?? (choice.resume && !from ? `attempt ${choice.resume.n}'s worktree is gone` : null);
 
   const attempt = createAttempt(db, unit.id, harnessId, setting("role.worker.model"));
-  const branch = `${setting("git.branch_prefix")}/${project.id}/${unitRef(unit.seq)}-${attempt.n}`;
-  const worktree = paths.worktree(repo.id, project.id, unit.seq, attempt.n);
-  mkdirSync(dirname(worktree), { recursive: true });
-  await addWorktree(mirror, worktree, branch, base);
+  const refs = { projectId: project.id, unitId: unit.id, attemptId: attempt.id };
+  if (fresh) recordEvent(db, "attempt.fresh", refs, { reason: fresh });
+  const base = from ? from.baseSha! : await resolveRef(mirror, `origin/${repo.defaultBranch}`);
+  const branch = from ? from.branch! : `${setting("git.branch_prefix")}/${project.id}/${unitRef(unit.seq)}-${attempt.n}`;
+  const worktree = from ? from.worktreePath! : paths.worktree(repo.id, project.id, unit.seq, attempt.n);
+  if (!from) {
+    mkdirSync(dirname(worktree), { recursive: true });
+    await addWorktree(mirror, worktree, branch, base);
+  }
 
   const standingPath = paths.standingOrders(project.id);
   const packForbid = isPack ? [] : [`${repo.verifyPackPath}/**`];
@@ -125,15 +138,25 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     report: HANDOFF_TEMPLATE,
     standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
   };
-  const briefText = renderBrief(brief);
+  const briefText = from
+    ? renderResumePrompt({
+        unit: `${project.id}/U${unit.seq}`,
+        attempt: attempt.n,
+        resumes: from.n,
+        branch,
+        ...rejectionFindings(db, boot, unit, from),
+        timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
+        report: HANDOFF_TEMPLATE,
+      })
+    : renderBrief(brief);
   write(paths.brief(project.id, unit.seq, attempt.n), briefText);
 
   const startedAt = now();
-  transitionUnit(db, unit.id, "running", { attempt: attempt.n });
-  updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base });
+  transitionUnit(db, unit.id, "running", { attempt: attempt.n, ...(from ? { resumes: from.n } : {}) });
+  updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base, resumesAttemptId: from?.id ?? null });
 
   const session = await runAgentSession(ctx, {
-    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: isPack ? "pack" : "worker" }),
+    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: isPack ? "pack" : "worker", inheritedSkills: from?.skills }),
     adapter,
     run: {
       prompt: briefText,
@@ -143,6 +166,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       pluginDirs: [boot.skillsDir],
       addDirs: [],
       extraArgs: setting("harness.claude.extra_args"),
+      resume: from?.sessionId ?? undefined,
     },
     cwd: worktree,
     env: envValues,
@@ -161,11 +185,22 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     return getAttempt(db, attempt.id);
   }
 
+  if (from && !getAttempt(db, attempt.id).sessionId) {
+    const reason = `resuming attempt ${from.n}'s session failed to start: ${session.final?.text || session.stderrTail.trim() || `exit ${session.exitCode}`}`;
+    updateAttempt(db, attempt.id, { state: "failed", endedAt, exitCode: session.exitCode, failureMode: "harness-error" });
+    recordEvent(db, "attempt.resume_failed", refs, { reason });
+    transitionUnit(db, unit.id, "ready", { reason, attempt: attempt.n });
+    return runWorkUnit(ctx, unitId);
+  }
+
   const leftovers = await discardLeftovers(worktree);
   if (leftovers.paths.length) write(paths.leftovers(project.id, unit.seq, attempt.n), leftovers.patch);
   const head = await headSha(worktree);
   const touched = await changedPaths(worktree, base);
-  const refs = { projectId: project.id, unitId: unit.id, attemptId: attempt.id };
+  const reject = (rejection: Rejection, data: Record<string, unknown>) => {
+    updateAttempt(db, attempt.id, { rejection, ...(rejection === "code-fault" ? {} : { failureMode: "scope" as const }) });
+    transitionUnit(db, unit.id, "rejected", data);
+  };
   const final = session.final;
   const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
 
@@ -183,17 +218,14 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     transitionUnit(db, unit.id, "handed_off", { attempt: attempt.n, status: handoff.status, head, leftovers: leftovers.paths });
     const violations = checkScope(touched, unit.writeScope, [...unit.forbidScope, ...packForbid]);
     const literals = hardCodedValues(await addedLines(worktree, base), envValues, setting("values.literal_allowed"));
-    if (violations.length) {
-      updateAttempt(db, attempt.id, { failureMode: "scope" });
-      transitionUnit(db, unit.id, "rejected", { reason: "scope", violations });
-    } else if (literals.length) {
-      updateAttempt(db, attempt.id, { failureMode: "scope" });
+    if (violations.length) reject("scope", { reason: "scope", violations });
+    else if (literals.length) {
       addUnitNote(
         db,
         unit.id,
         `Attempt ${attempt.n} wrote environment values literally: ${literals.map((l) => `${l.path} has "${l.value}", use $${l.name}`).join("; ")}. Read values from the environment by name.`,
       );
-      transitionUnit(db, unit.id, "rejected", { reason: "hard-coded environment values", literals });
+      reject("literals", { reason: "hard-coded environment values", literals });
     } else if (handoff.status === "blocked") {
       transitionUnit(db, unit.id, "blocked", { reason: "agent reported blocked" });
     } else if (head === base) {
@@ -204,6 +236,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         unit.id,
         `Attempt ${attempt.n} skipped required skills (${session.missingSkills.join(", ")}). Load each of them with the Skill tool before doing any work.`,
       );
+      updateAttempt(db, attempt.id, { rejection: "skills" });
       transitionUnit(db, unit.id, "rejected", { reason: "skipped required skills", missing: session.missingSkills });
     } else {
       await ensureMirror(repo.url, mirror);
@@ -214,6 +247,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
           unit.id,
           `Attempt ${attempt.n} conflicted with ${repo.defaultBranch} at ${trunk.slice(0, 10)}, which moved while it worked; the next attempt starts from the new trunk.`,
         );
+        updateAttempt(db, attempt.id, { rejection: "conflict" });
         transitionUnit(db, unit.id, "rejected", { reason: "conflicts with trunk", trunk });
       } else queueVerification(db, getUnit(db, unit.id));
     }

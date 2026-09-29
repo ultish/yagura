@@ -45,3 +45,29 @@ describe("claude command", () => {
     expect(claudeAdapter.command({ ...run, model: "opus" }).argv.slice(-2)).toEqual(["--model", "opus"]);
   });
 });
+
+describe("claude resume (real transcripts)", () => {
+  const read = (f: string) =>
+    readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8")
+      .split("\n")
+      .flatMap(parseClaudeLine);
+
+  it("passes the session to --resume", () => {
+    const run = { prompt: "p", bin: null, model: null, permissionMode: "acceptEdits", pluginDirs: [], addDirs: [], extraArgs: [] };
+    expect(claudeAdapter.command({ ...run, resume: "abc" }).argv.slice(-2)).toEqual(["--resume", "abc"]);
+    expect(claudeAdapter.command(run).argv).not.toContain("--resume");
+  });
+
+  it("keeps the session id and replays nothing from the earlier round", () => {
+    const events = read("claude-resume.jsonl");
+    expect(events.filter((e) => e.kind === "session").map((e) => e.kind === "session" && e.sessionId)).toEqual(["62931194-a641-43c8-b229-468927482bf2"]);
+    expect(events.filter((e) => e.kind === "text").map((e) => e.kind === "text" && e.text)).toEqual(["PERSIMMON"]);
+    expect(events.at(-1)).toMatchObject({ kind: "final", text: "PERSIMMON", isError: false });
+  });
+
+  it("starts no session when the id is unknown", () => {
+    const events = read("claude-resume-missing.jsonl");
+    expect(events.some((e) => e.kind === "session")).toBe(false);
+    expect(events).toEqual([{ kind: "final", text: "", isError: true, stopReason: null, costUsd: 0 }]);
+  });
+});

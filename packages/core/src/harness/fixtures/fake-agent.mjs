@@ -5,7 +5,9 @@ const mode = process.env.FAKE_MODE;
 const emit = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
 let brief = "";
 process.stdin.on("data", (d) => (brief += d));
+const resumeAt = process.argv.indexOf("--resume");
 process.stdin.on("end", () => {
+  if (resumeAt > 0) return resumed(process.argv[resumeAt + 1]);
   emit({ type: "system", subtype: "init", session_id: "s1", model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
   const skills =
     {
@@ -42,6 +44,31 @@ process.stdin.on("end", () => {
       : `## Status\n${mode === "blocked" ? "blocked" : "success"}\n\n## Branch\n\`b\`\n\n## What I did\n- edited ${file}\n\n## Verification\nunit-verified\n\n## Evidence\n- python3 -m unittest -> ok\n`;
   emit({ type: "result", subtype: "success", is_error: false, result: handoff, terminal_reason: "completed", total_cost_usd: 0.01 });
 });
+
+// Mirrors real claude -p --resume (fixtures claude-resume*.jsonl): same session id, no replay, no fresh skill loads.
+function resumed(sessionId) {
+  if (process.env.FAKE_RESUME === "missing") {
+    const error = `No conversation found with session ID: ${sessionId}`;
+    emit({ type: "result", subtype: "error_during_execution", is_error: true, errors: [error] });
+    process.stderr.write(`${error}\n`);
+    process.exit(1);
+  }
+  emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
+  const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
+  appendFileSync(file, `# fixed after findings: ${/run:\d+/.test(brief)}\n`);
+  const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
+  g("add", file);
+  g("commit", "-q", "-m", "fix after findings");
+  emit({ type: "assistant", message: { content: [{ type: "text", text: "Fixed." }], usage: { input_tokens: 900, output_tokens: 20 } } });
+  emit({
+    type: "result",
+    subtype: "success",
+    is_error: false,
+    result: `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file}\n\n## Verification\nunit-verified\n`,
+    terminal_reason: "completed",
+    total_cost_usd: 0.01,
+  });
+}
 
 function verify(mode) {
   emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "s1", name: "Skill", input: { skill: "yagura:yagura-verifier" } }] } });
@@ -119,14 +146,20 @@ function engine(role) {
         `printf '%s' '${svg}' > "$YAGURA_EVIDENCE/screen.svg"`,
         `node -e 'require("fs").writeFileSync(process.env.YAGURA_EVIDENCE + "/pixel.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"))'`,
         `echo "checking ${file}"`,
-        `test -f ${file}`,
+        process.env.FAKE_VERIFY_NEEDS_FIX ? `grep -q 'fixed after findings' ${file}` : `test -f ${file}`,
         "",
       ].join("\n"),
     );
-    const run = (at) =>
-      Number(/run:(\d+)/.exec(execSync(`yagura evidence run --at ${at} --label s -- sh ${process.cwd()}/scenario.sh`, { encoding: "utf8" }))[1]);
+    const exits = {};
+    const run = (at) => {
+      const out = execSync(`yagura evidence run --at ${at} --label s -- sh ${process.cwd()}/scenario.sh`, { encoding: "utf8" });
+      const [, id, exit] = /run:(\d+) .*: (?:exit (\d+)|timed out)/.exec(out);
+      exits[at] = exit === "0";
+      return Number(id);
+    };
     const base = run("base");
     const head = run("head");
+    if (!exits.head) return finish(`## Status\nsuccess\n\n## Verification\nverifier-failed\n\n## Evidence\n- run:${head} fails on head\n- run:${base}\n`);
     const order = ["deployed-verified", "live-local-verified", "e2e-verified", "unit-verified", "build-only"];
     const listed = [...brief.matchAll(/^- [\w-]+ \(([\w-]+)\): base/gm)].map((m) => m[1]);
     const tier = order.find((t) => listed.includes(t)) ?? "unit-verified";

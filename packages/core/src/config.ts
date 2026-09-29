@@ -62,6 +62,13 @@ export const SETTINGS = {
   "timebox.watchman_seconds": z.number().int().positive().default(900).describe("How long one watchman turn may run"),
   "watchman.context_tokens": z.number().int().min(4000).default(40000).describe("Size budget for the watchman's brief"),
   "timebox.work_seconds": z.number().int().positive().default(1800).describe("How long a worker may run before it is stopped"),
+  "work.resume_on_rejection": z.boolean().default(true).describe("After a rejection, resume the worker's own session with the findings"),
+  "work.resume_max_context": z
+    .number()
+    .gt(0)
+    .max(1)
+    .default(0.6)
+    .describe("Start fresh instead when the rejected session used more than this share of its context window"),
   "timebox.verify_seconds": z.number().int().positive().default(1200).describe("How long a verifier may run before it is stopped"),
   "verify.max_retries": z.number().int().positive().default(2).describe("Fresh verify runs after an invalid or blocked verdict"),
   max_attempts: z.number().int().positive().default(2).describe("Tries a unit gets before it blocks"),
@@ -104,6 +111,8 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "timebox.watchman_seconds": [],
   "watchman.context_tokens": [],
   "timebox.work_seconds": PR,
+  "work.resume_on_rejection": PR,
+  "work.resume_max_context": PR,
   "timebox.verify_seconds": PRE,
   "verify.max_retries": P,
   max_attempts: PR,
