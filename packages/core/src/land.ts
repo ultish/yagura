@@ -8,6 +8,7 @@ import { gateResolved } from "./gates.js";
 import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWorktree, resolveRef } from "./git.js";
 import { layout } from "./paths.js";
 import { markPackProven } from "./packs.js";
+import { MAX_REBASES, queueRebase } from "./rebase.js";
 import { addVerifyUnit } from "./runner.js";
 import {
   addUnitNote,
@@ -26,7 +27,7 @@ import {
 } from "./store.js";
 import { landMessage } from "./audit.js";
 
-export type LandOutcome = "landed" | "blocked" | "reverifying" | "proposed" | "waiting" | "rework";
+export type LandOutcome = "landed" | "blocked" | "reverifying" | "proposed" | "waiting" | "rework" | "rebasing";
 
 export interface LandResult {
   unit: Unit;
@@ -118,6 +119,14 @@ async function squashOntoTrunk(l: Landing): Promise<Squash> {
   }
 }
 
+function rebaseOrBlock(l: Landing, trunk: Sha, conflict: string): LandResult {
+  const rebase = queueRebase(l.db, l.unit, trunk, conflict);
+  if (!rebase) return block(l, `${conflict}; ${MAX_REBASES} rebases did not land it`);
+  const reason = `${conflict}; rebasing in U${rebase.seq}`;
+  transitionUnit(l.db, l.unit.id, "blocked", { reason, rebaseUnit: rebase.seq });
+  return { unit: getUnit(l.db, l.unit.id), outcome: "rebasing", landedSha: null, reason };
+}
+
 function block(l: Landing, reason: string): LandResult {
   transitionUnit(l.db, l.unit.id, "blocked", { reason });
   return { unit: getUnit(l.db, l.unit.id), outcome: "blocked", landedSha: null, reason };
@@ -181,7 +190,7 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
     return block(l, (e as Error).message);
   }
   const squash = await squashOntoTrunk(l);
-  if (squash.kind === "conflict") return block(l, `conflicts with ${l.repo.defaultBranch} at ${squash.trunk.slice(0, 10)}; needs a rebase unit`);
+  if (squash.kind === "conflict") return rebaseOrBlock(l, squash.trunk, `conflicts with ${l.repo.defaultBranch} at ${squash.trunk.slice(0, 10)}`);
   if (squash.kind === "changed") return reverify(l, squash.trunk, squash.rebased);
   if (forge) return propose(l, forge, squash);
 
@@ -321,7 +330,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   if (status.merge === "behind" || status.merge === "conflict") {
     const squash = await squashOntoTrunk(l);
     if (squash.kind === "conflict")
-      return block(l, `pull request #${mr.number} conflicts with ${repo.defaultBranch} at ${squash.trunk.slice(0, 10)}; needs a rebase unit`);
+      return rebaseOrBlock(l, squash.trunk, `pull request #${mr.number} conflicts with ${repo.defaultBranch} at ${squash.trunk.slice(0, 10)}`);
     if (squash.kind === "changed") return reverify(l, squash.trunk, squash.rebased);
     return propose(l, forge, squash);
   }

@@ -13,6 +13,7 @@ process.stdin.on("end", () => {
     {
       worker: ["yagura:yagura-worker", "pstack:poteto-mode"],
       pack: ["yagura:yagura-pack"],
+      rebase: ["yagura:yagura-rebase"],
       planner: ["yagura:yagura-planner"],
       verifier: ["yagura:yagura-verifier"],
       watchman: ["yagura:yagura-watchman"],
@@ -20,6 +21,7 @@ process.stdin.on("end", () => {
   skills.push(...(process.env.FAKE_SKILLS ?? "").split(",").filter(Boolean));
   if (mode !== "noskills")
     for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
+  if (process.env.YAGURA_ROLE === "rebase") return rebase();
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
   if (mode === "hang") return setTimeout(() => {}, 60_000);
   if ((mode ?? "").startsWith("verify")) return verify(mode);
@@ -69,6 +71,15 @@ function resumed(sessionId) {
     terminal_reason: "completed",
     total_cost_usd: 0.01,
   });
+}
+
+// Replays the branch onto the named trunk commit, keeping the branch's side of each conflict.
+function rebase() {
+  const onto = /git rebase ([0-9a-f]{40})/.exec(brief)[1];
+  if (process.env.FAKE_REBASE === "fail")
+    return finish("## Status\nblocked\n\n## Verification\nnot-verified\n\n## Notes, concerns, deviations\n- could not resolve\n");
+  execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "rebase", "-X", "theirs", onto]);
+  finish("## Status\nsuccess\n\n## Verification\nunit-verified\n\n## What I did\n- rebased and kept both changes\n");
 }
 
 function verify(mode) {

@@ -41,3 +41,4 @@ export * from "./templates.js";
 export * from "./resume.js";
 export * from "./skills.js";
 export * from "./forge.js";
+export * from "./rebase.js";

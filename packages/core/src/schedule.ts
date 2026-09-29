@@ -16,7 +16,7 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
   const deps = listDeps(db, projectId);
   const result: Readiness = { ready: [], waiting: [], stuck: [] };
   for (const u of units) {
-    if (u.state !== "ready" || (!isBuild(u) && u.type !== "verify")) continue;
+    if (u.state !== "ready" || (!isBuild(u) && u.type !== "verify" && u.type !== "rebase")) continue;
     if (u.type === "verify") {
       const target = u.targetUnitId ? byId.get(u.targetUnitId) : undefined;
       const pack = units.find((p) => p.type === "pack" && p.repoId === u.repoId && !TERMINAL.has(p.state));

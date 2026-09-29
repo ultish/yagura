@@ -16,6 +16,7 @@ import { setSetting } from "./config.js";
 import { getMergeRequest } from "./forge.js";
 import { landUnit, liveVerdict, watchMergeRequest } from "./land.js";
 import { layout } from "./paths.js";
+import { runRebaseUnit } from "./rebase.js";
 import { runWorkUnit } from "./runner.js";
 import { failurePolicy } from "./schedule.js";
 import {
@@ -181,14 +182,50 @@ describe("landUnit (forge none)", () => {
     expect(failurePolicy(getUnitBySeq(db, project, 1), listAttempts(db, work.id))).toMatchObject({ action: "retry" });
   });
 
-  it("blocks instead of landing when trunk conflicts with the change", async () => {
+  it("queues a rebase unit when trunk conflicts, verifies the rebased head, and lands it", async () => {
     const work = await verifiedUnit();
     await advanceTrunk("app/orders.py", "x = 99\n");
-    const before = await originMain();
+    const trunk = await originMain();
     const result = await landUnit(ctx, work.id);
-    expect(result).toMatchObject({ outcome: "blocked", reason: expect.stringMatching(/conflicts with main/) });
+    expect(result).toMatchObject({ outcome: "rebasing", reason: `conflicts with main at ${trunk.slice(0, 10)}; rebasing in U3` });
     expect(result.unit.state).toBe("blocked");
-    expect(await originMain()).toBe(before);
+    const rebase = getUnitBySeq(db, project, 3);
+    expect(rebase).toMatchObject({ type: "rebase", state: "ready", targetUnitId: work.id, writeScope: ["app/**"] });
+    expect(rebase.goal).toBe(`Rebase U1 onto main at ${trunk}: Implement apply_discount. Then more detail.`);
+
+    process.env.FAKE_MODE = "success";
+    const attempt = await runRebaseUnit(ctx, rebase.id);
+    expect(attempt).toMatchObject({ state: "handed_off", missingSkills: [] });
+    expect(getUnitBySeq(db, project, 3).state).toBe("done");
+    expect(getUnitBySeq(db, project, 1).state).toBe("verifying");
+    const onTarget = listAttempts(db, work.id).at(-1)!;
+    expect(onTarget).toMatchObject({ harness: "yagura-rebase", baseSha: trunk, headSha: attempt.headSha });
+    expect(readFileSync(layout(ctx.boot).brief(project, 3, 1), "utf8")).toContain(`(run \`git rebase ${trunk}\`)`);
+
+    process.env.FAKE_MODE = "verify-pass";
+    await runVerifyUnit(ctx, getUnitBySeq(db, project, 4).id);
+    const landed = await landUnit(ctx, work.id);
+    expect(landed.outcome).toBe("landed");
+    expect(await git(["merge-base", "--is-ancestor", trunk, "main"], { cwd: origin }).then(() => true)).toBe(true);
+    expect(await git(["show", "main:app/orders.py"], { cwd: origin })).toContain("edited by fake agent");
+  });
+
+  it("blocks when the rebase fails, and stops queuing rebases after two", async () => {
+    const work = await verifiedUnit();
+    await advanceTrunk("app/orders.py", "x = 99\n");
+    await landUnit(ctx, work.id);
+    process.env.FAKE_REBASE = "fail";
+    try {
+      await runRebaseUnit(ctx, getUnitBySeq(db, project, 3).id);
+    } finally {
+      delete process.env.FAKE_REBASE;
+    }
+    expect(getUnitBySeq(db, project, 3).state).toBe("blocked");
+    expect(getUnitBySeq(db, project, 1).state).toBe("blocked");
+    db.prepare("UPDATE units SET state = 'verified' WHERE id = ?").run(work.id);
+    expect((await landUnit(ctx, work.id)).outcome).toBe("rebasing");
+    db.prepare("UPDATE units SET state = 'verified' WHERE id = ?").run(work.id);
+    expect(await landUnit(ctx, work.id)).toMatchObject({ outcome: "blocked", reason: expect.stringMatching(/; 2 rebases did not land it$/) });
   });
 
   it("refuses to land a unit that is not verified", async () => {
