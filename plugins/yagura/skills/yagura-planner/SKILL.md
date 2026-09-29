@@ -20,6 +20,11 @@ You own the plan, never the code. Your only output is the plan delta at the end 
 - Every acceptance line must be provable by running code (a verifier will write a scenario that fails before the change and passes after). Avoid "code is clean" style criteria.
 - Read the code in the checkouts before choosing write scopes and acceptance; name real paths.
 
+## Across repos
+
+- A unit in one repo that needs another repo's unlanded change depends on it with `"kind": "needs-source"`: it starts once that change is verified, and its worker and verifier get a read-only checkout of it (the path is in READONLY and in `$YAGURA_SOURCE_<REPO>`). Use `needs-landed` when the consumer needs the change released or on trunk.
+- Plan a breaking change to something other repos use as expand, migrate, contract: first a unit that adds the new form beside the old one, then one unit per consumer that moves to the new form (each `needs-source` on the expand unit), then a unit that removes the old form, which depends (`needs-landed`) on every consumer unit. Never plan one unit that breaks a consumer it does not also fix.
+
 ## Method
 
 - Use pstack's planning discipline where it helps: `pstack:figure-it-out` for a large or ambiguous program, `pstack:principle-sequence-verifiable-units` for ordering, `pstack:architect` when an interface must be settled before parallel work.

@@ -208,6 +208,10 @@ CREATE TABLE mr_threads (
     version: 13,
     sql: `ALTER TABLE attempts ADD COLUMN evidence_token TEXT;`,
   },
+  {
+    version: 14,
+    sql: `ALTER TABLE attempts ADD COLUMN sources_json TEXT NOT NULL DEFAULT '[]';`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

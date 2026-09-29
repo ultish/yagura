@@ -3,6 +3,8 @@ import { listDeps, listUnits, type Db } from "./store.js";
 
 const TERMINAL = new Set(["landed", "done", "abandoned"]);
 const SATISFIES_DEP = new Set(["landed", "done"]);
+// A needs-source consumer builds against the upstream's verified head, so it can start before that lands.
+const SATISFIES_SOURCE = new Set(["verified", "landing", "landed", "done"]);
 
 export interface Readiness {
   ready: Unit[];
@@ -27,7 +29,7 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
     let reason: string | null = null;
     for (const d of deps.filter((x) => x.unitId === u.id)) {
       const on = byId.get(d.dependsOn)!;
-      if (d.kind === "scope-overlap" ? TERMINAL.has(on.state) : SATISFIES_DEP.has(on.state)) continue;
+      if (d.kind === "scope-overlap" ? TERMINAL.has(on.state) : (d.kind === "needs-source" ? SATISFIES_SOURCE : SATISFIES_DEP).has(on.state)) continue;
       if (d.kind !== "scope-overlap" && on.state === "abandoned") {
         result.stuck.push({ unit: u, reason: `depends on U${on.seq}, which was abandoned` });
         reason = null;

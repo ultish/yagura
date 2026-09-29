@@ -11,6 +11,7 @@ import { parseHandoff } from "./handoff.js";
 import { acquireLease, keepable, keepLease, releaseLease } from "./leases.js";
 import { syncPackStatus } from "./repos.js";
 import { requiredProjectSkills } from "./skills.js";
+import { depShas, mountSources, sourceEnv } from "./sources.js";
 import { addVerifyUnit } from "./runner.js";
 import { layout } from "./paths.js";
 import {
@@ -111,6 +112,8 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
   mkdirSync(dirname(head), { recursive: true });
   await addDetachedWorktree(mirror, head, work.headSha!);
   await addDetachedWorktree(mirror, baseWorktree(head), work.baseSha!);
+  const sources = await mountSources(ctx, target, head);
+  updateAttempt(db, attempt.id, { sources });
   updateAttempt(db, attempt.id, { worktreePath: head, baseSha: work.baseSha, headSha: work.headSha });
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, target: target.seq });
   updateAttempt(db, attempt.id, { state: "running", startedAt: now() });
@@ -146,10 +149,21 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
         const id = Number(
           db
             .prepare(
-              `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, trunk_outcome, head_outcome, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, trunk_outcome, head_outcome, dep_shas_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
-            .run(target.id, attempt.id, decision.tier, repo.id, work.headSha, null, decision.trunkOutcome, decision.headOutcome, now()).lastInsertRowid,
+            .run(
+              target.id,
+              attempt.id,
+              decision.tier,
+              repo.id,
+              work.headSha,
+              null,
+              decision.trunkOutcome,
+              decision.headOutcome,
+              JSON.stringify(depShas(sources)),
+              now(),
+            ).lastInsertRowid,
         ) as VerdictId;
         for (const runId of decision.citedRunIds) {
           const r = db.prepare("SELECT stdout_artifact_id, stderr_artifact_id FROM evidence_runs WHERE id = ?").get(runId) as
@@ -236,11 +250,11 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
         model: setting("role.verifier.model"),
         permissionMode: setting("harness.claude.permission_mode"),
         pluginDirs: [boot.skillsDir],
-        addDirs: [head, baseWorktree(head)],
+        addDirs: [head, baseWorktree(head), ...sources.map((s) => s.path)],
         extraArgs: setting("harness.claude.extra_args"),
       },
       cwd: scenarioDir,
-      env: { ...lease.vars, YAGURA_HEAD: head, YAGURA_BASE: baseWorktree(head), YAGURA_SCENARIOS: scenarioDir },
+      env: { ...lease.vars, ...sourceEnv(sources), YAGURA_HEAD: head, YAGURA_BASE: baseWorktree(head), YAGURA_SCENARIOS: scenarioDir },
       timeboxSeconds: unit.timeboxSeconds,
       logPath: paths.log(project.id, unit.seq, attempt.n),
     });

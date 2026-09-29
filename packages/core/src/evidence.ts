@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { sourceEnv } from "./sources.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, relative } from "node:path";
@@ -156,7 +157,7 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
   const result = await runShell(
     req.command,
     cwd,
-    { ...process.env, ...(lease?.vars ?? {}), YAGURA_EVIDENCE: evidenceDir, YAGURA_AT: req.at, YAGURA_SHA: sha },
+    { ...process.env, ...(lease?.vars ?? {}), ...sourceEnv(attempt.sources), YAGURA_EVIDENCE: evidenceDir, YAGURA_AT: req.at, YAGURA_SHA: sha },
     req.timeoutSeconds ?? 300,
   );
   const durationMs = Date.now() - started;

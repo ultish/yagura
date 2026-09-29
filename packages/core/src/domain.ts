@@ -268,6 +268,7 @@ export interface Attempt {
   contextPeak: number;
   sessionId: string | null;
   resumesAttemptId: AttemptId | null;
+  sources: { unit: string; repoId: RepoId; sha: Sha; path: string }[];
   rejection: Rejection | null;
   skills: string[];
   missingSkills: string[];

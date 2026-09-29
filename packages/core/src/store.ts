@@ -296,6 +296,7 @@ function toAttempt(r: Record<string, unknown>): Attempt {
     contextPeak: r.context_peak as number,
     sessionId: (r.session_id as string | null) ?? null,
     resumesAttemptId: (r.resumes_attempt_id as AttemptId | null) ?? null,
+    sources: JSON.parse((r.sources_json as string | undefined) ?? "[]"),
     rejection: (r.rejection as Attempt["rejection"]) ?? null,
     skills: JSON.parse((r.skills_json as string | undefined) ?? "[]"),
     missingSkills: JSON.parse((r.missing_skills_json as string | undefined) ?? "[]"),
@@ -345,6 +346,7 @@ const ATTEMPT_COLUMNS = {
   missingSkills: "missing_skills_json",
   sessionId: "session_id",
   resumesAttemptId: "resumes_attempt_id",
+  sources: "sources_json",
   rejection: "rejection",
 } as const satisfies Partial<Record<keyof Attempt, string>>;
 
@@ -352,7 +354,7 @@ export function updateAttempt(db: Db, id: AttemptId, patch: Partial<Pick<Attempt
   const entries = Object.entries(patch) as [keyof typeof ATTEMPT_COLUMNS, unknown][];
   if (!entries.length) return;
   const sets = entries.map(([k]) => `${ATTEMPT_COLUMNS[k]} = ?`).join(", ");
-  const values = entries.map(([k, v]) => (k === "pluginVersions" || k === "skills" || k === "missingSkills" ? JSON.stringify(v) : v));
+  const values = entries.map(([k, v]) => (k === "pluginVersions" || k === "skills" || k === "missingSkills" || k === "sources" ? JSON.stringify(v) : v));
   db.prepare(`UPDATE attempts SET ${sets} WHERE id = ?`).run(...values, id);
 }
 

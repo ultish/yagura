@@ -7,8 +7,9 @@ import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runRebaseUnit } from "./rebase.js";
+import { reverifyAgainstSources, sourceDeps, staleSource } from "./sources.js";
 import { runTriageUnit } from "./triage.js";
-import { runWorkUnit } from "./runner.js";
+import { addVerifyUnit, runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
 import { ensurePackUnits } from "./packs.js";
@@ -101,6 +102,14 @@ export class Engine {
     for (const u of listUnits(this.db, project.id).filter((x) => x.state === "verified" && x.repoId)) {
       const key = `land:${u.repoId}`;
       if (this.inflight.has(key)) continue;
+      // A consumer lands after what it builds against, and only on a verdict proven against that source as it is now.
+      if (sourceDeps(this.db, u).some((d) => d.state !== "landed" && d.state !== "done")) continue;
+      const stale = staleSource(this.db, u);
+      if (stale) {
+        reverifyAgainstSources(this.db, u, stale, (x) => addVerifyUnit(this.db, x));
+        this.log(`  U${u.seq} re-verifies: ${stale}`);
+        continue;
+      }
       // One lander per repo: a unit whose pull request is open stays landing until it merges.
       if (listUnits(this.db, project.id).some((x) => x.repoId === u.repoId && x.state === "landing")) continue;
       const onForge = getRepo(this.db, u.repoId!).forge !== "none";

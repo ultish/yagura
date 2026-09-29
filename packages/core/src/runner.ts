@@ -17,6 +17,7 @@ import {
 } from "./domain.js";
 import { chooseResume, rejectionFindings, renderResumePrompt } from "./resume.js";
 import { requiredProjectSkills, skillMethod } from "./skills.js";
+import { mountSources, sourceEnv } from "./sources.js";
 import { environmentNotes, hardCodedValues, listValues, valueMap } from "./envvalues.js";
 import { LEASE_VARS } from "./leases.js";
 import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
@@ -126,6 +127,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   }
 
   const projectSkills = requiredProjectSkills(db, unit);
+  const sources = await mountSources(ctx, unit, worktree);
   const references = await referenceCheckouts(ctx, project.id, unit.seq, from?.n ?? attempt.n, setting("project.reference_repos"));
   const standingPath = paths.standingOrders(project.id);
   const packForbid = isPack ? [] : [`${repo.verifyPackPath}/**`];
@@ -149,7 +151,10 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       ...unit.notes.map((n) => `Note from an earlier attempt: ${n}`),
       ...(environmentNotes(db, project.environmentId) ? [`About this environment: ${environmentNotes(db, project.environmentId)}`] : []),
     ],
-    readonly: references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
+    readonly: [
+      ...sources.map((s) => ({ repoId: s.repoId, path: s.path, sha: s.sha })),
+      ...references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
+    ],
     acceptance: unit.acceptance,
     verify: unit.verify,
     env: envValues,
@@ -188,7 +193,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
 
   const startedAt = now();
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, ...(from ? { resumes: from.n } : {}) });
-  updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base, resumesAttemptId: from?.id ?? null });
+  updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base, resumesAttemptId: from?.id ?? null, sources });
 
   const session = await runAgentSession(ctx, {
     recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: isPack ? "pack" : "worker", inheritedSkills: from?.skills, projectSkills }),
@@ -199,12 +204,12 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       model: setting("role.worker.model"),
       permissionMode: setting("harness.claude.permission_mode"),
       pluginDirs: [boot.skillsDir],
-      addDirs: references.map((r) => r.path),
+      addDirs: [...sources.map((s) => s.path), ...references.map((r) => r.path)],
       extraArgs: setting("harness.claude.extra_args"),
       resume: from?.sessionId ?? undefined,
     },
     cwd: worktree,
-    env: envValues,
+    env: { ...envValues, ...sourceEnv(sources) },
     timeboxSeconds: unit.timeboxSeconds,
     logPath: paths.log(project.id, unit.seq, attempt.n),
   });
