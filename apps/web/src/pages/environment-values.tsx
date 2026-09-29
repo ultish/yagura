@@ -21,7 +21,7 @@ function keepLine(keep: EnvironmentDetail["keep"]): string {
   return `${which} ${what} for ${keep.hours.value} ${keep.hours.value === 1 ? "hour" : "hours"}, then it is deleted.`;
 }
 
-function slotLine(slot: KeptSlot): string | null {
+export function slotLine(slot: KeptSlot): string | null {
   if (slot.namespace) return `kubectl${slot.context ? ` --context ${slot.context}` : ""} -n ${slot.namespace}`;
   return slot.leaseDir;
 }

@@ -133,6 +133,7 @@ export interface AttemptDetail {
   leftovers: string | null;
   runs: EvidenceRun[];
   verifications: { unit: { id: number; seq: number; state: string }; attempts: { id: number; n: number; state: string; runs: EvidenceRun[] }[] }[];
+  kept: KeptSlot[];
   waiting: string | null;
 }
 

@@ -182,6 +182,7 @@ export function attemptDetail(db: Db, paths: { brief: string; handoff: string; l
     runs: listEvidenceRuns(db, attempt.id),
     verifications,
     waiting: readiness(db, unit.projectId).waiting.find((w) => w.unit.id === unit.id)?.reason ?? null,
+    kept: keptSlots(db, { attemptId: attempt.id }),
   };
 }
 
@@ -234,28 +235,33 @@ export function environmentView(db: Db, id: EnvironmentId) {
     active: leases.filter((l) => l.state === "active").map((l) => ({ ...holder(l), slot: l.slot as string, since: l.granted_at as string })),
     queued: leases.filter((l) => l.state === "queued").map((l) => ({ ...holder(l), since: l.requested_at as string })),
     projects: db.prepare("SELECT id, state FROM projects WHERE environment_id = ? ORDER BY created_at").all(id) as { id: string; state: string }[],
-    kept: (
-      db
-        .prepare(
-          `SELECT l.id, l.slot, l.vars_json, l.kept_until, l.kept_reason, l.attempt_id, u.project_id, u.seq, u.goal
-           FROM leases l JOIN attempts a ON a.id = l.attempt_id JOIN units u ON u.id = a.unit_id
-           WHERE l.environment_id = ? AND l.kept_until IS NOT NULL ORDER BY l.id`,
-        )
-        .all(id) as Row[]
-    ).map((l) => {
-      const vars = JSON.parse(l.vars_json as string) as Record<string, string>;
-      return {
-        leaseId: l.id as number,
-        attemptId: l.attempt_id as number,
-        unit: { projectId: l.project_id as string, seq: l.seq as number, goal: l.goal as string },
-        until: l.kept_until as string,
-        reason: (l.kept_reason as string) ?? "",
-        namespace: vars.YAGURA_NAMESPACE ?? null,
-        context: vars.KUBECONTEXT ?? null,
-        leaseDir: vars.YAGURA_LEASE_DIR ?? null,
-      };
-    }),
+    kept: keptSlots(db, { environmentId: id }),
   };
+}
+
+// Slots a verification left up on purpose (the keep policy), with what a developer needs to go and look.
+export function keptSlots(db: Db, where: { environmentId?: EnvironmentId; attemptId?: number }) {
+  return (
+    db
+      .prepare(
+        `SELECT l.id, l.slot, l.vars_json, l.kept_until, l.kept_reason, l.attempt_id, u.project_id, u.seq, u.goal
+         FROM leases l JOIN attempts a ON a.id = l.attempt_id JOIN units u ON u.id = a.unit_id
+         WHERE l.kept_until IS NOT NULL AND (? IS NULL OR l.environment_id = ?) AND (? IS NULL OR l.attempt_id = ?) ORDER BY l.id`,
+      )
+      .all(where.environmentId ?? null, where.environmentId ?? null, where.attemptId ?? null, where.attemptId ?? null) as Row[]
+  ).map((l) => {
+    const vars = JSON.parse(l.vars_json as string) as Record<string, string>;
+    return {
+      leaseId: l.id as number,
+      attemptId: l.attempt_id as number,
+      unit: { projectId: l.project_id as string, seq: l.seq as number, goal: l.goal as string },
+      until: l.kept_until as string,
+      reason: (l.kept_reason as string) ?? "",
+      namespace: vars.YAGURA_NAMESPACE ?? null,
+      context: vars.KUBECONTEXT ?? null,
+      leaseDir: vars.YAGURA_LEASE_DIR ?? null,
+    };
+  });
 }
 
 export function environmentDetail(db: Db, id: EnvironmentId) {

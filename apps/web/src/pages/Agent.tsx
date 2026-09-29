@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, streamUrl, useApi, useNow, type Attempt, type AttemptDetail, type EvidenceRun, type LogLine, type ProjectDetail } from "../api";
+import { slotLine } from "./environment-values";
 import { roleOf } from "../lib/units";
-import { duration, modelName, tokens } from "../lib/format";
+import { clock, duration, modelName, tokens } from "../lib/format";
 import { Markdown } from "../lib/markdown";
 import { buildTimeline, type Step } from "../lib/timeline";
 import { Link } from "../ui/Link";
@@ -434,6 +435,28 @@ export function Agent({ attemptId }: { attemptId: number }) {
             <Meter label="context" value={ctxPeak} max={window} text={`${tokens(ctxPeak)} of ${tokens(window)}`} />
             <Meter label="timebox" value={elapsed} max={d.timeboxSeconds * 1000} text={`${duration(elapsed)} of ${duration(d.timeboxSeconds * 1000)}`} />
           </div>
+          {d.kept.map((k) => (
+            <div key={k.leaseId}>
+              <h2 className="h2">Kept slot</h2>
+              <div style={{ fontSize: 13, marginTop: 6 }}>
+                {k.reason}. Deleted at {clock(k.until)} unless you delete it first.
+              </div>
+              {slotLine(k) && (
+                <div className="mono" style={{ fontSize: 12, marginTop: 4, wordBreak: "break-all" }}>
+                  {slotLine(k)}
+                </div>
+              )}
+              <button
+                className="btn sm"
+                type="button"
+                style={{ marginTop: 6 }}
+                disabled={action.busy}
+                onClick={() => void action.run(() => api(`/api/leases/${k.leaseId}/delete-kept`, { body: {} }))}
+              >
+                Delete now
+              </button>
+            </div>
+          ))}
           <div>
             <h2 className="h2">{a.resumesAttemptId ? "Resumed" : "Brief"}</h2>
             {a.resumesAttemptId ? (
