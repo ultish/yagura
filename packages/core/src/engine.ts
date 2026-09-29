@@ -1,7 +1,9 @@
 import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
-import { landUnit } from "./land.js";
+import { markMergeChecked, openMergeRequests } from "./forge.js";
+import { landUnit, watchMergeRequest } from "./land.js";
+import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runWorkUnit } from "./runner.js";
@@ -11,6 +13,7 @@ import { ensurePackUnits } from "./packs.js";
 import {
   addGate,
   getProject,
+  getRepo,
   getUnit,
   listAttempts,
   listGates,
@@ -18,6 +21,7 @@ import {
   listUnits,
   now,
   recordEvent,
+  setAndon,
   setProjectState,
   transitionUnit,
   updateAttempt,
@@ -92,6 +96,7 @@ export class Engine {
     for (const u of listUnits(this.db, project.id).filter((x) => x.state === "verified" && x.repoId)) {
       const key = `land:${u.repoId}`;
       if (this.inflight.has(key)) continue;
+      const onForge = getRepo(this.db, u.repoId!).forge !== "none";
       if (project.mergePolicy === "human") {
         const gate = listGates(this.db, project.id)
           .filter((g) => g.kind === "land" && g.unitId === u.id)
@@ -101,20 +106,36 @@ export class Engine {
             projectId: project.id,
             unitId: u.id,
             kind: "land",
-            question: `U${u.seq} is verified. Land it on ${u.repoId}?`,
+            question: `U${u.seq} is verified. ${onForge ? "Merge its pull request" : "Land it"} on ${u.repoId}?`,
             options: ["land", "hold"],
             defaultOption: "hold",
           });
           this.log(`  gate: land U${u.seq}?`);
-          continue;
         }
-        if (!gateResolved(gate, "land")) continue;
+        // On a forge the pull request opens now so it can be reviewed there; the gate decides the merge.
+        if (!onForge && !landApproved(this.db, project.id, u)) continue;
       }
       this.start(
         key,
         `land U${u.seq}`,
         () => landUnit(this.ctx, u.id),
         () => undefined,
+      );
+    }
+    const poll = resolveSetting(this.db, "forge.poll_seconds").value * 1000;
+    for (const mr of openMergeRequests(this.db)) {
+      const u = getUnit(this.db, mr.unitId);
+      if (u.projectId !== project.id) continue;
+      const key = `land:${u.repoId}`;
+      if (this.inflight.has(key) || (mr.checkedAt && Date.now() - Date.parse(mr.checkedAt) < poll)) continue;
+      this.start(
+        key,
+        `watch pull request #${mr.number} for U${u.seq}`,
+        () => watchMergeRequest(this.ctx, u.id),
+        (e) => {
+          markMergeChecked(this.db, u.id);
+          this.log(`  ✗ pull request #${mr.number}: ${e instanceof Error ? e.message : String(e)}`);
+        },
       );
     }
   }
@@ -252,6 +273,16 @@ export class Engine {
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
     for (const project of this.scope().filter((p) => p.state === "active")) {
+      const missing = projectSkillChecks(this.db, this.ctx.boot, project.id).filter((c) => !c.installed);
+      if (missing.length) {
+        if (!project.andonReason)
+          setAndon(
+            this.db,
+            project.id,
+            `skills not installed where agents run: ${missing.map((c) => `${c.skill} (${c.purposes.join(", ")})`).join("; ")}. Install them or change the project's skills settings, then clear the andon`,
+          );
+        continue;
+      }
       for (const u of await ensurePackUnits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
       this.settleFailures(project);
       if (this.maybeClose(project)) continue;

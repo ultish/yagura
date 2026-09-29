@@ -10,6 +10,7 @@ import { addDetachedWorktree, diffText, ensureMirror, patchId } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { acquireLease, keepable, keepLease, releaseLease } from "./leases.js";
 import { syncPackStatus } from "./repos.js";
+import { requiredProjectSkills } from "./skills.js";
 import { addVerifyUnit } from "./runner.js";
 import { layout } from "./paths.js";
 import {
@@ -163,6 +164,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     return { ...finish(decision, handedOff), verdictId };
   };
 
+  const projectSkills = requiredProjectSkills(db, unit);
   const lease = await acquireLease(db, boot, project.environmentId as EnvironmentId, attempt.id);
   const keepPolicy = resolveSetting(db, "lease.keep", { projectId: project.id, environmentId: project.environmentId }).value;
   let kept: string | null = null;
@@ -221,11 +223,12 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       deploys: !!pack.pack.deploy,
       timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
       standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
+      skills: projectSkills,
     });
     write(paths.brief(project.id, unit.seq, attempt.n), briefText);
 
     const session = await runAgentSession(ctx, {
-      recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "verifier" }),
+      recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "verifier", projectSkills }),
       adapter,
       run: {
         prompt: briefText,

@@ -183,6 +183,7 @@ export interface NewUnit {
   context?: string[];
   measurements?: MeasurementSpec[];
   playbook?: string | null;
+  scaffold?: boolean;
   refs?: string[];
   timeboxSeconds: number;
   maxAttempts: number;
@@ -219,6 +220,7 @@ export function addUnit(db: Db, u: NewUnit): Unit {
         t,
       );
     const unitId = Number(result.lastInsertRowid) as UnitId;
+    if (u.scaffold) db.prepare("UPDATE units SET scaffold = 1 WHERE id = ?").run(unitId);
     recordEvent(db, "unit.created", { projectId: u.projectId, unitId }, { seq, type: u.type });
     return unitId;
   })();
@@ -245,6 +247,7 @@ function toUnit(r: Record<string, unknown>): Unit {
     refs: JSON.parse((r.refs_json as string | undefined) ?? "[]"),
     landedSha: (r.landed_sha as Unit["landedSha"]) ?? null,
     playbook: (r.playbook as string | null) ?? null,
+    scaffold: r.scaffold === 1,
     timeboxSeconds: r.timebox_seconds as number,
     maxAttempts: r.max_attempts as number,
     createdByDrainId: (r.created_by_drain_id as Unit["createdByDrainId"]) ?? null,
@@ -409,6 +412,11 @@ export function setProjectEnvironment(db: Db, projectId: ProjectId, environmentI
 
 export function setRepoUrl(db: Db, repoId: RepoId, url: string): void {
   db.prepare("UPDATE repos SET url = ? WHERE id = ?").run(url, repoId);
+}
+
+export function setRepoForge(db: Db, repoId: RepoId, forge: Forge): void {
+  db.prepare("UPDATE repos SET forge = ? WHERE id = ?").run(forge, repoId);
+  recordEvent(db, "repo.forge", {}, { repo: repoId, forge });
 }
 
 export function addUnitNote(db: Db, unitId: UnitId, note: string): void {

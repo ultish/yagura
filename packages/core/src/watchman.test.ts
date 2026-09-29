@@ -347,4 +347,29 @@ describe("watchman turns", () => {
       /p3: environment box2 failed its doctor/,
     );
   });
+
+  it("sets a proposed project's skills and reference repos, refusing a reference that is not registered", async () => {
+    const t = createThread(db, { title: "t" });
+    addRepo(db, { id: "billing", url: "/billing", defaultBranch: "main" });
+    const pack = { provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] };
+    const propose = (references: string[]) => () =>
+      storeTurn(ctx, t.id, {
+        body: "ok",
+        turnLog: null,
+        records: TurnRecords.parse({
+          proposal: {
+            summary: "a service",
+            repos: [{ id: "svc", verifyPack: pack }],
+            projects: [{ id: "svc", goal: "g", predicate: "p", repos: ["svc"], skills: { scaffold: ["setup-gradle"], work: ["setup-gradle"] }, references }],
+          },
+        }),
+      });
+    expect(propose(["ghost"])).toThrow(/svc: reference repo ghost is neither registered nor created by this proposal/);
+    const { proposal } = propose(["billing"])();
+    await applyProposal(ctx, proposal!.id);
+    const at = { projectId: "svc" as ProjectId };
+    expect(resolveSetting(db, "skills.scaffold", at)).toMatchObject({ value: ["setup-gradle"], source: "project" });
+    expect(resolveSetting(db, "skills.pack", at)).toMatchObject({ value: [], source: "default" });
+    expect(resolveSetting(db, "project.reference_repos", at).value).toEqual(["billing"]);
+  });
 });

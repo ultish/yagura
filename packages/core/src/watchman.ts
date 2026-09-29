@@ -7,6 +7,7 @@ import { listValues } from "./envvalues.js";
 import { PROVIDERS_IMPL } from "./leases.js";
 import { PRESETS } from "./presets.js";
 import { listTemplates } from "./templates.js";
+import { installedSkills } from "./skills.js";
 import { describeMention, resolveMentions } from "./mentions.js";
 import { missingSkills } from "./pack.js";
 import { layout } from "./paths.js";
@@ -239,7 +240,8 @@ Reply to the developer in plain prose. Then end your final message with exactly 
     "projects": [{
       "id": "kafka-diff", "goal": "…", "predicate": "checkable done condition", "repos": ["kafka-diff"],
       "environment": null, "merge": "auto", "minTier": "unit-verified", "after": [], "phaseGate": false,
-      "spec": "# kafka-diff\\n\\n## Scope\\n…", "units": []
+      "spec": "# kafka-diff\\n\\n## Scope\\n…", "units": [],
+      "skills": { "scaffold": ["setup-gradle"], "work": [], "pack": [], "verify": [] }, "references": ["billing"]
     }],
     "amend": [{ "project": "kafka-diff", "units": [{ "key": "ignore-ts", "repo": "kafka-diff", "goal": "…", "write": ["src/**"], "accept": ["…"], "verify": "…" }] }]
   }
@@ -276,6 +278,12 @@ function catalog(db: Db, boot: RunContext["boot"]): string {
     `- environment presets: ${PRESETS.map((p) => `${p.id} (${p.values.map((v) => v.name).join(", ")})`).join("; ")}`,
     `- environment templates: ${templates.join("; ") || "(none)"}`,
     `- environment providers: ${Object.keys(PROVIDERS_IMPL).join(", ")}`,
+    `- the developer's own skills (for project skills): ${
+      [...installedSkills(boot)]
+        .filter((s) => !s.includes(":"))
+        .sort()
+        .join(", ") || "(none)"
+    }`,
     `- existing project ids (taken): ${projects.map((p) => `${p.id} [${p.state}]`).join(", ") || "(none)"}`,
     `- tiers, strongest first: ${PASS_TIERS.join(", ")}`,
     `- unit playbooks: ${WORK_PLAYBOOKS.join(", ")}`,

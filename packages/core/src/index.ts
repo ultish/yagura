@@ -39,3 +39,5 @@ export * from "./envvalues.js";
 export * from "./presets.js";
 export * from "./templates.js";
 export * from "./resume.js";
+export * from "./skills.js";
+export * from "./forge.js";

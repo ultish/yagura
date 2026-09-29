@@ -2,15 +2,30 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { resolveSetting, type Bootstrap } from "./config.js";
 import { PASS_TIERS, REBASE_HARNESS } from "./domain.js";
-import type { Sha, Unit, UnitId, VerdictId } from "./domain.js";
+import type { Attempt, Project, Repo, Sha, Unit, UnitId, VerdictId } from "./domain.js";
+import { forgeFor, ForgeError, getMergeRequest, recordMergeStatus, saveMergeRequest, setMergeState, type ForgeAdapter, type PrStatus } from "./forge.js";
+import { gateResolved } from "./gates.js";
 import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWorktree, resolveRef } from "./git.js";
 import { layout } from "./paths.js";
 import { markPackProven } from "./packs.js";
 import { addVerifyUnit } from "./runner.js";
-import { createAttempt, getProject, getRepo, getUnit, listAttempts, now, recordEvent, setLandedSha, transitionUnit, updateAttempt, type Db } from "./store.js";
+import {
+  createAttempt,
+  getProject,
+  getRepo,
+  getUnit,
+  listAttempts,
+  listGates,
+  now,
+  recordEvent,
+  setLandedSha,
+  transitionUnit,
+  updateAttempt,
+  type Db,
+} from "./store.js";
 import { landMessage } from "./audit.js";
 
-export type LandOutcome = "landed" | "blocked" | "reverifying";
+export type LandOutcome = "landed" | "blocked" | "reverifying" | "proposed" | "waiting";
 
 export interface LandResult {
   unit: Unit;
@@ -38,104 +53,247 @@ export function liveVerdict(db: Db, unitId: UnitId): LiveVerdict | null {
   );
 }
 
-export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId): Promise<LandResult> {
+interface Landing {
+  db: Db;
+  boot: Bootstrap;
+  unit: Unit;
+  project: Project;
+  repo: Repo;
+  verdict: LiveVerdict;
+  work: Attempt;
+  mirror: string;
+}
+
+function landing(ctx: { db: Db; boot: Bootstrap }, unit: Unit): Landing {
   const { db, boot } = ctx;
-  const unit = getUnit(db, unitId);
-  if (unit.state !== "verified") throw new Error(`U${unit.seq} is ${unit.state}, not verified`);
   if (!unit.repoId) throw new Error(`U${unit.seq} has no repo`);
   const repo = getRepo(db, unit.repoId);
-  const busy = db.prepare("SELECT seq FROM units WHERE repo_id = ? AND state = 'landing' AND id <> ?").get(repo.id, unit.id) as { seq: number } | undefined;
-  if (busy) throw new Error(`U${busy.seq} is already landing in ${repo.id}; one lander per repo`);
   const verdict = liveVerdict(db, unit.id);
   if (!verdict) throw new Error(`U${unit.seq} has no live passing verdict`);
   const work = listAttempts(db, unit.id).find((a) => a.headSha === verdict.head_sha && a.baseSha);
   if (!work?.baseSha) throw new Error(`U${unit.seq}: no attempt produced the verified head ${verdict.head_sha}`);
-  const project = getProject(db, unit.projectId);
-  const author = {
-    name: resolveSetting(db, "git.author_name", { projectId: project.id, repoId: repo.id }).value,
-    email: resolveSetting(db, "git.author_email", { projectId: project.id, repoId: repo.id }).value,
-  };
-  const refs = { projectId: project.id, unitId: unit.id };
-  const paths = layout(boot);
-  const mirror = paths.mirror(repo.id);
+  return { db, boot, unit, project: getProject(db, unit.projectId), repo, verdict, work, mirror: layout(boot).mirror(repo.id) };
+}
 
-  transitionUnit(db, unit.id, "landing", { verdict: verdict.id });
-  const reverify = async (onto: Sha, rebased: Sha): Promise<LandResult> => {
-    const attempt = createAttempt(db, unit.id, REBASE_HARNESS, null);
-    const branch = `${work.branch ?? `yg/${project.id}/u${unit.seq}`}-rebased-${attempt.n}`;
-    await git(["update-ref", `refs/heads/${branch}`, rebased], { gitDir: mirror });
-    const reason = `rebased onto ${repo.defaultBranch} at ${onto.slice(0, 10)} and the patch changed; the rebased head needs re-verification`;
-    db.transaction(() => {
-      updateAttempt(db, attempt.id, { state: "handed_off", baseSha: onto, headSha: rebased, branch, startedAt: now(), endedAt: now() });
-      db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, verdict.id);
-      transitionUnit(db, unit.id, "verifying", { reason, rebasedHead: rebased });
-      addVerifyUnit(db, getUnit(db, unit.id));
-    })();
-    return { unit: getUnit(db, unit.id), outcome: "reverifying", landedSha: null, reason };
-  };
-  const block = (reason: string): LandResult => {
-    transitionUnit(db, unit.id, "blocked", { reason });
-    return { unit: getUnit(db, unit.id), outcome: "blocked", landedSha: null, reason };
-  };
+const authorOf = (l: Landing) => ({
+  name: resolveSetting(l.db, "git.author_name", { projectId: l.project.id, repoId: l.repo.id }).value,
+  email: resolveSetting(l.db, "git.author_email", { projectId: l.project.id, repoId: l.repo.id }).value,
+});
 
-  await ensureMirror(repo.url, mirror);
-  const trunk = await resolveRef(mirror, `origin/${repo.defaultBranch}`);
-  const wt = `${paths.worktree(repo.id, project.id, unit.seq, 0)}.land`;
+type Squash = { kind: "squashed"; landed: Sha; trunk: Sha; message: string } | { kind: "conflict"; trunk: Sha } | { kind: "changed"; trunk: Sha; rebased: Sha };
+
+// The verified head, rebased onto trunk and squashed into one commit with yagura's trailers.
+async function squashOntoTrunk(l: Landing): Promise<Squash> {
+  const author = authorOf(l);
+  await ensureMirror(l.repo.url, l.mirror);
+  const trunk = await resolveRef(l.mirror, `origin/${l.repo.defaultBranch}`);
+  const wt = `${layout(l.boot).worktree(l.repo.id, l.project.id, l.unit.seq, 0)}.land`;
   mkdirSync(dirname(wt), { recursive: true });
-  await addDetachedWorktree(mirror, wt, verdict.head_sha);
-  let landed: Sha;
+  await removeWorktree(l.mirror, wt).catch(() => undefined);
+  await addDetachedWorktree(l.mirror, wt, l.verdict.head_sha);
   try {
-    if (trunk !== work.baseSha) {
+    if (trunk !== l.work.baseSha) {
       try {
-        await git(["-c", `user.name=${author.name}`, "-c", `user.email=${author.email}`, "rebase", "--quiet", "--onto", trunk, work.baseSha], { cwd: wt });
+        await git(["-c", `user.name=${author.name}`, "-c", `user.email=${author.email}`, "rebase", "--quiet", "--onto", trunk, l.work.baseSha!], { cwd: wt });
       } catch {
         await git(["rebase", "--abort"], { cwd: wt }).catch(() => undefined);
-        return block(`conflicts with ${repo.defaultBranch} at ${trunk.slice(0, 10)}; needs a rebase unit`);
+        return { kind: "conflict", trunk };
       }
     }
     const tree = await git(["rev-parse", "HEAD^{tree}"], { cwd: wt });
-    const message = landMessage(db, boot, {
-      unit,
-      work,
-      verdict: { id: verdict.id, tier: verdict.tier, attemptId: verdict.attempt_id },
-      url: resolveSetting(db, "yagura.url", { projectId: project.id, repoId: repo.id }).value,
+    const message = landMessage(l.db, l.boot, {
+      unit: l.unit,
+      work: l.work,
+      verdict: { id: l.verdict.id, tier: l.verdict.tier, attemptId: l.verdict.attempt_id },
+      url: resolveSetting(l.db, "yagura.url", { projectId: l.project.id, repoId: l.repo.id }).value,
     });
     const identity = { GIT_AUTHOR_NAME: author.name, GIT_AUTHOR_EMAIL: author.email, GIT_COMMITTER_NAME: author.name, GIT_COMMITTER_EMAIL: author.email };
-    landed = (await gitWithEnv(["commit-tree", tree, "-p", trunk, "-F", "-"], wt, identity, message)) as Sha;
-    const squashedPatch = await patchId(wt, trunk, landed);
-    if (!verdict.patch_id || squashedPatch !== verdict.patch_id) return await reverify(trunk, (await git(["rev-parse", "HEAD"], { cwd: wt })) as Sha);
-    db.transaction(() => {
-      db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(
-        now(),
-        `landed as ${landed}; patch-id unchanged, carried forward`,
-        verdict.id,
-      );
-      db.prepare(
-        `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, created_at)
-         SELECT unit_id, attempt_id, tier, repo_id, ?, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, ? FROM verdicts WHERE id = ?`,
-      ).run(landed, now(), verdict.id);
-      db.prepare(
-        "INSERT INTO verdict_artifacts (verdict_id, artifact_id) SELECT last_insert_rowid(), artifact_id FROM verdict_artifacts WHERE verdict_id = ?",
-      ).run(verdict.id);
-    })();
+    const landed = (await gitWithEnv(["commit-tree", tree, "-p", trunk, "-F", "-"], wt, identity, message)) as Sha;
+    if (!l.verdict.patch_id || (await patchId(wt, trunk, landed)) !== l.verdict.patch_id)
+      return { kind: "changed", trunk, rebased: (await git(["rev-parse", "HEAD"], { cwd: wt })) as Sha };
+    return { kind: "squashed", landed, trunk, message };
   } finally {
-    await removeWorktree(mirror, wt).catch(() => undefined);
+    await removeWorktree(l.mirror, wt).catch(() => undefined);
   }
+}
 
+function block(l: Landing, reason: string): LandResult {
+  transitionUnit(l.db, l.unit.id, "blocked", { reason });
+  return { unit: getUnit(l.db, l.unit.id), outcome: "blocked", landedSha: null, reason };
+}
+
+async function reverify(l: Landing, onto: Sha, rebased: Sha): Promise<LandResult> {
+  const { db } = l;
+  const attempt = createAttempt(db, l.unit.id, REBASE_HARNESS, null);
+  const branch = `${l.work.branch ?? `yg/${l.project.id}/u${l.unit.seq}`}-rebased-${attempt.n}`;
+  await git(["update-ref", `refs/heads/${branch}`, rebased], { gitDir: l.mirror });
+  const reason = `rebased onto ${l.repo.defaultBranch} at ${onto.slice(0, 10)} and the patch changed; the rebased head needs re-verification`;
+  db.transaction(() => {
+    updateAttempt(db, attempt.id, { state: "handed_off", baseSha: onto, headSha: rebased, branch, startedAt: now(), endedAt: now() });
+    db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, l.verdict.id);
+    transitionUnit(db, l.unit.id, "verifying", { reason, rebasedHead: rebased });
+    addVerifyUnit(db, getUnit(db, l.unit.id));
+  })();
+  return { unit: getUnit(db, l.unit.id), outcome: "reverifying", landedSha: null, reason };
+}
+
+// The verdict follows the code to the commit on trunk, as long as that commit's patch is the one verified.
+function carryVerdict(l: Landing, sha: Sha, reason: string): void {
+  const { db } = l;
+  db.transaction(() => {
+    db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, l.verdict.id);
+    db.prepare(
+      `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, created_at)
+       SELECT unit_id, attempt_id, tier, repo_id, ?, patch_id, dep_shas_json, artifact_versions_json, trunk_outcome, head_outcome, ? FROM verdicts WHERE id = ?`,
+    ).run(sha, now(), l.verdict.id);
+    db.prepare(
+      "INSERT INTO verdict_artifacts (verdict_id, artifact_id) SELECT last_insert_rowid(), artifact_id FROM verdict_artifacts WHERE verdict_id = ?",
+    ).run(l.verdict.id);
+  })();
+}
+
+function markLanded(l: Landing, sha: Sha, data: Record<string, unknown>): void {
+  setLandedSha(l.db, l.unit.id, sha);
+  markPackProven(l.db, l.unit, sha);
+  transitionUnit(l.db, l.unit.id, "landed", { sha, ...data });
+  recordEvent(
+    l.db,
+    "unit.landed",
+    { projectId: l.project.id, unitId: l.unit.id },
+    { sha, branch: l.repo.defaultBranch, squashedFrom: l.verdict.head_sha, ...data },
+  );
+}
+
+export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId): Promise<LandResult> {
+  const { db } = ctx;
+  const unit = getUnit(db, unitId);
+  if (unit.state !== "verified") throw new Error(`U${unit.seq} is ${unit.state}, not verified`);
+  const l = landing(ctx, unit);
+  const busy = db.prepare("SELECT seq FROM units WHERE repo_id = ? AND state = 'landing' AND id <> ?").get(l.repo.id, unit.id) as { seq: number } | undefined;
+  if (busy) throw new Error(`U${busy.seq} is already landing in ${l.repo.id}; one lander per repo`);
+
+  transitionUnit(db, unit.id, "landing", { verdict: l.verdict.id });
+  let forge: ForgeAdapter | null;
   try {
-    await git(["push", "--quiet", "origin", `${landed}:refs/heads/${repo.defaultBranch}`], { gitDir: mirror });
+    forge = forgeFor(db, l.repo);
   } catch (e) {
-    return block(`push to ${repo.defaultBranch} was rejected: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
+    return block(l, (e as Error).message);
   }
-  await ensureMirror(repo.url, mirror);
-  setLandedSha(db, unit.id, landed);
-  markPackProven(db, unit, landed);
-  transitionUnit(db, unit.id, "landed", { sha: landed, onto: trunk });
-  recordEvent(db, "unit.landed", refs, { sha: landed, branch: repo.defaultBranch, rebased: trunk !== work.baseSha, squashedFrom: verdict.head_sha });
+  const squash = await squashOntoTrunk(l);
+  if (squash.kind === "conflict") return block(l, `conflicts with ${l.repo.defaultBranch} at ${squash.trunk.slice(0, 10)}; needs a rebase unit`);
+  if (squash.kind === "changed") return reverify(l, squash.trunk, squash.rebased);
+  if (forge) return propose(l, forge, squash);
+
+  carryVerdict(l, squash.landed, `landed as ${squash.landed}; patch-id unchanged, carried forward`);
+  try {
+    await git(["push", "--quiet", "origin", `${squash.landed}:refs/heads/${l.repo.defaultBranch}`], { gitDir: l.mirror });
+  } catch (e) {
+    return block(l, `push to ${l.repo.defaultBranch} was rejected: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
+  }
+  await ensureMirror(l.repo.url, l.mirror);
+  const rebased = squash.trunk !== l.work.baseSha;
+  markLanded(l, squash.landed, { onto: squash.trunk, rebased });
   return {
     unit: getUnit(db, unit.id),
     outcome: "landed",
-    landedSha: landed,
-    reason: trunk === work.baseSha ? "squashed onto trunk" : "rebased onto the moved trunk and squashed; patch unchanged",
+    landedSha: squash.landed,
+    reason: rebased ? "rebased onto the moved trunk and squashed; patch unchanged" : "squashed onto trunk",
   };
+}
+
+// One pull request per unit, on a branch yagura owns; pushing again updates it.
+async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, { kind: "squashed" }>): Promise<LandResult> {
+  const { db } = l;
+  const branch = `${resolveSetting(db, "git.branch_prefix", { projectId: l.project.id, repoId: l.repo.id }).value}/${l.project.id}/u${l.unit.seq}`;
+  try {
+    await git(["push", "--quiet", "--force", "origin", `${squash.landed}:refs/heads/${branch}`], { gitDir: l.mirror });
+    const existing = getMergeRequest(db, l.unit.id);
+    const pr =
+      (existing?.state === "open" ? { number: existing.number, url: existing.url } : null) ??
+      (await forge.find(branch)) ??
+      (await forge.open({ branch, base: l.repo.defaultBranch, title: l.unit.goal, body: squash.message }));
+    saveMergeRequest(db, {
+      unitId: l.unit.id,
+      forge: forge.kind,
+      forgeRepo: forge.repo,
+      number: pr.number,
+      url: pr.url,
+      branch,
+      headSha: squash.landed,
+      baseSha: squash.trunk,
+    });
+    recordEvent(db, "pr.pushed", { projectId: l.project.id, unitId: l.unit.id }, { number: pr.number, url: pr.url, head: squash.landed, onto: squash.trunk });
+    return { unit: getUnit(db, l.unit.id), outcome: "proposed", landedSha: null, reason: `pull request #${pr.number}: ${pr.url}` };
+  } catch (e) {
+    if (e instanceof ForgeError || (e as { code?: unknown }).code !== undefined)
+      return block(l, `could not open the pull request: ${(e as Error).message.split("\n")[0]}`);
+    throw e;
+  }
+}
+
+export function mergeApproved(db: Db, project: Project, unit: Unit): boolean {
+  if (project.mergePolicy === "auto") return true;
+  const gate = listGates(db, project.id)
+    .filter((g) => g.kind === "land" && g.unitId === unit.id)
+    .at(-1);
+  return !!gate && gateResolved(gate, "land");
+}
+
+async function finishMerged(l: Landing, status: PrStatus, number: number): Promise<LandResult> {
+  const merged = status.mergedSha!;
+  await ensureMirror(l.repo.url, l.mirror);
+  const patch = await patchId(l.mirror, `${merged}^1` as Sha, merged);
+  setMergeState(l.db, l.unit.id, "merged", l.project.id, { number, sha: merged });
+  if (patch === l.verdict.patch_id) carryVerdict(l, merged, `merged as ${merged} (pull request #${number}); patch-id unchanged, carried forward`);
+  else {
+    const reason = `pull request #${number} merged as ${merged} with a patch other than the one verified; verdict not carried`;
+    l.db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, l.verdict.id);
+    recordEvent(l.db, "pr.merged_unverified", { projectId: l.project.id, unitId: l.unit.id }, { number, sha: merged });
+  }
+  markLanded(l, merged, { pr: number });
+  return { unit: getUnit(l.db, l.unit.id), outcome: "landed", landedSha: merged, reason: `pull request #${number} merged` };
+}
+
+// Deterministic babysitting: read the pull request, act on what changed, spend no tokens.
+export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId): Promise<LandResult | null> {
+  const { db } = ctx;
+  const mr = getMergeRequest(db, unitId);
+  if (!mr || mr.state !== "open") return null;
+  const unit = getUnit(db, unitId);
+  const repo = getRepo(db, unit.repoId!);
+  const forge = forgeFor(db, repo);
+  if (!forge) return null;
+  const project = getProject(db, unit.projectId);
+  if (unit.state === "abandoned") {
+    await forge.close(mr.number, `yagura abandoned ${project.id}/U${unit.seq}, so this pull request will not be merged.`);
+    setMergeState(db, unit.id, "closed", project.id, { number: mr.number, reason: "unit abandoned" });
+    return null;
+  }
+  const status = await forge.status(mr.number);
+  recordMergeStatus(db, unit.id, status);
+  if (!["landing", "blocked"].includes(unit.state)) return null;
+  const l = landing(ctx, unit);
+  if (status.state === "merged") return finishMerged(l, status, mr.number);
+  if (unit.state !== "landing") return null;
+  if (status.state === "closed") {
+    setMergeState(db, unit.id, "closed", project.id, { number: mr.number, reason: "closed on the forge" });
+    return block(l, `pull request #${mr.number} was closed without merging`);
+  }
+  if (status.headSha !== mr.headSha) return block(l, `pull request #${mr.number}'s branch moved to ${status.headSha.slice(0, 10)} outside yagura`);
+  if (status.merge === "behind" || status.merge === "conflict") {
+    const squash = await squashOntoTrunk(l);
+    if (squash.kind === "conflict")
+      return block(l, `pull request #${mr.number} conflicts with ${repo.defaultBranch} at ${squash.trunk.slice(0, 10)}; needs a rebase unit`);
+    if (squash.kind === "changed") return reverify(l, squash.trunk, squash.rebased);
+    return propose(l, forge, squash);
+  }
+  if (status.failing.length) return block(l, `checks failed on pull request #${mr.number}: ${status.failing.join(", ")}`);
+  const waiting = (reason: string): LandResult => ({ unit, outcome: "waiting", landedSha: null, reason });
+  if (status.pending.length) return waiting(`checks running: ${status.pending.join(", ")}`);
+  if (status.merge !== "clean") return waiting(`the forge says ${status.merge}`);
+  if (!mergeApproved(db, project, unit)) return waiting("waiting for the land gate");
+  await forge.merge(mr.number, mr.headSha, resolveSetting(db, "forge.merge_method", { repoId: repo.id }).value);
+  const after = await forge.status(mr.number);
+  recordMergeStatus(db, unit.id, after);
+  return after.state === "merged" ? finishMerged(l, after, mr.number) : waiting("merge requested");
 }

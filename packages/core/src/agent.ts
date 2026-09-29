@@ -62,7 +62,10 @@ export interface SessionRecorder {
 }
 
 // A resumed session already loaded the skills its first round did, so those count toward METHOD.
-export function attemptRecorder(db: Db, s: { attempt: Attempt; unit: Unit; projectId: ProjectId; role: Role; inheritedSkills?: string[] }): SessionRecorder {
+export function attemptRecorder(
+  db: Db,
+  s: { attempt: Attempt; unit: Unit; projectId: ProjectId; role: Role; inheritedSkills?: string[]; projectSkills?: string[] },
+): SessionRecorder {
   const refs = { projectId: s.projectId, unitId: s.unit.id, attemptId: s.attempt.id };
   return {
     env: { YAGURA_ATTEMPT: String(s.attempt.id), YAGURA_PROJECT: s.projectId, YAGURA_UNIT: `U${s.unit.seq}`, YAGURA_ROLE: s.role },
@@ -73,7 +76,7 @@ export function attemptRecorder(db: Db, s: { attempt: Attempt; unit: Unit; proje
     session: (e) => updateAttempt(db, s.attempt.id, { pluginVersions: e.plugins, model: e.model, sessionId: e.sessionId }),
     usage: (contextPeak, tokensOut) => updateAttempt(db, s.attempt.id, { contextPeak, tokensOut }),
     finished: (skills) => {
-      const missing = getAttempt(db, s.attempt.id).stopNote !== null ? [] : missingSkills(s.role, [...(s.inheritedSkills ?? []), ...skills]);
+      const missing = getAttempt(db, s.attempt.id).stopNote !== null ? [] : missingSkills(s.role, [...(s.inheritedSkills ?? []), ...skills], s.projectSkills);
       updateAttempt(db, s.attempt.id, { skills, missingSkills: missing });
       if (missing.length) recordEvent(db, "attempt.method_miss", refs, { role: s.role, missing, loaded: skills });
       return missing;

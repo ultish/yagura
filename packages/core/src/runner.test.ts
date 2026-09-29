@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
-import type { Bootstrap } from "./config.js";
+import { setSetting, type Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
@@ -190,5 +190,70 @@ describe("runWorkUnit", () => {
     const done = await running;
     expect(done.state).toBe("stopped");
     expect(getUnit(db, unit.id)).toMatchObject({ state: "ready", notes: ["Operator stopped attempt 1: wrong approach; use the store"] });
+  });
+
+  describe("project skills and reference repos", () => {
+    const ctx = () => ({ db, boot, adapters: { claude: fake }, cli: [] });
+    const unitWith = (scaffold: boolean) => {
+      const u = addUnit(db, {
+        projectId: project,
+        type: "work",
+        repoId: "testbed" as RepoId,
+        goal: "Build it",
+        writeScope: ["app/**"],
+        acceptance: ["it builds"],
+        verify: "true",
+        scaffold,
+        timeboxSeconds: 60,
+        maxAttempts: 2,
+      });
+      transitionUnit(db, u.id, "ready");
+      return u;
+    };
+    const runUnit = async (scaffold: boolean, skills: string) => {
+      process.env.FAKE_MODE = "success";
+      process.env.FAKE_SKILLS = skills;
+      try {
+        const u = unitWith(scaffold);
+        const attempt = await runWorkUnit(ctx(), u.id);
+        return { unit: getUnit(db, u.id), attempt, brief: readFileSync(layout(boot).brief(project, u.seq, attempt.n), "utf8") };
+      } finally {
+        delete process.env.FAKE_SKILLS;
+      }
+    };
+
+    it("names the project's work skills in METHOD and rejects work that skipped one", async () => {
+      setSetting(db, "project", project, "skills.work", ["setup-thing"]);
+      const skipped = await runUnit(false, "");
+      expect(skipped.brief).toContain("Then load these project skills with the Skill tool before you change anything, and follow them: setup-thing.");
+      expect(skipped.attempt).toMatchObject({ missingSkills: ["setup-thing"], rejection: "skills" });
+      expect(skipped.unit.state).toBe("rejected");
+      const loaded = await runUnit(false, "setup-thing");
+      expect(loaded.attempt.missingSkills).toEqual([]);
+      expect(loaded.unit.state).toBe("verifying");
+    });
+
+    it("runs a scaffold unit with the scaffold skills instead of the work skills", async () => {
+      setSetting(db, "project", project, "skills.work", ["setup-thing"]);
+      setSetting(db, "project", project, "skills.scaffold", ["setup-gradle"]);
+      const { unit, attempt, brief } = await runUnit(true, "setup-gradle");
+      expect(brief).toContain("This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more.");
+      expect(brief).toContain("follow them: setup-gradle.");
+      expect(attempt.missingSkills).toEqual([]);
+      expect(unit.state).toBe("verifying");
+    });
+
+    it("gives the worker a read-only trunk checkout of each reference repo", async () => {
+      const ref = mkdtempSync(join(tmpdir(), "yagura-ref-"));
+      writeFileSync(join(ref, "build.gradle.kts"), "plugins {}\n");
+      await git(["init", "--quiet", "-b", "main"], { cwd: ref });
+      await commitAll(ref, "init", { name: "t", email: "t@t" });
+      addRepo(db, { id: "billing", url: ref, defaultBranch: "main" });
+      setSetting(db, "project", project, "project.reference_repos", ["billing"]);
+      const { brief } = await runUnit(false, "");
+      const line = /^- billing at (\S+) @ ([0-9a-f]{40})$/m.exec(brief)!;
+      expect(readFileSync(join(line[1]!, "build.gradle.kts"), "utf8")).toBe("plugins {}\n");
+      expect(line[2]).toBe(await git(["rev-parse", "HEAD"], { cwd: ref }));
+    });
   });
 });

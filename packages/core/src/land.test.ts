@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -12,19 +13,24 @@ import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { findByRef, findUnitsByCommit, traceUnit } from "./audit.js";
 import { setSetting } from "./config.js";
-import { landUnit } from "./land.js";
+import { getMergeRequest } from "./forge.js";
+import { landUnit, liveVerdict, watchMergeRequest } from "./land.js";
 import { layout } from "./paths.js";
 import { runWorkUnit } from "./runner.js";
 import { failurePolicy } from "./schedule.js";
 import {
   addEnvironment,
+  addGate,
   addProject,
   addRepo,
   addUnit,
   getUnitBySeq,
   listAttempts,
+  answerGate,
   openStore,
+  setMergePolicy,
   setProjectEnvironment,
+  setRepoForge,
   transitionUnit,
   type Db,
 } from "./store.js";
@@ -198,5 +204,108 @@ describe("landUnit (forge none)", () => {
       maxAttempts: 1,
     });
     await expect(landUnit(ctx, work.id)).rejects.toThrow(/draft, not verified/);
+  });
+});
+
+describe("landing through a GitHub pull request (fake gh over a real origin)", () => {
+  const ghState = () =>
+    JSON.parse(readFileSync(join(root, "gh.json"), "utf8")) as {
+      prs: { number: number; head: string; title: string; body: string; state: string; checks: unknown[]; mergeStateStatus?: string; comment?: string }[];
+      calls: string[];
+    };
+  const editPr = (patch: Record<string, unknown>) => {
+    const st = ghState();
+    Object.assign(st.prs[0]!, patch);
+    writeFileSync(join(root, "gh.json"), JSON.stringify(st));
+  };
+  const live = (unitId: number) => liveVerdict(db, unitId as never)!;
+
+  beforeEach(() => {
+    const bin = fixtures("fake-gh.mjs");
+    chmodSync(bin, 0o755);
+    process.env.FAKE_GH_STATE = join(root, "gh.json");
+    process.env.FAKE_GH_ORIGIN = origin;
+    setRepoForge(db, "testbed" as RepoId, "gh");
+    setSetting(db, "repo", "testbed", "forge.repo", "ultish/sandbox");
+    setSetting(db, "global", "", "forge.gh_bin", bin);
+  });
+
+  it("opens one pull request with the squashed commit and merges it when clean, carrying the verdict to the merged commit", async () => {
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit();
+    const trunkBefore = await originMain();
+    const proposed = await landUnit(ctx, work.id);
+    expect(proposed).toMatchObject({ outcome: "proposed", reason: "pull request #1: https://github.com/ultish/sandbox/pull/1" });
+    expect(proposed.unit.state).toBe("landing");
+    expect(await originMain()).toBe(trunkBefore);
+    const pr = ghState().prs[0]!;
+    expect(pr).toMatchObject({ head: "yg/p/u1", title: "Implement apply_discount. Then more detail.", state: "OPEN" });
+    expect(pr.body).toContain("Yagura-Unit: U1");
+    const mr = getMergeRequest(db, work.id)!;
+    expect(mr).toMatchObject({ number: 1, branch: "yg/p/u1", baseSha: trunkBefore, state: "open" });
+
+    const merged = await watchMergeRequest(ctx, work.id);
+    expect(merged?.outcome).toBe("landed");
+    const main = await originMain();
+    expect(merged?.landedSha).toBe(main);
+    expect(main).not.toBe(mr.headSha);
+    expect(await git(["log", "-1", "--format=%B", "main"], { cwd: origin })).toContain("Yagura-Verdict: unit-verified");
+    expect(live(work.id).head_sha).toBe(main);
+    expect(getMergeRequest(db, work.id)!.state).toBe("merged");
+    expect(ghState().calls.filter((c) => c.startsWith("pr merge"))).toEqual([`pr merge 1 --repo ultish/sandbox --rebase --match-head-commit ${mr.headSha}`]);
+  });
+
+  it("waits for the land gate under merge: human, then merges", async () => {
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "waiting", reason: "waiting for the land gate" });
+    const gateId = addGate(db, { projectId: project, unitId: work.id, kind: "land", question: "land?", options: ["land", "hold"], defaultOption: "hold" });
+    answerGate(db, gateId, "land");
+    expect((await watchMergeRequest(ctx, work.id))?.outcome).toBe("landed");
+  });
+
+  it("re-squashes onto a moved trunk and updates the same pull request", async () => {
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit("success-line");
+    await landUnit(ctx, work.id);
+    const first = getMergeRequest(db, work.id)!;
+    await advanceTrunk("README.md", "moved\n");
+    const updated = await watchMergeRequest(ctx, work.id);
+    expect(updated).toMatchObject({ outcome: "proposed", reason: "pull request #1: https://github.com/ultish/sandbox/pull/1" });
+    const second = getMergeRequest(db, work.id)!;
+    expect(second.headSha).not.toBe(first.headSha);
+    expect(second.baseSha).toBe(await originMain());
+    expect(ghState().prs).toHaveLength(1);
+    expect((await watchMergeRequest(ctx, work.id))?.outcome).toBe("landed");
+    expect(await git(["show", "main:README.md"], { cwd: origin })).toBe("moved");
+    expect(await git(["show", "main:app/orders.py"], { cwd: origin })).toContain("edited by fake agent");
+  });
+
+  it("blocks on failing checks, and lands when a person merges the pull request anyway", async () => {
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    editPr({ checks: [{ __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "FAILURE" }] });
+    const blocked = await watchMergeRequest(ctx, work.id);
+    expect(blocked).toMatchObject({ outcome: "blocked", reason: "checks failed on pull request #1: build" });
+    execFileSync(fixtures("fake-gh.mjs"), ["pr", "merge", "1", "--rebase", "--match-head-commit", getMergeRequest(db, work.id)!.headSha]);
+    const landed = await watchMergeRequest(ctx, work.id);
+    expect(landed).toMatchObject({ outcome: "landed", landedSha: await originMain() });
+  });
+
+  it("blocks when the pull request is closed on the forge", async () => {
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    editPr({ state: "CLOSED" });
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "blocked", reason: "pull request #1 was closed without merging" });
+    expect(getMergeRequest(db, work.id)!.state).toBe("closed");
+  });
+
+  it("closes the pull request of an abandoned unit with a comment", async () => {
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    transitionUnit(db, work.id, "abandoned", { reason: "cancelled" });
+    expect(await watchMergeRequest(ctx, work.id)).toBeNull();
+    expect(ghState().prs[0]).toMatchObject({ state: "CLOSED", comment: "yagura abandoned p/U1, so this pull request will not be merged." });
   });
 });

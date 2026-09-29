@@ -46,9 +46,9 @@ export const REQUIRED_SKILLS: Partial<Record<Role, readonly string[]>> = {
   watchman: ["yagura:yagura-watchman"],
 };
 
-export function missingSkills(role: Role, loaded: readonly string[]): string[] {
+export function missingSkills(role: Role, loaded: readonly string[], project: readonly string[] = []): string[] {
   const bare = (s: string) => s.slice(s.indexOf(":") + 1);
-  return (REQUIRED_SKILLS[role] ?? []).filter((req) => !loaded.some((l) => l === req || bare(l) === bare(req)));
+  return [...(REQUIRED_SKILLS[role] ?? []), ...project].filter((req) => !loaded.some((l) => l === req || bare(l) === bare(req)));
 }
 
 export function loadPack(worktree: string, packPath: string): PackLoad {

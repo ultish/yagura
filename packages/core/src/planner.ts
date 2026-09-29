@@ -108,6 +108,8 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
       standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
       timeboxMinutes: setting("timebox.work_seconds") / 60,
       specPath: existsSync(paths.spec(projectId)) ? paths.spec(projectId) : null,
+      scaffoldSkills: setting("skills.scaffold"),
+      references: setting("project.reference_repos"),
     });
     write(paths.brief(projectId, unit.seq, attempt.n), briefText);
     transitionUnit(db, unit.id, "running", { attempt: attempt.n });

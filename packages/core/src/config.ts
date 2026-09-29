@@ -62,6 +62,11 @@ export const SETTINGS = {
   "timebox.watchman_seconds": z.number().int().positive().default(900).describe("How long one watchman turn may run"),
   "watchman.context_tokens": z.number().int().min(4000).default(40000).describe("Size budget for the watchman's brief"),
   "timebox.work_seconds": z.number().int().positive().default(1800).describe("How long a worker may run before it is stopped"),
+  "skills.scaffold": z.array(z.string().min(1)).default([]).describe("Skills a scaffold unit (a new project's skeleton) must load"),
+  "skills.work": z.array(z.string().min(1)).default([]).describe("Skills every worker must load"),
+  "skills.pack": z.array(z.string().min(1)).default([]).describe("Skills the verify pack writer must load"),
+  "skills.verify": z.array(z.string().min(1)).default([]).describe("Skills every verifier must load"),
+  "project.reference_repos": z.array(z.string().min(1)).default([]).describe("Registered repos that already do it right; workers get a read-only checkout"),
   "work.resume_on_rejection": z.boolean().default(true).describe("After a rejection, resume the worker's own session with the findings"),
   "work.resume_max_context": z
     .number()
@@ -81,6 +86,10 @@ export const SETTINGS = {
   "lease.keep": z.enum(["never", "failed", "always"]).default("never").describe("Keep what a verification deployed afterwards"),
   "lease.keep_hours": z.number().positive().default(2).describe("Hours a kept namespace or slot lives before it is deleted"),
   "gates.timeout_hours": z.number().positive().nullable().default(24).describe("Hours before an unanswered question takes its default (empty: never)"),
+  "forge.repo": z.string().nullable().default(null).describe("The repo on the forge as [host/]owner/name (empty: read from the repo URL)"),
+  "forge.merge_method": z.enum(["rebase", "squash", "merge"]).default("rebase").describe("How yagura merges a pull request"),
+  "forge.gh_bin": z.string().default("gh").describe("The gh CLI yagura runs for GitHub"),
+  "forge.poll_seconds": z.number().int().positive().default(30).describe("How often an open pull request is checked"),
 } satisfies Record<string, z.ZodTypeAny>;
 
 export type SettingKey = keyof typeof SETTINGS;
@@ -90,6 +99,7 @@ const P: readonly OverrideScope[] = ["project"];
 const PR: readonly OverrideScope[] = ["project", "repo"];
 const PRE: readonly OverrideScope[] = ["project", "repo", "environment"];
 const PE: readonly OverrideScope[] = ["project", "environment"];
+const R: readonly OverrideScope[] = ["repo"];
 
 // The layers each setting is read at; an override anywhere else would never take effect.
 export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
@@ -112,6 +122,11 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "watchman.context_tokens": [],
   "timebox.work_seconds": PR,
   "work.resume_on_rejection": PR,
+  "skills.scaffold": PR,
+  "skills.work": PR,
+  "skills.pack": PR,
+  "skills.verify": PR,
+  "project.reference_repos": P,
   "work.resume_max_context": PR,
   "timebox.verify_seconds": PRE,
   "verify.max_retries": P,
@@ -125,6 +140,10 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "values.literal_allowed": PR,
   "lease.keep": PE,
   "lease.keep_hours": PE,
+  "forge.repo": R,
+  "forge.merge_method": R,
+  "forge.gh_bin": [],
+  "forge.poll_seconds": [],
 };
 export type SettingValue<K extends SettingKey> = z.output<(typeof SETTINGS)[K]>;
 export type SettingSource = SettingScope | "default";

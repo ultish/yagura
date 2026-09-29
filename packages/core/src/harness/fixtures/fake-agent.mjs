@@ -17,6 +17,7 @@ process.stdin.on("end", () => {
       verifier: ["yagura:yagura-verifier"],
       watchman: ["yagura:yagura-watchman"],
     }[process.env.YAGURA_ROLE] ?? [];
+  skills.push(...(process.env.FAKE_SKILLS ?? "").split(",").filter(Boolean));
   if (mode !== "noskills")
     for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);

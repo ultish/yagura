@@ -115,6 +115,7 @@ export interface ProjectDetail extends ProjectSummary {
   gates: Gate[];
   waiting: { unitId: number; reason: string }[];
   threads: number[];
+  skills: { skill: string; purposes: string[]; repos: string[]; installed: boolean }[];
 }
 
 export interface AgentRow extends Attempt {

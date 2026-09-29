@@ -1,4 +1,5 @@
 import type { RenderedBrief } from "./domain.js";
+import { skillMethod } from "./skills.js";
 
 export const HANDOFF_TEMPLATE = `## Status
 success | partial | blocked
@@ -144,6 +145,7 @@ export interface VerifyBrief {
   deploys: boolean;
   timeboxMinutes: number;
   standing: string;
+  skills: string[];
 }
 
 const DIFF_LIMIT = 60_000;
@@ -198,7 +200,7 @@ ${v.timeboxMinutes} minutes.
 - claiming a result you did not capture with evidence run
 
 ## METHOD
-Load the yagura-verifier skill first and follow it.
+Load the yagura-verifier skill first and follow it.${skillMethod(v.skills)}
 
 ## REPORT
 Your final message is your verdict; nothing else you write is read. Use exactly this structure:
@@ -218,6 +220,8 @@ export interface PlanBrief {
   standing: string;
   timeboxMinutes: number;
   specPath?: string | null;
+  scaffoldSkills?: string[];
+  references?: string[];
 }
 
 export function renderPlanBrief(p: PlanBrief): string {
@@ -246,6 +250,7 @@ ${p.status}
 - \`verify\` is the command a worker runs to check itself (for example the repo's test command).
 - \`deps\` names units that must land first: a key from this delta or an existing unit such as "U3".
 - \`playbook\` is one of: ${p.playbooks.join(", ")}.
+- \`scaffold\`: true marks the unit that builds a new project's skeleton. ${p.scaffoldSkills?.length ? `This project names scaffold skills (${p.scaffoldSkills.join(", ")}): when a repo has no project skeleton yet, make its first unit a scaffold unit and let later units build on it.` : "This project names no scaffold skills; leave it false."}${p.references?.length ? `\n- Workers get read-only checkouts of reference repos that already do it right (${p.references.join(", ")}); point at them in \`context\` when a unit should follow their shape.` : ""}
 - \`refs\` (optional) lists issue keys the unit addresses, e.g. "gitlab#123"; the project's own refs are added automatically.
 - A blocked or failed unit can be retried with a note that changes what the next attempt does, split into new units, or cancelled.
 - Ask the human only for a product or preference decision no experiment can settle, with a default.

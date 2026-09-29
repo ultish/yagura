@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { write } from "./agent.js";
-import { resolveSetting, type Bootstrap } from "./config.js";
+import { resolveSetting, setSetting, type Bootstrap } from "./config.js";
+import { SKILL_PURPOSES } from "./skills.js";
 import { MERGE_POLICIES, PASS_TIERS, type EnvironmentId, type ProjectId, type RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import { VerifyPack } from "./pack.js";
@@ -54,6 +55,16 @@ export const ProposalBody = z
             refs: z.array(z.string().min(1)).default([]),
             spec: z.string().default(""),
             units: z.array(PlanUnit).default([]),
+            skills: z
+              .object({
+                scaffold: z.array(z.string().min(1)).optional(),
+                work: z.array(z.string().min(1)).optional(),
+                pack: z.array(z.string().min(1)).optional(),
+                verify: z.array(z.string().min(1)).optional(),
+              })
+              .strict()
+              .default({}),
+            references: z.array(z.string()).default([]),
           })
           .strict(),
       )
@@ -134,6 +145,8 @@ export function validateProposal(db: Db, boot: Bootstrap, threadId: number, p: P
       }
     }
     if (!proj.environment) defaultEnvironment(db, newEnvs);
+    for (const r of proj.references)
+      if (!repoExists(r) && !newRepos.has(r)) throw new ProposalInvalid(`${proj.id}: reference repo ${r} is neither registered nor created by this proposal`);
     for (const u of proj.units)
       if (!proj.repos.includes(u.repo)) throw new ProposalInvalid(`${proj.id}: unit ${u.key} uses repo ${u.repo}, which is not one of the project's repos`);
     earlier.add(proj.id);
@@ -239,6 +252,11 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
           environmentId: env as EnvironmentId,
         });
         linkThreadProject(db, proposal.threadId, project.id);
+        for (const purpose of SKILL_PURPOSES) {
+          const skills = p.skills[purpose];
+          if (skills) setSetting(db, "project", project.id, `skills.${purpose}`, skills);
+        }
+        if (p.references.length) setSetting(db, "project", project.id, "project.reference_repos", p.references);
         if (p.units.length) out.units[p.id] = applyDelta(db, project.id, PlanDelta.parse({ add: p.units }), null).added.map((u) => `U${u.seq}`);
         out.projects.push(p.id);
       }
@@ -290,6 +308,8 @@ export function describeProposal(body: ProposalBody): string {
       p.after.length ? `after ${p.after.join(", ")}` : "",
       p.phaseGate ? "phase gate" : "",
       p.environment ? `env ${p.environment}` : "",
+      ...SKILL_PURPOSES.flatMap((k) => (p.skills[k]?.length ? [`${k} skills ${p.skills[k]!.join(", ")}`] : [])),
+      p.references.length ? `references ${p.references.join(", ")}` : "",
     ];
     lines.push(`- project ${p.id}: ${p.goal}`, `  done when: ${p.predicate}`, `  ${facts.filter(Boolean).join(" · ")}`);
     for (const u of p.units) lines.push(`  - unit ${u.key}: ${u.goal}`);

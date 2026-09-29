@@ -42,6 +42,9 @@ import {
   runVerifyUnit,
   setProjectEnvironment,
   setRepoUrl,
+  setRepoForge,
+  FORGES,
+  type Forge,
   type EnvironmentId,
   type Provider,
   type RunContext,
@@ -61,6 +64,7 @@ import {
   resolveSetting,
   runWorkUnit,
   setSetting,
+  projectSkillChecks,
   clearSetting,
   exportSettings,
   importSettings,
@@ -98,7 +102,7 @@ const USAGE = `yagura — agent orchestration
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
-  yagura repo set <id> --url <url>
+  yagura repo set <id> [--url <url>] [--forge none|gh]   gh lands through pull requests (forge.repo, forge.merge_method)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]   runs the doctor
   yagura env set <id> [--capacity <n>] [--name <text>]
@@ -114,7 +118,8 @@ const USAGE = `yagura — agent orchestration
   yagura template list
   yagura template save <env> <name> [--description <text>] [--ask <NAME>...]
   yagura template apply <name> --id <new env> [--name <text>] [--answer <NAME=value>...]
-  yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...]
+  yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...] [--reference <repo id>...]
+  yagura project skills <id>                       checks the project's skills.* are installed where agents run
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
   yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go
   yagura thread mentions <@project | @project/U3 | @project/U3.2 | @thread:4 | @repo:id>   conversations that mention it
@@ -221,10 +226,12 @@ function printRecords(threadId: number, sinceMessageId: number) {
 async function main() {
   switch (command) {
     case "repo": {
-      const { positionals, values } = args({ id: { type: "string" }, url: { type: "string" } });
-      if (positionals[0] === "set" && positionals[1] && values.url) {
-        setRepoUrl(db, positionals[1] as RepoId, values.url);
-        console.log(`repo ${positionals[1]} → ${values.url}`);
+      const { positionals, values } = args({ id: { type: "string" }, url: { type: "string" }, forge: { type: "string" } });
+      if (positionals[0] === "set" && positionals[1] && (values.url || values.forge)) {
+        if (values.forge && !(FORGES as readonly string[]).includes(values.forge)) fail(`--forge must be one of ${FORGES.join(", ")}`);
+        if (values.url) setRepoUrl(db, positionals[1] as RepoId, values.url);
+        if (values.forge) setRepoForge(db, positionals[1] as RepoId, values.forge as Forge);
+        console.log(`repo ${positionals[1]}:${values.url ? ` url → ${values.url}` : ""}${values.forge ? ` forge → ${values.forge}` : ""}`);
         return;
       }
       if (positionals[0] !== "add" || !positionals[1] || positionals[2]) fail(USAGE);
@@ -245,8 +252,24 @@ async function main() {
         issue: { type: "string", multiple: true },
         after: { type: "string", multiple: true },
         "phase-gate": { type: "boolean" },
+        reference: { type: "string", multiple: true },
       });
       const id = positionals[1];
+      if (positionals[0] === "skills" && id) {
+        const checks = projectSkillChecks(db, boot, id as ProjectId);
+        if (!checks.length) console.log(`project ${id} names no project skills (set skills.scaffold, skills.work, skills.pack, skills.verify)`);
+        for (const c of checks)
+          console.log(
+            `${c.installed ? "✓" : "✗"} ${c.skill}  ${c.purposes.join(", ")} · ${c.repos.join(", ")}${c.installed ? "" : "  not installed where agents run"}`,
+          );
+        if (checks.some((c) => !c.installed)) process.exitCode = 1;
+        return;
+      }
+      if (positionals[0] === "set" && id && values.reference) {
+        setSetting(db, "project", id as ProjectId, "project.reference_repos", many(values.reference));
+        console.log(`project ${id}: reference repos → ${many(values.reference).join(", ")}`);
+        if (!values.env && !values.merge && !values.issue) return;
+      }
       if (positionals[0] === "set" && id && (values.env || values.merge || values.issue)) {
         if (values.issue) setProjectRefs(db, id as ProjectId, many(values.issue));
         if (values.env) setProjectEnvironment(db, id as ProjectId, values.env as EnvironmentId);

@@ -59,6 +59,7 @@ import {
   registerRepo,
   RepoUnusable,
   applyTemplate,
+  projectSkillChecks,
   ENVIRONMENT_ID,
   deleteKept,
   deleteValue,
@@ -184,6 +185,7 @@ export function createApp(opts: ServerOptions): Hono {
       deps: listDeps(db, id),
       gates: listGates(db, id),
       waiting: r.waiting.map((w) => ({ unitId: w.unit.id, reason: w.reason })),
+      skills: projectSkillChecks(db, boot, id),
     });
   });
 

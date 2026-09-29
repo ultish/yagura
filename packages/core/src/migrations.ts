@@ -159,6 +159,29 @@ ALTER TABLE attempts ADD COLUMN resumes_attempt_id INTEGER REFERENCES attempts (
 ALTER TABLE attempts ADD COLUMN rejection TEXT CHECK (rejection IN ('code-fault', 'literals', 'scope', 'skills', 'conflict'));
 `,
   },
+  {
+    version: 10,
+    sql: `ALTER TABLE units ADD COLUMN scaffold INTEGER NOT NULL DEFAULT 0;`,
+  },
+  {
+    version: 11,
+    sql: `
+CREATE TABLE merge_requests (
+  unit_id INTEGER PRIMARY KEY REFERENCES units (id),
+  forge TEXT NOT NULL,
+  forge_repo TEXT NOT NULL,
+  number INTEGER NOT NULL,
+  url TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  head_sha TEXT NOT NULL,
+  base_sha TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'merged', 'closed')),
+  status_json TEXT,
+  checked_at TEXT,
+  created_at TEXT NOT NULL
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

@@ -294,6 +294,19 @@ export function Project({ id }: { id: string }) {
             </div>
           );
         })}
+        {d.skills.length > 0 && (
+          <div>
+            <h2 className="h2">Project skills</h2>
+            <div className="facts" style={{ marginTop: 6 }}>
+              {d.skills.map((k) => (
+                <span key={k.skill} className={k.installed ? undefined : "s-bell"}>
+                  <span className="mono">{k.skill}</span> {k.purposes.join(", ")}
+                  {k.installed ? "" : " · not installed where agents run"}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <div>
           <div className="gh">
             <h2 className="h2">Settings</h2>

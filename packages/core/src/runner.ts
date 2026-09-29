@@ -3,11 +3,23 @@ import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { HANDOFF_TEMPLATE, packContract, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
-import { isBuild, type Attempt, type EnvironmentId, type Rejection, type RenderedBrief, type Unit, type UnitId } from "./domain.js";
+import {
+  isBuild,
+  type Attempt,
+  type EnvironmentId,
+  type ProjectId,
+  type Rejection,
+  type RenderedBrief,
+  type RepoId,
+  type Sha,
+  type Unit,
+  type UnitId,
+} from "./domain.js";
 import { chooseResume, rejectionFindings, renderResumePrompt } from "./resume.js";
+import { requiredProjectSkills, skillMethod } from "./skills.js";
 import { environmentNotes, hardCodedValues, listValues, valueMap } from "./envvalues.js";
 import { LEASE_VARS } from "./leases.js";
-import { addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
+import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
 import { classifyFailure, parseHandoff, syntheticFailureHandoff } from "./handoff.js";
 import { layout, unitRef } from "./paths.js";
 import { checkScope } from "./scope.js";
@@ -57,6 +69,24 @@ export function queueVerification(db: Db, target: Unit): Unit {
   return verify;
 }
 
+// Read-only trunk checkouts of repos that already do it right; a resumed attempt keeps the paths its session saw.
+async function referenceCheckouts(ctx: RunContext, projectId: ProjectId, seq: number, n: number, repoIds: string[]) {
+  const out: { repoId: RepoId; path: string; sha: Sha }[] = [];
+  for (const id of repoIds) {
+    const ref = getRepo(ctx.db, id as RepoId);
+    const mirror = layout(ctx.boot).mirror(ref.id);
+    await ensureMirror(ref.url, mirror);
+    const sha = await resolveRef(mirror, `origin/${ref.defaultBranch}`);
+    const path = `${layout(ctx.boot).worktree(ref.id, projectId, seq, n)}.reference`;
+    if (!existsSync(path)) {
+      mkdirSync(dirname(path), { recursive: true });
+      await addDetachedWorktree(mirror, path, sha);
+    }
+    out.push({ repoId: ref.id, path, sha: (await headSha(path)) as Sha });
+  }
+  return out;
+}
+
 export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt> {
   const { db, boot } = ctx;
   const unit = getUnit(db, unitId);
@@ -95,6 +125,8 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     await addWorktree(mirror, worktree, branch, base);
   }
 
+  const projectSkills = requiredProjectSkills(db, unit);
+  const references = await referenceCheckouts(ctx, project.id, unit.seq, from?.n ?? attempt.n, setting("project.reference_repos"));
   const standingPath = paths.standingOrders(project.id);
   const packForbid = isPack ? [] : [`${repo.verifyPackPath}/**`];
   const env = project.environmentId ? getEnvironment(db, project.environmentId) : null;
@@ -117,7 +149,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       ...unit.notes.map((n) => `Note from an earlier attempt: ${n}`),
       ...(environmentNotes(db, project.environmentId) ? [`About this environment: ${environmentNotes(db, project.environmentId)}`] : []),
     ],
-    readonly: [],
+    readonly: references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
     acceptance: unit.acceptance,
     verify: unit.verify,
     env: envValues,
@@ -132,9 +164,12 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       "nothing outside SCOPE",
       isPack ? "do not change the code the pack verifies" : `do not edit the verify pack at ${repo.verifyPackPath}`,
     ],
-    method: isPack
-      ? "Load the yagura-pack skill first and follow it."
-      : `Load the yagura-worker skill first and follow it. Then use pstack:poteto-mode${unit.playbook ? ` with the ${unit.playbook} playbook` : ""}.`,
+    method:
+      (isPack
+        ? "Load the yagura-pack skill first and follow it."
+        : `Load the yagura-worker skill first and follow it. Then use pstack:poteto-mode${unit.playbook ? ` with the ${unit.playbook} playbook` : ""}.`) +
+      (unit.scaffold ? " This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more." : "") +
+      skillMethod(projectSkills),
     report: HANDOFF_TEMPLATE,
     standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
   };
@@ -156,7 +191,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base, resumesAttemptId: from?.id ?? null });
 
   const session = await runAgentSession(ctx, {
-    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: isPack ? "pack" : "worker", inheritedSkills: from?.skills }),
+    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: isPack ? "pack" : "worker", inheritedSkills: from?.skills, projectSkills }),
     adapter,
     run: {
       prompt: briefText,
@@ -164,7 +199,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       model: setting("role.worker.model"),
       permissionMode: setting("harness.claude.permission_mode"),
       pluginDirs: [boot.skillsDir],
-      addDirs: [],
+      addDirs: references.map((r) => r.path),
       extraArgs: setting("harness.claude.extra_args"),
       resume: from?.sessionId ?? undefined,
     },

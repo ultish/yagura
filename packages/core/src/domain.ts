@@ -84,7 +84,7 @@ export const UNIT_TRANSITIONS: Record<UnitState, readonly UnitState[]> = {
   landing: ["landed", "verifying", "blocked", "abandoned"],
   rejected: ["ready", "blocked", "abandoned"],
   failed: ["ready", "blocked", "abandoned"],
-  blocked: ["ready", "abandoned"],
+  blocked: ["ready", "landed", "abandoned"],
   landed: [],
   done: [],
   abandoned: [],
@@ -225,6 +225,7 @@ export interface Unit {
   refs: string[];
   landedSha: Sha | null;
   playbook: string | null;
+  scaffold: boolean;
   timeboxSeconds: number;
   maxAttempts: number;
   createdByDrainId: DrainId | null;
