@@ -22,9 +22,13 @@ export interface ForgeAdapter {
   status(number: number): Promise<PrStatus>;
   merge(number: number, headSha: Sha, method: "rebase" | "squash" | "merge"): Promise<void>;
   close(number: number, comment: string): Promise<void>;
+  failedRuns(headSha: Sha): Promise<{ id: number; name: string; log: string }[]>;
+  rerunFailed(runId: number): Promise<void>;
 }
 
 export class ForgeError extends Error {}
+
+const LOG_LINES = 60;
 
 // Titles, bodies, and comments go to gh as arguments or stdin, never through a shell.
 function gh(bin: string, args: string[], stdin?: string): Promise<string> {
@@ -123,6 +127,24 @@ export function githubForge(bin: string, repo: string): ForgeAdapter {
     },
     async close(number, comment) {
       await gh(bin, ["pr", "close", String(number), ...R, "--comment", comment]);
+    },
+    async failedRuns(headSha) {
+      const runs = JSON.parse(await gh(bin, ["run", "list", ...R, "--commit", headSha, "--json", "databaseId,name,conclusion"])) as {
+        databaseId: number;
+        name: string;
+        conclusion: string;
+      }[];
+      const failed = runs.filter((r) => ["failure", "timed_out", "startup_failure"].includes(r.conclusion));
+      return Promise.all(
+        failed.map(async (r) => ({
+          id: r.databaseId,
+          name: r.name,
+          log: (await gh(bin, ["run", "view", String(r.databaseId), ...R, "--log-failed"]).catch(() => "")).split("\n").slice(-LOG_LINES).join("\n"),
+        })),
+      );
+    },
+    async rerunFailed(runId) {
+      await gh(bin, ["run", "rerun", String(runId), ...R, "--failed"]);
     },
   };
 }

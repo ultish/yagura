@@ -114,8 +114,12 @@ export function rejectionFindings(db: Db, boot: Bootstrap, unit: Unit, rejected:
   if (rejected.rejection !== "code-fault") return { why: note, runs: [], verifierReport: null };
   const verify = db.prepare("SELECT id, seq FROM units WHERE target_unit_id = ? AND type = 'verify' ORDER BY seq DESC LIMIT 1").get(unit.id) as
     { id: Unit["id"]; seq: number } | undefined;
-  const outcome = db.prepare("SELECT data_json FROM events WHERE type = 'verify.outcome' AND unit_id = ? ORDER BY id DESC LIMIT 1").get(unit.id) as
-    { data_json: string } | undefined;
+  const outcome = db.prepare("SELECT id, data_json FROM events WHERE type = 'verify.outcome' AND unit_id = ? ORDER BY id DESC LIMIT 1").get(unit.id) as
+    { id: number; data_json: string } | undefined;
+  const ci = db.prepare("SELECT id FROM events WHERE type = 'pr.checks_failed' AND unit_id = ? ORDER BY id DESC LIMIT 1").get(unit.id) as
+    { id: number } | undefined;
+  // The pull request's CI found the fault after the verifier passed it; its note holds the failing logs.
+  if (ci && (!outcome || ci.id > outcome.id)) return { why: note, runs: [], verifierReport: null };
   const why = outcome ? `The verifier rejected your work: ${(JSON.parse(outcome.data_json) as { reason: string }).reason}` : note;
   const attempt = verify ? listAttempts(db, verify.id).at(-1) : undefined;
   if (!verify || !attempt) return { why, runs: [], verifierReport: null };

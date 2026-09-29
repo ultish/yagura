@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { resolveSetting, type Bootstrap } from "./config.js";
-import { PASS_TIERS, REBASE_HARNESS } from "./domain.js";
+import { PASS_TIERS, REBASE_HARNESS, spendsAttempt } from "./domain.js";
 import type { Attempt, Project, Repo, Sha, Unit, UnitId, VerdictId } from "./domain.js";
 import { forgeFor, ForgeError, getMergeRequest, recordMergeStatus, saveMergeRequest, setMergeState, type ForgeAdapter, type PrStatus } from "./forge.js";
 import { gateResolved } from "./gates.js";
@@ -10,6 +10,7 @@ import { layout } from "./paths.js";
 import { markPackProven } from "./packs.js";
 import { addVerifyUnit } from "./runner.js";
 import {
+  addUnitNote,
   createAttempt,
   getProject,
   getRepo,
@@ -25,7 +26,7 @@ import {
 } from "./store.js";
 import { landMessage } from "./audit.js";
 
-export type LandOutcome = "landed" | "blocked" | "reverifying" | "proposed" | "waiting";
+export type LandOutcome = "landed" | "blocked" | "reverifying" | "proposed" | "waiting" | "rework";
 
 export interface LandResult {
   unit: Unit;
@@ -254,6 +255,43 @@ async function finishMerged(l: Landing, status: PrStatus, number: number): Promi
   return { unit: getUnit(l.db, l.unit.id), outcome: "landed", landedSha: merged, reason: `pull request #${number} merged` };
 }
 
+// A first failure on a head may be flaky and gets one re-run; failing again on the same head is the code's fault,
+// so the unit goes back to work with the failing logs, its next attempt resumes the worker, and the same pull request is updated.
+async function ciFailed(l: Landing, forge: ForgeAdapter, number: number, head: Sha, failing: string[]): Promise<LandResult> {
+  const { db } = l;
+  const refs = { projectId: l.project.id, unitId: l.unit.id };
+  const seen = (
+    db
+      .prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'pr.checks_failed' AND unit_id = ? AND json_extract(data_json, '$.head') = ?")
+      .get(l.unit.id, head) as { n: number }
+  ).n;
+  const runs = await forge.failedRuns(head);
+  if (!seen && runs.length) {
+    for (const r of runs) await forge.rerunFailed(r.id);
+    recordEvent(db, "pr.checks_failed", refs, { number, head, checks: failing, rerun: runs.map((r) => r.id) });
+    return {
+      unit: l.unit,
+      outcome: "waiting",
+      landedSha: null,
+      reason: `checks failed on pull request #${number} (${failing.join(", ")}); re-running the failed jobs once in case they were flaky`,
+    };
+  }
+  recordEvent(db, "pr.checks_failed", refs, { number, head, checks: failing, rerun: [] });
+  const logs = runs.map((r) => `${r.name}:\n${r.log}`).join("\n\n");
+  addUnitNote(
+    db,
+    l.unit.id,
+    `CI failed on pull request #${number} (${failing.join(", ")})${seen ? " again after a re-run, so it is not flaky" : ""}.${logs ? `\n${logs}` : ""}`,
+  );
+  updateAttempt(db, l.work.id, { rejection: "code-fault" });
+  const reason = `checks failed on pull request #${number}: ${failing.join(", ")}`;
+  transitionUnit(db, l.unit.id, "blocked", { reason });
+  const used = listAttempts(db, l.unit.id).filter(spendsAttempt).length;
+  if (used >= l.unit.maxAttempts) return { unit: getUnit(db, l.unit.id), outcome: "blocked", landedSha: null, reason };
+  transitionUnit(db, l.unit.id, "ready", { reason: "reworking after CI failed", attemptsUsed: used });
+  return { unit: getUnit(db, l.unit.id), outcome: "rework", landedSha: null, reason };
+}
+
 // Deterministic babysitting: read the pull request, act on what changed, spend no tokens.
 export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId): Promise<LandResult | null> {
   const { db } = ctx;
@@ -287,7 +325,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
     if (squash.kind === "changed") return reverify(l, squash.trunk, squash.rebased);
     return propose(l, forge, squash);
   }
-  if (status.failing.length) return block(l, `checks failed on pull request #${mr.number}: ${status.failing.join(", ")}`);
+  if (status.failing.length) return ciFailed(l, forge, mr.number, mr.headSha, status.failing);
   const waiting = (reason: string): LandResult => ({ unit, outcome: "waiting", landedSha: null, reason });
   if (status.pending.length) return waiting(`checks running: ${status.pending.join(", ")}`);
   if (status.merge !== "clean") return waiting(`the forge says ${status.merge}`);

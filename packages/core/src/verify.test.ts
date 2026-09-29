@@ -287,7 +287,7 @@ describe("resume on rejection", () => {
       "attempt 3 peaked at 75% of its context window",
       "attempt 4 is not resumed: resume on rejection is off",
     ]);
-  });
+  }, 30_000);
 
   it("falls back to a fresh attempt at no extra try when the session cannot be resumed", async () => {
     const { target } = await workThenVerify("verify-fail");

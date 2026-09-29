@@ -96,6 +96,8 @@ export class Engine {
     for (const u of listUnits(this.db, project.id).filter((x) => x.state === "verified" && x.repoId)) {
       const key = `land:${u.repoId}`;
       if (this.inflight.has(key)) continue;
+      // One lander per repo: a unit whose pull request is open stays landing until it merges.
+      if (listUnits(this.db, project.id).some((x) => x.repoId === u.repoId && x.state === "landing")) continue;
       const onForge = getRepo(this.db, u.repoId!).forge !== "none";
       if (project.mergePolicy === "human") {
         const gate = listGates(this.db, project.id)
@@ -335,13 +337,14 @@ export class Engine {
     const tickMs = this.opts.tickMs ?? 2000;
     const recovered = this.recoverOrphans();
     if (recovered) this.log(`recovered ${recovered} attempt(s) left running by a previous process`);
+    const aborted = new Promise((r) => signal.addEventListener("abort", r, { once: true }));
     while (!signal.aborted) {
       await this.tick().catch((e: unknown) => this.log(`✗ tick: ${e instanceof Error ? e.message : String(e)}`));
-      await Promise.race([
-        ...this.inflight.values(),
-        new Promise((r) => setTimeout(r, tickMs)),
-        new Promise((r) => signal.addEventListener("abort", r, { once: true })),
-      ]);
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([...this.inflight.values(), new Promise((r) => (timer = setTimeout(r, tickMs))), aborted]);
+      clearTimeout(timer);
+      // A task that settles at once must not keep the loop on microtasks, or timers and signals never run.
+      await new Promise((r) => setImmediate(r));
     }
     for (const a of this.db.prepare("SELECT id FROM attempts WHERE state = 'running'").all() as { id: number }[])
       stopAttempt(this.db, a.id as never, "yagura daemon shut down");

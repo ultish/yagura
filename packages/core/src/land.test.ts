@@ -212,12 +212,14 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     JSON.parse(readFileSync(join(root, "gh.json"), "utf8")) as {
       prs: { number: number; head: string; title: string; body: string; state: string; checks: unknown[]; mergeStateStatus?: string; comment?: string }[];
       calls: string[];
+      runs?: { reruns?: number }[];
     };
   const editPr = (patch: Record<string, unknown>) => {
     const st = ghState();
     Object.assign(st.prs[0]!, patch);
     writeFileSync(join(root, "gh.json"), JSON.stringify(st));
   };
+  const editState = (patch: Record<string, unknown>) => writeFileSync(join(root, "gh.json"), JSON.stringify({ ...ghState(), ...patch }));
   const live = (unitId: number) => liveVerdict(db, unitId as never)!;
 
   beforeEach(() => {
@@ -281,16 +283,51 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(await git(["show", "main:app/orders.py"], { cwd: origin })).toContain("edited by fake agent");
   });
 
-  it("blocks on failing checks, and lands when a person merges the pull request anyway", async () => {
+  it("re-runs failed CI once, then sends the unit back with the failing logs to a resumed worker, and updates the same pull request", async () => {
     setMergePolicy(db, project, "auto");
     const work = await verifiedUnit();
     await landUnit(ctx, work.id);
+    const head = getMergeRequest(db, work.id)!.headSha;
+    const failing = [{ __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "FAILURE" }];
+    editPr({ checks: failing });
+    editState({ runs: [{ databaseId: 7, name: "build", conclusion: "failure", head, log: "FAIL test_orders\nAssertionError: expected 3, got 4" }] });
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({
+      outcome: "waiting",
+      reason: "checks failed on pull request #1 (build); re-running the failed jobs once in case they were flaky",
+    });
+    expect(ghState().runs![0]!.reruns).toBe(1);
+
+    const rework = await watchMergeRequest(ctx, work.id);
+    expect(rework).toMatchObject({ outcome: "rework", reason: "checks failed on pull request #1: build" });
+    expect(rework!.unit.state).toBe("ready");
+    expect(rework!.unit.notes.at(-1)).toBe(
+      "CI failed on pull request #1 (build) again after a re-run, so it is not flaky.\nbuild:\nFAIL test_orders\nAssertionError: expected 3, got 4",
+    );
+
+    process.env.FAKE_MODE = "success";
+    await runWorkUnit(ctx, work.id);
+    const [first, second] = listAttempts(db, work.id);
+    expect(second).toMatchObject({ resumesAttemptId: first!.id, state: "handed_off" });
+    const prompt = readFileSync(layout(ctx.boot).brief(project, 1, 2), "utf8");
+    expect(prompt).toContain("## WHY\nCI failed on pull request #1 (build) again after a re-run, so it is not flaky.\nbuild:\nFAIL test_orders");
+    process.env.FAKE_MODE = "verify-pass";
+    await runVerifyUnit(ctx, getUnitBySeq(db, project, 3).id);
+    editPr({ checks: [] });
+    expect(await landUnit(ctx, work.id)).toMatchObject({ outcome: "proposed", reason: "pull request #1: https://github.com/ultish/sandbox/pull/1" });
+    expect(getMergeRequest(db, work.id)!.headSha).not.toBe(head);
+    expect(ghState().prs).toHaveLength(1);
+    expect((await watchMergeRequest(ctx, work.id))?.outcome).toBe("landed");
+  });
+
+  it("lands when a person merges a pull request that yagura blocked", async () => {
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit();
+    db.prepare("UPDATE units SET max_attempts = 1 WHERE id = ?").run(work.id);
+    await landUnit(ctx, work.id);
     editPr({ checks: [{ __typename: "CheckRun", name: "build", status: "COMPLETED", conclusion: "FAILURE" }] });
-    const blocked = await watchMergeRequest(ctx, work.id);
-    expect(blocked).toMatchObject({ outcome: "blocked", reason: "checks failed on pull request #1: build" });
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "blocked", reason: "checks failed on pull request #1: build" });
     execFileSync(fixtures("fake-gh.mjs"), ["pr", "merge", "1", "--rebase", "--match-head-commit", getMergeRequest(db, work.id)!.headSha]);
-    const landed = await watchMergeRequest(ctx, work.id);
-    expect(landed).toMatchObject({ outcome: "landed", landedSha: await originMain() });
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "landed", landedSha: await originMain() });
   });
 
   it("blocks when the pull request is closed on the forge", async () => {

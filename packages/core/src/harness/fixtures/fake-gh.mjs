@@ -19,6 +19,18 @@ process.stdin.on("data", (d) => (stdin += d));
 process.stdin.on("end", () => {
   state.calls.push([group, verb, ...rest.filter((a) => !a.includes("\n"))].join(" "));
   const pr = () => state.prs.find((p) => p.number === Number(rest[0]));
+  if (group === "run") {
+    const runs = state.runs ?? [];
+    if (verb === "list")
+      return out(runs.filter((r) => r.head === flag("--commit")).map(({ databaseId, name, conclusion }) => ({ databaseId, name, conclusion })));
+    const r = runs.find((x) => x.databaseId === Number(rest[0]));
+    if (!r) fail(`no run ${rest[0]}`);
+    if (verb === "view") return console.log(r.log ?? "");
+    if (verb === "rerun") {
+      r.reruns = (r.reruns ?? 0) + 1;
+      return save();
+    }
+  }
   if (group !== "pr") fail(`unknown command ${group}`);
   if (verb === "list") return out(state.prs.filter((p) => p.head === flag("--head") && p.state === "OPEN").map(({ number, url }) => ({ number, url })));
   if (verb === "create") {
