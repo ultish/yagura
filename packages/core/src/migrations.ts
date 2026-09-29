@@ -182,6 +182,28 @@ CREATE TABLE merge_requests (
 );
 `,
   },
+  {
+    version: 12,
+    sql: `
+CREATE TABLE mr_threads (
+  unit_id INTEGER NOT NULL REFERENCES units (id),
+  thread_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('review-thread', 'comment', 'review')),
+  author TEXT NOT NULL,
+  path TEXT,
+  line INTEGER,
+  comments_json TEXT NOT NULL,
+  decision TEXT CHECK (decision IN ('fixed', 'dismissed', 'asked')),
+  reason TEXT,
+  commit_sha TEXT,
+  wave_unit_id INTEGER REFERENCES units (id),
+  gate_id INTEGER REFERENCES gates (id),
+  directive TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (unit_id, thread_id)
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

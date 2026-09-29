@@ -520,6 +520,12 @@ export function listGates(db: Db, projectId: ProjectId | null, state?: Gate["sta
   return rows.map(toGate);
 }
 
+export function getGate(db: Db, id: number): Gate {
+  const row = db.prepare("SELECT * FROM gates WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  if (!row) throw new Error(`gate ${id} not found`);
+  return toGate(row);
+}
+
 export function answerGate(db: Db, id: number, answer: string): Gate {
   const row = db.prepare("SELECT * FROM gates WHERE id = ?").get(id) as Record<string, unknown> | undefined;
   if (!row) throw new Error(`gate ${id} not found`);

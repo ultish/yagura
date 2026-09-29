@@ -9,6 +9,7 @@ import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWork
 import { layout } from "./paths.js";
 import { markPackProven } from "./packs.js";
 import { MAX_REBASES, queueRebase } from "./rebase.js";
+import { freshThreads, listThreadRows, MAX_TRIAGE_WAVES, queueTriage } from "./triage.js";
 import { addVerifyUnit } from "./runner.js";
 import {
   addUnitNote,
@@ -27,7 +28,7 @@ import {
 } from "./store.js";
 import { landMessage } from "./audit.js";
 
-export type LandOutcome = "landed" | "blocked" | "reverifying" | "proposed" | "waiting" | "rework" | "rebasing";
+export type LandOutcome = "landed" | "blocked" | "reverifying" | "proposed" | "waiting" | "rework" | "rebasing" | "triaging";
 
 export interface LandResult {
   unit: Unit;
@@ -66,14 +67,19 @@ interface Landing {
   mirror: string;
 }
 
-function landing(ctx: { db: Db; boot: Bootstrap }, unit: Unit): Landing {
-  const { db, boot } = ctx;
-  if (!unit.repoId) throw new Error(`U${unit.seq} has no repo`);
-  const repo = getRepo(db, unit.repoId);
+export function verifiedHead(db: Db, unit: Unit): { verdict: LiveVerdict; work: Attempt } {
   const verdict = liveVerdict(db, unit.id);
   if (!verdict) throw new Error(`U${unit.seq} has no live passing verdict`);
   const work = listAttempts(db, unit.id).find((a) => a.headSha === verdict.head_sha && a.baseSha);
   if (!work?.baseSha) throw new Error(`U${unit.seq}: no attempt produced the verified head ${verdict.head_sha}`);
+  return { verdict, work };
+}
+
+function landing(ctx: { db: Db; boot: Bootstrap }, unit: Unit): Landing {
+  const { db, boot } = ctx;
+  if (!unit.repoId) throw new Error(`U${unit.seq} has no repo`);
+  const repo = getRepo(db, unit.repoId);
+  const { verdict, work } = verifiedHead(db, unit);
   return { db, boot, unit, project: getProject(db, unit.projectId), repo, verdict, work, mirror: layout(boot).mirror(repo.id) };
 }
 
@@ -117,6 +123,14 @@ async function squashOntoTrunk(l: Landing): Promise<Squash> {
   } finally {
     await removeWorktree(l.mirror, wt).catch(() => undefined);
   }
+}
+
+function triageOrBlock(l: Landing, number: number, fresh: Parameters<typeof queueTriage>[3]): LandResult {
+  const triage = queueTriage(l.db, l.unit, number, fresh);
+  if (!triage) return block(l, `pull request #${number} has new review threads after ${MAX_TRIAGE_WAVES} triage waves; it needs you`);
+  const reason = `${fresh.length} review thread(s) on pull request #${number}; triaging in U${triage.seq}`;
+  if (l.unit.state === "landing") transitionUnit(l.db, l.unit.id, "blocked", { reason, reviewUnit: triage.seq });
+  return { unit: getUnit(l.db, l.unit.id), outcome: "triaging", landedSha: null, reason };
 }
 
 function rebaseOrBlock(l: Landing, trunk: Sha, conflict: string): LandResult {
@@ -321,6 +335,12 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   if (!["landing", "blocked"].includes(unit.state)) return null;
   const l = landing(ctx, unit);
   if (status.state === "merged") return finishMerged(l, status, mr.number);
+  if (unit.state === "blocked" && listThreadRows(db, unit.id).some((r) => r.decision === "asked")) {
+    const answered = freshThreads(db, unit.id, await forge.threads(mr.number)).filter((f) => f.directive);
+    const open = listThreadRows(db, unit.id).filter((r) => r.decision === "asked").length;
+    if (answered.length && answered.length >= open) return triageOrBlock(l, mr.number, answered);
+    return null;
+  }
   if (unit.state !== "landing") return null;
   if (status.state === "closed") {
     setMergeState(db, unit.id, "closed", project.id, { number: mr.number, reason: "closed on the forge" });
@@ -334,8 +354,12 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
     if (squash.kind === "changed") return reverify(l, squash.trunk, squash.rebased);
     return propose(l, forge, squash);
   }
-  if (status.failing.length) return ciFailed(l, forge, mr.number, mr.headSha, status.failing);
+  const fresh = freshThreads(db, unit.id, await forge.threads(mr.number));
+  if (fresh.length) return triageOrBlock(l, mr.number, fresh);
   const waiting = (reason: string): LandResult => ({ unit, outcome: "waiting", landedSha: null, reason });
+  const asking = listThreadRows(db, unit.id).filter((r) => r.decision === "asked");
+  if (asking.length) return waiting(`waiting for your answer on ${asking.length} review thread(s)`);
+  if (status.failing.length) return ciFailed(l, forge, mr.number, mr.headSha, status.failing);
   if (status.pending.length) return waiting(`checks running: ${status.pending.join(", ")}`);
   if (status.merge !== "clean") return waiting(`the forge says ${status.merge}`);
   if (!mergeApproved(db, project, unit)) return waiting("waiting for the land gate");

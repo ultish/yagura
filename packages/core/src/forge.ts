@@ -24,6 +24,77 @@ export interface ForgeAdapter {
   close(number: number, comment: string): Promise<void>;
   failedRuns(headSha: Sha): Promise<{ id: number; name: string; log: string }[]>;
   rerunFailed(runId: number): Promise<void>;
+  threads(number: number): Promise<PrThread[]>;
+  reply(number: number, thread: Pick<PrThread, "id" | "kind">, body: string): Promise<void>;
+}
+
+export type ThreadKind = "review-thread" | "comment" | "review";
+
+// Reviewer text is untrusted data: it reaches agents only as quoted CONTEXT, never a command.
+export interface PrThread {
+  id: string;
+  kind: ThreadKind;
+  author: string;
+  path: string | null;
+  line: number | null;
+  comments: string[];
+}
+
+// Everything yagura posts carries this marker, so its own replies never read as new review activity.
+export const YAGURA_MARK = "<!-- yagura -->";
+export const marked = (body: string) => `${body}\n\n${YAGURA_MARK}`;
+const isYagura = (body: string) => body.includes(YAGURA_MARK);
+
+const THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) { nodes { id isResolved path line comments(first: 50) { nodes { author { login } body } } } }
+      comments(first: 100) { nodes { id author { login } body } }
+      reviews(first: 50) { nodes { id author { login } body state } }
+    }
+  }
+}`;
+const REPLY_MUTATION = `mutation($thread: ID!, $body: String!) {
+  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { id } }
+}`;
+
+type Author = { login: string } | null;
+export function readThreads(data: unknown): PrThread[] {
+  const pr = (
+    data as {
+      data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              nodes: { id: string; isResolved: boolean; path: string | null; line: number | null; comments: { nodes: { author: Author; body: string }[] } }[];
+            };
+            comments: { nodes: { id: string; author: Author; body: string }[] };
+            reviews: { nodes: { id: string; author: Author; body: string; state: string }[] };
+          };
+        };
+      };
+    }
+  ).data.repository.pullRequest;
+  const out: PrThread[] = [];
+  for (const t of pr.reviewThreads.nodes) {
+    const comments = t.comments.nodes.filter((c) => !isYagura(c.body));
+    if (t.isResolved || !comments.length) continue;
+    out.push({
+      id: t.id,
+      kind: "review-thread",
+      author: comments[0]!.author?.login ?? "ghost",
+      path: t.path,
+      line: t.line,
+      comments: comments.map((c) => c.body),
+    });
+  }
+  for (const c of pr.comments.nodes)
+    if (!isYagura(c.body) && c.body.trim())
+      out.push({ id: c.id, kind: "comment", author: c.author?.login ?? "ghost", path: null, line: null, comments: [c.body] });
+  for (const r of pr.reviews.nodes)
+    if (!isYagura(r.body) && r.body.trim())
+      out.push({ id: r.id, kind: "review", author: r.author?.login ?? "ghost", path: null, line: null, comments: [r.body] });
+  return out;
 }
 
 export class ForgeError extends Error {}
@@ -81,6 +152,8 @@ const MERGE_STATES: Record<string, MergeState> = {
 
 export function githubForge(bin: string, repo: string): ForgeAdapter {
   const R = ["--repo", repo];
+  const repoParts = repo.split("/");
+  const host = repoParts.length === 3 ? ["--hostname", repoParts[0]!] : [];
   const numberOf = (url: string) => {
     const n = /\/pull\/(\d+)/.exec(url)?.[1];
     if (!n) throw new ForgeError(`gh did not return a pull request URL: ${url.slice(0, 200)}`);
@@ -126,7 +199,7 @@ export function githubForge(bin: string, repo: string): ForgeAdapter {
       await gh(bin, ["pr", "merge", String(number), ...R, `--${method}`, "--match-head-commit", headSha]);
     },
     async close(number, comment) {
-      await gh(bin, ["pr", "close", String(number), ...R, "--comment", comment]);
+      await gh(bin, ["pr", "close", String(number), ...R, "--comment", marked(comment)]);
     },
     async failedRuns(headSha) {
       const runs = JSON.parse(await gh(bin, ["run", "list", ...R, "--commit", headSha, "--json", "databaseId,name,conclusion"])) as {
@@ -145,6 +218,19 @@ export function githubForge(bin: string, repo: string): ForgeAdapter {
     },
     async rerunFailed(runId) {
       await gh(bin, ["run", "rerun", String(runId), ...R, "--failed"]);
+    },
+    async threads(number) {
+      const [owner, name] = repoParts.slice(-2);
+      return readThreads(
+        JSON.parse(
+          await gh(bin, ["api", "graphql", ...host, "-f", `query=${THREADS_QUERY}`, "-F", `owner=${owner}`, "-F", `name=${name}`, "-F", `number=${number}`]),
+        ),
+      );
+    },
+    async reply(number, thread, body) {
+      if (thread.kind === "review-thread")
+        await gh(bin, ["api", "graphql", ...host, "-f", `query=${REPLY_MUTATION}`, "-F", `thread=${thread.id}`, "-F", "body=@-"], marked(body));
+      else await gh(bin, ["pr", "comment", String(number), ...R, "--body-file", "-"], marked(body));
     },
   };
 }

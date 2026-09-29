@@ -7,6 +7,7 @@ import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runRebaseUnit } from "./rebase.js";
+import { runTriageUnit } from "./triage.js";
 import { runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
@@ -150,7 +151,7 @@ export class Engine {
     const triggers = this.db
       .prepare(
         `SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND id > ? AND (
-           (type = 'unit.state' AND json_extract(data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(data_json, '$.drain') IS NULL AND json_extract(data_json, '$.rebaseUnit') IS NULL)
+           (type = 'unit.state' AND json_extract(data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(data_json, '$.drain') IS NULL AND json_extract(data_json, '$.rebaseUnit') IS NULL AND json_extract(data_json, '$.reviewUnit') IS NULL)
            OR (type IN ('gate.answered', 'gate.defaulted') AND COALESCE(json_extract(data_json, '$.kind'), '') <> 'report')
            OR type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed'))`,
       )
@@ -180,7 +181,9 @@ export class Engine {
           ? () => runVerifyUnit(this.ctx, u.id)
           : u.type === "rebase"
             ? () => runRebaseUnit(this.ctx, u.id)
-            : () => runWorkUnit(this.ctx, u.id);
+            : u.type === "review-triage"
+              ? () => runTriageUnit(this.ctx, u.id)
+              : () => runWorkUnit(this.ctx, u.id);
       this.start(`unit:${u.id}`, `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}`, run, (e) => this.recoverCrashed(u.id, e));
     }
   }

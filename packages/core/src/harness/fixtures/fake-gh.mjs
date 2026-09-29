@@ -19,6 +19,30 @@ process.stdin.on("data", (d) => (stdin += d));
 process.stdin.on("end", () => {
   state.calls.push([group, verb, ...rest.filter((a) => !a.includes("\n"))].join(" "));
   const pr = () => state.prs.find((p) => p.number === Number(rest[0]));
+  if (group === "api" && verb === "graphql") {
+    const fields = Object.fromEntries(
+      rest.flatMap((a, i) => (rest[i - 1] === "-F" || rest[i - 1] === "-f" ? [[a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)]] : [])),
+    );
+    if (fields.query.includes("addPullRequestReviewThreadReply")) {
+      const thread = state.prs.flatMap((p) => p.threads ?? []).find((t) => t.id === fields.thread);
+      if (!thread) fail(`no thread ${fields.thread}`);
+      thread.comments.push({ author: { login: "ultish" }, body: fields.body === "@-" ? stdin : fields.body });
+      return out({ data: { addPullRequestReviewThreadReply: { comment: { id: "c" } } } });
+    }
+    const p = state.prs.find((x) => x.number === Number(fields.number));
+    if (!p) fail(`no pull request ${fields.number}`);
+    return out({
+      data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: { nodes: (p.threads ?? []).map((t) => ({ ...t, comments: { nodes: t.comments } })) },
+            comments: { nodes: p.comments ?? [] },
+            reviews: { nodes: p.reviews ?? [] },
+          },
+        },
+      },
+    });
+  }
   if (group === "run") {
     const runs = state.runs ?? [];
     if (verb === "list")
@@ -76,6 +100,10 @@ process.stdin.on("end", () => {
     Object.assign(p, { state: "MERGED", mergeCommit: merged, headRefOid: head });
     save();
     return;
+  }
+  if (verb === "comment") {
+    p.comments = [...(p.comments ?? []), { id: `IC_${(p.comments ?? []).length + 1}`, author: { login: "ultish" }, body: stdin }];
+    return save();
   }
   if (verb === "close") {
     Object.assign(p, { state: "CLOSED", comment: flag("--comment"), headRefOid: git("rev-parse", `refs/heads/${p.head}`) });

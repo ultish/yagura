@@ -84,7 +84,7 @@ export const UNIT_TRANSITIONS: Record<UnitState, readonly UnitState[]> = {
   landing: ["landed", "verifying", "blocked", "abandoned"],
   rejected: ["ready", "blocked", "abandoned"],
   failed: ["ready", "blocked", "abandoned"],
-  blocked: ["ready", "verifying", "landed", "abandoned"],
+  blocked: ["ready", "verifying", "verified", "landed", "abandoned"],
   landed: [],
   done: [],
   abandoned: [],

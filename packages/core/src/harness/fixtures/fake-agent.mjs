@@ -14,6 +14,7 @@ process.stdin.on("end", () => {
       worker: ["yagura:yagura-worker", "pstack:poteto-mode"],
       pack: ["yagura:yagura-pack"],
       rebase: ["yagura:yagura-rebase"],
+      "review-triage": ["yagura:yagura-review-triage"],
       planner: ["yagura:yagura-planner"],
       verifier: ["yagura:yagura-verifier"],
       watchman: ["yagura:yagura-watchman"],
@@ -22,6 +23,7 @@ process.stdin.on("end", () => {
   if (mode !== "noskills")
     for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
   if (process.env.YAGURA_ROLE === "rebase") return rebase();
+  if (process.env.YAGURA_ROLE === "review-triage") return triage();
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
   if (mode === "hang") return setTimeout(() => {}, 60_000);
   if ((mode ?? "").startsWith("verify")) return verify(mode);
@@ -71,6 +73,21 @@ function resumed(sessionId) {
     terminal_reason: "completed",
     total_cost_usd: 0.01,
   });
+}
+
+// Fixes threads that say "please fix" (or that the developer said to fix), and dismisses the rest.
+function triage() {
+  const threads = [...brief.matchAll(/^- T(\d+) · [\s\S]*?(?=^- T\d+ · |^- Decisions from|^## )/gm)].map((m) => ({ n: m[1], text: m[0] }));
+  const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
+  const lines = threads.map((t) => {
+    const fix = /please fix|The developer decided: fix/.test(t.text) && !/The developer decided: dismiss/.test(t.text);
+    if (fix) appendFileSync(file, `# review fix T${t.n}\n`);
+    return fix ? `- T${t.n}: fixed — added the review fix to ${file}` : `- T${t.n}: dismissed — the existing test covers this case`;
+  });
+  if (lines.some((l) => l.includes("fixed"))) {
+    execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-qam", "review fixes"]);
+  }
+  finish(`## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Decisions\n${lines.join("\n")}\n`);
 }
 
 // Replays the branch onto the named trunk commit, keeping the branch's side of each conflict.
