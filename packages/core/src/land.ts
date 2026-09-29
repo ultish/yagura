@@ -233,7 +233,10 @@ async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, 
   const { db } = l;
   const branch = `${resolveSetting(db, "git.branch_prefix", { projectId: l.project.id, repoId: l.repo.id }).value}/${l.project.id}/u${l.unit.seq}`;
   try {
-    const push = () => git(["push", "--quiet", "--force", "origin", `${squash.landed}:refs/heads/${branch}`], { gitDir: l.mirror });
+    // Overwrite the branch only if it still holds what yagura last pushed there (or does not exist yet), so a person's push is never lost.
+    const expected = getMergeRequest(db, l.unit.id)?.headSha ?? "";
+    const push = () =>
+      git(["push", "--quiet", `--force-with-lease=refs/heads/${branch}:${expected}`, "origin", `${squash.landed}:refs/heads/${branch}`], { gitDir: l.mirror });
     // GitHub sometimes refuses a push for a moment; one retry separates that from a real rejection.
     await push().catch(async () => {
       await new Promise((r) => setTimeout(r, 2000));
@@ -258,7 +261,12 @@ async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, 
     return { unit: getUnit(db, l.unit.id), outcome: "proposed", landedSha: null, reason: `pull request #${pr.number}: ${pr.url}` };
   } catch (e) {
     if (e instanceof ForgeError || (e as { code?: unknown }).code !== undefined)
-      return block(l, `could not open the pull request: ${lastLine((e as Error).message)}`);
+      return block(
+        l,
+        /stale info/.test((e as Error).message)
+          ? `${branch} changed outside yagura since its last push; yagura will not overwrite it`
+          : `could not open the pull request: ${lastLine((e as Error).message)}`,
+      );
     throw e;
   }
 }

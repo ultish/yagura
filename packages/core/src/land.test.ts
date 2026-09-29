@@ -391,6 +391,21 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     });
   });
 
+  it("never overwrites a push someone else made to the pull request branch", async () => {
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    const ours = getMergeRequest(db, work.id)!.headSha;
+    const theirs = await git(["commit-tree", `${ours}^{tree}`, "-p", ours, "-m", "a reviewer's commit"], { cwd: origin });
+    await git(["update-ref", "refs/heads/yg/p/u1", theirs], { cwd: origin });
+    await advanceTrunk("README.md", "moved\n");
+    db.prepare("UPDATE units SET state = 'verified' WHERE id = ?").run(work.id);
+    expect(await landUnit(ctx, work.id)).toMatchObject({
+      outcome: "blocked",
+      reason: "yg/p/u1 changed outside yagura since its last push; yagura will not overwrite it",
+    });
+    expect(await git(["rev-parse", "yg/p/u1"], { cwd: origin })).toBe(theirs);
+  });
+
   it("blocks when the pull request is closed on the forge", async () => {
     const work = await verifiedUnit();
     await landUnit(ctx, work.id);
