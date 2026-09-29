@@ -66,6 +66,12 @@ export const SETTINGS = {
   "skills.work": z.array(z.string().min(1)).default([]).describe("Skills every worker must load"),
   "skills.pack": z.array(z.string().min(1)).default([]).describe("Skills the verify pack writer must load"),
   "skills.verify": z.array(z.string().min(1)).default([]).describe("Skills every verifier must load"),
+  "project.budget_hours": z
+    .number()
+    .positive()
+    .nullable()
+    .default(null)
+    .describe("Wall-clock hours for the project: at 70% no new work starts and verified work lands; at 100% it stops (empty: no limit)"),
   "project.reference_repos": z.array(z.string().min(1)).default([]).describe("Registered repos that already do it right; workers get a read-only checkout"),
   "work.resume_on_rejection": z.boolean().default(true).describe("After a rejection, resume the worker's own session with the findings"),
   "work.resume_max_context": z
@@ -127,6 +133,7 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "skills.pack": PR,
   "skills.verify": PR,
   "project.reference_repos": P,
+  "project.budget_hours": P,
   "work.resume_max_context": PR,
   "timebox.verify_seconds": PRE,
   "verify.max_retries": P,

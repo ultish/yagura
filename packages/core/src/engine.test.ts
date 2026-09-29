@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RunContext } from "./agent.js";
-import type { Bootstrap } from "./config.js";
+import { setSetting, type Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
 import { Engine } from "./engine.js";
 import { artifactName, listEvidenceRuns, readArtifact, runArtifacts } from "./evidence.js";
@@ -66,6 +66,22 @@ beforeEach(async () => {
 });
 
 describe("Engine", () => {
+  it("stops starting work past 70% of the wall-clock budget, and raises an andon when it is spent", async () => {
+    setSetting(db, "project", project, "project.budget_hours", 1);
+    const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
+    db.prepare("UPDATE projects SET created_at = ? WHERE id = ?").run(ago(50), project);
+    const log: string[] = [];
+    const engine = new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) });
+    await engine.runUntilIdle();
+    const work = listUnits(db, project).filter((u) => u.type === "work");
+    expect(work.map((u) => u.state)).toEqual(["ready", "ready", "ready"]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.type = 'work'").get()).toEqual({ n: 0 });
+    expect(log).toContain("  p: 83% of the wall-clock budget used; no new work starts, verified work keeps landing");
+    db.prepare("UPDATE projects SET created_at = ? WHERE id = ?").run(ago(70), project);
+    await engine.tick();
+    expect(getProject(db, project).andonReason).toBe("the wall-clock budget of 1h is used up; what was verified has landed, and the rest waits for you");
+  });
+
   it("plans, runs disjoint units in parallel, serializes overlapping ones, verifies, lands, and closes", async () => {
     const log: string[] = [];
     await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();

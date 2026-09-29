@@ -40,11 +40,13 @@ export interface EngineOptions {
 }
 
 const TERMINAL = new Set(["landed", "done", "abandoned"]);
+export const LANDING_CUTOFF = 0.7;
 const PLAN_TRIGGERS = ["landed", "blocked", "abandoned"];
 
 export class Engine {
   private readonly inflight = new Map<string, Promise<void>>();
   private readonly landingSaid = new Map<UnitId, string>();
+  private readonly cutoffSaid = new Set<ProjectId>();
   private readonly log: (line: string) => void;
 
   constructor(
@@ -154,6 +156,22 @@ export class Engine {
     this.log(`  U${u.seq} ${line}`);
   }
 
+  // The share of the project's wall-clock budget used since it became active, or null without a budget.
+  budgetUsed(project: Project, at = Date.now()): number | null {
+    const hours = resolveSetting(this.db, "project.budget_hours", { projectId: project.id }).value;
+    if (!hours) return null;
+    const activated = this.db
+      .prepare("SELECT ts FROM events WHERE type = 'project.state' AND project_id = ? AND json_extract(data_json, '$.state') = 'active' ORDER BY id LIMIT 1")
+      .get(project.id) as { ts: string } | undefined;
+    return (at - Date.parse(activated?.ts ?? project.createdAt)) / (hours * 3_600_000);
+  }
+
+  // Past the landing cutoff only what helps verified work land may start: verification, rebases, review triage.
+  private mayStart(project: Project, u: Unit): boolean {
+    const used = this.budgetUsed(project);
+    return used === null || used < LANDING_CUTOFF || !isBuild(u);
+  }
+
   private planNeeded(project: Project): boolean {
     if (this.inflight.has(`plan:${project.id}`)) return false;
     const since = lastDrainEventId(this.db, project.id);
@@ -176,7 +194,7 @@ export class Engine {
       this.log(`  U${s.unit.seq} blocked: ${s.reason}`);
     }
     for (const u of r.ready) {
-      if (this.inflight.has(`unit:${u.id}`)) continue;
+      if (this.inflight.has(`unit:${u.id}`) || !this.mayStart(project, u)) continue;
       const sctx = { projectId: project.id, repoId: u.repoId, environmentId: u.type === "verify" ? project.environmentId : null };
       const harness = resolveSetting(this.db, u.type === "verify" ? "role.verifier.harness" : "role.worker.harness", sctx).value;
       if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return;
@@ -304,6 +322,16 @@ export class Engine {
           );
         continue;
       }
+      const used = this.budgetUsed(project);
+      if (used !== null && used >= 1 && !project.andonReason) {
+        const hours = resolveSetting(this.db, "project.budget_hours", { projectId: project.id }).value;
+        setAndon(this.db, project.id, `the wall-clock budget of ${hours}h is used up; what was verified has landed, and the rest waits for you`);
+        continue;
+      }
+      if (used !== null && used >= LANDING_CUTOFF && !this.cutoffSaid.has(project.id)) {
+        this.cutoffSaid.add(project.id);
+        this.log(`  ${project.id}: ${Math.round(used * 100)}% of the wall-clock budget used; no new work starts, verified work keeps landing`);
+      }
       for (const u of await ensurePackUnits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
       this.settleFailures(project);
       if (this.maybeClose(project)) continue;
@@ -329,7 +357,7 @@ export class Engine {
       if (p.state !== "active") return true;
       if (p.andonReason) return true;
       if (this.planNeeded(p)) return false;
-      if (readiness(this.db, p.id).ready.length) return false;
+      if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
       if (listUnits(this.db, p.id).some((u) => u.state === "verified" && (p.mergePolicy === "auto" || landApproved(this.db, p.id, u)))) return false;
       return !listUnits(this.db, p.id).some((u) => isBuild(u) && (u.state === "failed" || u.state === "rejected"));
     });

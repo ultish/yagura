@@ -127,7 +127,7 @@ Files that agents read (standing orders, briefs, handoffs, status) are markdown 
 3. **Pilot.** One unit end to end: brief → work → verify → land. It falsifies the brief template, verify recipe, and unit size while that costs one agent. Skipped for clone-like units.
 4. **Scale.** Rolling window up to the project's in-flight cap; refill as units finish. Never blocking batches.
 5. **Drain.** At drain points the daemon classifies new handoffs, then invokes the planner (§8).
-6. **Land.** Continuous, from the first verified unit. Stop spawning at ~70% of the wall-clock budget and land what is verified.
+6. **Land.** Continuous, from the first verified unit. Stop spawning at ~70% of the wall-clock budget and land what is verified. (As built 2026-09-30: `project.budget_hours`, counted from the project's activation; from 70% (`LANDING_CUTOFF`) the engine starts no new work or pack units while verification, rebases, review triage, and landing continue, and logs it once; at 100% it raises an andon.)
 7. **Close.** Predicate checked on the real artifact by a final `verify`/`measure` unit; every unit reconciled to a terminal state; lessons appended to standing orders or the pack.
 
 ## 7. Briefs and handoffs

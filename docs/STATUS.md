@@ -137,5 +137,5 @@ Open: one-way notices from a worker to running siblings in the same repo (`yagur
 - Existing `unproven` packs get no proof run; `stale` is never set. An environment's provider settings cannot be edited after creation (name and capacity can). Deleting one (`yagura env rm`, the Edit panel's Delete with a confirm step, `POST /api/environments/:id/delete`) is refused while a project that is not closed uses it or a slot is in use, queued, or kept; it removes values, settings, and lease history and detaches closed projects (2026-09-30, checked in the browser).
 - (Fixed 2026-09-30) `yagura evidence run` now also needs `YAGURA_EVIDENCE_TOKEN`, a random per-session secret stored with the attempt (migration 13) and compared in constant time; it is never returned by the API.
 - `yagura drive` (one project, foreground) refuses while the daemon runs; it is for debugging only. Normal use is `yagura daemon`, or `pnpm dev` while developing.
-- No wall-clock budget or landing cutoff yet (DESIGN §6).
+- (Built 2026-09-30) Wall-clock budget and landing cutoff: `project.budget_hours` (DESIGN §6 "Land"; engine test with a backdated activation). No cost budget yet.
 - The user's SessionStart hook (codebase-memory-mcp indexing) runs in every agent session; suggested fix is to skip when `YAGURA_ATTEMPT` is set. Not yet applied.
