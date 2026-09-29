@@ -313,3 +313,14 @@ export function useQuery(): URLSearchParams {
   );
   return new URLSearchParams(search);
 }
+
+export interface WatchmanTurnRow {
+  id: number;
+  threadId: number;
+  threadTitle: string;
+  state: "running" | "done" | "failed" | "stopped";
+  model: string | null;
+  contextPeak: number;
+  startedAt: string;
+  endedAt: string | null;
+}

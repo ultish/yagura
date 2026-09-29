@@ -212,6 +212,24 @@ CREATE TABLE mr_threads (
     version: 14,
     sql: `ALTER TABLE attempts ADD COLUMN sources_json TEXT NOT NULL DEFAULT '[]';`,
   },
+  {
+    version: 15,
+    sql: `
+CREATE TABLE watchman_turns (
+  id INTEGER PRIMARY KEY,
+  thread_id INTEGER NOT NULL REFERENCES threads (id),
+  message_id INTEGER NOT NULL REFERENCES thread_messages (id),
+  pid INTEGER,
+  state TEXT NOT NULL DEFAULT 'running' CHECK (state IN ('running', 'done', 'failed', 'stopped')),
+  model TEXT,
+  context_peak INTEGER NOT NULL DEFAULT 0,
+  log_path TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT
+);
+CREATE INDEX watchman_turns_running ON watchman_turns (thread_id) WHERE state = 'running';
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

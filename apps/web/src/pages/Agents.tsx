@@ -1,16 +1,62 @@
 import { useState } from "react";
-import { useApi, useNow, type AgentRow } from "../api";
+import { api, useApi, useNow, type AgentRow, type WatchmanTurnRow } from "../api";
 import { roleOf } from "../lib/units";
 import { clock, duration, modelName, tokens } from "../lib/format";
 import { Link } from "../ui/Link";
-import { Row } from "../ui/rows";
+import { Row, useAction } from "../ui/rows";
 
 export function Agents() {
   const now = useNow(1000);
   const [limit, setLimit] = useState(50);
-  const { data, error } = useApi<{ attempts: AgentRow[]; caps: { maxParallelAgents: number; running: number } }>(`/api/agents?recent=${limit}`);
+  const { data, error, reload } = useApi<{ attempts: AgentRow[]; watchman: WatchmanTurnRow[]; caps: { maxParallelAgents: number; running: number } }>(
+    `/api/agents?recent=${limit}`,
+  );
+  const stop = useAction();
   const all = data?.attempts ?? [];
   const running = all.filter((a) => a.state === "running");
+  const turns = data?.watchman ?? [];
+  const turnRow = (t: WatchmanTurnRow) => {
+    const took = duration((t.endedAt ? Date.parse(t.endedAt) : now) - Date.parse(t.startedAt));
+    return (
+      <Row
+        key={`w${t.id}`}
+        seq={<Link to={`/talk/${t.threadId}`}>thread {t.threadId}</Link>}
+        goal={t.threadTitle}
+        status={
+          t.state === "running"
+            ? `Watchman answering for ${took}.`
+            : t.state === "done"
+              ? `Answered in ${took}.`
+              : t.state === "stopped"
+                ? "Stopped by an operator."
+                : `Ended without a reply after ${took}.`
+        }
+        tone={t.state === "running" ? "lamp" : t.state === "failed" ? "bell" : t.state === "done" ? "pine" : "muted"}
+        facts={
+          <>
+            <span>
+              <b>watchman</b>
+            </span>
+            <span>{modelName(t.model)}</span>
+            {t.contextPeak > 0 && <span>ctx {tokens(t.contextPeak)}</span>}
+            <span>started {clock(t.startedAt)}</span>
+          </>
+        }
+        actions={
+          t.state === "running" ? (
+            <button
+              className="btn sm"
+              type="button"
+              disabled={stop.busy}
+              onClick={() => void stop.run(async () => (await api(`/api/watchman-turns/${t.id}/stop`, { body: {} }), reload()))}
+            >
+              Stop
+            </button>
+          ) : undefined
+        }
+      />
+    );
+  };
   const past = all.filter((a) => a.state !== "running");
   const row = (a: AgentRow) => {
     const took = a.startedAt ? duration((a.endedAt ? Date.parse(a.endedAt) : now) - Date.parse(a.startedAt)) : "";
@@ -59,8 +105,18 @@ export function Agents() {
           <h2 className="h2">Lanterns lit</h2>
           <span className="n">{data ? `${data.caps.running} of ${data.caps.maxParallelAgents} agent slots` : ""}</span>
         </div>
-        {running.length ? running.map(row) : <div className="empty">No agents at work.</div>}
+        {turns.filter((t) => t.state === "running").map(turnRow)}
+        {running.length || turns.some((t) => t.state === "running") ? running.map(row) : <div className="empty">No agents at work.</div>}
       </section>
+      {turns.some((t) => t.state !== "running") && (
+        <section>
+          <div className="gh">
+            <h2 className="h2">Watchman turns</h2>
+            <span className="n">{turns.filter((t) => t.state !== "running").length}</span>
+          </div>
+          {turns.filter((t) => t.state !== "running").map(turnRow)}
+        </section>
+      )}
       <section>
         <div className="gh">
           <h2 className="h2">Recent</h2>

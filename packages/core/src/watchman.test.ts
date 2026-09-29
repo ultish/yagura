@@ -21,6 +21,7 @@ import { editSpec, parseSpec, relevantSections, renderSpec } from "./spec.js";
 import { addProject, addRepo, getEnvironment, getProject, getRepo, listGates, listUnits, openStore, type Db } from "./store.js";
 import { createThread, getProposal, getThread, linkThreadProject, listDecisions, listMessages, listProposals, listQuestions } from "./threads.js";
 import { assembleContext, parseReply, runWatchmanTurn, storeTurn, TurnRecords, type ContextParts } from "./watchman.js";
+import { listTurns, runningTurn, stopTurn, TurnBusy } from "./turns.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
 const fake: HarnessAdapter = {
@@ -371,5 +372,27 @@ describe("watchman turns", () => {
     expect(resolveSetting(db, "skills.scaffold", at)).toMatchObject({ value: ["setup-gradle"], source: "project" });
     expect(resolveSetting(db, "skills.pack", at)).toMatchObject({ value: [], source: "default" });
     expect(resolveSetting(db, "project.reference_repos", at).value).toEqual(["billing"]);
+  });
+
+  it("records each watchman turn, refuses a second one on the same thread while it runs, and can stop it", async () => {
+    const t = createThread(db, { title: "t" });
+    process.env.FAKE_DELAY_MS = "5000";
+    try {
+      const turn = runWatchmanTurn(ctx, t.id, "prototype a chain");
+      let running = runningTurn(db, t.id);
+      for (let i = 0; i < 100 && !running?.pid; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        running = runningTurn(db, t.id);
+      }
+      expect(running).toMatchObject({ threadId: t.id, state: "running", threadTitle: "t" });
+      await expect(runWatchmanTurn(ctx, t.id, "again")).rejects.toThrow(TurnBusy);
+      expect(stopTurn(db, running!.id)).toBe(true);
+      expect((await turn).problem).toBe("you stopped the watchman");
+    } finally {
+      delete process.env.FAKE_DELAY_MS;
+    }
+    expect(listTurns(db).map((x) => x.state)).toEqual(["stopped"]);
+    expect((await runWatchmanTurn(ctx, t.id, "prototype a chain")).problem).toBeNull();
+    expect(listTurns(db).map((x) => x.state)).toEqual(["done", "stopped"]);
   });
 });

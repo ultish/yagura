@@ -59,6 +59,10 @@ import {
   registerRepo,
   RepoUnusable,
   applyTemplate,
+  runningTurn,
+  stopTurn,
+  TurnBusy,
+  listTurns,
   deleteEnvironment,
   projectSkillChecks,
   ENVIRONMENT_ID,
@@ -197,6 +201,10 @@ export function createApp(opts: ServerOptions): Hono {
 
   app.get("/api/projects/:id/events", (c) => c.json(eventsSince(db, Number(c.req.query("since") ?? 0), c.req.param("id"))));
 
+  app.post("/api/watchman-turns/:id/stop", (c) => {
+    const stopped = stopTurn(db, Number(c.req.param("id")));
+    return stopped ? c.json({ stopped }) : c.json({ error: "that watchman turn is not running" }, 409);
+  });
   app.get("/api/agents", (c) => {
     const rows = db
       .prepare(
@@ -211,6 +219,7 @@ export function createApp(opts: ServerOptions): Hono {
     });
     return c.json({
       attempts,
+      watchman: listTurns(db, 20),
       caps: {
         maxParallelAgents: resolveSetting(db, "max_parallel_agents").value,
         running: attempts.filter((a) => a.state === "running").length,
@@ -440,21 +449,16 @@ export function createApp(opts: ServerOptions): Hono {
     );
   });
 
-  const talking = new Set<number>();
-  const talk = (threadId: number, text: string) => {
-    if (talking.has(threadId)) throw new Error(`thread ${threadId} is already waiting on the watchman`);
-    talking.add(threadId);
-    const turn = runWatchmanTurn({ db, boot, adapters: opts.adapters ?? { claude: claudeAdapter }, cli: opts.cli ?? [] }, threadId, text)
-      .catch((e: unknown) => {
-        addMessage(db, { threadId, role: "system", body: `the watchman failed: ${e instanceof Error ? e.message : String(e)}` });
-      })
-      .finally(() => talking.delete(threadId));
-    return turn;
-  };
+  const busy = (threadId: number) => runningTurn(db, threadId) !== null;
+  const talk = (threadId: number, text: string) =>
+    runWatchmanTurn({ db, boot, adapters: opts.adapters ?? { claude: claudeAdapter }, cli: opts.cli ?? [] }, threadId, text).catch((e: unknown) => {
+      if (e instanceof TurnBusy) return;
+      addMessage(db, { threadId, role: "system", body: `the watchman failed: ${e instanceof Error ? e.message : String(e)}` });
+    });
   const threadView = (id: number) => ({
     thread: getThread(db, id),
     projects: getThread(db, id).projects.map((p) => projectSummary(db, p)),
-    busy: talking.has(id),
+    busy: busy(id),
     messages: listMessages(db, id),
     decisions: listDecisions(db, id),
     questions: listQuestions(db, id),
@@ -464,7 +468,7 @@ export function createApp(opts: ServerOptions): Hono {
 
   app.get("/api/mentions", (c) => c.json(suggestMentions(db, c.req.query("q") ?? "")));
   app.get("/api/mentions/:token/messages", (c) => c.json(messagesMentioning(db, decodeURIComponent(c.req.param("token")))));
-  app.get("/api/threads", (c) => c.json(listThreads(db).map((t) => ({ ...t, busy: talking.has(t.id) }))));
+  app.get("/api/threads", (c) => c.json(listThreads(db).map((t) => ({ ...t, busy: busy(t.id) }))));
   app.get("/api/threads/search", (c) => c.json(searchMessages(db, c.req.query("q") ?? "", c.req.query("thread") ? Number(c.req.query("thread")) : undefined)));
   app.post("/api/threads", async (c) => {
     const b = await body(c);
@@ -479,7 +483,7 @@ export function createApp(opts: ServerOptions): Hono {
     const b = await body(c);
     getThread(db, id);
     if (typeof b.message !== "string" || !b.message.trim()) return c.json({ error: "message is required" }, 400);
-    if (talking.has(id)) return c.json({ error: `thread ${id} is already waiting on the watchman` }, 409);
+    if (busy(id)) return c.json({ error: `thread ${id} is already waiting on the watchman` }, 409);
     void talk(id, b.message.trim());
     return c.json(threadView(id), 202);
   });

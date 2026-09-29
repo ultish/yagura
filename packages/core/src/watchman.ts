@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { assertThreadFree, beginTurn, endTurn, getTurn, turnRecorder } from "./turns.js";
 import { z } from "zod";
 import { runAgentSession, write, type RunContext, type SessionRecorder } from "./agent.js";
 import { resolveSetting } from "./config.js";
@@ -449,20 +450,6 @@ export interface TurnResult {
   problem: string | null;
 }
 
-function threadRecorder(db: Db, threadId: number, messageId: number): SessionRecorder {
-  return {
-    env: { YAGURA_THREAD: String(threadId), YAGURA_ROLE: "watchman" },
-    started: (pid) => recordEvent(db, "watchman.started", {}, { thread: threadId, message: messageId, pid }),
-    session: () => undefined,
-    usage: () => undefined,
-    finished: (skills) => {
-      const missing = missingSkills("watchman", skills);
-      if (missing.length) recordEvent(db, "watchman.method_miss", {}, { thread: threadId, message: messageId, missing, loaded: skills });
-      return missing;
-    },
-  };
-}
-
 export function renderRetry(brief: string, reply: string, reason: string): string {
   return `${brief}
 ## YOUR PREVIOUS REPLY WAS REJECTED
@@ -479,6 +466,7 @@ Answer the same message again: the same prose, adjusted if the fix changes what 
 export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: string): Promise<TurnResult> {
   const { db, boot } = ctx;
   const paths = layout(boot);
+  assertThreadFree(db, threadId);
   const human = addMessage(db, { threadId, role: "human", body: text });
   const setting = <K extends Parameters<typeof resolveSetting>[1]>(k: K) => resolveSetting(db, k).value;
   const harnessId = setting("role.watchman.harness");
@@ -488,13 +476,14 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
   const brief = buildWatchmanBrief(ctx, threadId, human);
   write(paths.turnBrief(threadId, human.id), brief.text);
   const logPath = paths.turnLog(threadId, human.id);
+  const turnId = beginTurn(db, threadId, human.id, logPath);
   const cwd = paths.thread(threadId);
   mkdirSync(cwd, { recursive: true });
   recordEvent(db, "watchman.turn", {}, { thread: threadId, message: human.id, contextTokens: brief.context.usedTokens, dropped: brief.context.dropped });
 
   const ask = async (prompt: string, log: string): Promise<{ text: string | null; problem: string | null }> => {
     const session = await runAgentSession(ctx, {
-      recorder: threadRecorder(db, threadId, human.id),
+      recorder: turnRecorder(db, { id: turnId, threadId, messageId: human.id }),
       adapter,
       run: {
         prompt,
@@ -513,7 +502,12 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
     if (session.final && !session.final.isError && !session.timedOut) return { text: session.final.text, problem: null };
     return {
       text: null,
-      problem: session.timedOut ? "the watchman ran out of time" : `the watchman ended without a reply (exit ${session.exitCode ?? session.signal})`,
+      problem:
+        getTurn(db, turnId).state === "stopped"
+          ? "you stopped the watchman"
+          : session.timedOut
+            ? "the watchman ran out of time"
+            : `the watchman ended without a reply (exit ${session.exitCode ?? session.signal})`,
     };
   };
   const attemptStore = async (text: string, log: string): Promise<{ stored: ReturnType<typeof storeTurn> | null; body: string; problem: string | null }> => {
@@ -534,6 +528,7 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
   if (!first.text) {
     out.problem = first.problem;
     addMessage(db, { threadId, role: "system", body: first.problem!, turnLog: logPath });
+    endTurn(db, turnId, "failed");
     return out;
   }
   let log = logPath;
@@ -562,5 +557,6 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
       addMessage(db, { threadId, role: "system", body: out.problem });
     }
   }
+  endTurn(db, turnId, out.reply ? "done" : "failed");
   return out;
 }
