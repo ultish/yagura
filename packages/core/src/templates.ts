@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
-import { resolveSetting, setSetting, type Bootstrap } from "./config.js";
+import { resolveSetting, setSetting, SETTING_LAYERS, SETTINGS, type Bootstrap, type SettingKey } from "./config.js";
 import { PROVIDERS, type EnvironmentId } from "./domain.js";
 import { checkValueName, listValues, setEnvironmentNotes, setValue } from "./envvalues.js";
 import { doctorEnvironment, PROVIDERS_IMPL } from "./leases.js";
@@ -22,6 +22,7 @@ export const EnvTemplate = z
     capacity: z.number().int().min(0),
     notes: z.string().default(""),
     keep: Keep.optional(),
+    settings: z.record(z.unknown()).default({}),
     values: z
       .array(
         z
@@ -84,6 +85,16 @@ export function saveTemplate(
     capacity: env.capacity,
     notes: env.notes,
     keep: { policy: resolveSetting(db, "lease.keep", sctx).value, hours: resolveSetting(db, "lease.keep_hours", sctx).value },
+    settings: Object.fromEntries(
+      (
+        db.prepare("SELECT key, value_json FROM settings WHERE scope = 'environment' AND scope_id = ? ORDER BY key").all(environmentId) as {
+          key: string;
+          value_json: string;
+        }[]
+      )
+        .filter((r) => !r.key.startsWith("lease.keep"))
+        .map((r) => [r.key, JSON.parse(r.value_json)]),
+    ),
     values: values.map((v) => ({ name: v.name, value: v.value, note: v.note, check: v.check, ask: (input.ask ?? []).includes(v.name) })),
   });
   mkdirSync(templatesDir(boot), { recursive: true });
@@ -103,6 +114,7 @@ export const EnvironmentDraft = z
     capacity: z.number().int().min(0).default(1),
     notes: z.string().default(""),
     keep: Keep.optional(),
+    settings: z.record(z.unknown()).default({}),
     presets: z.array(z.string()).default([]),
     values: z
       .array(z.object({ name: z.string(), value: z.string(), note: z.string().default(""), check: z.string().nullable().default(null) }).strict())
@@ -128,6 +140,7 @@ export function draftFromTemplate(
     capacity: t.capacity,
     notes: t.notes,
     keep: t.keep,
+    settings: t.settings,
     values: t.values.map((v) => ({ name: v.name, value: v.ask ? answers[v.name]!.trim() : v.value, note: v.note, check: v.check })),
   });
 }
@@ -142,6 +155,12 @@ export function checkDraft(db: Db, d: EnvironmentDraft): void {
   }
   const unknown = d.presets.filter((p) => !PRESETS.some((x) => x.id === p));
   if (unknown.length) throw new TemplateInvalid(`no preset ${unknown.join(", ")}; presets are ${PRESETS.map((p) => p.id).join(", ")}`);
+  for (const [key, value] of Object.entries(d.settings)) {
+    if (!(key in SETTINGS)) throw new TemplateInvalid(`no setting ${key}`);
+    if (!SETTING_LAYERS[key as SettingKey].includes("environment")) throw new TemplateInvalid(`${key} cannot be set per environment`);
+    const parsed = SETTINGS[key as SettingKey].safeParse(value);
+    if (!parsed.success) throw new TemplateInvalid(`${key}: ${parsed.error.issues[0]?.message ?? "invalid"}`);
+  }
   const impl = PROVIDERS_IMPL[d.provider];
   const problem = impl ? impl.validateConfig(d.providerConfig, d.capacity) : `provider ${d.provider} is not available yet`;
   if (problem) throw new TemplateInvalid(problem);
@@ -160,6 +179,7 @@ export function createEnvironment(db: Db, d: EnvironmentDraft, source: string): 
       setSetting(db, "environment", id, "lease.keep", d.keep.policy);
       setSetting(db, "environment", id, "lease.keep_hours", d.keep.hours);
     }
+    for (const [key, value] of Object.entries(d.settings)) setSetting(db, "environment", id, key as SettingKey, value as never);
     recordEvent(db, "environment.created", {}, { environment: id, source });
   })();
   return id;

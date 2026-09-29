@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveSetting, type Bootstrap } from "./config.js";
 import type { ProjectId, Unit } from "./domain.js";
-import { projectRepos, type Db } from "./store.js";
+import { getProject, projectRepos, type Db } from "./store.js";
 
 export const SKILL_PURPOSES = ["scaffold", "work", "pack", "verify"] as const;
 export type SkillPurpose = (typeof SKILL_PURPOSES)[number];
@@ -33,7 +33,7 @@ export const isInstalled = (installed: Set<string>, skill: string) =>
 
 // The project skills a session must load, on top of the role's own required skills.
 export function requiredProjectSkills(db: Db, unit: Pick<Unit, "projectId" | "repoId" | "type" | "scaffold">): string[] {
-  const at = { projectId: unit.projectId, repoId: unit.repoId ?? undefined };
+  const at = { projectId: unit.projectId, repoId: unit.repoId ?? undefined, environmentId: getProject(db, unit.projectId).environmentId };
   const purpose: SkillPurpose = unit.type === "pack" ? "pack" : unit.type === "verify" ? "verify" : unit.scaffold ? "scaffold" : "work";
   return resolveSetting(db, `skills.${purpose}`, at).value;
 }
@@ -49,7 +49,7 @@ export function projectSkillChecks(db: Db, boot: Bootstrap, projectId: ProjectId
   const found = new Map<string, SkillCheck>();
   for (const repoId of projectRepos(db, projectId).map((r) => r.id))
     for (const purpose of SKILL_PURPOSES)
-      for (const skill of resolveSetting(db, `skills.${purpose}`, { projectId, repoId }).value) {
+      for (const skill of resolveSetting(db, `skills.${purpose}`, { projectId, repoId, environmentId: getProject(db, projectId).environmentId }).value) {
         const c = found.get(skill) ?? { skill, purposes: [], repos: [], installed: false };
         if (!c.purposes.includes(purpose)) c.purposes.push(purpose);
         if (!c.repos.includes(repoId)) c.repos.push(repoId);

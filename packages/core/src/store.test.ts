@@ -123,6 +123,10 @@ describe("settings", () => {
     expect(describeSettings(db, { environmentId: "dev" as never }, "environment").map((s) => [s.key, s.source])).toEqual([
       ["role.verifier.harness", "default"],
       ["role.verifier.model", "environment"],
+      ["skills.scaffold", "default"],
+      ["skills.work", "default"],
+      ["skills.pack", "default"],
+      ["skills.verify", "default"],
       ["timebox.verify_seconds", "default"],
       ["lease.keep", "default"],
       ["lease.keep_hours", "default"],
