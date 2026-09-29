@@ -193,3 +193,41 @@ describe("bootstrap", () => {
     expect(b.skillsDir).toMatch(/plugins\/yagura$/);
   });
 });
+
+describe("deleting an environment", () => {
+  it("refuses while an open project uses it or a slot is held, then removes it with its values and settings", async () => {
+    const { addEnvironment, deleteEnvironment, getProject, setProjectEnvironment, setProjectState } = await import("./store.js");
+    const { setValue, listValues } = await import("./envvalues.js");
+    const { setSetting } = await import("./config.js");
+    const db = openStore(":memory:");
+    addRepo(db, { id: "r", url: "/r", defaultBranch: "main" });
+    addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["r" as RepoId] });
+    const env = "box" as never;
+    addEnvironment(db, { id: "box", name: "box", provider: "local-process", capacity: 1 });
+    setValue(db, env, { name: "REDIS_URL", value: "redis://box:6379" });
+    setSetting(db, "environment", "box", "lease.keep", "failed");
+    setProjectEnvironment(db, "p" as ProjectId, env);
+    expect(() => deleteEnvironment(db, env)).toThrow("environment box is used by p; move those projects to another environment first");
+    setProjectState(db, "p" as ProjectId, "closed");
+    const unit = addUnit(db, {
+      projectId: "p" as ProjectId,
+      type: "work",
+      repoId: "r" as RepoId,
+      goal: "g",
+      writeScope: [],
+      acceptance: [],
+      verify: "v",
+      timeboxSeconds: 60,
+      maxAttempts: 1,
+    });
+    const a = createAttempt(db, unit.id, "claude", null);
+    db.prepare("INSERT INTO leases (environment_id, attempt_id, slot, state, requested_at) VALUES ('box', ?, '0', 'active', 'now')").run(a.id);
+    expect(() => deleteEnvironment(db, env)).toThrow("environment box has slots in use or kept; wait for them or delete the kept ones first");
+    db.prepare("UPDATE leases SET state = 'released'").run();
+    deleteEnvironment(db, env);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM environments").get()).toEqual({ n: 0 });
+    expect(listValues(db, env)).toEqual([]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM settings WHERE scope = 'environment'").get()).toEqual({ n: 0 });
+    expect(getProject(db, "p" as ProjectId).environmentId).toBeNull();
+  });
+});

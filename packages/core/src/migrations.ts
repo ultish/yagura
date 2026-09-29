@@ -204,6 +204,10 @@ CREATE TABLE mr_threads (
 );
 `,
   },
+  {
+    version: 13,
+    sql: `ALTER TABLE attempts ADD COLUMN evidence_token TEXT;`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

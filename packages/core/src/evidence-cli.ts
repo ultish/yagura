@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { parseArgs } from "node:util";
 import { loadBootstrap } from "./config.js";
 import type { AttemptId } from "./domain.js";
@@ -23,6 +24,11 @@ export async function evidenceCli(argv: string[], env: NodeJS.ProcessEnv = proce
   const boot = loadBootstrap(env);
   const db = openStore(layout(boot).db);
   try {
+    const row = db.prepare("SELECT evidence_token FROM attempts WHERE id = ?").get(Number(env.YAGURA_ATTEMPT)) as { evidence_token: string | null } | undefined;
+    const given = Buffer.from(env.YAGURA_EVIDENCE_TOKEN ?? "");
+    const expected = Buffer.from(row?.evidence_token ?? "");
+    if (!expected.length || given.length !== expected.length || !timingSafeEqual(given, expected))
+      return { code: 2, output: "evidence run refused: YAGURA_EVIDENCE_TOKEN does not match this attempt's session\n" };
     const run = await runEvidence(db, boot, {
       attemptId: Number(env.YAGURA_ATTEMPT) as AttemptId,
       at: values.at as At,

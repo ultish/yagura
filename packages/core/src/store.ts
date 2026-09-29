@@ -371,6 +371,25 @@ export function addEnvironment(
   return getEnvironment(db, e.id as EnvironmentId);
 }
 
+// History stays in events; what goes is the environment itself, its values, settings, and finished leases.
+export function deleteEnvironment(db: Db, id: EnvironmentId): void {
+  getEnvironment(db, id);
+  const using = (db.prepare("SELECT id FROM projects WHERE environment_id = ? AND state <> 'closed' ORDER BY id").all(id) as { id: string }[]).map((p) => p.id);
+  if (using.length) throw new Error(`environment ${id} is used by ${using.join(", ")}; move those projects to another environment first`);
+  const busy = db
+    .prepare("SELECT COUNT(*) AS n FROM leases WHERE environment_id = ? AND (state IN ('queued', 'active') OR kept_until IS NOT NULL)")
+    .get(id) as { n: number };
+  if (busy.n) throw new Error(`environment ${id} has slots in use or kept; wait for them or delete the kept ones first`);
+  db.transaction(() => {
+    db.prepare("UPDATE projects SET environment_id = NULL WHERE environment_id = ?").run(id);
+    db.prepare("DELETE FROM leases WHERE environment_id = ?").run(id);
+    db.prepare("DELETE FROM environment_values WHERE environment_id = ?").run(id);
+    db.prepare("DELETE FROM settings WHERE scope = 'environment' AND scope_id = ?").run(id);
+    db.prepare("DELETE FROM environments WHERE id = ?").run(id);
+    recordEvent(db, "environment.deleted", {}, { environment: id });
+  })();
+}
+
 export function getEnvironment(db: Db, id: EnvironmentId): Environment {
   const r = db.prepare("SELECT * FROM environments WHERE id = ?").get(id) as Record<string, unknown> | undefined;
   if (!r) throw new Error(`environment ${id} not found`);

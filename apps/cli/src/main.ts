@@ -70,6 +70,7 @@ import {
   importSettings,
   updateEnvironment,
   doctorEnvironment,
+  deleteEnvironment,
   applyPreset,
   applyTemplate,
   deleteValue,
@@ -107,6 +108,7 @@ const USAGE = `yagura — agent orchestration
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]   runs the doctor
   yagura env set <id> [--capacity <n>] [--name <text>]
   yagura env doctor <id>
+  yagura env rm <id>                                refused while a project that is not closed uses it
   yagura env values <id>
   yagura env value set <id> <NAME> <value> [--note <text>] [--check <cmd>] [--clear-check]
   yagura env value rm <id> <NAME>
@@ -536,6 +538,11 @@ async function main() {
       const printDoctor = (checks: { name: string; ok: boolean; detail: string }[]) => {
         for (const c of checks) console.log(`  ${c.ok ? "✓" : "✗"} ${c.name}: ${c.detail}`);
       };
+      if (sub === "rm" && id) {
+        deleteEnvironment(db, id as EnvironmentId);
+        console.log(`deleted environment ${id}`);
+        return;
+      }
       if (sub === "doctor" && id) {
         const result = await doctorEnvironment(db, boot, id as EnvironmentId);
         console.log(`environment ${id}: doctor ${result.ok ? "passing" : "failing"}`);

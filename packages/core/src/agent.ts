@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { appendFileSync, chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -62,13 +63,26 @@ export interface SessionRecorder {
 }
 
 // A resumed session already loaded the skills its first round did, so those count toward METHOD.
+// Only the session yagura started for an attempt knows its token, so no other process can record evidence in that attempt's name.
+function issueEvidenceToken(db: Db, attemptId: AttemptId): string {
+  const token = randomBytes(24).toString("hex");
+  db.prepare("UPDATE attempts SET evidence_token = ? WHERE id = ?").run(token, attemptId);
+  return token;
+}
+
 export function attemptRecorder(
   db: Db,
   s: { attempt: Attempt; unit: Unit; projectId: ProjectId; role: Role; inheritedSkills?: string[]; projectSkills?: string[] },
 ): SessionRecorder {
   const refs = { projectId: s.projectId, unitId: s.unit.id, attemptId: s.attempt.id };
   return {
-    env: { YAGURA_ATTEMPT: String(s.attempt.id), YAGURA_PROJECT: s.projectId, YAGURA_UNIT: `U${s.unit.seq}`, YAGURA_ROLE: s.role },
+    env: {
+      YAGURA_ATTEMPT: String(s.attempt.id),
+      YAGURA_EVIDENCE_TOKEN: issueEvidenceToken(db, s.attempt.id),
+      YAGURA_PROJECT: s.projectId,
+      YAGURA_UNIT: `U${s.unit.seq}`,
+      YAGURA_ROLE: s.role,
+    },
     started: (pid) => {
       updateAttempt(db, s.attempt.id, { pid });
       recordEvent(db, "attempt.started", refs, { pid, role: s.role });

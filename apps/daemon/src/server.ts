@@ -59,6 +59,7 @@ import {
   registerRepo,
   RepoUnusable,
   applyTemplate,
+  deleteEnvironment,
   projectSkillChecks,
   ENVIRONMENT_ID,
   deleteKept,
@@ -318,6 +319,10 @@ export function createApp(opts: ServerOptions): Hono {
     });
     await doctorEnvironment(db, boot, b.id as EnvironmentId);
     return c.json(environmentView(db, b.id as EnvironmentId), 201);
+  });
+  app.post("/api/environments/:id/delete", (c) => {
+    deleteEnvironment(db, c.req.param("id") as EnvironmentId);
+    return c.json({ deleted: true });
   });
   app.get("/api/environments/:id", (c) => c.json(environmentDetail(db, c.req.param("id") as EnvironmentId)));
   app.post("/api/environments/:id/values", async (c) => {

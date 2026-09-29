@@ -152,6 +152,7 @@ function AddEnvironment({ onAdded }: { onAdded: () => void }) {
 }
 
 function EditEnvironment({ v, onDone }: { v: EnvironmentView; onDone: () => void }) {
+  const [confirming, setConfirming] = useState(false);
   const [name, setName] = useState(v.environment.name);
   const [capacity, setCapacity] = useState(String(v.environment.capacity));
   const action = useAction();
@@ -194,6 +195,26 @@ function EditEnvironment({ v, onDone }: { v: EnvironmentView; onDone: () => void
       <button className="btn sm" type="button" onClick={onDone}>
         Never mind
       </button>
+      {!confirming ? (
+        <button className="btn sm" type="button" style={{ marginLeft: "auto" }} onClick={() => setConfirming(true)}>
+          Delete environment
+        </button>
+      ) : (
+        <span style={{ display: "flex", gap: 8, alignItems: "center", marginLeft: "auto", fontSize: 13 }}>
+          <span className="s-bell">Delete {v.environment.id} with its values and settings?</span>
+          <button
+            className="btn sm bell"
+            type="button"
+            disabled={action.busy}
+            onClick={() => void action.run(async () => (await api(`/api/environments/${v.environment.id}/delete`, { body: {} }), onDone()))}
+          >
+            Delete
+          </button>
+          <button className="btn sm" type="button" onClick={() => setConfirming(false)}>
+            Keep it
+          </button>
+        </span>
+      )}
       {Number(capacity) < v.active.length && (
         <span className="muted" style={{ fontSize: 13, width: "100%" }}>
           Slots in use now keep running; no new ones start until the count drops.
