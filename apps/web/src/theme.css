@@ -108,8 +108,14 @@ body {
   background: var(--bg);
   color: var(--text);
 }
+/* Zen Kaku Gothic New draws ` like an accent over the next letter; agents write Markdown, so borrow the code font's backtick. */
+@font-face {
+  font-family: "Backtick";
+  src: local("JetBrains Mono"), local("JetBrainsMono-Regular"), local("Menlo"), local("Courier New");
+  unicode-range: U+0060;
+}
 body {
-  font-family: "Zen Kaku Gothic New", system-ui, sans-serif;
+  font-family: "Backtick", "Zen Kaku Gothic New", system-ui, sans-serif;
   font-size: 15px;
   line-height: 1.45;
 }
