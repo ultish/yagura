@@ -145,3 +145,4 @@ Open: one-way notices from a worker to running siblings in the same repo (`yagur
 - `yagura drive` (one project, foreground) refuses while the daemon runs; it is for debugging only. Normal use is `yagura daemon`, or `pnpm dev` while developing.
 - (Built 2026-09-30) Wall-clock budget and landing cutoff: `project.budget_hours` (DESIGN §6 "Land"; engine test with a backdated activation). No cost budget yet.
 - The user's SessionStart hook (codebase-memory-mcp indexing) runs in every agent session; suggested fix is to skip when `YAGURA_ATTEMPT` is set. Not yet applied.
+- (Decided 2026-09-30, not built) The watchman as a live session: a resumed session per thread with a "clear", a delta brief, read-only tools, and a role guard on the CLI (DESIGN §21). Step 1, session continuity and clear, is the smallest useful piece.

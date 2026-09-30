@@ -718,3 +718,57 @@ Answers to the questions this design left open (2026-09-26):
 6. **Forges (2026-09-27, user):** repos can use GitHub (`gh`) or GitLab (`glab`), configured per repo with its host; GitHub is built and proven first on a private sandbox repo, GitLab on the dev VM.
 7. **Agent communication (2026-09-29, user):** no chat between agents. A rejected worker resumes its own session with the verifier's findings instead of starting cold, within the limits in §13 "Resume on rejection"; one-way notices to siblings stay open until a real run needs them.
 8. **Judgment over rules (2026-09-30, user):** agents are trusted to know how to test; the verifier checks the worker did what was asked, tests what was built, and keeps the verify pack current (fixing or extending it, or running `maintain-verification-skill`); the worker never edits the pack; yagura agrees or disagrees only on facts it can check; environment values and notes are context, not checks, and failures surface from real use to the watchman and the developer; the audit trail (each agent's decisions and reasons, yagura's checks, cost) lets the developer disagree with any decision after the fact (§13 "Judgment, evidence, and the trail").
+
+## 21. The watchman as a live session (decided 2026-09-30, user; not built yet)
+
+Today each watchman message is a fresh harness session whose context yagura rebuilds from the store (§8a). The developer wants the conversation to feel like a Claude Code session: continuous, able to look things up and run read-only commands itself, with a "clear" that starts a new session. This section is the design; nothing here is built. It replaces §8a's "every message is a fresh harness session" and keeps the rest of §8a (records, mentions, proposals applied on Go).
+
+### Principle, restated
+
+No long-lived LLM _process_, and the store stays the truth. A session is a transcript the harness keeps on disk; yagura stores only its id. If the daemon restarts, a session is lost, or the developer clears it, the next turn rebuilds everything from the store as today. Nothing lives only in a session.
+
+### Session continuity
+
+- A thread has at most one **current session**: `thread_sessions(id, thread_id, harness_session_id, started_at, ended_at, ended_reason)` (`cleared`, `rolled`, `lost`). A turn resumes the current session (`--resume`, as workers do in §13 "Resume on rejection"); with none, it starts one.
+- **First turn of a session:** the full brief of §8a (standing orders, decisions, questions, statuses, spec, recent messages). **Resumed turn:** only what changed since the last turn: the new message and, from the store, new or changed decisions and questions (including ones edited in the dashboard), spec edits, project status changes, gates opened or answered, and mentions. The session already holds the rest.
+- **Clear** (dashboard button, `yagura thread clear <id>`, or `/clear` typed in the box): ends the current session with reason `cleared`. Decisions, questions, spec, and messages stay; the next message starts a new session with the full brief. The transcript shows a marker where the session changed.
+- **Roll:** when a turn's context peak (already recorded per turn) passes `watchman.session_roll_tokens` (a setting, default 150k), the next turn starts a new session and says so in a system message. The harness's own compaction is not relied on, because the developer would not see what it dropped.
+- **Lost session:** a resume that fails ("No conversation found", or the session file is gone) ends the session as `lost` and re-runs the same turn as a fresh session with the full brief. Not an error the developer sees, except as a system message.
+- The one-turn-per-thread rule across processes (built) stays. Messages sent while a turn runs are queued and delivered together as the next turn, in order.
+
+### Tools
+
+The watchman gets tools, chosen by an allow-list rather than `bypassPermissions`:
+
+- **Read:** `Read`, `Grep`, `Glob` limited to the thread's directory, each linked project's spec and unit handoffs and logs, and read-only mounts of registered repo mirrors' trunk (`--add-dir`, as workers get reference repos in §11).
+- **`yagura` read commands** through `Bash(yagura <command>:*)` patterns: `show`, `thread search|show|mentions`, `agents`, `settings get`, `env list`, `project skills`, `doctor`. Read-only `git` (`log`, `show`, `ls-tree`, `diff`) against the mirrors.
+- **Nothing else:** no file writes, no `git` writes, no network tools (§18), no other `Bash`.
+
+The rule that writes go through one door does not change: the watchman changes yagura only through its records block and proposals (§8a), validated by yagura and applied on Go. Tools let it look things up (a unit's handoff, a repo's tree, an older thread) instead of guessing from a trimmed brief.
+
+Enforced by yagura, not by the prompt:
+
+- The allow-list is passed to the harness (`HarnessRun.allowedTools`; the claude adapter turns it into `--allowed-tools` and `--disallowed-tools`), and the watchman's permission mode is its own setting (`harness.claude.watchman_permission_mode`, default `default`), not the workers' bypass.
+- Every watchman session gets `YAGURA_ROLE=watchman` and a per-turn secret (the same pattern as `YAGURA_EVIDENCE_TOKEN`). The CLI and daemon API refuse any mutating command from that role, so a pattern that is too loose in the allow-list still cannot write.
+- A denied tool call is recorded in the turn's log and shown in the transcript.
+
+### Dashboard
+
+The thread page shows a **New session** button, the session marker in the transcript, a context meter (peak against the roll threshold), and the turn's tool calls as they happen (the live log exists). Stop exists. Clearing needs no confirm: it loses nothing.
+
+### Build order
+
+1. Session continuity and clear (`thread_sessions`, resume, delta brief, roll, lost fallback, the button and `/clear`). Useful alone, and the smallest step toward this.
+2. Read tools: the allow-list, the watchman permission-mode setting, mirrors as read-only mounts.
+3. The role guard on the CLI and API, with the per-turn secret.
+4. Dashboard: session markers, context meter, tool calls in the transcript.
+
+### Proof
+
+Real SQLite and git; the fake agent extended to honour `--resume` and to attempt a denied tool. Tests: a second message resumes the first's session and its brief holds only the delta; clear ends the session and the next brief is full; a resume that fails re-runs fresh and records `lost`; a turn over the roll threshold starts a new session; the fake agent's write attempt is refused by the CLI guard even when the allow-list is widened; a read of another project's spec outside the thread's links is refused. Then one real `claude -p --resume` watchman exchange (Haiku) to capture the transcript as a fixture.
+
+### Open
+
+- The exact `yagura` and `git` patterns in the allow-list; start narrow and widen from real use.
+- Whether the roll threshold should follow the model's context size instead of a fixed number.
+- Whether a cleared session's transcript should stay readable in the dashboard (leaning yes, from the harness's log that yagura already records per turn).
