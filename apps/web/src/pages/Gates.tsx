@@ -1,5 +1,6 @@
 import { useApi, type BellItem, type Gate } from "../api";
 import { clock } from "../lib/format";
+import { Inline } from "../lib/markdown";
 import { Link } from "../ui/Link";
 import { BellRow, Row } from "../ui/rows";
 
@@ -60,7 +61,7 @@ export function Gates() {
                   <Link to={`/p/${g.projectId}`}>{g.projectId}</Link>
                 )
               }
-              goal={g.question}
+              goal={<Inline text={g.question} />}
               status={
                 g.state === "defaulted"
                   ? `Nobody answered, so it took the default: ${g.answer}.`

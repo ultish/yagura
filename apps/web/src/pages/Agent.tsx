@@ -3,7 +3,7 @@ import { api, streamUrl, useApi, useNow, type Attempt, type AttemptDetail, type 
 import { slotLine } from "./environment-values";
 import { roleOf } from "../lib/units";
 import { clock, duration, modelName, tokens } from "../lib/format";
-import { Markdown } from "../lib/markdown";
+import { Inline, Markdown } from "../lib/markdown";
 import { buildTimeline, type Step } from "../lib/timeline";
 import { Link } from "../ui/Link";
 import { DiffView, RunView } from "../ui/evidence";
@@ -344,7 +344,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
         </div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
           <h1 className="serif" style={{ margin: 0, fontSize: 28, fontWeight: 600, maxWidth: 900, lineHeight: 1.3 }}>
-            {u.goal}
+            <Inline text={u.goal} />
           </h1>
           {a.state === "running" && !stopping && (
             <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -570,7 +570,7 @@ export function UnitAgent({ projectId, seq, n }: { projectId: string; seq: numbe
     return (
       <main style={{ padding: 36 }}>
         <h1 className="serif">
-          U{seq}: {unit.goal}
+          U{seq}: <Inline text={unit.goal} />
         </h1>
         <p className="muted">No agent has run for this unit yet ({unit.state}).</p>
         <Link to={`/p/${projectId}`}>Back to {projectId}</Link>

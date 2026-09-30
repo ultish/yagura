@@ -134,7 +134,7 @@ function ProjectGates({ d }: { d: ProjectDetail }) {
         <Row
           key={g.id}
           seq="project"
-          goal={g.question}
+          goal={<Inline text={g.question} />}
           status={g.defaultOption ? `Default if nobody answers: ${g.defaultOption}.` : undefined}
           tone={g.kind === "report" ? "pine" : "bell"}
           actions={g.options.map((o, i) => (

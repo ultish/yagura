@@ -205,7 +205,7 @@ export function BellRow({ item, showProject }: { item: BellItem; showProject: bo
   return (
     <Row
       seq={seq}
-      goal={item.unit?.goal ?? g.question}
+      goal={<Inline text={item.unit?.goal ?? g.question} />}
       status={item.unit ? g.question : g.kind === "report" ? "Report posted in the conversation." : undefined}
       tone={g.kind === "report" ? "pine" : "bell"}
       facts={unanswered && <span>{unanswered}</span>}

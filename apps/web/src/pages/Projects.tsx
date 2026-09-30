@@ -2,6 +2,7 @@ import { useApi, type ProjectSummary } from "../api";
 import { clock, sha } from "../lib/format";
 import { needsYou } from "../lib/scene";
 import { Link } from "../ui/Link";
+import { Inline } from "../lib/markdown";
 import { Row } from "../ui/rows";
 
 const GROUPS: { title: string; test: (s: ProjectSummary) => boolean }[] = [
@@ -39,7 +40,7 @@ export function Projects() {
                 <Row
                   key={s.project.id}
                   seq={<Link to={`/p/${s.project.id}`}>{s.project.id}</Link>}
-                  goal={s.project.goal}
+                  goal={<Inline text={s.project.goal} />}
                   status={
                     s.project.andonReason
                       ? `Andon: ${s.project.andonReason}`
