@@ -36,8 +36,7 @@ process.stdin.on("end", () => {
   const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
   g("add", file);
   g("commit", "-q", "-m", "fake agent work");
-  mkdirSync("app/__pycache__", { recursive: true });
-  writeFileSync("app/__pycache__/orders.pyc", "generated after commit\n");
+  writeFileSync("app/notes.txt", "written after commit\n");
   emit({
     type: "assistant",
     message: { content: [{ type: "tool_use", id: "t1", name: "Edit", input: { file_path: file } }], usage: { input_tokens: 1200, output_tokens: 30 } },
@@ -173,7 +172,8 @@ function engine(role) {
     const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
     g("add", "-A");
     g("commit", "-q", "-m", `work ${process.env.YAGURA_UNIT}`);
-    return setTimeout(() => finish("## Status\nsuccess\n\n## Verification\nunit-verified\n"), 400);
+    const followUps = process.env.FAKE_FOLLOWUPS ? `\n## Suggested follow-ups\n- ${process.env.FAKE_FOLLOWUPS}\n` : "\n## Suggested follow-ups\n- None.\n";
+    return setTimeout(() => finish(`## Status\nsuccess\n\n## Verification\nunit-verified\n${followUps}`), 400);
   }
   if (role === "verifier") {
     const file = /^\+\+\+ b\/(.+)$/m.exec(brief)[1];

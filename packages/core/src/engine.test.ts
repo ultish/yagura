@@ -112,6 +112,8 @@ describe("Engine", () => {
         .sort(),
     ).toEqual([`app/a/extra/p-U${work[2]!.seq}.txt`, `app/a/p-U${work[0]!.seq}.txt`, `app/b/p-U${work[1]!.seq}.txt`]);
     expect(log.some((l) => l.startsWith("✔ project p closed"))).toBe(true);
+    const drains = () => (db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'plan.drain_started' AND project_id = ?").get(project) as { n: number }).n;
+    expect(drains()).toBe(2);
 
     const verifyAttempt = listAttempts(db, listUnits(db, project).find((u) => u.type === "verify" && u.targetUnitId === a)!.id)[0]!;
     const headRun = listEvidenceRuns(db, verifyAttempt.id).find((r) => r.label === "s" && r.at === "head")!;
@@ -284,6 +286,17 @@ describe("Engine", () => {
         .filter((u) => u.type === "work")
         .map((u) => u.state),
     ).toEqual(["landed", "landed", "landed"]);
+    expect(getProject(db, project).state).toBe("closed");
+  }, 60_000);
+
+  it("plans again after a landing whose worker suggested follow-ups, even with work still queued", async () => {
+    process.env.FAKE_FOLLOWUPS = "cache the parsed config";
+    try {
+      await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    } finally {
+      delete process.env.FAKE_FOLLOWUPS;
+    }
+    expect((db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'plan.drain_started'").get() as { n: number }).n).toBe(4);
     expect(getProject(db, project).state).toBe("closed");
   }, 60_000);
 

@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -36,6 +36,18 @@ describe("git", () => {
     expect(await commitAll(wt, "work", author)).toBe(true);
     expect(await commitAll(wt, "nothing", author)).toBe(false);
     expect((await changedPaths(wt, base)).sort()).toEqual([".agents/verify/drive", "app/orders.py"]);
+  });
+
+  it("keeps files tools generate out of an agent's commits, once per mirror", async () => {
+    const wt = join(root, "wt-generated");
+    await addWorktree(mirror, wt, "yg/p/u9-1", await resolveRef(mirror, "origin/main"));
+    mkdirSync(join(wt, "app/__pycache__"), { recursive: true });
+    writeFileSync(join(wt, "app/__pycache__/orders.cpython-312.pyc"), "bytecode");
+    writeFileSync(join(wt, "app/new.py"), "y = 1\n");
+    await commitAll(wt, "work", author);
+    expect(await git(["show", "--name-only", "--format=", "HEAD"], { cwd: wt })).toBe("app/new.py");
+    await ensureMirror(origin, mirror);
+    expect(readFileSync(join(mirror, "info/exclude"), "utf8").match(/__pycache__/g)).toHaveLength(1);
   });
 
   it("keeps unit branches across later fetches", async () => {

@@ -1,8 +1,11 @@
+import { existsSync, readFileSync } from "node:fs";
 import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
 import { markMergeChecked, openMergeRequests } from "./forge.js";
+import { parseHandoff } from "./handoff.js";
 import { landUnit, watchMergeRequest, type LandResult } from "./land.js";
+import { layout } from "./paths.js";
 import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
@@ -45,6 +48,26 @@ export interface EngineOptions {
 const TERMINAL = new Set(["landed", "done", "abandoned"]);
 export const LANDING_CUTOFF = 0.7;
 const PLAN_TRIGGERS = ["landed", "blocked", "abandoned"];
+const YAGURA_GATES = ["report", "land", "environment", "review"];
+
+function suggestsFollowUps(db: Db, boot: RunContext["boot"], unitId: UnitId): boolean {
+  const unit = getUnit(db, unitId);
+  const last = listAttempts(db, unitId)
+    .filter((a) => a.state === "handed_off")
+    .at(-1);
+  const path = last ? layout(boot).handoff(unit.projectId, unit.seq, last.n) : null;
+  const handoff = path && existsSync(path) ? parseHandoff(readFileSync(path, "utf8")) : null;
+  return (handoff?.followUps ?? "")
+    .split("\n")
+    .map((l) =>
+      l
+        .replace(/^[-*]\s*/, "")
+        .trim()
+        .replace(/[.()]/g, "")
+        .toLowerCase(),
+    )
+    .some((l) => l && !["none", "n/a", "nothing"].includes(l));
+}
 
 export class Engine {
   private readonly inflight = new Map<string, Promise<void>>();
@@ -185,19 +208,27 @@ export class Engine {
     return used === null || used < LANDING_CUTOFF || !isBuild(u);
   }
 
+  // A drain costs a planner session, so only what can change the plan starts one: a unit that stopped short, a
+  // question answered, a rejected delta, andon cleared, a spec edit, or work landing with nothing left queued or
+  // with follow-ups suggested. Land, environment, and review gates, and pack units, are yagura's own to finish.
   private planNeeded(project: Project): boolean {
     if (this.inflight.has(`plan:${project.id}`)) return false;
     const since = lastDrainEventId(this.db, project.id);
     if (since === 0) return true;
-    const triggers = this.db
+    const events = this.db
       .prepare(
-        `SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND id > ? AND (
-           (type = 'unit.state' AND json_extract(data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(data_json, '$.drain') IS NULL AND json_extract(data_json, '$.rebaseUnit') IS NULL AND json_extract(data_json, '$.reviewUnit') IS NULL)
-           OR (type IN ('gate.answered', 'gate.defaulted') AND COALESCE(json_extract(data_json, '$.kind'), '') <> 'report')
-           OR type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed'))`,
+        `SELECT e.type, e.unit_id, e.data_json, u.type AS unit_type FROM events e LEFT JOIN units u ON u.id = e.unit_id WHERE e.project_id = ? AND e.id > ? AND (
+           (e.type = 'unit.state' AND json_extract(e.data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(e.data_json, '$.drain') IS NULL AND json_extract(e.data_json, '$.rebaseUnit') IS NULL AND json_extract(e.data_json, '$.reviewUnit') IS NULL)
+           OR (e.type IN ('gate.answered', 'gate.defaulted') AND COALESCE(json_extract(e.data_json, '$.kind'), '') NOT IN (${YAGURA_GATES.map(() => "?").join(", ")}))
+           OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed'))`,
       )
-      .get(project.id, since, ...PLAN_TRIGGERS) as { n: number };
-    return triggers.n > 0;
+      .all(project.id, since, ...PLAN_TRIGGERS, ...YAGURA_GATES) as { type: string; unit_id: UnitId | null; data_json: string; unit_type: string | null }[];
+    const open = () => listUnits(this.db, project.id).some((u) => isBuild(u) && !TERMINAL.has(u.state) && u.state !== "blocked");
+    return events.some((e) => {
+      if (e.type !== "unit.state" || (JSON.parse(e.data_json) as { to: string }).to !== "landed") return true;
+      if (e.unit_type === "pack") return false;
+      return !open() || suggestsFollowUps(this.db, this.ctx.boot, e.unit_id!);
+    });
   }
 
   private spawn(project: Project): void {

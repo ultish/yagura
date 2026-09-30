@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type { Sha } from "./domain.js";
 
@@ -15,10 +16,21 @@ export async function git(args: string[], opts: { cwd?: string; gitDir?: string 
   return stdout.trimEnd();
 }
 
+// Files tools generate as they run. Agents commit whatever is untracked in a repo without its own .gitignore, and
+// every worktree of a mirror reads the mirror's info/exclude.
+const GENERATED = ["__pycache__/", "*.py[cod]", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", "node_modules/", ".gradle/", ".DS_Store"];
+
 export async function ensureMirror(url: string, gitDir: string): Promise<void> {
   if (!existsSync(gitDir)) {
     await git(["clone", "--bare", "--quiet", url, gitDir]);
     await git(["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], { gitDir });
+  }
+  const exclude = join(gitDir, "info", "exclude");
+  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+  const missing = GENERATED.filter((p) => !current.split("\n").includes(p));
+  if (missing.length) {
+    mkdirSync(dirname(exclude), { recursive: true });
+    appendFileSync(exclude, `${current && !current.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`);
   }
   if ((await git(["remote", "get-url", "origin"], { gitDir })) !== url) await git(["remote", "set-url", "origin", url], { gitDir });
   await git(["fetch", "--quiet", "--prune", "origin"], { gitDir });

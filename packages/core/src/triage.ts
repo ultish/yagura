@@ -325,9 +325,13 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
 // the PR watcher posts whatever is still pending on every poll, and each reply goes out once.
 export async function postReplies(db: Db, forge: ForgeAdapter, target: Unit, number: number): Promise<number> {
   let posted = 0;
-  for (const row of listThreadRows(db, target.id).filter((r) => (r.decision === "fixed" || r.decision === "dismissed") && !r.repliedAt)) {
+  const pending = listThreadRows(db, target.id).filter((r) => (r.decision === "fixed" || r.decision === "dismissed") && !r.repliedAt);
+  if (!pending.length) return 0;
+  const already = await forge.replyKeys(number);
+  for (const row of pending) {
+    const key = `${target.projectId}/U${target.seq}/w${row.waveUnitId}/${row.threadId}`;
     const body = row.decision === "fixed" ? `Fixed in ${row.commitSha!.slice(0, 10)} (yagura ${target.projectId}/U${target.seq}): ${row.reason}` : row.reason!;
-    await forge.reply(number, { id: row.threadId, kind: row.kind }, body);
+    if (!already.has(key)) await forge.reply(number, { id: row.threadId, kind: row.kind }, body, key);
     db.prepare("UPDATE mr_threads SET replied_at = ? WHERE unit_id = ? AND thread_id = ?").run(now(), target.id, row.threadId);
     posted++;
   }

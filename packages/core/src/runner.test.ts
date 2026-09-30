@@ -96,7 +96,7 @@ describe("runWorkUnit", () => {
     expect(await git(["log", "-1", "--format=%s"], { cwd: attempt.worktreePath! })).toBe("fake agent work");
     expect(await git(["diff", "--name-only", attempt.baseSha!, "HEAD"], { cwd: attempt.worktreePath! })).toBe("app/orders.py");
     expect(await git(["status", "--porcelain"], { cwd: attempt.worktreePath! })).toBe("");
-    expect(readFileSync(paths.leftovers(project, 1, 1), "utf8")).toContain("app/__pycache__/orders.pyc");
+    expect(readFileSync(paths.leftovers(project, 1, 1), "utf8")).toContain("app/notes.txt");
   });
 
   it("rejects work that wrote outside its scope", async () => {

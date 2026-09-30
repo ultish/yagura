@@ -25,7 +25,8 @@ export interface ForgeAdapter {
   failedRuns(headSha: Sha): Promise<{ id: number; name: string; log: string }[]>;
   rerunFailed(runId: number): Promise<void>;
   threads(number: number): Promise<PrThread[]>;
-  reply(number: number, thread: Pick<PrThread, "id" | "kind">, body: string): Promise<void>;
+  replyKeys(number: number): Promise<Set<string>>;
+  reply(number: number, thread: Pick<PrThread, "id" | "kind">, body: string, key: string): Promise<void>;
 }
 
 export type ThreadKind = "review-thread" | "comment" | "review";
@@ -43,6 +44,14 @@ export interface PrThread {
 // Everything yagura posts carries this marker, so its own replies never read as new review activity.
 export const YAGURA_MARK = "<!-- yagura -->";
 export const marked = (body: string) => `${body}\n\n${YAGURA_MARK}`;
+// GitHub can report a failure for a reply it did post, so each reply carries a key yagura checks before posting again.
+const keyed = (body: string, key: string) => `${marked(body)}\n<!-- yagura-reply:${key} -->`;
+
+export function readReplyKeys(data: unknown): Set<string> {
+  const keys = new Set<string>();
+  for (const m of JSON.stringify(data).matchAll(/<!-- yagura-reply:([^ ]+?) -->/g)) keys.add(m[1]!);
+  return keys;
+}
 const isYagura = (body: string) => body.includes(YAGURA_MARK);
 
 const THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
@@ -227,10 +236,18 @@ export function githubForge(bin: string, repo: string): ForgeAdapter {
         ),
       );
     },
-    async reply(number, thread, body) {
+    async replyKeys(number) {
+      const [owner, name] = repoParts.slice(-2);
+      return readReplyKeys(
+        JSON.parse(
+          await gh(bin, ["api", "graphql", ...host, "-f", `query=${THREADS_QUERY}`, "-F", `owner=${owner}`, "-F", `name=${name}`, "-F", `number=${number}`]),
+        ),
+      );
+    },
+    async reply(number, thread, body, key) {
       if (thread.kind === "review-thread")
-        await gh(bin, ["api", "graphql", ...host, "-f", `query=${REPLY_MUTATION}`, "-F", `thread=${thread.id}`, "-F", "body=@-"], marked(body));
-      else await gh(bin, ["pr", "comment", String(number), ...R, "--body-file", "-"], marked(body));
+        await gh(bin, ["api", "graphql", ...host, "-f", `query=${REPLY_MUTATION}`, "-F", `thread=${thread.id}`, "-F", "body=@-"], keyed(body, key));
+      else await gh(bin, ["pr", "comment", String(number), ...R, "--body-file", "-"], keyed(body, key));
     },
   };
 }

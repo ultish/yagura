@@ -24,10 +24,12 @@ process.stdin.on("end", () => {
       rest.flatMap((a, i) => (rest[i - 1] === "-F" || rest[i - 1] === "-f" ? [[a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)]] : [])),
     );
     if (fields.query.includes("addPullRequestReviewThreadReply")) {
-      if (process.env.FAKE_GH_REPLY_FAIL) fail("gh: HTTP 502");
+      if (process.env.FAKE_GH_REPLY_FAIL === "before") fail("gh: HTTP 502");
       const thread = state.prs.flatMap((p) => p.threads ?? []).find((t) => t.id === fields.thread);
       if (!thread) fail(`no thread ${fields.thread}`);
       thread.comments.push({ author: { login: "ultish" }, body: fields.body === "@-" ? stdin : fields.body });
+      // GitHub sometimes posts the reply and still answers 502.
+      if (process.env.FAKE_GH_REPLY_FAIL === "after") fail("gh: HTTP 502");
       return out({ data: { addPullRequestReviewThreadReply: { comment: { id: "c" } } } });
     }
     const p = state.prs.find((x) => x.number === Number(fields.number));
