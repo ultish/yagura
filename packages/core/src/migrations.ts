@@ -230,6 +230,25 @@ CREATE TABLE watchman_turns (
 CREATE INDEX watchman_turns_running ON watchman_turns (thread_id) WHERE state = 'running';
 `,
   },
+  {
+    version: 16,
+    sql: `
+CREATE TABLE pack_edits (
+  id INTEGER PRIMARY KEY,
+  attempt_id INTEGER NOT NULL REFERENCES attempts (id),
+  target_unit_id INTEGER NOT NULL REFERENCES units (id),
+  base_sha TEXT NOT NULL,
+  sha TEXT NOT NULL,
+  branch TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'queued', 'dropped')),
+  pack_unit_id INTEGER REFERENCES units (id),
+  reason TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX pack_edits_target ON pack_edits (target_unit_id);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

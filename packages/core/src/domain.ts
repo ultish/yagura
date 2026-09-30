@@ -107,9 +107,10 @@ export class IllegalTransition extends Error {
 // An attempt yagura made itself (a rebased head waiting for re-verification) is not a try the unit spent.
 export const REBASE_HARNESS = "yagura-rebase";
 export const PROOF_HARNESS = "yagura-proof";
+export const PACK_EDIT_HARNESS = "yagura-pack-edit";
 // A resume that never started a session (unknown or expired session id) falls back to a fresh attempt at no extra try.
 export const spendsAttempt = (a: { state: string; harness: string; resumesAttemptId?: AttemptId | null; sessionId?: string | null }) =>
-  a.state !== "stopped" && a.harness !== REBASE_HARNESS && !(a.resumesAttemptId && !a.sessionId);
+  a.state !== "stopped" && a.harness !== REBASE_HARNESS && a.harness !== PACK_EDIT_HARNESS && !(a.resumesAttemptId && !a.sessionId);
 
 export const DEP_KINDS = ["needs-source", "needs-landed", "scope-overlap"] as const;
 export type DepKind = (typeof DEP_KINDS)[number];
@@ -122,6 +123,8 @@ export type HandoffStatus = (typeof HANDOFF_STATUSES)[number];
 
 // Why yagura sent a handed-off attempt back; decides whether the next attempt may resume its session.
 export const REJECTIONS = ["code-fault", "literals", "scope", "skills", "conflict"] as const;
+export const PACK_EDIT_STATES = ["pending", "queued", "dropped"] as const;
+export type PackEditState = (typeof PACK_EDIT_STATES)[number];
 export type Rejection = (typeof REJECTIONS)[number];
 
 export const FAILURE_MODES = ["timebox", "context-exhausted", "oom", "network", "tool-error", "harness-error", "scope", "unknown"] as const;
@@ -318,6 +321,8 @@ export interface Handoff {
   evidence: string[];
   notes: string;
   followUps: string;
+  packChanges: string;
+  decisions: string;
   raw: string;
 }
 

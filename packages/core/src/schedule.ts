@@ -1,4 +1,5 @@
 import { isBuild, spendsAttempt, type Attempt, type FailureMode, type ProjectId, type Unit } from "./domain.js";
+import { editPackUnitIds } from "./packedits.js";
 import { listDeps, listUnits, type Db } from "./store.js";
 
 const TERMINAL = new Set(["landed", "done", "abandoned"]);
@@ -17,11 +18,12 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
   const byId = new Map(units.map((u) => [u.id, u]));
   const deps = listDeps(db, projectId);
   const result: Readiness = { ready: [], waiting: [], stuck: [] };
+  const fromEdits = editPackUnitIds(db, projectId);
   for (const u of units) {
     if (u.state !== "ready" || (!isBuild(u) && u.type !== "verify" && u.type !== "rebase" && u.type !== "review-triage")) continue;
     if (u.type === "verify") {
       const target = u.targetUnitId ? byId.get(u.targetUnitId) : undefined;
-      const pack = units.find((p) => p.type === "pack" && p.repoId === u.repoId && !TERMINAL.has(p.state));
+      const pack = units.find((p) => p.type === "pack" && p.repoId === u.repoId && !TERMINAL.has(p.state) && !fromEdits.has(p.id));
       if (pack && target?.type !== "pack") result.waiting.push({ unit: u, reason: `waiting for the verify pack (U${pack.seq}, now ${pack.state})` });
       else result.ready.push(u);
       continue;

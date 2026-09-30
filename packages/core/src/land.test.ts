@@ -145,6 +145,15 @@ describe("landUnit (forge none)", () => {
     ]);
   });
 
+  it("blocks instead of re-verifying forever when trunk already has the same change", async () => {
+    const work = await verifiedUnit();
+    await advanceTrunk("app/orders.py", "# edited by fake agent\n# brief had GOAL: true\n");
+    const trunk = await originMain();
+    const result = await landUnit(ctx, work.id);
+    expect(result).toMatchObject({ outcome: "blocked", reason: `nothing left to land: main at ${trunk.slice(0, 10)} already has this change` });
+    expect(await originMain()).toBe(trunk);
+  });
+
   it("traces a landed commit and an issue back to the units, agents, and evidence behind them", async () => {
     const work = await verifiedUnit();
     const { landedSha } = await landUnit(ctx, work.id);

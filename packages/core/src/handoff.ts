@@ -10,6 +10,8 @@ const SECTIONS = {
   evidence: "evidence",
   notes: "notes",
   followUps: "suggested follow-ups",
+  packChanges: "pack changes",
+  decisions: "decisions",
 } as const;
 
 function splitSections(text: string): Map<string, string> {
@@ -49,6 +51,8 @@ export function parseHandoff(finalMessage: string): Handoff | null {
       .filter(Boolean),
     notes: s.get("notes") ?? "",
     followUps: s.get("followUps") ?? "",
+    packChanges: s.get("packChanges") ?? "",
+    decisions: s.get("decisions") ?? "",
     raw: text,
   };
 }

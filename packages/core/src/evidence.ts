@@ -7,7 +7,8 @@ import type { Bootstrap } from "./config.js";
 import type { ArtifactId, AttemptId, ProjectId, Sha } from "./domain.js";
 import { isPristine, readFileAt, restorePristine } from "./git.js";
 import { activeLease } from "./leases.js";
-import { parsePack, type PackLoad } from "./pack.js";
+import { loadPack, parsePack, type PackLoad } from "./pack.js";
+import { overlayPack, packWorkspaceOf } from "./packedits.js";
 import { layout } from "./paths.js";
 import { getAttempt, getRepo, getUnit, now, recordEvent, type Db } from "./store.js";
 
@@ -98,12 +99,15 @@ type RunRequest = { attemptId: AttemptId; at: At; label: string; command: string
 export const PACK_LABEL = (step: "doctor" | "deploy" | "teardown") => `pack:${step}`;
 const LIFECYCLE_SECONDS = 900;
 
-// A pack unit's proof uses the pack it wrote; everything else uses trunk's, so a change cannot weaken its own checks.
+// A pack unit's proof uses the pack it wrote; a verification uses its verifier's copy of trunk's pack, which the
+// verifier may fix or extend and which runs on both sides alike. The worker's change never supplies the pack.
 export async function packForAttempt(db: Db, boot: Bootstrap, attemptId: AttemptId): Promise<PackLoad> {
   const attempt = getAttempt(db, attemptId);
   const unit = getUnit(db, attempt.unitId);
   const target = unit.targetUnitId ? getUnit(db, unit.targetUnitId) : null;
   const repo = getRepo(db, unit.repoId!);
+  const workspace = packWorkspaceOf(db, attemptId);
+  if (workspace) return loadPack(workspace, repo.verifyPackPath);
   const mirror = layout(boot).mirror(repo.id);
   const ref = target?.type === "pack" ? attempt.headSha! : `origin/${repo.defaultBranch}`;
   return parsePack(await readFileAt(mirror, ref, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath);
@@ -150,6 +154,8 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
 
   const tampered = !(await isPristine(cwd, sha));
   if (tampered) await restorePristine(cwd, sha);
+  const workspace = packWorkspaceOf(db, attempt.id);
+  if (workspace) overlayPack(workspace, cwd, getRepo(db, unit.repoId!).verifyPackPath);
 
   const evidenceDir = mkdtempSync(join(boot.home, "evidence-tmp-"));
   const lease = activeLease(db, attempt.id);

@@ -1,11 +1,11 @@
 ---
 name: yagura-verifier
-description: Use when a prompt is a yagura verify brief (starts with "# yagura verify brief"). Sets how to verify another agent's change with evidence yagura captures itself, and how to report a verdict yagura will accept.
+description: Use when a prompt is a yagura verify brief (starts with "# yagura verify brief"). Sets how to verify another agent's change with evidence yagura captures itself, how to keep the repo's verify pack working, and how to report a verdict yagura will accept.
 ---
 
 # yagura verifier
 
-You judge someone else's change. yagura trusts only evidence it captured, so your verdict stands or falls on the run ids you cite.
+You judge someone else's change: did it do what was asked, and does what was built work? You decide how to test it. yagura only checks facts about your evidence, so your verdict stands or falls on the run ids you cite.
 
 ## How to verify
 
@@ -16,11 +16,22 @@ You judge someone else's change. yagura trusts only evidence it captured, so you
 5. Decide the verdict:
    - a pass tier (the strongest the evidence supports; yagura caps it at what the pack checks prove) when every criterion is met;
    - `verifier-failed` when the change does not meet a criterion, citing the head run that shows it;
-   - `verifier-blocked` when the environment stopped you from running the evidence at all.
+   - `verifier-blocked` when something outside the change (a service you cannot reach, a tool that is missing) stopped you from running the evidence, and you could not fix it in the pack. Say exactly what you could not reach.
+
+## Keep the pack working
+
+The verify pack is the repo's standing instructions for checking changes. You have an editable copy (the brief names it; `$YAGURA_PACK` points at it), and every evidence run on either side uses your copy.
+
+- When the pack is wrong (a doctor or deploy that fails on trunk, a command that cannot work, a deploy that no longer matches how the app runs), fix it there rather than giving up.
+- When the pack does not check what this change built (new tests it does not run, a new service it does not start), extend it, often by turning your scenario into a check.
+- For a pack that has drifted a long way, follow `pstack:maintain-verification-skill`, writing only inside your pack copy.
+- Edit files only; do not run git. yagura re-runs the doctor and every check on both sides with your copy when you finish, commits your edit on its own, and lands it after this unit.
+- Under `## Pack changes`, list each change and why. If you remove or loosen a check, say why; the developer reads this.
 
 ## Rules
 
-- Never edit the checkouts, commit, or run git. Runs start from clean checkouts; edits are discarded and marked as tampering, which voids your verdict.
+- Never edit the checkouts, commit, or run git. Runs start from clean checkouts; edits are discarded and marked as tampering, which voids your verdict. Your pack copy is the one thing you may edit.
 - Cite every run you rely on as `run:<id>` under Evidence and Findings. Citing an id yagura did not record voids your verdict.
+- Under `## Decisions`, say what you chose to test and how, what you deliberately did not test, and why. The developer reads this later to decide whether they agree.
 - Do not load pstack playbooks that open PRs, loop, or hand work to a human; yagura owns those steps. `pstack:principle-prove-it-works` and `cursor-team-kit:verify-this` are good guides for scenario design.
 - End with the verdict exactly as the brief's REPORT section shows, starting at `## Status`.

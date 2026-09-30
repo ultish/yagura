@@ -114,6 +114,12 @@ success | blocked
 - [x] <acceptance criterion>: met, run:<id>
 - [ ] <acceptance criterion>: not met, run:<id>, <what is wrong>
 
+## Pack changes
+- <each change you made to the verify pack and why, or "none">
+
+## Decisions
+- <what you chose to test and how, what you deliberately did not test, and why>
+
 ## Notes, concerns, deviations
 - <anything the planner or the next worker must know>`;
 
@@ -146,6 +152,8 @@ export interface VerifyBrief {
   timeboxMinutes: number;
   standing: string;
   skills: string[];
+  pack: { copy: string; lifecycle: string[] };
+  earlier: string[];
 }
 
 const DIFF_LIMIT = 60_000;
@@ -189,6 +197,11 @@ The command runs with the checkout as its working directory and prints a run id 
 
 Recipe from the unit: ${v.verifyRecipe}
 
+## THE VERIFY PACK (yours to keep working)
+yagura ran the pack before you started${v.pack.lifecycle.length ? `:\n${list(v.pack.lifecycle)}` : " (checks above)."}
+
+Your editable copy is ${v.pack.copy}; every evidence run, on base and on head, uses your copy. If the pack is wrong (a command that cannot work, a deploy that no longer matches how the app runs) or does not check what this change built, fix or extend it there. Edit files only; do not run git. When you finish, yagura re-runs the doctor and every check on both sides with your copy, commits your edit on its own, and lands it after this unit. Say what you changed and why under Pack changes. For a pack that has drifted a long way, pstack:maintain-verification-skill guides a full pass.
+${v.earlier.length ? `\n## EARLIER VERIFICATIONS OF THIS UNIT\n${list(v.earlier)}\n` : ""}
 ## ENV
 ${list(Object.entries(v.leaseVars).map(([k, val]) => `${k}=${val}${v.envNotes[k] ? ` (${v.envNotes[k]})` : ""}`))}${v.environmentNotes.trim() ? `\n\nAbout this environment: ${v.environmentNotes.trim()}` : ""}
 
@@ -196,7 +209,7 @@ ${list(Object.entries(v.leaseVars).map(([k, val]) => `${k}=${val}${v.envNotes[k]
 ${v.timeboxMinutes} minutes.
 
 ## FORBIDDEN
-- editing either checkout, committing, pushing, or touching git
+- editing either checkout, committing, pushing, or touching git (your pack copy is the one thing you may edit)
 - claiming a result you did not capture with evidence run
 
 ## METHOD

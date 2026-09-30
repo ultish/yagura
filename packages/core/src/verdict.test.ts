@@ -29,6 +29,8 @@ const handoff = (verification: Handoff["verification"], evidence: string[]): Han
   evidence,
   notes: "",
   followUps: "",
+  packChanges: "",
+  decisions: "",
   raw: "",
 });
 

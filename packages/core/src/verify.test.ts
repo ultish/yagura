@@ -14,7 +14,8 @@ import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
-import { runWorkUnit } from "./runner.js";
+import { listPackEdits } from "./packedits.js";
+import { addVerifyUnit, runWorkUnit } from "./runner.js";
 import {
   addEnvironment,
   addProject,
@@ -177,25 +178,67 @@ describe("pack lifecycle scripts", () => {
     ]);
   });
 
-  it("stops before the verifier when doctor fails, and blames the environment, not the change", async () => {
+  it("still runs the verifier when the doctor fails, and blames the environment when the verifier leaves the pack as it is", async () => {
     await setTrunkPack({ doctor: "echo cluster unreachable >&2; exit 3", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] });
     const { target, result } = await workThenVerify("verify-pass");
     expect(result.decision).toMatchObject({ outcome: "env-blocked", reason: expect.stringMatching(/^the pack's doctor failed \(run:\d+\)/) });
-    expect(labels(result.attempt.id)).toEqual(["pack:doctor@base:3"]);
-    expect(result.attempt.skills).toEqual([]);
+    expect(labels(result.attempt.id).slice(0, 3)).toEqual(["pack:doctor@base:3", "check:unit@base:0", "check:unit@head:0"]);
+    expect(result.attempt.skills).toContain("yagura:yagura-verifier");
+    expect(readFileSync(layout(ctx.boot).brief(project, 2, 1), "utf8")).toContain("- doctor on trunk: run:1 exit 3");
     expect(target.state).toBe("verifying");
-    expect(
-      listUnits(db, project)
-        .filter((u) => u.type === "verify")
-        .map((u) => u.state),
-    ).toEqual(["failed", "ready"]);
+  });
+
+  it("uses the verifier's pack fix at once on both sides, and keeps it as an edit to land after the unit", async () => {
+    await setTrunkPack({ doctor: "exit 3", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] });
+    const { target, result } = await workThenVerify("verify-fix-pack");
+    expect(result.decision).toMatchObject({ outcome: "verified", tier: "unit-verified" });
+    expect(labels(result.attempt.id)).toEqual([
+      "pack:doctor@base:3",
+      "check:unit@base:0",
+      "check:unit@head:0",
+      "scenario@base:1",
+      "scenario@head:0",
+      "pack:doctor@base:0",
+      "check:unit@base:0",
+      "check:unit@head:0",
+      "check:orders-edited@base:1",
+      "check:orders-edited@head:0",
+    ]);
+    const edits = listPackEdits(db, target.id);
+    expect(edits).toMatchObject([
+      { state: "pending", summary: "- doctor: the old one probed a service this repo does not use\n- added orders-edited, which runs what this change built" },
+    ]);
+    const mirror = layout(ctx.boot).mirror("testbed" as RepoId);
+    expect(await git(["diff", "--name-only", edits[0]!.baseSha, edits[0]!.sha], { gitDir: mirror })).toBe(".agents/verify/verify.json");
+    expect(db.prepare("SELECT data_json FROM events WHERE type = 'pack.edit_outside'").get()).toEqual({ data_json: JSON.stringify({ paths: ["stray.txt"] }) });
+
+    transitionUnit(db, target.id, "verifying");
+    process.env.FAKE_MODE = "verify-pass";
+    const again = await runVerifyUnit(ctx, addVerifyUnit(db, getUnit(db, target.id)).id);
+    expect(labels(again.attempt.id).slice(0, 5)).toEqual([
+      "pack:doctor@base:0",
+      "check:unit@base:0",
+      "check:unit@head:0",
+      "check:orders-edited@base:1",
+      "check:orders-edited@head:0",
+    ]);
+  });
+
+  it("drops a pack edit that yagura cannot read and does not accept the verdict", async () => {
+    const { target, result } = await workThenVerify("verify-bad-pack");
+    expect(result.decision).toMatchObject({
+      outcome: "invalid",
+      reason: expect.stringMatching(/^the verifier's pack edit cannot be used \(verify.json is not valid JSON/),
+    });
+    expect(listPackEdits(db, target.id)).toEqual([]);
+    expect(target.state).toBe("verifying");
   });
 
   it("sends the work back when its head does not deploy while trunk does", async () => {
     await setTrunkPack({ deploy: 'grep -q "x = 1" app/orders.py', checks: [{ name: "unit", command: "true", tier: "unit-verified" }] });
     const { target, result } = await workThenVerify("verify-pass");
     expect(result.decision).toMatchObject({ outcome: "code-fault", reason: expect.stringMatching(/^head does not deploy \(run:\d+\) while trunk does/) });
-    expect(labels(result.attempt.id)).toEqual(["pack:deploy@base:0", "check:unit@base:0", "pack:deploy@head:1", "check:unit@head:0"]);
+    expect(labels(result.attempt.id).slice(0, 4)).toEqual(["pack:deploy@base:0", "check:unit@base:0", "pack:deploy@head:1", "check:unit@head:0"]);
     expect(target.state).toBe("ready");
   });
 

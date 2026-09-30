@@ -12,6 +12,7 @@ import { runTriageUnit } from "./triage.js";
 import { addVerifyUnit, runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
+import { queuePackEdits } from "./packedits.js";
 import { ensurePackUnits } from "./packs.js";
 import {
   addGate,
@@ -342,6 +343,7 @@ export class Engine {
         this.log(`  ${project.id}: ${Math.round(used * 100)}% of the wall-clock budget used; no new work starts, verified work keeps landing`);
       }
       for (const u of await ensurePackUnits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
+      for (const u of await queuePackEdits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
       this.settleFailures(project);
       if (this.maybeClose(project)) continue;
       if (project.andonReason) continue;

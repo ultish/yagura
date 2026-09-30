@@ -167,7 +167,9 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     forbidden: [
       "no git push, rebase, merge, or branch switching",
       "nothing outside SCOPE",
-      isPack ? "do not change the code the pack verifies" : `do not edit the verify pack at ${repo.verifyPackPath}`,
+      isPack
+        ? "do not change the code the pack verifies"
+        : `do not edit the verify pack at ${repo.verifyPackPath}; if your change stops it working, say what broke under Notes and the verifier will fix the pack`,
     ],
     method:
       (isPack

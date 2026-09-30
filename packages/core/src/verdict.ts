@@ -45,7 +45,10 @@ const lifecycle = (runs: EvidenceRun[], step: string, at?: "base" | "head") => r
 
 // Trunk that will not deploy or pass doctor is the environment's problem; a head that will not deploy is the change's.
 export function lifecycleProblem(runs: EvidenceRun[]): Pick<VerdictDecision, "outcome" | "reason" | "tier"> | null {
-  const failed = (step: string, at?: "base" | "head") => lifecycle(runs, step, at).find((r) => !passed(r));
+  const failed = (step: string, at?: "base" | "head") => {
+    const last = lifecycle(runs, step, at).at(-1);
+    return last && !passed(last) ? last : undefined;
+  };
   const doctor = failed("doctor");
   if (doctor)
     return { outcome: "env-blocked", tier: "verifier-blocked", reason: `the pack's doctor failed (run:${doctor.id}), so the environment is not worth driving` };

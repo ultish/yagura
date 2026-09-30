@@ -88,7 +88,11 @@ const authorOf = (l: Landing) => ({
   email: resolveSetting(l.db, "git.author_email", { projectId: l.project.id, repoId: l.repo.id }).value,
 });
 
-type Squash = { kind: "squashed"; landed: Sha; trunk: Sha; message: string } | { kind: "conflict"; trunk: Sha } | { kind: "changed"; trunk: Sha; rebased: Sha };
+type Squash =
+  | { kind: "squashed"; landed: Sha; trunk: Sha; message: string }
+  | { kind: "conflict"; trunk: Sha }
+  | { kind: "changed"; trunk: Sha; rebased: Sha }
+  | { kind: "empty"; trunk: Sha };
 
 // The verified head, rebased onto trunk and squashed into one commit with yagura's trailers.
 async function squashOntoTrunk(l: Landing): Promise<Squash> {
@@ -109,6 +113,7 @@ async function squashOntoTrunk(l: Landing): Promise<Squash> {
       }
     }
     const tree = await git(["rev-parse", "HEAD^{tree}"], { cwd: wt });
+    if (tree === (await git(["rev-parse", `${trunk}^{tree}`], { cwd: wt }))) return { kind: "empty", trunk };
     const message = landMessage(l.db, l.boot, {
       unit: l.unit,
       work: l.work,
@@ -209,6 +214,7 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
   const squash = await squashOntoTrunk(l);
   if (squash.kind === "conflict") return rebaseOrBlock(l, squash.trunk, `conflicts with ${l.repo.defaultBranch} at ${squash.trunk.slice(0, 10)}`);
   if (squash.kind === "changed") return reverify(l, squash.trunk, squash.rebased);
+  if (squash.kind === "empty") return block(l, `nothing left to land: ${l.repo.defaultBranch} at ${squash.trunk.slice(0, 10)} already has this change`);
   if (forge) return propose(l, forge, squash);
 
   carryVerdict(l, squash.landed, `landed as ${squash.landed}; patch-id unchanged, carried forward`);
@@ -375,6 +381,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
     if (squash.kind === "conflict")
       return rebaseOrBlock(l, squash.trunk, `pull request #${mr.number} conflicts with ${repo.defaultBranch} at ${squash.trunk.slice(0, 10)}`);
     if (squash.kind === "changed") return reverify(l, squash.trunk, squash.rebased);
+    if (squash.kind === "empty") return block(l, `nothing left to land: ${l.repo.defaultBranch} at ${squash.trunk.slice(0, 10)} already has this change`);
     return propose(l, forge, squash);
   }
   const fresh = freshThreads(db, unit.id, await forge.threads(mr.number));

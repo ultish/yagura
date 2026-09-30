@@ -3,11 +3,24 @@ import { dirname, join } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
 import { renderVerifyBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
-import { PROOF_HARNESS, spendsAttempt, type Attempt, type EnvironmentId, type Unit, type UnitId, type VerdictId } from "./domain.js";
+import {
+  PROOF_HARNESS,
+  spendsAttempt,
+  type Attempt,
+  type AttemptId,
+  type EnvironmentId,
+  type Handoff,
+  type Sha,
+  type Unit,
+  type UnitId,
+  type VerdictId,
+} from "./domain.js";
 import { baseWorktree, listEvidenceRuns, PACK_LABEL, packForAttempt, runEvidence, teardownDeployed } from "./evidence.js";
 import { environmentNotes, listValues } from "./envvalues.js";
 import { addDetachedWorktree, diffText, ensureMirror, patchId } from "./git.js";
 import { parseHandoff } from "./handoff.js";
+import { loadPack, type VerifyPack } from "./pack.js";
+import { commitPackEdit, discardWorkspace, openPackWorkspace, stagePackChanges } from "./packedits.js";
 import { acquireLease, keepable, keepLease, releaseLease } from "./leases.js";
 import { syncPackStatus } from "./repos.js";
 import { requiredProjectSkills } from "./skills.js";
@@ -29,7 +42,7 @@ import {
   updateAttempt,
   type Db,
 } from "./store.js";
-import { CHECK_LABEL, decidePackProof, decideVerdict, lifecycleProblem, type VerdictDecision } from "./verdict.js";
+import { CHECK_LABEL, decidePackProof, decideVerdict, type VerdictDecision } from "./verdict.js";
 
 export interface VerifyResult {
   attempt: Attempt;
@@ -53,6 +66,15 @@ function failedVerifications(db: Db, target: Unit): number {
       )
       .get(target.id) as { n: number }
   ).n;
+}
+
+function earlierVerifications(db: Db, target: Unit): string[] {
+  return (db.prepare("SELECT data_json FROM events WHERE type = 'verify.outcome' AND unit_id = ? ORDER BY id").all(target.id) as { data_json: string }[]).map(
+    (r) => {
+      const d = JSON.parse(r.data_json) as { outcome: string; reason: string; verifyUnit: number };
+      return `U${d.verifyUnit}: ${d.outcome}: ${d.reason}`;
+    },
+  );
 }
 
 function applyOutcome(db: Db, target: Unit, work: Attempt, decision: VerdictDecision, verifySeq: number): void {
@@ -112,6 +134,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
   mkdirSync(dirname(head), { recursive: true });
   await addDetachedWorktree(mirror, head, work.headSha!);
   await addDetachedWorktree(mirror, baseWorktree(head), work.baseSha!);
+  const workspace = proof ? null : await openPackWorkspace(db, { mirror, repo, projectId: project.id, target, verifySeq: unit.seq, head });
   const sources = await mountSources(ctx, target, head);
   updateAttempt(db, attempt.id, { sources });
   updateAttempt(db, attempt.id, { worktreePath: head, baseSha: work.baseSha, headSha: work.headSha });
@@ -178,6 +201,43 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     return { ...finish(decision, handedOff), verdictId };
   };
 
+  const discard = async (ws: { path: string }) => {
+    await discardWorkspace(ws.path);
+    return { checks: null, problem: null };
+  };
+  // The verifier's pack edit counts at once: yagura re-runs the doctor and every check on both sides with it, then
+  // commits it on its own branch to land after this unit. Anything it changed outside the pack is dropped.
+  const settlePackEdit = async (a: {
+    attemptId: AttemptId;
+    target: Unit;
+    workspace: { path: string; start: Sha };
+    handoff: Handoff;
+    runPack: (p: VerifyPack) => Promise<void>;
+  }): Promise<{ checks: VerifyPack["checks"] | null; problem: string | null }> => {
+    const staged = await stagePackChanges(a.workspace.path, repo.verifyPackPath);
+    const refs = { projectId: project.id, unitId: a.target.id, attemptId: a.attemptId };
+    if (staged.discarded.length) recordEvent(db, "pack.edit_outside", refs, { paths: staged.discarded });
+    if (!staged.changed.length) return discard(a.workspace);
+    const edited = loadPack(a.workspace.path, repo.verifyPackPath);
+    if (!edited.ok) {
+      await discard(a.workspace);
+      return { checks: null, problem: `the verifier's pack edit cannot be used (${edited.reason}); the edit was dropped` };
+    }
+    await a.runPack(edited.pack);
+    await commitPackEdit(db, {
+      workspace: a.workspace.path,
+      start: a.workspace.start,
+      attemptId: a.attemptId,
+      target: a.target,
+      summary: a.handoff.packChanges.trim() || `Changed ${staged.changed.join(", ")}`,
+      author: {
+        name: resolveSetting(db, "git.author_name", { projectId: project.id, repoId: repo.id }).value,
+        email: resolveSetting(db, "git.author_email", { projectId: project.id, repoId: repo.id }).value,
+      },
+    });
+    return { checks: edited.pack.checks, problem: null };
+  };
+
   const projectSkills = requiredProjectSkills(db, unit);
   const lease = await acquireLease(db, boot, project.environmentId as EnvironmentId, attempt.id);
   const keepPolicy = resolveSetting(db, "lease.keep", { projectId: project.id, environmentId: project.environmentId }).value;
@@ -192,21 +252,17 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     const sides = proof ? (["head"] as const) : (["base", "head"] as const);
     const capture = (at: "base" | "head", label: string, command: string, timeoutSeconds?: number) =>
       runEvidence(db, boot, { attemptId: attempt.id, at, label, command, timeoutSeconds });
-    if (pack.pack.doctor) await capture(sides[0], PACK_LABEL("doctor"), pack.pack.doctor);
-    for (const check of lifecycleProblem(listEvidenceRuns(db, attempt.id)) ? [] : pack.pack.checks)
-      for (const at of sides) await capture(at, CHECK_LABEL(check.name), check.command, check.timeoutSeconds);
+    const runPack = async (p: VerifyPack) => {
+      if (p.doctor) await capture(sides[0], PACK_LABEL("doctor"), p.doctor);
+      for (const check of p.checks) for (const at of sides) await capture(at, CHECK_LABEL(check.name), check.command, check.timeoutSeconds);
+    };
+    await runPack(pack.pack);
 
     if (proof) {
       await teardownDeployed(db, boot, attempt.id);
       const decision = decidePackProof({ runs: listEvidenceRuns(db, attempt.id), checks: pack.pack.checks, minTier: project.minTier });
       updateAttempt(db, attempt.id, { state: "handed_off", endedAt: now(), handoffStatus: decision.outcome === "verified" ? "success" : "blocked" });
       return await settle(decision, true);
-    }
-    const early = lifecycleProblem(listEvidenceRuns(db, attempt.id));
-    if (early) {
-      await endSlot(early.outcome);
-      updateAttempt(db, attempt.id, { state: "failed", endedAt: now(), failureMode: "tool-error" });
-      return await settle({ ...early, trunkOutcome: null, headOutcome: null, citedRunIds: [] }, false);
     }
     const runs = listEvidenceRuns(db, attempt.id);
     const outcomeOf = (name: string, at: "base" | "head") => {
@@ -238,6 +294,13 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
       standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
       skills: projectSkills,
+      pack: {
+        copy: join(workspace!.path, repo.verifyPackPath),
+        lifecycle: runs
+          .filter((r) => r.label === PACK_LABEL("doctor") || r.label === PACK_LABEL("deploy"))
+          .map((r) => `${r.label.slice(5)} on ${r.at === "base" ? "trunk" : "head"}: run:${r.id} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}`),
+      },
+      earlier: earlierVerifications(db, target),
     });
     write(paths.brief(project.id, unit.seq, attempt.n), briefText);
 
@@ -250,11 +313,18 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
         model: setting("role.verifier.model"),
         permissionMode: setting("harness.claude.permission_mode"),
         pluginDirs: [boot.skillsDir],
-        addDirs: [head, baseWorktree(head), ...sources.map((s) => s.path)],
+        addDirs: [head, baseWorktree(head), workspace!.path, ...sources.map((s) => s.path)],
         extraArgs: setting("harness.claude.extra_args"),
       },
       cwd: scenarioDir,
-      env: { ...lease.vars, ...sourceEnv(sources), YAGURA_HEAD: head, YAGURA_BASE: baseWorktree(head), YAGURA_SCENARIOS: scenarioDir },
+      env: {
+        ...lease.vars,
+        ...sourceEnv(sources),
+        YAGURA_HEAD: head,
+        YAGURA_BASE: baseWorktree(head),
+        YAGURA_PACK: join(workspace!.path, repo.verifyPackPath),
+        YAGURA_SCENARIOS: scenarioDir,
+      },
       timeboxSeconds: unit.timeboxSeconds,
       logPath: paths.log(project.id, unit.seq, attempt.n),
     });
@@ -262,6 +332,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     const final = session.final;
     const stop = stopRequested(db, attempt.id);
     if (stop.stopped) {
+      await discard(workspace!);
       await endSlot("stopped");
       updateAttempt(db, attempt.id, { state: "stopped", endedAt: now(), exitCode: session.exitCode });
       const decision: VerdictDecision = {
@@ -276,13 +347,15 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     }
     const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
     if (final?.text) write(paths.handoff(project.id, unit.seq, attempt.n), final.text);
-    const decision = decideVerdict({
+    const settled = handoff ? await settlePackEdit({ attemptId: attempt.id, target, workspace: workspace!, handoff, runPack }) : await discard(workspace!);
+    const verdict = decideVerdict({
       handoff,
       runs: listEvidenceRuns(db, attempt.id),
-      checks: pack.pack.checks,
+      checks: settled.checks ?? pack.pack.checks,
       playbook: target.playbook,
       minTier: project.minTier,
     });
+    const decision: VerdictDecision = settled.problem ? { ...verdict, outcome: "invalid", tier: null, reason: settled.problem } : verdict;
     await endSlot(decision.outcome);
     updateAttempt(db, attempt.id, {
       state: handoff ? "handed_off" : "failed",

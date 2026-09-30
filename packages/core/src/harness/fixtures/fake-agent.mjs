@@ -110,11 +110,22 @@ function verify(mode) {
     return Number(/run:(\d+)/.exec(out)[1]);
   };
   if (mode === "verify-tamper") appendFileSync(`${process.env.YAGURA_HEAD}/app/orders.py`, "# edited by fake agent\n");
+  // Fixes a broken doctor and adds a check, the way a verifier repairs the pack it was handed.
+  let packChanges = "none";
+  if (mode === "verify-fix-pack" || mode === "verify-bad-pack") {
+    const file = `${process.env.YAGURA_PACK}/verify.json`;
+    const pack = JSON.parse(readFileSync(file, "utf8"));
+    if (pack.doctor) pack.doctor = "true";
+    pack.checks.push({ name: "orders-edited", command: "grep -q 'edited by fake agent' app/orders.py", tier: "unit-verified" });
+    writeFileSync(file, mode === "verify-bad-pack" ? "{ not json" : JSON.stringify(pack));
+    writeFileSync(`${process.env.YAGURA_PACK}/../../stray.txt`, "outside the pack\n");
+    packChanges = "- doctor: the old one probed a service this repo does not use\n- added orders-edited, which runs what this change built";
+  }
   const base = run("base");
   const head = run("head");
   const tier = mode === "verify-fail" ? "verifier-failed" : "unit-verified";
   const cite = mode === "verify-lie" ? "run:999" : `run:${head}`;
-  const handoff = `## Status\nsuccess\n\n## Verification\n${tier}\n\n## Evidence\n- ${cite} scenario on head\n- run:${base} scenario on base\n\n## Findings\n- [x] criterion: ${cite}\n`;
+  const handoff = `## Status\nsuccess\n\n## Verification\n${tier}\n\n## Evidence\n- ${cite} scenario on head\n- run:${base} scenario on base\n\n## Findings\n- [x] criterion: ${cite}\n\n## Pack changes\n${packChanges}\n\n## Decisions\n- tested the edited file directly\n`;
   emit({ type: "result", subtype: "success", is_error: false, result: handoff, terminal_reason: "completed", total_cost_usd: 0.01 });
 }
 
@@ -179,6 +190,12 @@ function engine(role) {
         "",
       ].join("\n"),
     );
+    let packChanges = "none";
+    if (/^- doctor on trunk: run:\d+ exit [1-9]/m.test(brief)) {
+      const file = `${process.env.YAGURA_PACK}/verify.json`;
+      writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), doctor: "true" }));
+      packChanges = "- doctor: it probed a service this repo does not use";
+    }
     const exits = {};
     const run = (at) => {
       const out = execSync(`yagura evidence run --at ${at} --label s -- sh ${process.cwd()}/scenario.sh`, { encoding: "utf8" });
@@ -192,7 +209,7 @@ function engine(role) {
     const order = ["deployed-verified", "live-local-verified", "e2e-verified", "unit-verified", "build-only"];
     const listed = [...brief.matchAll(/^- [\w-]+ \(([\w-]+)\): base/gm)].map((m) => m[1]);
     const tier = order.find((t) => listed.includes(t)) ?? "unit-verified";
-    return finish(`## Status\nsuccess\n\n## Verification\n${tier}\n\n## Evidence\n- run:${head}\n- run:${base}\n`);
+    return finish(`## Status\nsuccess\n\n## Verification\n${tier}\n\n## Evidence\n- run:${head}\n- run:${base}\n\n## Pack changes\n${packChanges}\n`);
   }
 }
 

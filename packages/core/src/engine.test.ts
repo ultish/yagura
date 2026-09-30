@@ -177,6 +177,41 @@ describe("Engine", () => {
     expect(getProject(db, q).state).toBe("closed");
   }, 60_000);
 
+  it("lets verifiers fix a broken pack, uses the fix at once, and lands it after the unit it was made for", async () => {
+    const seed = join(mkdtempSync(join(tmpdir(), "yagura-brokenpack-")), "seed");
+    mkdirSync(join(seed, ".agents/verify"), { recursive: true });
+    writeFileSync(join(seed, "README.md"), "x\n");
+    writeFileSync(
+      join(seed, ".agents/verify/verify.json"),
+      JSON.stringify({ provider: "local-process", doctor: "exit 3", checks: [{ name: "unit", command: "test -f README.md", tier: "unit-verified" }] }),
+    );
+    await git(["init", "--quiet", "-b", "main"], { cwd: seed });
+    await commitAll(seed, "init", { name: "t", email: "t@t" });
+    await git(["clone", "--quiet", "--bare", seed, `${seed}.git`]);
+    addRepo(db, { id: "broken", url: `${seed}.git`, defaultBranch: "main" });
+    const q = "q" as ProjectId;
+    addProject(db, { id: q, name: "Q", goal: "g", predicate: "all files landed", minTier: "unit-verified", repos: ["broken" as RepoId] });
+    setProjectEnvironment(db, q, "local" as EnvironmentId);
+    setMergePolicy(db, q, "auto");
+
+    await new Engine(ctx, { projectId: q, tickMs: 50 }).runUntilIdle();
+
+    const units = listUnits(db, q);
+    expect(units.filter((u) => u.type === "work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+    const firstVerify = units.find((u) => u.type === "verify")!;
+    const runs = listEvidenceRuns(db, listAttempts(db, firstVerify.id)[0]!.id).map((r) => `${r.label}@${r.at}:${r.exitCode}`);
+    expect(runs[0]).toBe("pack:doctor@base:3");
+    expect(runs.at(-3)).toBe("pack:doctor@base:0");
+    const packUnits = units.filter((u) => u.type === "pack");
+    expect(packUnits.some((u) => u.state === "landed")).toBe(true);
+    expect(JSON.parse(await git(["show", "main:.agents/verify/verify.json"], { cwd: `${seed}.git` }))).toMatchObject({ doctor: "true" });
+    const edits = db.prepare("SELECT state, summary FROM pack_edits").all() as { state: string; summary: string }[];
+    expect(edits.length).toBeGreaterThan(0);
+    expect(edits.every((e) => e.state !== "pending")).toBe(true);
+    expect(edits[0]!.summary).toBe("- doctor: it probed a service this repo does not use");
+    expect(getProject(db, q).state).toBe("closed");
+  }, 60_000);
+
   it("sends a pack back to its agent when the proof fails", async () => {
     const seed = join(mkdtempSync(join(tmpdir(), "yagura-badpack-")), "seed");
     mkdirSync(seed, { recursive: true });

@@ -14,7 +14,7 @@ import {
   UnknownSetting,
   effectiveSettings,
 } from "./config.js";
-import { IllegalTransition, type ProjectId, type RepoId } from "./domain.js";
+import { IllegalTransition, PACK_EDIT_STATES, type ProjectId, type RepoId } from "./domain.js";
 import { addProject, addRepo, addUnit, createAttempt, getUnit, openStore, schemaVersion, transitionUnit, updateAttempt, getAttempt, type Db } from "./store.js";
 import { LATEST_VERSION } from "./migrations.js";
 import Database from "better-sqlite3";
@@ -43,6 +43,19 @@ const newUnit = () =>
   });
 
 describe("store", () => {
+  it("accepts every pack edit state and nothing else", () => {
+    const unit = newUnit();
+    const attempt = createAttempt(db, unit.id, "claude", null);
+    const insert = (state: string) =>
+      db
+        .prepare(
+          "INSERT INTO pack_edits (attempt_id, target_unit_id, base_sha, sha, branch, summary, state, created_at) VALUES (?, ?, 'b', 's', 'x', 'y', ?, 'now')",
+        )
+        .run(attempt.id, unit.id, state);
+    for (const state of PACK_EDIT_STATES) insert(state);
+    expect(() => insert("landed")).toThrow(/CHECK/);
+  });
+
   it("reopens an existing database without re-applying the schema", () => {
     const path = join(mkdtempSync(join(tmpdir(), "yagura-db-")), "yagura.db");
     const first = openStore(path);
