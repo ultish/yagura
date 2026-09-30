@@ -287,6 +287,18 @@ describe("Engine", () => {
     expect(getProject(db, project).state).toBe("closed");
   }, 60_000);
 
+  it("blocks a unit that crashes before it starts instead of starting it again every tick", async () => {
+    setSetting(db, "project", project, "role.worker.harness", "missing-harness");
+    const log: string[] = [];
+    await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();
+    const work = listUnits(db, project).filter((u) => u.type === "work");
+    expect(work.filter((u) => u.state === "blocked").length).toBeGreaterThan(0);
+    expect(log.filter((l) => l.startsWith("✗ work")).length).toBe(work.filter((u) => u.state === "blocked").length);
+    expect(db.prepare("SELECT data_json FROM events WHERE type = 'unit.state' AND json_extract(data_json, '$.to') = 'blocked' LIMIT 1").get()).toEqual({
+      data_json: JSON.stringify({ from: "ready", to: "blocked", reason: "engine error before it started: no adapter for harness missing-harness" }),
+    });
+  });
+
   it("does not start work while the project's andon is raised", async () => {
     const { setAndon } = await import("./store.js");
     setAndon(db, project, "investigating a bad deploy");

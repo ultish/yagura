@@ -9,7 +9,7 @@ import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWork
 import { layout } from "./paths.js";
 import { markPackProven } from "./packs.js";
 import { MAX_REBASES, queueRebase } from "./rebase.js";
-import { freshThreads, listThreadRows, MAX_TRIAGE_WAVES, queueTriage } from "./triage.js";
+import { freshThreads, listThreadRows, MAX_TRIAGE_WAVES, queueTriage, postReplies } from "./triage.js";
 import { addVerifyUnit } from "./runner.js";
 import {
   addUnitNote,
@@ -354,6 +354,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   }
   const status = await forge.status(mr.number);
   recordMergeStatus(db, unit.id, status);
+  await postReplies(db, forge, unit, mr.number);
   if (!["landing", "blocked"].includes(unit.state)) return null;
   const l = landing(ctx, unit);
   if (status.state === "merged") return finishMerged(l, status, mr.number);

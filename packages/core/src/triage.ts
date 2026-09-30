@@ -5,7 +5,7 @@ import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { REBASE_HARNESS, type Attempt, type IsoTime, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
-import { forgeFor, getMergeRequest, type PrThread, type ThreadKind } from "./forge.js";
+import { forgeFor, getMergeRequest, type ForgeAdapter, type PrThread, type ThreadKind } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { verifiedHead } from "./land.js";
@@ -49,6 +49,7 @@ export interface ThreadRow {
   waveUnitId: UnitId | null;
   gateId: number | null;
   directive: string | null;
+  repliedAt: IsoTime | null;
   createdAt: IsoTime;
 }
 
@@ -67,6 +68,7 @@ const toRow = (r: Row): ThreadRow => ({
   waveUnitId: (r.wave_unit_id as UnitId | null) ?? null,
   gateId: (r.gate_id as number | null) ?? null,
   directive: (r.directive as string | null) ?? null,
+  repliedAt: (r.replied_at as IsoTime | null) ?? null,
   createdAt: r.created_at as IsoTime,
 });
 
@@ -141,7 +143,7 @@ export function triageContext(rows: ThreadRow[], earlier: ThreadRow[], number: n
 }
 
 export function parseDecisions(text: string, count: number): Map<number, { decision: PrThreadDecision; reason: string }> {
-  const section = /^##\s+Decisions\s*$([\s\S]*?)(?=^##\s|\s*$(?![\s\S]))/im.exec(text)?.[1] ?? "";
+  const section = [...text.matchAll(/^##\s+Decisions\s*$([\s\S]*?)(?=^##\s|\s*$(?![\s\S]))/gim)].map((m) => m[1]).join("\n");
   const out = new Map<number, { decision: PrThreadDecision; reason: string }>();
   for (const m of section.matchAll(/^-\s*T(\d+)\s*[:·-]\s*(fixed|dismissed|asked)\b\s*[—–:-]?\s*(.*)$/gim)) {
     const i = Number(m[1]);
@@ -150,13 +152,15 @@ export function parseDecisions(text: string, count: number): Map<number, { decis
   return out;
 }
 
-const DECISIONS_REPORT = `
-
-## Decisions
+// The worker template's own Decisions section is where every thread's decision goes, one T-line each.
+const TRIAGE_REPORT = HANDOFF_TEMPLATE.replace(
+  /^## Decisions\n.*$/m,
+  `## Decisions
 - T1: fixed — what you changed, in one line
 - T2: dismissed — the concrete disproof yagura posts as the reply (a test, a line of code, a spec reference)
 - T3: asked — the question the developer must decide
-(one line per thread, every thread)`;
+(one line per thread, every thread; then any other choice you made, as for any handoff)`,
+);
 
 export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt> {
   const { db, boot } = ctx;
@@ -181,7 +185,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const rows = all.filter((r) => r.waveUnitId === unit.id);
 
   const attempt = createAttempt(db, unit.id, harnessId, setting("role.worker.model"));
-  const branch = `${setting("git.branch_prefix")}/${project.id}/${unitRef(target.seq)}-review-${unitRef(unit.seq)}`;
+  const branch = `${setting("git.branch_prefix")}/${project.id}/${unitRef(target.seq)}-review-${unitRef(unit.seq)}-${attempt.n}`;
   const worktree = paths.worktree(repo.id, project.id, unit.seq, attempt.n);
   mkdirSync(dirname(worktree), { recursive: true });
   await addWorktree(mirror, worktree, branch, verdict.head_sha);
@@ -204,7 +208,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     forbidden: ["no git push, rebase, merge, or branch switching", "nothing outside SCOPE", "no reply to reviewers yourself; yagura posts your decisions"],
     method:
       "Load the yagura-review-triage skill first and follow it. Then load pstack:poteto-mode with the Skill tool (required) and follow its bug-fix playbook for each thread you fix, proving the fault with a failing check first.",
-    report: HANDOFF_TEMPLATE + DECISIONS_REPORT,
+    report: TRIAGE_REPORT,
     standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
   });
   write(paths.brief(project.id, unit.seq, attempt.n), briefText);
@@ -285,12 +289,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
         options: ["fix", "dismiss"],
       });
       asked.push(`T${i + 1}`);
-    } else
-      await forge.reply(
-        mr.number,
-        { id: row.threadId, kind: row.kind },
-        decision === "fixed" ? `Fixed in ${head.slice(0, 10)} (yagura ${project.id}/U${target.seq}): ${reason}` : reason,
-      );
+    }
     db.prepare("UPDATE mr_threads SET decision = ?, reason = ?, commit_sha = ?, gate_id = ? WHERE unit_id = ? AND thread_id = ?").run(
       decision,
       reason,
@@ -316,5 +315,21 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
       transitionUnit(db, target.id, "verified", { reason: `review threads answered by U${unit.seq}; nothing to change`, reviewUnit: unit.seq });
   })();
   recordEvent(db, "triage.done", refs, { target: target.seq, head, changed, asked });
+  await postReplies(db, forge, target, mr.number).catch((e: unknown) =>
+    recordEvent(db, "triage.reply_deferred", refs, { error: e instanceof Error ? e.message : String(e) }),
+  );
   return getAttempt(db, attempt.id);
+}
+
+// Replies are posted apart from the decisions they report, so a forge outage never costs the triage it follows;
+// the PR watcher posts whatever is still pending on every poll, and each reply goes out once.
+export async function postReplies(db: Db, forge: ForgeAdapter, target: Unit, number: number): Promise<number> {
+  let posted = 0;
+  for (const row of listThreadRows(db, target.id).filter((r) => (r.decision === "fixed" || r.decision === "dismissed") && !r.repliedAt)) {
+    const body = row.decision === "fixed" ? `Fixed in ${row.commitSha!.slice(0, 10)} (yagura ${target.projectId}/U${target.seq}): ${row.reason}` : row.reason!;
+    await forge.reply(number, { id: row.threadId, kind: row.kind }, body);
+    db.prepare("UPDATE mr_threads SET replied_at = ? WHERE unit_id = ? AND thread_id = ?").run(now(), target.id, row.threadId);
+    posted++;
+  }
+  return posted;
 }

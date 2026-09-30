@@ -59,7 +59,7 @@ export async function runRebaseUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const trunk = (/ at ([0-9a-f]{40}):/.exec(unit.goal)?.[1] as Sha | undefined) ?? (await resolveRef(mirror, `origin/${repo.defaultBranch}`));
 
   const attempt = createAttempt(db, unit.id, harnessId, setting("role.worker.model"));
-  const branch = `${setting("git.branch_prefix")}/${project.id}/${unitRef(target.seq)}-rebase-${unitRef(unit.seq)}`;
+  const branch = `${setting("git.branch_prefix")}/${project.id}/${unitRef(target.seq)}-rebase-${unitRef(unit.seq)}-${attempt.n}`;
   const worktree = paths.worktree(repo.id, project.id, unit.seq, attempt.n);
   mkdirSync(dirname(worktree), { recursive: true });
   await addWorktree(mirror, worktree, branch, verdict.head_sha);

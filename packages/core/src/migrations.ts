@@ -268,6 +268,13 @@ ALTER TABLE environments DROP COLUMN doctor_checked_at;
 ALTER TABLE environments DROP COLUMN doctor_json;
 `,
   },
+  {
+    version: 19,
+    sql: `
+ALTER TABLE mr_threads ADD COLUMN replied_at TEXT;
+UPDATE mr_threads SET replied_at = created_at WHERE decision IN ('fixed', 'dismissed');
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

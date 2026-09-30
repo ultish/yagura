@@ -312,7 +312,8 @@ async function main() {
       if ((positionals[0] === "reject" || positionals[0] === "requeue") && projectId && positionals[2]) {
         const u = getUnitBySeq(db, projectId, Number(positionals[2]));
         if (values.note) addUnitNote(db, u.id, values.note);
-        if (u.state !== "rejected") transitionUnit(db, u.id, "rejected", { by: "operator", note: values.note ?? null });
+        const direct = positionals[0] === "requeue" && (u.state === "blocked" || u.state === "failed");
+        if (!direct && u.state !== "rejected") transitionUnit(db, u.id, "rejected", { by: "operator", note: values.note ?? null });
         if (positionals[0] === "requeue") transitionUnit(db, u.id, "ready", { by: "operator" });
         console.log(`U${u.seq} → ${getUnitBySeq(db, projectId, u.seq).state}`);
         return;

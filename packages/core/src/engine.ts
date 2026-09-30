@@ -85,7 +85,9 @@ export class Engine {
     for (const a of listAttempts(this.db, unitId))
       if (a.state === "running" || a.state === "queued") updateAttempt(this.db, a.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
     if (unit.state === "running") transitionUnit(this.db, unitId, "failed", { reason: "engine error" });
-    else if (unit.state === "ready" && unit.type === "verify") transitionUnit(this.db, unitId, "blocked", { reason: "engine error" });
+    // A unit that crashes before it starts would crash again on the next tick, so it waits for someone to look.
+    else if (unit.state === "ready")
+      transitionUnit(this.db, unitId, "blocked", { reason: `engine error before it started: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}` });
   }
 
   private settleFailures(project: Project): void {

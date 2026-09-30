@@ -17,7 +17,7 @@ import { getMergeRequest } from "./forge.js";
 import { landUnit, liveVerdict, watchMergeRequest } from "./land.js";
 import { layout } from "./paths.js";
 import { runRebaseUnit } from "./rebase.js";
-import { listThreadRows, runTriageUnit } from "./triage.js";
+import { listThreadRows, parseDecisions, runTriageUnit } from "./triage.js";
 import { runWorkUnit } from "./runner.js";
 import { failurePolicy } from "./schedule.js";
 import {
@@ -481,5 +481,46 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     await landUnit(ctx, work.id);
     expect((await watchMergeRequest(ctx, work.id))?.outcome).toBe("landed");
     expect(await git(["show", "main:app/orders.py"], { cwd: origin })).toContain("# review fix T1");
+  });
+
+  it("keeps a triage whose reply GitHub refused, and posts the reply once on a later poll", async () => {
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    editPr({
+      threads: [{ id: "RT_1", isResolved: false, path: "app/orders.py", line: 1, comments: [{ author: { login: "alice" }, body: "please fix this" }] }],
+    });
+    await watchMergeRequest(ctx, work.id);
+    process.env.FAKE_MODE = "success";
+    process.env.FAKE_GH_REPLY_FAIL = "1";
+    try {
+      expect(await runTriageUnit(ctx, getUnitBySeq(db, project, 3).id)).toMatchObject({ state: "handed_off" });
+    } finally {
+      delete process.env.FAKE_GH_REPLY_FAIL;
+    }
+    expect(getUnitBySeq(db, project, 3).state).toBe("done");
+    expect(getUnitBySeq(db, project, 1).state).toBe("verifying");
+    expect(listThreadRows(db, work.id).map((r) => [r.decision, r.repliedAt])).toEqual([["fixed", null]]);
+    const replies = () => (ghState().prs[0] as unknown as { threads: { comments: unknown[] }[] }).threads[0]!.comments.length - 1;
+    expect(replies()).toBe(0);
+    await watchMergeRequest(ctx, work.id);
+    await watchMergeRequest(ctx, work.id);
+    expect(replies()).toBe(1);
+    expect(listThreadRows(db, work.id)[0]!.repliedAt).not.toBeNull();
+  });
+});
+
+describe("parseDecisions", () => {
+  it("reads thread decisions from every Decisions section, as a triage worker using the worker template writes them", () => {
+    const handoff = [
+      "## Status\nsuccess",
+      "## Decisions\n- I stripped apostrophes after the match rather than changing the regex.",
+      "## Notes, concerns, deviations\n- None.",
+      "## Decisions\n- T1: fixed — words() strips leading and trailing apostrophes\n- T2: dismissed — test_ties covers it",
+    ].join("\n\n");
+    expect([...parseDecisions(handoff, 2)]).toEqual([
+      [1, { decision: "fixed", reason: "words() strips leading and trailing apostrophes" }],
+      [2, { decision: "dismissed", reason: "test_ties covers it" }],
+    ]);
   });
 });

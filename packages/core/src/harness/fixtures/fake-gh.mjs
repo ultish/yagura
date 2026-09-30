@@ -24,6 +24,7 @@ process.stdin.on("end", () => {
       rest.flatMap((a, i) => (rest[i - 1] === "-F" || rest[i - 1] === "-f" ? [[a.slice(0, a.indexOf("=")), a.slice(a.indexOf("=") + 1)]] : [])),
     );
     if (fields.query.includes("addPullRequestReviewThreadReply")) {
+      if (process.env.FAKE_GH_REPLY_FAIL) fail("gh: HTTP 502");
       const thread = state.prs.flatMap((p) => p.threads ?? []).find((t) => t.id === fields.thread);
       if (!thread) fail(`no thread ${fields.thread}`);
       thread.comments.push({ author: { login: "ultish" }, body: fields.body === "@-" ? stdin : fields.body });
