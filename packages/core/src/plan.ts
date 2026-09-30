@@ -36,6 +36,8 @@ export const WORK_PLAYBOOKS = [
 
 const UnitRef = z.string().regex(/^U\d+$/, "unit references look like U3");
 
+const Deps = z.array(z.object({ on: z.string(), kind: z.enum(["needs-landed", "needs-source"]).default("needs-landed") }).strict());
+
 export const PlanUnit = z
   .object({
     key: z.string().regex(/^[a-z][a-z0-9-]*$/, "keys are lowercase words, e.g. discount-create"),
@@ -50,7 +52,7 @@ export const PlanUnit = z
     scaffold: z.boolean().default(false),
     timeboxMinutes: z.number().int().positive().max(240).optional(),
     refs: z.array(z.string().min(1)).default([]),
-    deps: z.array(z.object({ on: z.string(), kind: z.enum(["needs-landed", "needs-source"]).default("needs-landed") }).strict()).default([]),
+    deps: Deps.default([]),
   })
   .strict();
 
@@ -67,6 +69,7 @@ export const PlanDelta = z
             accept: z.array(z.string().min(1)).min(1).optional(),
             verify: z.string().min(1).optional(),
             context: z.array(z.string()).optional(),
+            deps: Deps.optional(),
           })
           .strict(),
       )
@@ -188,28 +191,35 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
       created.set(a.key, getUnit(db, unit.id));
     }
 
-    for (const a of delta.add) {
-      const unit = created.get(a.key)!;
-      for (const d of a.deps) {
-        const on = created.get(d.on) ?? (/^U\d+$/.test(d.on) ? unitRef(d.on, `${a.key} depends on`) : undefined);
-        if (!on) throw new PlanRejected(`${a.key} depends on "${d.on}", which is neither a key in this delta nor an existing unit`);
-        if (on.state === "abandoned") throw new PlanRejected(`${a.key} depends on ${d.on}, which is abandoned`);
+    const addDeps = (unit: Unit, name: string, deps: z.output<typeof Deps>) => {
+      for (const d of deps) {
+        const on = created.get(d.on) ?? (/^U\d+$/.test(d.on) ? unitRef(d.on, `${name} depends on`) : undefined);
+        if (!on) throw new PlanRejected(`${name} depends on "${d.on}", which is neither a key in this delta nor an existing unit`);
+        if (on.state === "abandoned") throw new PlanRejected(`${name} depends on ${d.on}, which is abandoned`);
         addDep(db, { unitId: unit.id, dependsOn: on.id, kind: d.kind });
       }
-    }
+    };
+    for (const a of delta.add) addDeps(created.get(a.key)!, a.key, a.deps);
 
-    const live = listUnits(db, projectId).filter((u) => isBuild(u) && !TERMINAL.has(u.state));
-    for (const unit of created.values())
-      for (const other of live)
+    const serialize = (unit: Unit) => {
+      for (const other of listUnits(db, projectId).filter((u) => isBuild(u) && !TERMINAL.has(u.state)))
         if (other.id < unit.id && other.repoId === unit.repoId && scopesOverlap(unit.writeScope, other.writeScope))
           addDep(db, { unitId: unit.id, dependsOn: other.id, kind: "scope-overlap" });
+    };
+    for (const unit of created.values()) serialize(unit);
     assertAcyclic(db, projectId);
 
     for (const m of delta.amend) {
       const u = unitRef(m.unit, "amend");
       if (!["draft", "ready"].includes(u.state) || listAttempts(db, u.id).length) throw new PlanRejected(`amend: ${m.unit} has already started (${u.state})`);
       amendUnit(db, u.id, { goal: m.goal, writeScope: m.write, acceptance: m.accept, verify: m.verify, context: m.context });
+      if (m.deps) {
+        db.prepare("DELETE FROM unit_deps WHERE unit_id = ? AND kind <> 'scope-overlap'").run(u.id);
+        addDeps(u, m.unit, m.deps);
+        serialize(getUnit(db, u.id));
+      }
     }
+    assertAcyclic(db, projectId);
 
     for (const r of delta.retry) {
       const u = unitRef(r.unit, "retry");

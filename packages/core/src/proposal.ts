@@ -120,7 +120,8 @@ export function validateProposal(db: Db, boot: Bootstrap, threadId: number, p: P
     if (newRepos.has(r.id)) throw new ProposalInvalid(`repo ${r.id} is listed twice`);
     try {
       if (isExisting(r)) checkRepoFree(db, r.id, resolveSource(r.existing));
-      else if (repoExists(r.id)) throw new RepoUnusable(`repo ${r.id} already exists`);
+      else if (repoExists(r.id))
+        throw new RepoUnusable(`repo ${r.id} is already registered; leave it out of the proposal's repos and name it in the project's repos`);
     } catch (e) {
       if (e instanceof RepoUnusable) throw new ProposalInvalid(e.message);
       throw e;

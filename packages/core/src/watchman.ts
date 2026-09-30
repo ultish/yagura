@@ -274,7 +274,7 @@ function catalog(db: Db, boot: RunContext["boot"]): string {
       : [],
   );
   return [
-    `- repos: ${repos.map((r) => `${r.id} (${r.url}, ${r.default_branch})`).join("; ") || "(none)"}`,
+    `- registered repos (use them by id in a project's repos; never list them again in the proposal's repos): ${repos.map((r) => `${r.id} (${r.url}, ${r.default_branch})`).join("; ") || "(none)"}`,
     `- environments: ${envs.map(envLine).join("; ") || `(none; a project with environment null gets a new local-process "local")`}`,
     `- environment presets: ${PRESETS.map((p) => `${p.id} (${p.values.map((v) => v.name).join(", ")})`).join("; ")}`,
     `- environment templates: ${templates.join("; ") || "(none)"}`,

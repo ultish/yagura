@@ -203,7 +203,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
     forbidden: ["no git push, rebase, merge, or branch switching", "nothing outside SCOPE", "no reply to reviewers yourself; yagura posts your decisions"],
     method:
-      "Load the yagura-review-triage skill first and follow it. Then use pstack:poteto-mode with the bug-fix playbook for each thread you fix, proving the fault with a failing check first.",
+      "Load the yagura-review-triage skill first and follow it. Then load pstack:poteto-mode with the Skill tool (required) and follow its bug-fix playbook for each thread you fix, proving the fault with a failing check first.",
     report: HANDOFF_TEMPLATE + DECISIONS_REPORT,
     standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
   });

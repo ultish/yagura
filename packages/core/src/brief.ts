@@ -266,6 +266,7 @@ ${p.status}
 - \`scaffold\`: true marks the unit that builds a new project's skeleton. ${p.scaffoldSkills?.length ? `This project names scaffold skills (${p.scaffoldSkills.join(", ")}): when a repo has no project skeleton yet, make its first unit a scaffold unit and let later units build on it.` : "This project names no scaffold skills; leave it false."}${p.references?.length ? `\n- Workers get read-only checkouts of reference repos that already do it right (${p.references.join(", ")}); point at them in \`context\` when a unit should follow their shape.` : ""}
 - \`refs\` (optional) lists issue keys the unit addresses, e.g. "gitlab#123"; the project's own refs are added automatically.
 - A blocked or failed unit can be retried with a note that changes what the next attempt does, split into new units, or cancelled.
+- A unit that has not started can be amended in place, including its \`deps\` (the list replaces its old one). To move units off a blocked one, amend their deps; do not cancel and re-add them.
 - Ask the human only for a product or preference decision no experiment can settle, with a default.
 - Set "done": true only when the DONE WHEN condition is met by landed, verified work.
 
@@ -290,9 +291,9 @@ End your final message with exactly one fenced json block holding the delta:
       "deps": [{ "on": "U1", "kind": "needs-landed" }]
     }
   ],
-  "amend": [],
-  "retry": [],
-  "cancel": [],
+  "amend": [{ "unit": "U4", "deps": [{ "on": "discount-on-create" }] }],
+  "retry": [{ "unit": "U2", "note": "what the next attempt must do differently" }],
+  "cancel": [{ "unit": "U5", "reason": "why it is no longer needed" }],
   "gates": [],
   "done": false,
   "summary": "what this plan does and why"

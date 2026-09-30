@@ -121,6 +121,25 @@ describe("applyDelta", () => {
     expect(() => applyDelta(db, project, delta({ retry: [{ unit: "U1", note: "x" }] }), null)).toThrow(/only blocked, failed, or rejected/);
   });
 
+  it("rewires a unit that has not started by amending its deps, keeping scope-overlap order, and refuses a cycle", () => {
+    applyDelta(
+      db,
+      project,
+      delta({ add: [unit("pack", ["ci/**"]), unit("core", ["app/core/**"], { deps: [{ on: "pack" }] }), unit("cli", ["app/**"], { deps: [{ on: "core" }] })] }),
+      null,
+    );
+    transitionUnit(db, getUnitBySeq(db, project, 1).id, "blocked");
+    applyDelta(db, project, delta({ amend: [{ unit: "U2", deps: [] }], add: [unit("docs", ["docs/**"])] }), null);
+    applyDelta(db, project, delta({ amend: [{ unit: "U3", deps: [{ on: "U4", kind: "needs-landed" }] }] }), null);
+    expect(
+      listDeps(db, project)
+        .map((d) => `U${d.unitId}->U${d.dependsOn}:${d.kind}`)
+        .sort(),
+    ).toEqual(["U3->U2:scope-overlap", "U3->U4:needs-landed"]);
+    expect(() => applyDelta(db, project, delta({ amend: [{ unit: "U4", deps: [{ on: "U3" }] }] }), null)).toThrow(/cycle/);
+    expect(listDeps(db, project).filter((d) => d.unitId === 4)).toEqual([]);
+  });
+
   it("cancels idle units, warns about running ones, and opens planner gates", () => {
     applyDelta(db, project, delta({ add: [unit("a", ["a/**"]), unit("b", ["b/**"])] }), null);
     transitionUnit(db, getUnitBySeq(db, project, 2).id, "running");
