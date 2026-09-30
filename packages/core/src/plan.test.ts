@@ -104,6 +104,15 @@ describe("applyDelta", () => {
     expect(() => applyDelta(db, project, delta({ add: [unit("a", ["x/**"]), unit("a", ["y/**"])] }), null)).toThrow(/duplicate key/);
   });
 
+  it("keeps the verify pack out of work units, warning the planner, and refuses a unit that only writes the pack", () => {
+    const r = applyDelta(db, project, delta({ add: [unit("pack-and-smoke", [".agents/verify/**", "tests/test_smoke.py"])] }), null);
+    expect(getUnitBySeq(db, project, 1).writeScope).toEqual(["tests/test_smoke.py"]);
+    expect(r.warnings).toEqual(["pack-and-smoke: dropped .agents/verify from its write scope; verifiers maintain the verify pack"]);
+    expect(() => applyDelta(db, project, delta({ add: [unit("pack", [".agents/verify/verify.json"])] }), null)).toThrow(
+      "pack only writes the verify pack (.agents/verify); verifiers maintain the pack, so leave it out of the plan",
+    );
+  });
+
   it("rejects dependency cycles", () => {
     const d = delta({ add: [unit("a", ["a/**"], { deps: [{ on: "b" }] }), unit("b", ["b/**"], { deps: [{ on: "a" }] })] });
     expect(() => applyDelta(db, project, d, null)).toThrow(/cycle/);

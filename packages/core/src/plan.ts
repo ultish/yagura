@@ -8,6 +8,7 @@ import {
   addUnit,
   addUnitNote,
   amendUnit,
+  getRepo,
   bumpMaxAttempts,
   getUnit,
   getUnitBySeq,
@@ -165,6 +166,15 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
       if (!repos.has(a.repo)) throw new PlanRejected(`${a.key}: repo "${a.repo}" is not part of this project (${[...repos].join(", ")})`);
     }
 
+    // Verifiers maintain the verify pack; a work unit that lists it would get a brief that both allows and forbids it.
+    const withoutPack = (name: string, repoId: string, write: string[]) => {
+      const pack = getRepo(db, repoId as RepoId).verifyPackPath;
+      const kept = write.filter((g) => g !== pack && !g.startsWith(`${pack}/`));
+      if (!kept.length) throw new PlanRejected(`${name} only writes the verify pack (${pack}); verifiers maintain the pack, so leave it out of the plan`);
+      if (kept.length < write.length) warnings.push(`${name}: dropped ${pack} from its write scope; verifiers maintain the verify pack`);
+      return kept;
+    };
+
     const created = new Map<string, Unit>();
     for (const a of delta.add) {
       const sctx = { projectId, repoId: a.repo as RepoId };
@@ -175,7 +185,7 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
         type: "work",
         repoId: a.repo as RepoId,
         goal: a.goal,
-        writeScope: a.write,
+        writeScope: withoutPack(a.key, a.repo, a.write),
         forbidScope: a.forbid,
         acceptance: a.accept,
         verify: a.verify,
@@ -212,7 +222,13 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
     for (const m of delta.amend) {
       const u = unitRef(m.unit, "amend");
       if (!["draft", "ready"].includes(u.state) || listAttempts(db, u.id).length) throw new PlanRejected(`amend: ${m.unit} has already started (${u.state})`);
-      amendUnit(db, u.id, { goal: m.goal, writeScope: m.write, acceptance: m.accept, verify: m.verify, context: m.context });
+      amendUnit(db, u.id, {
+        goal: m.goal,
+        writeScope: m.write && withoutPack(m.unit, u.repoId!, m.write),
+        acceptance: m.accept,
+        verify: m.verify,
+        context: m.context,
+      });
       if (m.deps) {
         db.prepare("DELETE FROM unit_deps WHERE unit_id = ? AND kind <> 'scope-overlap'").run(u.id);
         addDeps(u, m.unit, m.deps);

@@ -52,7 +52,7 @@ export function landMessage(
   const trailers = [
     `Yagura-Project: ${project.id}`,
     `Yagura-Unit: U${p.unit.seq}`,
-    `Yagura-Attempt: ${p.work.id} (${[p.work.model ?? p.work.harness, pstack ? `pstack ${pstack}` : null].filter(Boolean).join(", ")})`,
+    `Yagura-Attempt: U${p.unit.seq}.${p.work.n} (${[p.work.model ?? p.work.harness, pstack ? `pstack ${pstack}` : null].filter(Boolean).join(", ")})`,
     ...(p.work.branch ? [`Yagura-Branch: ${p.work.branch}`] : []),
     `Yagura-Verdict: ${p.verdict.tier} by U${verifyUnit.seq}${runs.length ? ` (${runs.map((r) => `run:${r}`).join(", ")})` : ""}`,
     ...(link ? [`Yagura-Link: ${link}`] : []),

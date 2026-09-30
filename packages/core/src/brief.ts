@@ -261,7 +261,7 @@ ${p.status}
 ## HOW TO PLAN
 - Only plan what the state calls for. Do not re-add work that is running, verifying, landed, or queued.
 - Each unit is one worker session in one repo: small enough for about ${Math.round(p.timeboxMinutes)} minutes of focused work, complete enough to verify on its own.
-- \`write\` lists the paths the unit may change (globs). Units whose write scopes overlap in the same repo run one after another; give independent work disjoint scopes so it can run in parallel.
+- \`write\` lists the paths the unit may change (globs). Leave out each repo's verify pack (\`.agents/verify\` unless the repo says otherwise): the verifiers keep it working, and a worker cannot change it. When the pack should check something new, say so in the unit's \`context\`; its verifier will extend the pack. Units whose write scopes overlap in the same repo run one after another; give independent work disjoint scopes so it can run in parallel.
 - \`accept\` lines are checkable statements a verifier can prove by running code, one behaviour each.
 - \`verify\` is the command a worker runs to check itself (for example the repo's test command).
 - \`deps\` names units that must land first: a key from this delta or an existing unit such as "U3".
