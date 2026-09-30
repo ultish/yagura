@@ -25,9 +25,8 @@ export function chooseResume(attempts: Attempt[], opts: { enabled: boolean; canR
   if (!last?.rejection) return { resume: null, fresh: null };
   const fresh = (why: string): ResumeChoice => ({ resume: null, fresh: `attempt ${last.n} ${why}` });
   if (!opts.enabled) return fresh("is not resumed: resume on rejection is off");
-  if (last.rejection !== "code-fault" && last.rejection !== "literals") return fresh(`was rejected for ${REJECTION_TEXT[last.rejection]}`);
+  if (last.rejection !== "code-fault") return fresh(`was rejected for ${REJECTION_TEXT[last.rejection]}`);
   if (last.resumesAttemptId) return fresh("was already a resumed round");
-  if (last.rejection === "literals" && attempts.at(-2)?.rejection === "literals") return fresh("hard-coded environment values twice in a row");
   if (!opts.canResume) return fresh(`ran on ${last.harness}, which cannot resume`);
   if (!last.sessionId || !last.worktreePath || !last.branch || !last.baseSha) return fresh("left no session to resume");
   const share = last.contextPeak / contextWindow(last.model);

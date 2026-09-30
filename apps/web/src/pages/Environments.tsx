@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, useApi, useNow, type EnvironmentView } from "../api";
 import { roleOf } from "../lib/units";
-import { clock, plural, since } from "../lib/format";
+import { plural, since } from "../lib/format";
 import { Link } from "../ui/Link";
 import { Row, useAction } from "../ui/rows";
 import { ScopedSettings } from "../ui/settings";
@@ -16,11 +16,6 @@ function occupancy(v: EnvironmentView): { text: string; tone: string } {
   const waiting = v.queued.length ? `, ${v.queued.length} waiting` : "";
   if (capacity === 0) return { text: `No slots: capacity is 0, so nothing can verify here${waiting}.`, tone: v.queued.length ? "bell" : "muted" };
   return { text: `${v.active.length} of ${plural(capacity, "slot")} in use${waiting}.`, tone: v.active.length ? "lamp" : "muted" };
-}
-
-function doctor(v: EnvironmentView): string {
-  const { doctorStatus, doctorCheckedAt } = v.environment;
-  return doctorStatus === "unknown" ? "doctor not run yet" : `doctor ${doctorStatus} ${clock(doctorCheckedAt)}`;
 }
 
 function AddEnvironment({ onAdded }: { onAdded: () => void }) {
@@ -97,7 +92,7 @@ function AddEnvironment({ onAdded }: { onAdded: () => void }) {
           style={{ ...field, width: 70 }}
         />
         <button className="btn lamp" type="submit" disabled={action.busy || !id.trim()}>
-          {action.busy ? "Running doctor…" : "Add environment"}
+          {action.busy ? "Adding…" : "Add environment"}
         </button>
       </div>
       {kube && (
@@ -139,8 +134,8 @@ function AddEnvironment({ onAdded }: { onAdded: () => void }) {
       )}
       <div className="muted" style={{ fontSize: 13 }}>
         Verification runs inside a slot of the project's environment. local-process gives each slot a private directory and a free port on this machine.
-        kube-namespace gives each slot its own namespace labelled yagura=1 (or one from your pool, where only yagura-labelled resources are deleted). Adding one
-        runs its doctor; a Kubernetes environment is usable once the doctor passes.
+        kube-namespace gives each slot its own namespace labelled yagura=1 (or one from your pool, where only yagura-labelled resources are deleted). yagura
+        checks nothing up front: if a verifier cannot reach something here, verification on this environment pauses and asks you.
       </div>
       {action.error && (
         <div className="s-bell" style={{ fontSize: 13 }}>
@@ -229,45 +224,6 @@ function EditEnvironment({ v, onDone }: { v: EnvironmentView; onDone: () => void
   );
 }
 
-function Doctor({ v, onRan }: { v: EnvironmentView; onRan: () => void }) {
-  const action = useAction();
-  const checks = v.environment.doctorChecks;
-  const failing = v.environment.doctorStatus === "failing";
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {checks.length > 0 && (
-        <details open={failing}>
-          <summary className="mono" style={{ fontSize: 12, cursor: "pointer", color: failing ? "var(--bell-text)" : "var(--muted)" }}>
-            {checks.filter((c) => c.ok).length} of {checks.length} doctor checks pass
-          </summary>
-          <div className="facts" style={{ flexDirection: "column", gap: 2, marginTop: 4 }}>
-            {checks.map((c) => (
-              <span key={c.name} className={c.ok ? undefined : "s-bell"}>
-                {c.ok ? "✓" : "✗"} <b>{c.name}</b> {c.detail}
-              </span>
-            ))}
-          </div>
-        </details>
-      )}
-      <div>
-        <button
-          className="btn sm"
-          type="button"
-          disabled={action.busy}
-          onClick={() => void action.run(async () => (await api(`/api/environments/${v.environment.id}/doctor`, { body: {} }), onRan()))}
-        >
-          {action.busy ? "Running doctor…" : "Run doctor"}
-        </button>
-      </div>
-      {action.error && (
-        <span className="s-bell" style={{ fontSize: 13 }}>
-          {action.error}
-        </span>
-      )}
-    </div>
-  );
-}
-
 function settingsOf(v: EnvironmentView): string | null {
   const c = v.environment.providerConfig as { context?: string; mode?: string; pool?: string[]; baseUrl?: string };
   if (v.environment.provider !== "kube-namespace") return null;
@@ -342,7 +298,11 @@ export function Environments() {
                 tone={o.tone}
                 facts={
                   <>
-                    <span>{doctor(v)}</span>
+                    {v.pausedBy !== null && (
+                      <span className="s-bell">
+                        verification paused: <Link to="/gates">gate {v.pausedBy}</Link>
+                      </span>
+                    )}
                     {settingsOf(v) && <span>{settingsOf(v)}</span>}
                     {v.projects.length ? (
                       <span>
@@ -362,7 +322,6 @@ export function Environments() {
                 extra={
                   <>
                     <Holders v={v} />
-                    <Doctor v={v} onRan={reload} />
                     {editing === e.id && (
                       <EditEnvironment
                         v={v}

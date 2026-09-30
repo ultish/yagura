@@ -18,7 +18,7 @@ interface ProposalBody {
   repos?: { id: string; description?: string; existing?: string }[];
   environments?: (
     | { id: string; template: string; answers?: Record<string, string> }
-    | { id: string; provider?: string; capacity?: number; presets?: string[]; values?: { name: string; value: string; check?: string | null }[] }
+    | { id: string; provider?: string; capacity?: number; presets?: string[]; values?: { name: string; value: string }[] }
   )[];
   projects?: {
     id: string;
@@ -78,7 +78,6 @@ function ProposalCard({ p, onEdit }: { p: Proposal; onEdit: (text: string) => vo
                   {e.values?.map((v) => (
                     <span key={v.name} className="mono">
                       {v.name}={v.value}
-                      {v.check ? <span title={v.check}> · checked</span> : null}
                     </span>
                   ))}
                   {e.presets?.map((p) => (

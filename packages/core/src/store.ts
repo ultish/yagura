@@ -125,7 +125,7 @@ export function addProject(
 ): Project {
   db.transaction(() => {
     for (const dep of p.after ?? []) getProject(db, dep);
-    if (p.environmentId) assertSelectable(getEnvironment(db, p.environmentId));
+    if (p.environmentId) getEnvironment(db, p.environmentId);
     db.prepare(
       `INSERT INTO projects (id, name, goal, predicate, min_tier, state, refs_json, after_json, phase_gate, merge_policy, environment_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -294,6 +294,7 @@ function toAttempt(r: Record<string, unknown>): Attempt {
     tokensIn: r.tokens_in as number,
     tokensOut: r.tokens_out as number,
     contextPeak: r.context_peak as number,
+    costUsd: (r.cost_usd as number | undefined) ?? 0,
     sessionId: (r.session_id as string | null) ?? null,
     resumesAttemptId: (r.resumes_attempt_id as AttemptId | null) ?? null,
     sources: JSON.parse((r.sources_json as string | undefined) ?? "[]"),
@@ -401,9 +402,6 @@ export function getEnvironment(db: Db, id: EnvironmentId): Environment {
     provider: r.provider as Provider,
     providerConfig: JSON.parse(r.provider_config_json as string),
     capacity: r.capacity as number,
-    doctorStatus: r.doctor_status as Environment["doctorStatus"],
-    doctorCheckedAt: (r.doctor_checked_at as IsoTime | null) ?? null,
-    doctorChecks: JSON.parse(r.doctor_json as string),
     notes: r.notes as string,
     createdAt: r.created_at as IsoTime,
   };
@@ -419,14 +417,8 @@ export function updateEnvironment(db: Db, id: EnvironmentId, patch: { name?: str
   return getEnvironment(db, id);
 }
 
-// local-process needs nothing outside this machine, so it is usable before its doctor runs; other providers are not.
-export function assertSelectable(env: Environment): void {
-  if (env.doctorStatus === "failing") throw new Error(`environment ${env.id} failed its doctor; fix it and run the doctor again before using it`);
-  if (env.provider !== "local-process" && env.doctorStatus !== "passing") throw new Error(`environment ${env.id} has not passed its doctor yet`);
-}
-
 export function setProjectEnvironment(db: Db, projectId: ProjectId, environmentId: EnvironmentId | null): void {
-  if (environmentId) assertSelectable(getEnvironment(db, environmentId));
+  if (environmentId) getEnvironment(db, environmentId);
   db.prepare("UPDATE projects SET environment_id = ? WHERE id = ?").run(environmentId, projectId);
   recordEvent(db, "project.environment", { projectId }, { environment: environmentId });
 }

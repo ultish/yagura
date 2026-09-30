@@ -6,7 +6,6 @@ export interface PresetValue {
   name: string;
   value: string;
   note: string;
-  check: string | null;
 }
 
 export interface Preset {
@@ -25,13 +24,11 @@ export const PRESETS: Preset[] = [
         name: "REGISTRY_PUSH",
         value: "localhost:5000",
         note: "Push images here from this machine (jib, docker push). Tag them with $YAGURA_SHA.",
-        check: 'curl -sf -o /dev/null "http://$REGISTRY_PUSH/v2/"',
       },
       {
         name: "REGISTRY_PULL",
         value: "hostname:5000",
         note: "The same registry as the cluster sees it. Use it in image references in helm values and manifests.",
-        check: null,
       },
     ],
   },
@@ -43,21 +40,19 @@ export const PRESETS: Preset[] = [
         name: "KAFKA_BOOTSTRAP_CLUSTER",
         value: "kafka.kafka.svc:9092",
         note: "Kafka bootstrap servers as pods see them. Use this in charts and manifests.",
-        check: null,
       },
       {
         name: "KAFKA_BOOTSTRAP_LOCAL",
         value: "hostname:30092",
         note: "Kafka bootstrap servers from this machine, for tests run here. Never put this in a chart.",
-        check: 'nc -z -w 5 "${KAFKA_BOOTSTRAP_LOCAL%:*}" "${KAFKA_BOOTSTRAP_LOCAL##*:}"',
       },
     ],
   },
-  { id: "helm", label: "helm", values: [{ name: "HELM", value: "helm", note: "Run helm as $HELM.", check: '"$HELM" version --short' }] },
+  { id: "helm", label: "helm", values: [{ name: "HELM", value: "helm", note: "Run helm as $HELM." }] },
   {
     id: "skaffold",
     label: "skaffold",
-    values: [{ name: "SKAFFOLD", value: "skaffold", note: "Run skaffold as $SKAFFOLD.", check: '"$SKAFFOLD" version' }],
+    values: [{ name: "SKAFFOLD", value: "skaffold", note: "Run skaffold as $SKAFFOLD." }],
   },
   {
     id: "maven-mirror",
@@ -67,7 +62,6 @@ export const PRESETS: Preset[] = [
         name: "MAVEN_MIRROR",
         value: "https://nexus.example/repository/maven-public/",
         note: "The only Maven repository reachable; builds run offline against it.",
-        check: 'curl -sf -o /dev/null "$MAVEN_MIRROR"',
       },
     ],
   },

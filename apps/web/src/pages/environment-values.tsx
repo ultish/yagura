@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, useApi, type EnvTemplateFile, type EnvValueView, type EnvironmentDetail, type KeptSlot } from "../api";
 import { clock } from "../lib/format";
 import { Link } from "../ui/Link";
@@ -26,95 +26,25 @@ export function slotLine(slot: KeptSlot): string | null {
   return slot.leaseDir;
 }
 
-function Suggestion({
-  envId,
-  name,
-  value,
-  onUse,
-  onDismiss,
-}: {
-  envId: string;
-  name: string;
-  value: string;
-  onUse: (check: string) => Promise<void> | void;
-  onDismiss: () => void;
-}) {
-  const [check, setCheck] = useState<string | null>(null);
-  const [trial, setTrial] = useState<string | null>(null);
-  const action = useAction();
-  useEffect(() => {
-    let cancel = false;
-    setTrial(null);
-    api<{ check: string | null }>(`/api/check-suggestion?name=${encodeURIComponent(name)}&value=${encodeURIComponent(value)}`).then(
-      (r) => !cancel && setCheck(r.check),
-      () => !cancel && setCheck(null),
-    );
-    return () => {
-      cancel = true;
-    };
-  }, [name, value]);
-  if (!check) return null;
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-      <span style={{ fontSize: 13 }}>
-        Suggested check <span className="mono">{check}</span>
-      </span>
-      <button
-        className="btn sm"
-        type="button"
-        disabled={action.busy}
-        onClick={() =>
-          void action.run(async () => {
-            const r = await api<{ ok: boolean; detail: string }>(`/api/environments/${envId}/try-check`, { body: { command: check, name, value } });
-            setTrial(`${r.ok ? "✓" : "✗"} ${r.detail}`);
-          })
-        }
-      >
-        Try it
-      </button>
-      <button className="btn sm lamp" type="button" disabled={action.busy} onClick={() => void action.run(async () => onUse(check))}>
-        Use it
-      </button>
-      <button className="btn sm" type="button" onClick={onDismiss}>
-        No thanks
-      </button>
-      {trial && <span style={{ fontSize: 13 }}>{trial}</span>}
-      {action.error && (
-        <span className="s-bell" style={{ fontSize: 13 }}>
-          {action.error}
-        </span>
-      )}
-    </div>
-  );
-}
-
 function ValueRow({ envId, v, onSaved }: { envId: string; v: EnvValueView; onSaved: () => void }) {
   const [value, setValue] = useState(v.value);
   const [note, setNote] = useState(v.note);
-  const [check, setCheck] = useState(v.check ?? "");
-  const [dismissed, setDismissed] = useState(false);
   const action = useAction();
-  const dirty = value !== v.value || note !== v.note || (check.trim() || null) !== v.check;
-  const save = (nextCheck: string | null) =>
-    api(`/api/environments/${envId}/values`, { body: { name: v.name, value, note, check: nextCheck, source: v.source } }).then(onSaved);
+  const dirty = value !== v.value || note !== v.note;
+  const save = () => api(`/api/environments/${envId}/values`, { body: { name: v.name, value, note, source: v.source } }).then(onSaved);
   return (
     <form
       className="item"
       style={{ alignItems: "flex-start" }}
       onSubmit={(e) => {
         e.preventDefault();
-        void action.run(() => save(check.trim() || null));
+        void action.run(save);
       }}
     >
       <div className="body" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         <div className="goal mono">{v.name}</div>
         <div className="facts">
           <span>{v.source}</span>
-          {v.last && (
-            <span className={v.last.ok ? "s-lamp" : "s-bell"}>
-              {v.last.ok ? "✓" : "✗"} {v.last.detail} {clock(v.last.at)}
-            </span>
-          )}
         </div>
         <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 13 }}>
           Value
@@ -124,22 +54,6 @@ function ValueRow({ envId, v, onSaved }: { envId: string; v: EnvValueView; onSav
           Note for agents
           <input value={note} onChange={(e) => setNote(e.target.value)} style={field} />
         </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 13 }}>
-          Check
-          <input className="mono" value={check} onChange={(e) => setCheck(e.target.value)} placeholder="none" style={field} />
-        </label>
-        {!check.trim() && !dismissed && (
-          <Suggestion
-            envId={envId}
-            name={v.name}
-            value={value}
-            onDismiss={() => setDismissed(true)}
-            onUse={async (suggested) => {
-              setCheck(suggested);
-              await save(suggested);
-            }}
-          />
-        )}
         {action.error && (
           <div className="s-bell" style={{ fontSize: 13 }}>
             {action.error}
@@ -169,20 +83,16 @@ function AddValue({ envId, onAdded }: { envId: string; onAdded: () => void }) {
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const [note, setNote] = useState("");
-  const [check, setCheck] = useState("");
-  const [dismissed, setDismissed] = useState(false);
   const action = useAction();
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         void action.run(async () => {
-          await api(`/api/environments/${envId}/values`, { body: { name: name.trim(), value, note, check: check.trim() || null } });
+          await api(`/api/environments/${envId}/values`, { body: { name: name.trim(), value, note } });
           setName("");
           setValue("");
           setNote("");
-          setCheck("");
-          setDismissed(false);
           onAdded();
         });
       }}
@@ -199,10 +109,7 @@ function AddValue({ envId, onAdded }: { envId: string; onAdded: () => void }) {
           id={`add-name-${envId}`}
           className="mono"
           value={name}
-          onChange={(e) => {
-            setName(e.target.value.toUpperCase());
-            setDismissed(false);
-          }}
+          onChange={(e) => setName(e.target.value.toUpperCase())}
           placeholder="NAME"
           style={{ ...field, width: 180 }}
         />
@@ -213,19 +120,12 @@ function AddValue({ envId, onAdded }: { envId: string; onAdded: () => void }) {
           id={`add-value-${envId}`}
           className="mono"
           value={value}
-          onChange={(e) => {
-            setValue(e.target.value);
-            setDismissed(false);
-          }}
+          onChange={(e) => setValue(e.target.value)}
           placeholder="value"
           style={{ ...field, flex: "1 1 180px", width: "auto" }}
         />
       </div>
       <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="note for agents" aria-label="Note for agents" style={field} />
-      <input className="mono" value={check} onChange={(e) => setCheck(e.target.value)} placeholder="check (optional)" aria-label="Check" style={field} />
-      {name.trim() && value && !check.trim() && !dismissed && (
-        <Suggestion envId={envId} name={name.trim()} value={value} onDismiss={() => setDismissed(true)} onUse={(suggested) => setCheck(suggested)} />
-      )}
       <div>
         <button className="btn sm lamp" type="submit" disabled={action.busy || !name.trim()}>
           Add value
@@ -415,7 +315,7 @@ export function EnvironmentValues({ id, onChanged }: { id: string; onChanged: ()
       )}
       {data.values.length === 0 && <div className="empty">No values yet. Add one, or start from a preset.</div>}
       {data.values.map((v) => (
-        <ValueRow key={`${v.name}:${v.value}:${v.note}:${v.check ?? ""}:${v.source}`} envId={id} v={v} onSaved={refresh} />
+        <ValueRow key={`${v.name}:${v.value}:${v.note}:${v.source}`} envId={id} v={v} onSaved={refresh} />
       ))}
       <AddValue envId={id} onAdded={refresh} />
       <Kept envId={id} slots={data.kept} onChanged={refresh} />
@@ -483,7 +383,7 @@ export function NewFromTemplate({ onAdded }: { onAdded: () => void }) {
           style={{ ...field, flex: "1 1 160px", width: "auto" }}
         />
         <button className="btn lamp" type="submit" disabled={action.busy || !name || !id.trim()}>
-          {action.busy ? "Running doctor…" : "Create"}
+          {action.busy ? "Creating…" : "Create"}
         </button>
       </div>
       {asks.map((v) => (

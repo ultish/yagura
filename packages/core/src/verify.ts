@@ -21,6 +21,7 @@ import { addDetachedWorktree, diffText, ensureMirror, patchId } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { loadPack, type VerifyPack } from "./pack.js";
 import { commitPackEdit, discardWorkspace, openPackWorkspace, stagePackChanges } from "./packedits.js";
+import { pauseEnvironment } from "./envpause.js";
 import { acquireLease, keepable, keepLease, releaseLease } from "./leases.js";
 import { syncPackStatus } from "./repos.js";
 import { requiredProjectSkills } from "./skills.js";
@@ -61,9 +62,7 @@ function latestWorkAttempt(db: Db, target: Unit): Attempt {
 function failedVerifications(db: Db, target: Unit): number {
   return (
     db
-      .prepare(
-        "SELECT COUNT(*) AS n FROM events WHERE type = 'verify.outcome' AND unit_id = ? AND json_extract(data_json, '$.outcome') IN ('invalid', 'env-blocked')",
-      )
+      .prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'verify.outcome' AND unit_id = ? AND json_extract(data_json, '$.outcome') = 'invalid'")
       .get(target.id) as { n: number }
   ).n;
 }
@@ -83,7 +82,14 @@ function applyOutcome(db: Db, target: Unit, work: Attempt, decision: VerdictDeci
     db,
     "verify.outcome",
     { projectId: target.projectId, unitId: target.id },
-    { outcome: decision.outcome, reason: decision.reason, tier: decision.tier, verifyUnit: verifySeq },
+    // yagura judges the facts the verifier cites, never its argument: an invalid verdict is the one it disagrees with.
+    {
+      outcome: decision.outcome,
+      check: decision.outcome === "invalid" ? "disagreed" : "agreed",
+      reason: decision.reason,
+      tier: decision.tier,
+      verifyUnit: verifySeq,
+    },
   );
   switch (decision.outcome) {
     case "verified":
@@ -101,6 +107,8 @@ function applyOutcome(db: Db, target: Unit, work: Attempt, decision: VerdictDeci
       transitionUnit(db, target.id, "blocked", { reason: decision.reason });
       return;
     case "env-blocked":
+      pauseEnvironment(db, target, decision.reason);
+      return;
     case "invalid":
       if (failedVerifications(db, target) >= maxRetries)
         transitionUnit(db, target.id, "blocked", { reason: `verification did not reach a verdict ${maxRetries} times: ${decision.reason}` });
@@ -239,7 +247,15 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
   };
 
   const projectSkills = requiredProjectSkills(db, unit);
-  const lease = await acquireLease(db, boot, project.environmentId as EnvironmentId, attempt.id);
+  let lease: Awaited<ReturnType<typeof acquireLease>>;
+  try {
+    lease = await acquireLease(db, boot, project.environmentId as EnvironmentId, attempt.id);
+  } catch (e) {
+    if (workspace) await discard(workspace).catch(() => undefined);
+    updateAttempt(db, attempt.id, { state: "failed", endedAt: now(), failureMode: "tool-error" });
+    const reason = `yagura could not get a slot on ${project.environmentId}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`;
+    return finish({ outcome: "env-blocked", tier: "verifier-blocked", reason, trunkOutcome: null, headOutcome: null, citedRunIds: [] }, false);
+  }
   const keepPolicy = resolveSetting(db, "lease.keep", { projectId: project.id, environmentId: project.environmentId }).value;
   let kept: string | null = null;
   const endSlot = async (outcome: VerdictDecision["outcome"] | "stopped") => {

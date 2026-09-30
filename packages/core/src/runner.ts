@@ -18,7 +18,7 @@ import {
 import { chooseResume, rejectionFindings, renderResumePrompt } from "./resume.js";
 import { requiredProjectSkills, skillMethod } from "./skills.js";
 import { mountSources, sourceEnv } from "./sources.js";
-import { environmentNotes, hardCodedValues, listValues, valueMap } from "./envvalues.js";
+import { environmentNotes, listValues, valueMap } from "./envvalues.js";
 import { LEASE_VARS } from "./leases.js";
 import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
 import { classifyFailure, parseHandoff, syntheticFailureHandoff } from "./handoff.js";
@@ -259,16 +259,8 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     });
     transitionUnit(db, unit.id, "handed_off", { attempt: attempt.n, status: handoff.status, head, leftovers: leftovers.paths });
     const violations = checkScope(touched, unit.writeScope, [...unit.forbidScope, ...packForbid]);
-    const literals = hardCodedValues(await addedLines(worktree, base), envValues, setting("values.literal_allowed"));
     if (violations.length) reject("scope", { reason: "scope", violations });
-    else if (literals.length) {
-      addUnitNote(
-        db,
-        unit.id,
-        `Attempt ${attempt.n} wrote environment values literally: ${literals.map((l) => `${l.path} has "${l.value}", use $${l.name}`).join("; ")}. Read values from the environment by name.`,
-      );
-      reject("literals", { reason: "hard-coded environment values", literals });
-    } else if (handoff.status === "blocked") {
+    else if (handoff.status === "blocked") {
       transitionUnit(db, unit.id, "blocked", { reason: "agent reported blocked" });
     } else if (head === base) {
       transitionUnit(db, unit.id, "blocked", { reason: "handed off with no commits" });

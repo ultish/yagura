@@ -38,6 +38,7 @@ import {
   type ProjectId,
   type Unit,
   type UnitId,
+  pausedBy,
 } from "@yagura/core";
 
 type Row = Record<string, unknown>;
@@ -236,6 +237,7 @@ export function environmentView(db: Db, id: EnvironmentId) {
     queued: leases.filter((l) => l.state === "queued").map((l) => ({ ...holder(l), since: l.requested_at as string })),
     projects: db.prepare("SELECT id, state FROM projects WHERE environment_id = ? ORDER BY created_at").all(id) as { id: string; state: string }[],
     kept: keptSlots(db, { environmentId: id }),
+    pausedBy: pausedBy(db, id),
   };
 }
 

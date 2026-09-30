@@ -24,12 +24,6 @@ export type KubeConfig = z.output<typeof KubeConfig>;
 
 export const YAGURA_LABEL = "yagura=1";
 
-export interface DoctorCheck {
-  name: string;
-  ok: boolean;
-  detail: string;
-}
-
 export function kubeConfig(env: Environment): KubeConfig {
   return KubeConfig.parse(env.providerConfig);
 }
@@ -90,46 +84,4 @@ export async function destroyNamespaceSlot(env: Environment, vars: Record<string
   const label = await kubectl(cfg, ["get", "namespace", ns, "-o", "jsonpath={.metadata.labels.yagura}"]);
   if (label !== "1") throw new Error(`namespace ${ns} is not labelled ${YAGURA_LABEL}; yagura leaves it alone`);
   await kubectl(cfg, ["delete", "namespace", ns, "--wait=false"]);
-}
-
-export async function doctorKube(env: Environment): Promise<DoctorCheck[]> {
-  const checks: DoctorCheck[] = [];
-  const step = async (name: string, fn: () => Promise<string>): Promise<boolean> => {
-    try {
-      checks.push({ name, ok: true, detail: await fn() });
-      return true;
-    } catch (e) {
-      checks.push({ name, ok: false, detail: e instanceof Error ? e.message : String(e) });
-      return false;
-    }
-  };
-  let cfg: KubeConfig;
-  try {
-    cfg = kubeConfig(env);
-  } catch (e) {
-    return [{ name: "config", ok: false, detail: e instanceof Error ? e.message : String(e) }];
-  }
-  const reach = await step("reach the cluster", async () => {
-    const context = cfg.context ?? (await kubectl(cfg, ["config", "current-context"]));
-    const version = JSON.parse(await kubectl(cfg, ["version", "-o", "json", "--request-timeout=10s"])) as { serverVersion?: { gitVersion?: string } };
-    return `context ${context}, server ${version.serverVersion?.gitVersion ?? "unknown"}`;
-  });
-  if (!reach) return checks;
-  if (cfg.mode === "create") {
-    const probe = `${cfg.prefix}-probe-${randomBytes(3).toString("hex")}`;
-    const created = await step("create a probe namespace", async () => {
-      await kubectl(cfg, ["create", "namespace", probe]);
-      await kubectl(cfg, ["label", "namespace", probe, YAGURA_LABEL, "yagura/probe=1"]);
-      return probe;
-    });
-    if (created) await step("delete the probe namespace", async () => (await kubectl(cfg, ["delete", "namespace", probe, "--wait=false"]), probe));
-  } else
-    for (const ns of cfg.pool)
-      await step(`use namespace ${ns}`, async () => {
-        await kubectl(cfg, ["get", "namespace", ns]);
-        const can = await kubectl(cfg, ["auth", "can-i", "create", "pods", "-n", ns]).catch(() => "no");
-        if (can !== "yes") throw new Error(`cannot create pods in ${ns}`);
-        return "can create pods";
-      });
-  return checks;
 }

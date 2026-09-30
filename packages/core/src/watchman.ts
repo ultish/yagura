@@ -235,7 +235,7 @@ Reply to the developer in plain prose. Then end your final message with exactly 
     ],
     "environments": [
       { "id": "vm", "provider": "kube-namespace", "providerConfig": { "context": "rancher-desktop" }, "capacity": 1, "notes": "dependencies run in the cluster",
-        "presets": ["helm"], "values": [{ "name": "REDIS_URL", "value": "redis://vm.internal:6379", "note": "Redis from this machine", "check": "redis-cli -u \\"$REDIS_URL\\" ping" }] },
+        "presets": ["helm"], "values": [{ "name": "REDIS_URL", "value": "redis://vm.internal:6379", "note": "Redis from this machine" }] },
       { "id": "vm2", "template": "spring-kube", "answers": { "REGISTRY_PULL": "vm2.internal:5000" } }
     ],
     "projects": [{
@@ -257,7 +257,7 @@ function catalog(db: Db, boot: RunContext["boot"]): string {
   const projects = db.prepare("SELECT id, state FROM projects ORDER BY created_at").all() as { id: string; state: string }[];
   const envLine = (e: Environment) => {
     const values = listValues(db, e.id).map((v) => v.name);
-    return `${e.id} (${e.provider}, ${e.capacity} slots, doctor ${e.doctorStatus}${values.length ? `, values ${values.join(" ")}` : ""})`;
+    return `${e.id} (${e.provider}, ${e.capacity} slots${values.length ? `, values ${values.join(" ")}` : ""})`;
   };
   const templates = listTemplates(boot).flatMap((t) =>
     t.template

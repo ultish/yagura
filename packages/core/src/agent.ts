@@ -59,6 +59,7 @@ export interface SessionRecorder {
   started(pid: number | null): void;
   session(e: Extract<HarnessEvent, { kind: "session" }>): void;
   usage(contextPeak: number, tokensOut: number): void;
+  cost(usd: number): void;
   finished(skills: string[]): string[];
 }
 
@@ -89,6 +90,7 @@ export function attemptRecorder(
     },
     session: (e) => updateAttempt(db, s.attempt.id, { pluginVersions: e.plugins, model: e.model, sessionId: e.sessionId }),
     usage: (contextPeak, tokensOut) => updateAttempt(db, s.attempt.id, { contextPeak, tokensOut }),
+    cost: (usd) => db.prepare("UPDATE attempts SET cost_usd = cost_usd + ? WHERE id = ?").run(usd, s.attempt.id),
     finished: (skills) => {
       const missing = getAttempt(db, s.attempt.id).stopNote !== null ? [] : missingSkills(s.role, [...(s.inheritedSkills ?? []), ...skills], s.projectSkills);
       updateAttempt(db, s.attempt.id, { skills, missingSkills: missing });
@@ -175,7 +177,10 @@ export async function runAgentSession(
         const skill = (e.input as { skill?: unknown } | null)?.skill;
         if (e.name === "Skill" && typeof skill === "string") skills.push(skill);
       }
-      if (e.kind === "final") final = e;
+      if (e.kind === "final") {
+        final = e;
+        if (e.costUsd) s.recorder.cost(e.costUsd);
+      }
       ctx.onEvent?.(e);
     }
   }

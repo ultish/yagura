@@ -5,7 +5,7 @@ import { z } from "zod";
 import { resolveSetting, setSetting, SETTING_LAYERS, SETTINGS, type Bootstrap, type SettingKey } from "./config.js";
 import { PROVIDERS, type EnvironmentId } from "./domain.js";
 import { checkValueName, listValues, setEnvironmentNotes, setValue } from "./envvalues.js";
-import { doctorEnvironment, PROVIDERS_IMPL } from "./leases.js";
+import { PROVIDERS_IMPL } from "./leases.js";
 import { applyPreset, PRESETS } from "./presets.js";
 import { addEnvironment, getEnvironment, recordEvent, type Db } from "./store.js";
 
@@ -30,7 +30,8 @@ export const EnvTemplate = z
             name: z.string(),
             value: z.string(),
             note: z.string().default(""),
-            check: z.string().nullable().default(null),
+            // Templates saved before value checks were removed (2026-09-30) still carry them; they are ignored.
+            check: z.unknown().optional(),
             ask: z.boolean().default(false),
           })
           .strict(),
@@ -95,7 +96,7 @@ export function saveTemplate(
         .filter((r) => !r.key.startsWith("lease.keep"))
         .map((r) => [r.key, JSON.parse(r.value_json)]),
     ),
-    values: values.map((v) => ({ name: v.name, value: v.value, note: v.note, check: v.check, ask: (input.ask ?? []).includes(v.name) })),
+    values: values.map((v) => ({ name: v.name, value: v.value, note: v.note, ask: (input.ask ?? []).includes(v.name) })),
   });
   mkdirSync(templatesDir(boot), { recursive: true });
   const path = join(templatesDir(boot), `${input.name}.yaml`);
@@ -116,9 +117,7 @@ export const EnvironmentDraft = z
     keep: Keep.optional(),
     settings: z.record(z.unknown()).default({}),
     presets: z.array(z.string()).default([]),
-    values: z
-      .array(z.object({ name: z.string(), value: z.string(), note: z.string().default(""), check: z.string().nullable().default(null) }).strict())
-      .default([]),
+    values: z.array(z.object({ name: z.string(), value: z.string(), note: z.string().default("") }).strict()).default([]),
   })
   .strict();
 export type EnvironmentDraft = z.output<typeof EnvironmentDraft>;
@@ -141,7 +140,7 @@ export function draftFromTemplate(
     notes: t.notes,
     keep: t.keep,
     settings: t.settings,
-    values: t.values.map((v) => ({ name: v.name, value: v.ask ? answers[v.name]!.trim() : v.value, note: v.note, check: v.check })),
+    values: t.values.map((v) => ({ name: v.name, value: v.ask ? answers[v.name]!.trim() : v.value, note: v.note })),
   });
 }
 
@@ -189,9 +188,8 @@ export async function applyTemplate(
   ctx: { db: Db; boot: Bootstrap },
   name: string,
   input: { id: string; name?: string; answers?: Record<string, string>; config?: Record<string, unknown> },
-): Promise<{ ok: boolean; environmentId: EnvironmentId }> {
+): Promise<{ environmentId: EnvironmentId }> {
   const id = createEnvironment(ctx.db, draftFromTemplate(ctx.boot, name, input), `template ${name}`);
   recordEvent(ctx.db, "template.applied", {}, { template: name, environment: id });
-  const doctor = await doctorEnvironment(ctx.db, ctx.boot, id);
-  return { ok: doctor.ok, environmentId: id };
+  return { environmentId: id };
 }

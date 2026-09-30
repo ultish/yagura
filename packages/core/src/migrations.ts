@@ -249,6 +249,25 @@ CREATE TABLE pack_edits (
 CREATE INDEX pack_edits_target ON pack_edits (target_unit_id);
 `,
   },
+  {
+    version: 17,
+    sql: `
+ALTER TABLE attempts ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0;
+ALTER TABLE watchman_turns ADD COLUMN cost_usd REAL NOT NULL DEFAULT 0;
+`,
+  },
+  {
+    version: 18,
+    sql: `
+ALTER TABLE environment_values DROP COLUMN check_cmd;
+ALTER TABLE environment_values DROP COLUMN last_ok;
+ALTER TABLE environment_values DROP COLUMN last_detail;
+ALTER TABLE environment_values DROP COLUMN last_checked_at;
+ALTER TABLE environments DROP COLUMN doctor_status;
+ALTER TABLE environments DROP COLUMN doctor_checked_at;
+ALTER TABLE environments DROP COLUMN doctor_json;
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

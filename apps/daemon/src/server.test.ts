@@ -230,7 +230,7 @@ describe("daemon API", () => {
     expect((await (await get("/api/environments")).json()) as unknown[]).toHaveLength(1);
   });
 
-  it("edits an environment's values, adds a preset, suggests and tries checks, and saves and applies a template", async () => {
+  it("edits an environment's values, adds a preset, and saves and applies a template", async () => {
     await post("/api/environments", { id: "box", provider: "local-process", capacity: 1 });
     await post("/api/environments/box/values", { name: "REDIS_URL", value: "redis://hostname:6379", note: "redis from this box" });
     expect(await (await post("/api/environments/box/values", { name: "yagura_x", value: "v" })).json()).toEqual({
@@ -238,17 +238,6 @@ describe("daemon API", () => {
     });
     expect(await (await post("/api/environments/box/presets/registry", {})).json()).toEqual({ added: ["REGISTRY_PUSH", "REGISTRY_PULL"], skipped: [] });
     expect(await (await post("/api/environments/box/presets/registry", {})).json()).toEqual({ added: [], skipped: ["REGISTRY_PUSH", "REGISTRY_PULL"] });
-    expect(await (await get("/api/check-suggestion?name=REDIS_URL&value=redis%3A%2F%2Fhostname%3A6379")).json()).toEqual({
-      check: 'redis-cli -u "$REDIS_URL" ping',
-    });
-    expect(await (await post("/api/environments/box/try-check", { command: 'echo "$REDIS_URL"' })).json()).toEqual({
-      ok: true,
-      detail: "redis://hostname:6379",
-    });
-    expect(await (await post("/api/environments/box/try-check", { command: 'echo "$NEW"', name: "NEW", value: "unsaved" })).json()).toEqual({
-      ok: true,
-      detail: "unsaved",
-    });
     await post("/api/environments/box/notes", { notes: "deps in cluster" });
     await post("/api/environments/box/values/REGISTRY_PULL/delete", {});
     const detail = (await (await get("/api/environments/box")).json()) as {

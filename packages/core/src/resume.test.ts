@@ -21,9 +21,8 @@ const attempt = (n: number, over: Partial<Attempt> = {}): Attempt =>
 const opts = { enabled: true, canResume: true, maxContext: 0.6 };
 
 describe("chooseResume", () => {
-  it("resumes a code fault or a first hard-coded value", () => {
+  it("resumes a code fault", () => {
     expect(chooseResume([attempt(1)], opts).resume?.n).toBe(1);
-    expect(chooseResume([attempt(1, { rejection: "literals" })], opts).resume?.n).toBe(1);
   });
 
   it("has nothing to decide when the last attempt was not rejected", () => {
@@ -36,9 +35,6 @@ describe("chooseResume", () => {
     expect(fresh([attempt(1, { rejection: "scope" })])).toBe("attempt 1 was rejected for writing outside its scope");
     expect(fresh([attempt(1, { rejection: "skills" })])).toBe("attempt 1 was rejected for skipping required skills");
     expect(fresh([attempt(1, { rejection: "conflict" })])).toBe("attempt 1 was rejected for a conflict with the moved trunk");
-    expect(fresh([attempt(1, { rejection: "literals" }), attempt(2, { rejection: "literals" })])).toBe(
-      "attempt 2 hard-coded environment values twice in a row",
-    );
     expect(fresh([attempt(1)], { ...opts, canResume: false })).toBe("attempt 1 ran on claude, which cannot resume");
     expect(fresh([attempt(1, { sessionId: null })])).toBe("attempt 1 left no session to resume");
     expect(fresh([attempt(1, { model: "claude-opus-5-5[1m]", contextPeak: 700_000 })])).toBe("attempt 1 peaked at 70% of its context window");

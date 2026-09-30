@@ -15,6 +15,7 @@ export interface WatchmanTurn {
   state: TurnState;
   model: string | null;
   contextPeak: number;
+  costUsd: number;
   logPath: string;
   startedAt: IsoTime;
   endedAt: IsoTime | null;
@@ -32,6 +33,7 @@ const toTurn = (r: Row): WatchmanTurn => ({
   state: r.state as TurnState,
   model: (r.model as string | null) ?? null,
   contextPeak: r.context_peak as number,
+  costUsd: (r.cost_usd as number | undefined) ?? 0,
   logPath: r.log_path as string,
   startedAt: r.started_at as IsoTime,
   endedAt: (r.ended_at as IsoTime | null) ?? null,
@@ -110,6 +112,7 @@ export function turnRecorder(db: Db, turn: { id: number; threadId: number; messa
     },
     session: (e) => db.prepare("UPDATE watchman_turns SET model = ? WHERE id = ?").run(e.model, id),
     usage: (contextPeak) => db.prepare("UPDATE watchman_turns SET context_peak = ? WHERE id = ?").run(contextPeak, id),
+    cost: (usd) => db.prepare("UPDATE watchman_turns SET cost_usd = cost_usd + ? WHERE id = ?").run(usd, id),
     finished: (skills) => {
       const missing = missingSkills("watchman", skills);
       if (missing.length) recordEvent(db, "watchman.method_miss", {}, { thread: threadId, message: messageId, missing, loaded: skills });

@@ -31,6 +31,7 @@ import {
   updateAttempt,
   type Db,
 } from "./store.js";
+import { readiness } from "./schedule.js";
 import { runVerifyUnit } from "./verify.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
@@ -126,6 +127,8 @@ describe("runVerifyUnit", () => {
     const { target, result } = await workThenVerify("verify-lie");
     expect(result.decision).toMatchObject({ outcome: "invalid", reason: expect.stringMatching(/run:999/) });
     expect(target.state).toBe("verifying");
+    const outcome = db.prepare("SELECT data_json FROM events WHERE type = 'verify.outcome'").get() as { data_json: string };
+    expect(JSON.parse(outcome.data_json)).toMatchObject({ outcome: "invalid", check: "disagreed" });
   });
 
   it("sends the work back with the verifier's reason when the change fails acceptance", async () => {
@@ -186,6 +189,10 @@ describe("pack lifecycle scripts", () => {
     expect(result.attempt.skills).toContain("yagura:yagura-verifier");
     expect(readFileSync(layout(ctx.boot).brief(project, 2, 1), "utf8")).toContain("- doctor on trunk: run:1 exit 3");
     expect(target.state).toBe("verifying");
+    expect(db.prepare("SELECT kind, state FROM gates").all()).toEqual([{ kind: "environment", state: "open" }]);
+    expect(listUnits(db, project).filter((u) => u.type === "verify" && u.state === "ready")).toEqual([]);
+    const waiting = addVerifyUnit(db, getUnit(db, target.id));
+    expect(readiness(db, project).waiting).toEqual([{ unit: waiting, reason: "verification on local is paused until gate 1 is answered" }]);
   });
 
   it("uses the verifier's pack fix at once on both sides, and keeps it as an edit to land after the unit", async () => {

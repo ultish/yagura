@@ -75,7 +75,14 @@ describe("runWorkUnit", () => {
     expect(getUnitBySeq(db, project, 2)).toMatchObject({ type: "verify", state: "ready", targetUnitId: unit.id });
     expect(attempt.skills).toEqual(["yagura:yagura-worker", "pstack:poteto-mode"]);
     expect(attempt.missingSkills).toEqual([]);
-    expect(attempt).toMatchObject({ state: "handed_off", handoffStatus: "success", selfTier: "unit-verified", model: "fake-model", contextPeak: 1200 });
+    expect(attempt).toMatchObject({
+      state: "handed_off",
+      handoffStatus: "success",
+      selfTier: "unit-verified",
+      model: "fake-model",
+      contextPeak: 1200,
+      costUsd: 0.01,
+    });
     expect(attempt.pluginVersions).toEqual({ pstack: "0.5.0" });
     expect(attempt.headSha).not.toBe(attempt.baseSha);
     expect(readFileSync(join(attempt.worktreePath!, "app/orders.py"), "utf8")).toContain("brief had GOAL: true");
@@ -100,7 +107,7 @@ describe("runWorkUnit", () => {
     expect(JSON.parse(ev.data_json).violations).toEqual([{ path: "README.md", reason: "outside-write-scope" }]);
   });
 
-  it("gives the agent the environment's values with their notes, and rejects work that writes one literally", async () => {
+  it("gives the agent the environment's values with their notes, and leaves judging a hard-coded value to the verifier", async () => {
     addEnvironment(db, { id: "dev", name: "dev", provider: "local-process", capacity: 1 });
     setProjectEnvironment(db, project, "dev" as EnvironmentId);
     setEnvironmentNotes(db, "dev" as EnvironmentId, "deps run in the cluster");
@@ -109,11 +116,8 @@ describe("runWorkUnit", () => {
     const brief = readFileSync(paths.brief(project, unit.seq, attempt.n), "utf8");
     expect(brief).toContain("## ENV\n- MARKER=edited by fake agent (the text every fake edit starts with)\n");
     expect(brief).toContain("- About this environment: deps run in the cluster");
-    expect(unit.state).toBe("rejected");
-    expect(attempt).toMatchObject({ state: "handed_off", failureMode: "scope" });
-    expect(unit.notes).toEqual([
-      'Attempt 1 wrote environment values literally: app/orders.py has "edited by fake agent", use $MARKER. Read values from the environment by name.',
-    ]);
+    expect(unit.state).toBe("verifying");
+    expect(attempt).toMatchObject({ state: "handed_off", rejection: null });
   });
 
   it("blocks the unit when the agent hands off blocked", async () => {

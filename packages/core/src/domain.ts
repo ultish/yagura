@@ -21,9 +21,6 @@ export type Provider = (typeof PROVIDERS)[number];
 export const FORGES = ["none", "glab", "gh"] as const;
 export type Forge = (typeof FORGES)[number];
 
-export const DOCTOR_STATUSES = ["unknown", "passing", "failing"] as const;
-export type DoctorStatus = (typeof DOCTOR_STATUSES)[number];
-
 export const PACK_STATUSES = ["missing", "unproven", "proven", "stale"] as const;
 export type PackStatus = (typeof PACK_STATUSES)[number];
 
@@ -122,6 +119,7 @@ export const HANDOFF_STATUSES = ["success", "partial", "blocked"] as const;
 export type HandoffStatus = (typeof HANDOFF_STATUSES)[number];
 
 // Why yagura sent a handed-off attempt back; decides whether the next attempt may resume its session.
+// yagura no longer rejects hard-coded values ("literals", until 2026-09-30); older databases still hold the value.
 export const REJECTIONS = ["code-fault", "literals", "scope", "skills", "conflict"] as const;
 export const PACK_EDIT_STATES = ["pending", "queued", "dropped"] as const;
 export type PackEditState = (typeof PACK_EDIT_STATES)[number];
@@ -174,9 +172,6 @@ export interface Environment {
   provider: Provider;
   providerConfig: Record<string, unknown>;
   capacity: number;
-  doctorStatus: DoctorStatus;
-  doctorCheckedAt: IsoTime | null;
-  doctorChecks: { name: string; ok: boolean; detail: string }[];
   notes: string;
   createdAt: IsoTime;
 }
@@ -269,6 +264,7 @@ export interface Attempt {
   tokensIn: number;
   tokensOut: number;
   contextPeak: number;
+  costUsd: number;
   sessionId: string | null;
   resumesAttemptId: AttemptId | null;
   sources: { unit: string; repoId: RepoId; sha: Sha; path: string }[];

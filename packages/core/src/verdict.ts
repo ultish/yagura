@@ -27,6 +27,12 @@ export const CHECK_LABEL = (name: string) => `check:${name}`;
 const passed = (r: EvidenceRun) => r.exitCode === 0 && !r.timedOut;
 const outcomeOf = (r: EvidenceRun | undefined) => (!r ? "not run" : r.timedOut ? "timed out" : `exit ${r.exitCode}`);
 
+const firstLine = (text: string) =>
+  text
+    .split("\n")
+    .map((l) => l.replace(/^[-*]\s*/, "").trim())
+    .find(Boolean) ?? "";
+
 export function citedRuns(handoff: Handoff): number[] {
   const ids = new Set<number>();
   for (const m of `${handoff.evidence.join("\n")}\n${handoff.notes}`.matchAll(/\brun:(\d+)\b/g)) ids.add(Number(m[1]));
@@ -97,7 +103,10 @@ export function decideVerdict(input: VerdictInput): VerdictDecision {
 
   const claimed = handoff.verification;
   if (claimed === "verifier-blocked")
-    return decision("env-blocked", "verifier reported the environment blocked verification", { tier: "verifier-blocked", ...summaries });
+    return decision("env-blocked", `the verifier could not verify: ${firstLine(handoff.notes) || "it gave no reason"}`, {
+      tier: "verifier-blocked",
+      ...summaries,
+    });
   if (claimed === "verifier-failed") {
     const failingHead = cited.map((id) => byId.get(id)!).filter((r) => r.at === "head" && !passed(r));
     if (!failingHead.length) return decision("invalid", "verifier-failed without citing a failing run on head");

@@ -12,6 +12,7 @@ import { runTriageUnit } from "./triage.js";
 import { addVerifyUnit, runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
+import { resumeVerifications } from "./envpause.js";
 import { queuePackEdits } from "./packedits.js";
 import { ensurePackUnits } from "./packs.js";
 import {
@@ -344,6 +345,7 @@ export class Engine {
       }
       for (const u of await ensurePackUnits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
       for (const u of await queuePackEdits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
+      for (const u of resumeVerifications(this.db, project.id)) this.log(`  U${u.seq}: ${u.goal} (verification resumed)`);
       this.settleFailures(project);
       if (this.maybeClose(project)) continue;
       if (project.andonReason) continue;

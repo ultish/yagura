@@ -2,8 +2,8 @@ import { mkdirSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import type { Bootstrap } from "./config.js";
-import { createNamespaceSlot, destroyNamespaceSlot, doctorKube, KubeConfig, kubeConfig, type DoctorCheck } from "./kube.js";
-import { checkValues, valueMap } from "./envvalues.js";
+import { createNamespaceSlot, destroyNamespaceSlot, KubeConfig, kubeConfig } from "./kube.js";
+import { valueMap } from "./envvalues.js";
 import type { AttemptId, Environment, EnvironmentId, IsoTime, LeaseId, Provider } from "./domain.js";
 import { getEnvironment, now, recordEvent, type Db } from "./store.js";
 
@@ -18,7 +18,6 @@ export interface Lease {
 export interface ProviderImpl {
   createSlot(env: Environment, lease: { id: LeaseId; slot: string }, boot: Bootstrap): Promise<Record<string, string>>;
   destroySlot(env: Environment, lease: { id: LeaseId; slot: string; vars: Record<string, string> }, boot: Bootstrap): Promise<void>;
-  doctor(env: Environment, boot: Bootstrap): Promise<DoctorCheck[]>;
   validateConfig(config: Record<string, unknown>, capacity: number): string | null;
 }
 
@@ -57,14 +56,6 @@ export const PROVIDERS_IMPL: Partial<Record<Provider, ProviderImpl>> = {
     async destroySlot(_env, lease, boot) {
       rmSync(leaseDir(boot, lease.id), { recursive: true, force: true });
     },
-    async doctor(_env, boot) {
-      const dir = join(boot.home, "leases");
-      mkdirSync(dir, { recursive: true });
-      return [
-        { name: "private directories", ok: true, detail: dir },
-        { name: "free ports", ok: true, detail: `port ${await freePort()} is free` },
-      ];
-    },
     validateConfig: (config) => (Object.keys(config).length ? `local-process takes no settings (got ${Object.keys(config).join(", ")})` : null),
   },
   "kube-namespace": {
@@ -77,7 +68,6 @@ export const PROVIDERS_IMPL: Partial<Record<Provider, ProviderImpl>> = {
       await destroyNamespaceSlot(env, lease.vars);
       rmSync(leaseDir(boot, lease.id), { recursive: true, force: true });
     },
-    doctor: (env) => doctorKube(env),
     validateConfig(config, capacity) {
       const parsed = KubeConfig.safeParse(config);
       if (!parsed.success) return parsed.error.issues.map((i) => `${i.path.join(".") || "config"}: ${i.message}`).join("; ");
@@ -87,20 +77,6 @@ export const PROVIDERS_IMPL: Partial<Record<Provider, ProviderImpl>> = {
     },
   },
 };
-
-export async function doctorEnvironment(db: Db, boot: Bootstrap, environmentId: EnvironmentId): Promise<{ ok: boolean; checks: DoctorCheck[] }> {
-  const env = getEnvironment(db, environmentId);
-  const checks = [...(await providerFor(env).doctor(env, boot)), ...(await checkValues(db, environmentId))];
-  const ok = checks.length > 0 && checks.every((c) => c.ok);
-  db.prepare("UPDATE environments SET doctor_status = ?, doctor_checked_at = ?, doctor_json = ? WHERE id = ?").run(
-    ok ? "passing" : "failing",
-    now(),
-    JSON.stringify(checks),
-    environmentId,
-  );
-  recordEvent(db, "environment.doctor", {}, { environment: environmentId, ok, failed: checks.filter((c) => !c.ok).map((c) => c.name) });
-  return { ok, checks };
-}
 
 function providerFor(env: Environment): ProviderImpl {
   const impl = PROVIDERS_IMPL[env.provider];

@@ -256,6 +256,37 @@ describe("Engine", () => {
     ).toBe(true);
   }, 60_000);
 
+  it("pauses verification on an environment its first verifier cannot use, and resumes every waiting unit once answered", async () => {
+    const { listGates, answerGate } = await import("./store.js");
+    const engine = new Engine(ctx, { projectId: project, tickMs: 50 });
+    process.env.FAKE_VERIFY_BLOCKED = "the registry at localhost:5000 refused the connection";
+    try {
+      await engine.runUntilIdle();
+    } finally {
+      delete process.env.FAKE_VERIFY_BLOCKED;
+    }
+    const gates = listGates(db, project, "open").filter((g) => g.kind === "environment");
+    expect(gates.map((g) => g.question)).toEqual([
+      "Verification on environment local is paused: the verifier could not verify: the registry at localhost:5000 refused the connection. It stays paused for every project on local until you answer that it works again.",
+    ]);
+    const opened = db.prepare("SELECT id FROM events WHERE type = 'environment.paused'").get() as { id: number };
+    const startedAfter = db
+      .prepare("SELECT COUNT(*) AS n FROM events e JOIN units u ON u.id = e.unit_id WHERE e.type = 'attempt.started' AND u.type = 'verify' AND e.id > ?")
+      .get(opened.id);
+    expect(startedAfter).toEqual({ n: 0 });
+    expect(listUnits(db, project).filter((u) => u.type === "work" && u.state === "landed")).toEqual([]);
+    expect(listUnits(db, project).filter((u) => u.state === "verifying").length).toBeGreaterThan(0);
+
+    answerGate(db, gates[0]!.id, "fixed");
+    await engine.runUntilIdle();
+    expect(
+      listUnits(db, project)
+        .filter((u) => u.type === "work")
+        .map((u) => u.state),
+    ).toEqual(["landed", "landed", "landed"]);
+    expect(getProject(db, project).state).toBe("closed");
+  }, 60_000);
+
   it("does not start work while the project's andon is raised", async () => {
     const { setAndon } = await import("./store.js");
     setAndon(db, project, "investigating a bad deploy");

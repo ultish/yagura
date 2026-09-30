@@ -203,6 +203,8 @@ function engine(role) {
       exits[at] = exit === "0";
       return Number(id);
     };
+    if (process.env.FAKE_VERIFY_BLOCKED)
+      return finish(`## Status\nblocked\n\n## Verification\nverifier-blocked\n\n## Notes, concerns, deviations\n- ${process.env.FAKE_VERIFY_BLOCKED}\n`);
     const base = run("base");
     const head = run("head");
     if (!exits.head) return finish(`## Status\nsuccess\n\n## Verification\nverifier-failed\n\n## Evidence\n- run:${head} fails on head\n- run:${base}\n`);

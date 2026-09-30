@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Bootstrap } from "./config.js";
 import type { AttemptId, EnvironmentId, ProjectId, RepoId } from "./domain.js";
-import { acquireLease, doctorEnvironment, PROVIDERS_IMPL, releaseLease } from "./leases.js";
+import { acquireLease, PROVIDERS_IMPL, releaseLease } from "./leases.js";
 import { addEnvironment, addProject, addRepo, addUnit, createAttempt, getEnvironment, openStore, setProjectEnvironment, type Db } from "./store.js";
 
 const fakeKubectl = fileURLToPath(new URL("./harness/fixtures/fake-kubectl.mjs", import.meta.url));
@@ -90,30 +90,5 @@ describe("kube-namespace provider", () => {
     expect(kube.validateConfig({ cluster: "x" }, 1)).toMatch(/Unrecognized key/);
     expect(kube.validateConfig({ context: "rancher-desktop" }, 1)).toBeNull();
     expect(PROVIDERS_IMPL["local-process"]!.validateConfig({ context: "x" }, 1)).toBe("local-process takes no settings (got context)");
-  });
-});
-
-describe("environment doctor", () => {
-  it("reaches the cluster and creates and deletes a probe namespace, then the environment is selectable", async () => {
-    kubeEnv("dev", {});
-    expect(() => setProjectEnvironment(db, "p" as ProjectId, "dev" as EnvironmentId)).toThrow("environment dev has not passed its doctor yet");
-    const result = await doctorEnvironment(db, boot, "dev" as EnvironmentId);
-    expect(result.checks.map((c) => [c.name, c.ok])).toEqual([
-      ["reach the cluster", true],
-      ["create a probe namespace", true],
-      ["delete the probe namespace", true],
-    ]);
-    expect(result.checks[0]!.detail).toBe("context fake-ctx, server v1.32.0+fake");
-    expect(namespaces()).toEqual([]);
-    expect(getEnvironment(db, "dev" as EnvironmentId)).toMatchObject({ doctorStatus: "passing", doctorChecks: result.checks });
-    setProjectEnvironment(db, "p" as ProjectId, "dev" as EnvironmentId);
-  });
-
-  it("fails when the cluster is unreachable and keeps the environment unselectable", async () => {
-    kubeEnv("dev", {});
-    process.env.FAKE_KUBE_DOWN = "1";
-    const result = await doctorEnvironment(db, boot, "dev" as EnvironmentId);
-    expect(result).toMatchObject({ ok: false, checks: [{ name: "reach the cluster", ok: false, detail: expect.stringMatching(/could not be reached/) }] });
-    expect(() => setProjectEnvironment(db, "p" as ProjectId, "dev" as EnvironmentId)).toThrow("environment dev failed its doctor");
   });
 });

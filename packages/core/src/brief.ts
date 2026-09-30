@@ -20,6 +20,9 @@ Self-report the strongest evidence you produced for the change itself, not for i
 ## Evidence
 - <what you ran> -> <outcome>
 
+## Decisions
+- <each choice you made that the brief did not settle, what you deliberately did not do, and why>
+
 ## Notes, concerns, deviations
 - <assumptions, surprises, anything the planner must know>
 
@@ -128,7 +131,7 @@ export function packContract(p: { packPath: string; provider: string; leaseVars:
     `This is a pack unit. ${p.reason}. Write a verify pack at ${p.packPath}/ so yagura can verify every later change to this repo.`,
     `${p.packPath}/verify.json: {"provider": "${p.provider}", "doctor"?: cmd, "deploy"?: cmd, "teardown"?: cmd, "checks": [{"name": "unit", "command": cmd, "tier": tier, "timeoutSeconds"?: n}], "features": [{"name", "doc"}], "protected": [globs]}. Check names are lowercase words joined by dashes.`,
     "Every command runs through sh -c with the repo checkout as its working directory and these variables: YAGURA_AT (base or head), YAGURA_SHA, YAGURA_EVIDENCE (a directory; files written there are kept as evidence), and the slot's variables: " +
-      `${p.leaseVars.join(", ")}, plus the environment's values under ENV (use them by name; a literal copy of a value in a file is rejected). Read nothing else from the machine; put scripts under ${p.packPath}/bin/ and one feature doc per user-facing feature under ${p.packPath}/features/.`,
+      `${p.leaseVars.join(", ")}, plus the environment's values under ENV (use them by name rather than copying a value into a file). Read nothing else from the machine; put scripts under ${p.packPath}/bin/ and one feature doc per user-facing feature under ${p.packPath}/features/.`,
     "doctor checks read-only that the environment is worth driving. deploy builds and starts the checkout in the slot; teardown removes only what deploy created. Leave out deploy and teardown when the checks need nothing running.",
     `Tiers, strongest first: deployed-verified, live-local-verified, e2e-verified, unit-verified, build-only. A check's tier is what its passing proves. This project needs at least ${p.minTier}.`,
     "yagura proves the pack on your branch head, with no agent: doctor, deploy, every check, then teardown must all exit 0 against the repo as it is now. Run them yourself the same way before you hand off.",

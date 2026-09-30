@@ -13,8 +13,7 @@ import { applyDelta, PlanDelta, PlanRejected, PlanUnit } from "./plan.js";
 import { checkRepoFree, inspectRepo, packStatusOf, REPO_ID, RepoUnusable, resolveSource, type RepoInspection } from "./repos.js";
 import { parseSpec, writeSpec } from "./spec.js";
 import { ValueInvalid } from "./envvalues.js";
-import { doctorEnvironment } from "./leases.js";
-import { addEnvironment, addProject, addRepo, assertSelectable, getEnvironment, getProject, recordEvent, setProjectState, type Db } from "./store.js";
+import { addEnvironment, addProject, addRepo, getEnvironment, getProject, recordEvent, setProjectState, type Db } from "./store.js";
 import { checkDraft, createEnvironment, draftFromTemplate, EnvironmentDraft, TemplateInvalid } from "./templates.js";
 import { getProposal, getThread, linkThreadProject, resolveProposal } from "./threads.js";
 
@@ -139,11 +138,6 @@ export function validateProposal(db: Db, boot: Bootstrap, threadId: number, p: P
     if (proj.environment && !newEnvs.includes(proj.environment)) {
       if (!db.prepare("SELECT 1 FROM environments WHERE id = ?").get(proj.environment))
         throw new ProposalInvalid(`${proj.id}: environment ${proj.environment} does not exist`);
-      try {
-        assertSelectable(getEnvironment(db, proj.environment as EnvironmentId));
-      } catch (e) {
-        throw new ProposalInvalid(`${proj.id}: ${(e as Error).message}`);
-      }
     }
     if (!proj.environment) defaultEnvironment(db, newEnvs);
     for (const r of proj.references)
@@ -205,22 +199,9 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
     validateProposal(db, boot, proposal.threadId, body);
     const drafts = environmentDrafts(db, boot, body);
     const created: string[] = [];
-    // Created before the projects, and kept if their doctor fails, so the developer can fix a value on the Environments page.
     for (const [i, d] of drafts.entries()) {
       const e = body.environments[i]!;
-      const id = createEnvironment(db, d, "template" in e ? `template ${e.template}` : "watchman");
-      created.push(id);
-      const doctor = await doctorEnvironment(db, boot, id);
-      const used = body.projects.filter((p) => p.environment === id).map((p) => p.id);
-      if (!doctor.ok && used.length)
-        throw new ProposalInvalid(
-          `environment ${id} failed its doctor (${doctor.checks
-            .filter((c) => !c.ok)
-            .map((c) => `${c.name}: ${c.detail}`)
-            .join(
-              "; ",
-            )}), so ${used.join(", ")} did not start. It was created: fix it on the Environments page, then propose the projects with environment ${id}`,
-        );
+      created.push(createEnvironment(db, d, "template" in e ? `template ${e.template}` : "watchman"));
     }
     const existing = await inspectProposalRepos(body, (id) => layout(boot).mirror(id as RepoId));
     const bares = new Map<string, string>();
@@ -298,7 +279,7 @@ export function describeProposal(body: ProposalBody): string {
       lines.push(`- environment ${e.id} from template ${e.template}${answered.length ? ` (answers: ${answered.join(", ")})` : ""}`);
       continue;
     }
-    const parts = [...e.values.map((v) => (v.check ? `${v.name} (checked)` : v.name)), ...e.presets.map((p) => `preset ${p}`)];
+    const parts = [...e.values.map((v) => v.name), ...e.presets.map((p) => `preset ${p}`)];
     lines.push(`- environment ${e.id} (${e.provider}, ${e.capacity} slots)${parts.length ? `: ${parts.join(", ")}` : ""}`);
   }
   for (const p of body.projects) {

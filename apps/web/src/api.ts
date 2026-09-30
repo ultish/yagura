@@ -61,9 +61,7 @@ export interface EnvValueView {
   name: string;
   value: string;
   note: string;
-  check: string | null;
   source: string;
-  last: { ok: boolean; detail: string; at: string } | null;
 }
 
 export interface EnvironmentView {
@@ -73,6 +71,7 @@ export interface EnvironmentView {
   queued: SlotHolder[];
   projects: { id: string; state: string }[];
   kept: KeptSlot[];
+  pausedBy: number | null;
 }
 
 export interface EnvironmentDetail extends EnvironmentView {

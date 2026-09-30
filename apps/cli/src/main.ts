@@ -69,7 +69,6 @@ import {
   exportSettings,
   importSettings,
   updateEnvironment,
-  doctorEnvironment,
   deleteEnvironment,
   applyPreset,
   applyTemplate,
@@ -79,13 +78,10 @@ import {
   listTemplates,
   listValues,
   PRESETS,
-  runCheck,
   saveTemplate,
   setEnvironmentNotes,
   setValue,
-  suggestCheck,
   templatesDir,
-  valueMap,
   type EnvValue,
   PROVIDERS_IMPL,
   transitionUnit,
@@ -105,18 +101,15 @@ const USAGE = `yagura — agent orchestration
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
   yagura repo set <id> [--url <url>] [--forge none|gh]   gh lands through pull requests (forge.repo, forge.merge_method)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
-               [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]   runs the doctor
+               [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]
   yagura env set <id> [--capacity <n>] [--name <text>]
-  yagura env doctor <id>
   yagura env rm <id>                                refused while a project that is not closed uses it
   yagura env values <id>
-  yagura env value set <id> <NAME> <value> [--note <text>] [--check <cmd>] [--clear-check]
+  yagura env value set <id> <NAME> <value> [--note <text>]
   yagura env value rm <id> <NAME>
   yagura env preset <id> <preset>          add that preset's values; names already set are left alone
   yagura env presets
   yagura env notes <id> | notes set <id> --text <text>
-  yagura env suggest <NAME> <value>        a check yagura would offer; nothing is saved
-  yagura env try <id> --check <cmd> [--name <NAME> --value <text>]
   yagura template list
   yagura template save <env> <name> [--description <text>] [--ask <NAME>...]
   yagura template apply <name> --id <new env> [--name <text>] [--answer <NAME=value>...]
@@ -181,8 +174,6 @@ const fail = (msg: string): never => {
 function printValue(v: EnvValue): void {
   console.log(`${v.name}=${v.value}  (${v.source})`);
   if (v.note) console.log(`  ${v.note}`);
-  console.log(`  check: ${v.check ?? "none"}`);
-  if (v.last) console.log(`  last: ${v.last.ok ? "✓" : "✗"} ${v.last.detail}`);
 }
 
 function answersOf(raw: string[]): Record<string, string> {
@@ -504,9 +495,7 @@ async function main() {
           answers: answersOf(many(values.answer)),
         });
         const created = getEnvironment(db, result.environmentId);
-        console.log(`environment ${created.id}: ${created.provider}, doctor ${result.ok ? "passing" : "failing"}`);
-        for (const c of created.doctorChecks) console.log(`  ${c.ok ? "✓" : "✗"} ${c.name}: ${c.detail}`);
-        if (!result.ok) process.exitCode = 1;
+        console.log(`environment ${created.id}: ${created.provider}, capacity ${created.capacity}`);
         return;
       }
       fail(USAGE);
@@ -528,26 +517,14 @@ async function main() {
         pool: { type: "string" },
         "base-url": { type: "string" },
         note: { type: "string" },
-        check: { type: "string" },
-        "clear-check": { type: "boolean" },
         text: { type: "string" },
         value: { type: "string" },
       });
       const [sub, a, b, ...more] = positionals;
       const id = a;
-      const printDoctor = (checks: { name: string; ok: boolean; detail: string }[]) => {
-        for (const c of checks) console.log(`  ${c.ok ? "✓" : "✗"} ${c.name}: ${c.detail}`);
-      };
       if (sub === "rm" && id) {
         deleteEnvironment(db, id as EnvironmentId);
         console.log(`deleted environment ${id}`);
-        return;
-      }
-      if (sub === "doctor" && id) {
-        const result = await doctorEnvironment(db, boot, id as EnvironmentId);
-        console.log(`environment ${id}: doctor ${result.ok ? "passing" : "failing"}`);
-        printDoctor(result.checks);
-        if (!result.ok) process.exitCode = 1;
         return;
       }
       if (sub === "set" && id) {
@@ -568,7 +545,6 @@ async function main() {
         return;
       }
       if (sub === "value" && a === "set" && b && more.length >= 2) {
-        if (values["clear-check"] && values.check !== undefined) fail("pass either --check or --clear-check");
         const name = more[0]!;
         const value = more.slice(1).join(" ");
         const existing = listValues(db, b as EnvironmentId).find((v) => v.name === name);
@@ -576,13 +552,8 @@ async function main() {
           name,
           value,
           note: values.note !== undefined ? values.note : (existing?.note ?? ""),
-          check: values["clear-check"] ? null : values.check !== undefined ? values.check : (existing?.check ?? null),
         });
         printValue(saved);
-        if (!saved.check) {
-          const suggestion = suggestCheck(saved.name, saved.value);
-          if (suggestion) console.log(`suggested check, not saved: ${suggestion}`);
-        }
         return;
       }
       if (sub === "value" && a === "rm" && b && more.length === 1) {
@@ -615,20 +586,6 @@ async function main() {
         console.log(notes || `environment ${id} has no notes`);
         return;
       }
-      if (sub === "suggest" && a) {
-        const value = [b, ...more].filter((part) => part !== undefined).join(" ");
-        if (!value) fail(USAGE);
-        const suggestion = suggestCheck(a, value);
-        console.log(suggestion ?? `no suggestion for ${a}`);
-        return;
-      }
-      if (sub === "try" && id && values.check) {
-        const overlay = values.name && values.value !== undefined ? { [values.name]: values.value } : {};
-        const result = await runCheck(values.check, { ...valueMap(db, id as EnvironmentId), ...overlay });
-        console.log(`${result.ok ? "✓" : "✗"} ${result.detail}`);
-        if (!result.ok) process.exitCode = 1;
-        return;
-      }
       if (sub !== "add" || !id || !values.provider) fail(USAGE);
       if (!(PROVIDERS as readonly string[]).includes(values.provider!)) fail(`--provider must be one of ${PROVIDERS.join(", ")}`);
       const providerConfig: Record<string, unknown> = {
@@ -642,10 +599,7 @@ async function main() {
       const problem = impl!.validateConfig(providerConfig, capacity);
       if (problem) fail(problem);
       const e = addEnvironment(db, { id: id!, name: values.name ?? id!, provider: values.provider as Provider, capacity, providerConfig });
-      const result = await doctorEnvironment(db, boot, e.id);
-      console.log(`environment ${e.id}: ${e.provider}, capacity ${e.capacity}, doctor ${result.ok ? "passing" : "failing"}`);
-      printDoctor(result.checks);
-      if (!result.ok) process.exitCode = 1;
+      console.log(`environment ${e.id}: ${e.provider}, capacity ${e.capacity}`);
       return;
     }
     case "show": {
@@ -653,8 +607,21 @@ async function main() {
       if (!projectId) fail(USAGE);
       const project = getProject(db, projectId as ProjectId);
       if (!seq) {
-        console.log(`${project.id} [${project.state}] ${project.goal}\n  predicate: ${project.predicate} · min tier: ${project.minTier}`);
-        for (const u of listUnits(db, project.id)) console.log(`  U${u.seq}  ${u.state.padEnd(10)} ${u.type.padEnd(6)} ${u.goal}`);
+        const costs = new Map(
+          (
+            db
+              .prepare(
+                "SELECT a.unit_id AS id, SUM(a.cost_usd) AS usd FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.project_id = ? GROUP BY a.unit_id",
+              )
+              .all(project.id) as { id: number; usd: number }[]
+          ).map((r) => [r.id, r.usd]),
+        );
+        const total = [...costs.values()].reduce((a, b) => a + b, 0);
+        console.log(
+          `${project.id} [${project.state}] ${project.goal}\n  predicate: ${project.predicate} · min tier: ${project.minTier} · agent cost $${total.toFixed(2)}`,
+        );
+        for (const u of listUnits(db, project.id))
+          console.log(`  U${u.seq}  ${u.state.padEnd(10)} ${u.type.padEnd(6)} ${`$${(costs.get(u.id) ?? 0).toFixed(2)}`.padStart(6)}  ${u.goal}`);
         return;
       }
       const u = getUnitBySeq(db, project.id, Number(seq));
@@ -662,7 +629,7 @@ async function main() {
       if (u.notes.length) console.log(`  notes:\n${u.notes.map((n) => `    - ${n}`).join("\n")}`);
       for (const a of listAttempts(db, u.id)) {
         console.log(
-          `  attempt ${a.n}: ${a.state} ${a.handoffStatus ?? ""} ${a.failureMode ?? ""} · ${a.model ?? "?"} · ctx peak ${a.contextPeak} · ${a.branch ?? a.headSha?.slice(0, 10) ?? ""}` +
+          `  attempt ${a.n}: ${a.state} ${a.handoffStatus ?? ""} ${a.failureMode ?? ""} · ${a.model ?? "?"} · $${a.costUsd.toFixed(2)} · ctx peak ${a.contextPeak} · ${a.branch ?? a.headSha?.slice(0, 10) ?? ""}` +
             (a.missingSkills.length ? `\n    skipped required skills: ${a.missingSkills.join(", ")}` : ""),
         );
         for (const r of listEvidenceRuns(db, a.id))
