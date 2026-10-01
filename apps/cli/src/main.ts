@@ -18,6 +18,7 @@ import {
   listThreads,
   ProposalBody,
   runWatchmanTurn,
+  clearWatchmanSession,
   searchMessages,
   setThreadAutonomy,
   addEnvironment,
@@ -116,7 +117,7 @@ const USAGE = `yagura — agent orchestration
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...] [--reference <repo id>...]
   yagura project skills <id>                       checks the project's skills.* are installed where agents run
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
-  yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go
+  yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go | clear <id>
   yagura thread mentions <@project | @project/U3 | @project/U3.2 | @thread:4 | @repo:id>   conversations that mention it
   yagura proposal apply|discard <id>
   yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
@@ -697,6 +698,10 @@ async function main() {
         : createThread(db, { title: text.slice(0, 60), autonomy: values.go ? "go" : "propose" });
       if (values.go && thread.autonomy !== "go") setThreadAutonomy(db, thread.id, "go");
       console.log(`thread ${thread.id} · ${values.go ? "go" : thread.autonomy}`);
+      if (text === "/clear") {
+        console.log(clearWatchmanSession(db, thread.id) ? "new session: the next message starts the watchman fresh" : "no session to clear");
+        return;
+      }
       const ctx = { ...agentCtx(), onEvent: (e: HarnessEvent) => (e.kind === "tool_call" ? console.log(renderEvent(e)) : undefined) };
       const turn = await runWatchmanTurn(ctx, thread.id, text);
       if (turn.reply) console.log(`\n${turn.reply.body}\n`);
@@ -743,6 +748,14 @@ async function main() {
       if (sub === "mentions" && more[0]) {
         for (const m of messagesMentioning(db, more[0].replace(/^@/, "")))
           console.log(`thread ${m.threadId} ${m.role} #${m.messageId} · ${m.createdAt}: ${m.body.split("\n")[0]!.slice(0, 140)}`);
+        return;
+      }
+      if (sub === "clear" && more[0]) {
+        console.log(
+          clearWatchmanSession(db, Number(more[0]))
+            ? `thread ${more[0]}: new session; the next message starts the watchman fresh`
+            : `thread ${more[0]} has no session to clear`,
+        );
         return;
       }
       if (sub === "set" && more[0] && (values.autonomy === "go" || values.autonomy === "propose")) {

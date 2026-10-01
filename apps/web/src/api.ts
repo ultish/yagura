@@ -218,6 +218,8 @@ export interface ThreadView {
   decisions: ThreadDecision[];
   questions: ThreadQuestion[];
   proposals: Proposal[];
+  session: { startedAt: string; contextPeak: number; rollAt: number } | null;
+  sessionStarts: number[];
 }
 
 export interface Suggestion {

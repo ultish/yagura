@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { assertThreadFree, beginTurn, endTurn, getTurn, turnRecorder } from "./turns.js";
+import { assertThreadFree, beginTurn, currentSession, endSession, endTurn, getTurn, markSeen, turnRecorder } from "./turns.js";
 import { z } from "zod";
 import { runAgentSession, write, type RunContext, type SessionRecorder } from "./agent.js";
 import { resolveSetting } from "./config.js";
@@ -177,7 +177,7 @@ export function renderWatchmanBrief(b: WatchmanBrief): string {
   const { sections, dropped } = b.context;
   return `# yagura watchman brief
 
-You are yagura's watchman: the developer's front door. You turn conversation into projects that yagura's own agents plan, build, verify, and land, and you keep the thread's memory in structured records. You never write code and never touch repos yourself. You have no memory beyond what is below: it is assembled fresh from yagura's database for this one message.
+You are yagura's watchman: the developer's front door. You turn conversation into projects that yagura's own agents plan, build, verify, and land, and you keep the thread's memory in structured records. You never write code and never touch repos yourself. This brief starts a session: later messages in this thread resume it and bring only what changed. yagura's records, not this session, are the truth: when a session is cleared or lost, the next one starts again from them.
 
 ## THREAD
 - thread ${b.thread.id}: ${b.thread.title}
@@ -298,47 +298,100 @@ function describeProposalRow(p: Proposal): string {
   return `### proposal ${p.id} [${p.state}]${result}\n${text}`;
 }
 
-export function buildWatchmanBrief(
-  ctx: { db: Db; boot: RunContext["boot"] },
-  threadId: number,
-  message: ThreadMessage,
-): { text: string; context: AssembledContext } {
+interface ThreadState {
+  thread: ReturnType<typeof getThread>;
+  decisions: { id: number; text: string }[];
+  questions: { id: number; text: string }[];
+  proposals: Proposal[];
+  standing: string;
+  catalog: string;
+  statuses: { projectId: string; text: string }[];
+  specs: { projectId: string; spec: Spec }[];
+}
+
+// What a session has been shown, so a resumed turn can be told only what changed.
+export interface Seen {
+  lastMessageId: number;
+  decisions: Record<string, string>;
+  questions: Record<string, string>;
+  proposals: Record<string, string>;
+  specs: Record<string, string>;
+  statuses: Record<string, string>;
+  standing: string;
+  catalog: string;
+}
+
+function threadState(ctx: { db: Db; boot: RunContext["boot"] }, threadId: number): ThreadState {
   const { db, boot } = ctx;
   const paths = layout(boot);
   const thread = getThread(db, threadId);
-  const decisions = listDecisions(db, threadId, { activeOnly: true })
-    .map((d) => `- D${d.id}: ${d.text}`)
-    .join("\n");
-  const questions = listQuestions(db, threadId, { openOnly: true })
-    .map((q) => `- Q${q.id}: ${q.text}`)
-    .join("\n");
-  const all = listProposals(db, threadId);
-  const proposals = all
-    .filter((p, i) => p.state === "pending" || i === all.length - 1)
+  const standingPath = `${paths.thread(threadId)}/standing-orders.md`;
+  return {
+    thread,
+    decisions: listDecisions(db, threadId, { activeOnly: true }).map((d) => ({ id: d.id, text: d.text })),
+    questions: listQuestions(db, threadId, { openOnly: true }).map((q) => ({ id: q.id, text: q.text })),
+    proposals: listProposals(db, threadId),
+    standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8").trim() : "",
+    catalog: catalog(db, boot),
+    statuses: thread.projects.map((p) => {
+      const project = getProject(db, p);
+      const after = project.after.length ? `\n- after: ${project.after.join(", ")}${project.phaseGate ? " (phase gate)" : ""}` : "";
+      const summary = latestDelta(db, p)?.summary;
+      return {
+        projectId: p,
+        text: `${generateStatus(db, boot, p, lastDrainEventId(db, p)).replace(/^# /, "### ")}${after}${summary ? `\n- planner's last summary: ${summary}` : ""}`,
+      };
+    }),
+    specs: thread.projects.flatMap((p) => {
+      const spec = readSpec(paths.spec(p));
+      return spec ? [{ projectId: p, spec }] : [];
+    }),
+  };
+}
+
+function seenOf(state: ThreadState, lastMessageId: number): Seen {
+  return {
+    lastMessageId,
+    decisions: Object.fromEntries(state.decisions.map((d) => [d.id, d.text])),
+    questions: Object.fromEntries(state.questions.map((q) => [q.id, q.text])),
+    proposals: Object.fromEntries(state.proposals.map((p) => [p.id, p.state])),
+    specs: Object.fromEntries(state.specs.map((s) => [s.projectId, renderSpec(s.spec)])),
+    statuses: Object.fromEntries(state.statuses.map((s) => [s.projectId, s.text])),
+    standing: state.standing,
+    catalog: state.catalog,
+  };
+}
+
+function mentionedIn(ctx: { db: Db; boot: RunContext["boot"] }, body: string): string {
+  return resolveMentions(ctx.db, body)
+    .map((m) => `### @${m.ref}\n${truncateTo(describeMention(ctx.db, ctx.boot, m), 2000, `… (truncated; ask yagura for more)`)}`)
+    .join("\n\n");
+}
+
+export interface BuiltBrief {
+  text: string;
+  context: AssembledContext;
+  seen: Seen;
+}
+
+export function buildWatchmanBrief(ctx: { db: Db; boot: RunContext["boot"] }, threadId: number, message: ThreadMessage): BuiltBrief {
+  const { db } = ctx;
+  const state = threadState(ctx, threadId);
+  const { thread } = state;
+  const decisions = state.decisions.map((d) => `- D${d.id}: ${d.text}`).join("\n");
+  const questions = state.questions.map((q) => `- Q${q.id}: ${q.text}`).join("\n");
+  const proposals = state.proposals
+    .filter((p, i) => p.state === "pending" || i === state.proposals.length - 1)
     .slice(-3)
     .map(describeProposalRow)
     .join("\n\n");
-  const standingPath = `${paths.thread(threadId)}/standing-orders.md`;
-  const standing = existsSync(standingPath) ? readFileSync(standingPath, "utf8").trim() : "";
-  const cat = catalog(db, boot);
-  const mentioned = resolveMentions(db, message.body)
-    .map((m) => `### @${m.ref}\n${truncateTo(describeMention(db, boot, m), 2000, `… (truncated; ask yagura for more)`)}`)
-    .join("\n\n");
-
-  const statuses = thread.projects.map((p) => {
-    const project = getProject(db, p);
-    const after = project.after.length ? `\n- after: ${project.after.join(", ")}${project.phaseGate ? " (phase gate)" : ""}` : "";
-    const summary = latestDelta(db, p)?.summary;
-    return {
-      projectId: p,
-      text: `${generateStatus(db, boot, p, lastDrainEventId(db, p)).replace(/^# /, "### ")}${after}${summary ? `\n- planner's last summary: ${summary}` : ""}`,
-    };
-  });
-  const spec = thread.projects.flatMap((p) => {
-    const s = readSpec(paths.spec(p));
-    if (!s) return [];
-    return [{ projectId: p, toc: s.sections.map((x) => x.heading), whole: renderSpec(s), relevant: relevantSections(s, message.body) }];
-  });
+  const mentioned = mentionedIn(ctx, message.body);
+  const spec = state.specs.map(({ projectId, spec: s }) => ({
+    projectId,
+    toc: s.sections.map((x) => x.heading),
+    whole: renderSpec(s),
+    relevant: relevantSections(s, message.body),
+  }));
   const history = listMessages(db, threadId).filter((m) => m.id !== message.id);
 
   const template = renderWatchmanBrief({
@@ -352,22 +405,105 @@ export function buildWatchmanBrief(
     context: EMPTY_CONTEXT,
     message: { id: 0, body: "" },
   });
-  const fixed = [template, decisions, questions, proposals, standing, cat, mentioned, message.body];
-  const context = assembleContext({ fixed, statuses, spec, history }, resolveSetting(db, "watchman.context_tokens").value);
+  const fixed = [template, decisions, questions, proposals, state.standing, state.catalog, mentioned, message.body];
+  const context = assembleContext({ fixed, statuses: state.statuses, spec, history }, resolveSetting(db, "watchman.context_tokens").value);
   return {
     text: renderWatchmanBrief({
       thread,
       decisions,
       questions,
       proposals,
-      catalog: cat,
-      standing,
+      catalog: state.catalog,
+      standing: state.standing,
       mentioned,
       context,
       message: { id: message.id, body: message.body },
     }),
     context,
+    seen: seenOf(state, message.id),
   };
+}
+
+export function buildWatchmanUpdate(ctx: { db: Db; boot: RunContext["boot"] }, threadId: number, message: ThreadMessage, seen: Seen): BuiltBrief {
+  const { db } = ctx;
+  const state = threadState(ctx, threadId);
+  const budget = resolveSetting(db, "watchman.context_tokens").value;
+  const blocks: string[] = [];
+  const section = (title: string, lines: string[]) => lines.length && blocks.push(`### ${title}\n${lines.join("\n")}`);
+
+  const active = new Set(state.decisions.map((d) => String(d.id)));
+  section("Decisions", [
+    ...state.decisions.filter((d) => seen.decisions[d.id] !== d.text).map((d) => `- D${d.id}: ${d.text}`),
+    ...Object.keys(seen.decisions)
+      .filter((id) => !active.has(id))
+      .map((id) => {
+        const by = getDecision(db, Number(id)).supersededBy;
+        return `- D${id} is no longer active${by ? ` (superseded by D${by})` : ""}`;
+      }),
+  ]);
+  const open = new Set(state.questions.map((q) => String(q.id)));
+  section("Open questions", [
+    ...state.questions.filter((q) => seen.questions[q.id] !== q.text).map((q) => `- Q${q.id}: ${q.text}`),
+    ...Object.keys(seen.questions)
+      .filter((id) => !open.has(id))
+      .map((id) => {
+        const answer = getQuestion(db, Number(id)).answer;
+        return `- Q${id} is closed${answer ? `, answered: ${answer}` : ""}`;
+      }),
+  ]);
+  section(
+    "Proposals",
+    state.proposals
+      .filter((p) => seen.proposals[p.id] !== p.state)
+      .map((p) =>
+        seen.proposals[p.id]
+          ? `- proposal ${p.id} is now ${p.state}${p.state === "applied" || p.state === "failed" ? ` → ${JSON.stringify(p.result)}` : ""}`
+          : describeProposalRow(p),
+      ),
+  );
+  for (const s of state.statuses)
+    if (seen.statuses[s.projectId] !== s.text)
+      blocks.push(truncateTo(s.text, Math.floor(budget * 0.2), `… (truncated; run \`yagura show ${s.projectId}\` for the rest)`));
+  for (const s of state.specs) {
+    const whole = renderSpec(s.spec);
+    if (seen.specs[s.projectId] !== whole)
+      blocks.push(`### spec of ${s.projectId} (changed; whole)\n${truncateTo(whole, Math.floor(budget * 0.3), "… (truncated)")}`);
+  }
+  if (seen.standing !== state.standing) blocks.push(`### Standing orders (changed)\n${state.standing || "(none)"}`);
+  if (seen.catalog !== state.catalog) blocks.push(`### What yagura has (changed)\n${state.catalog}`);
+  const messages = listMessages(db, threadId).filter((m) => m.id > seen.lastMessageId && m.id !== message.id && m.role !== "watchman");
+  section(
+    "Messages since your last turn",
+    messages.map((m) => `[${m.role} #${m.id}]\n${m.body}`),
+  );
+
+  const text = renderWatchmanUpdate({
+    changes: blocks.join("\n\n"),
+    mentioned: mentionedIn(ctx, message.body),
+    message: { id: message.id, body: message.body },
+  });
+  return {
+    text,
+    context: { ...EMPTY_CONTEXT, usedTokens: estimateTokens(text) },
+    seen: seenOf(state, message.id),
+  };
+}
+
+export function renderWatchmanUpdate(u: { changes: string; mentioned: string; message: { id: number; body: string } }): string {
+  return `# yagura: the next message in this thread
+
+This session continues. Below is only what changed in yagura's records since your last turn, including what yagura recorded from your last reply (with the ids it gave them); everything else you were shown earlier in this session still holds. METHOD and REPORT are unchanged: reply in plain prose, then end with exactly one fenced \`yagura\` block (\`{}\` is valid).
+
+## CHANGED SINCE YOUR LAST TURN
+${u.changes || "(nothing)"}
+
+## MENTIONED IN THE MESSAGE (generated from records)
+${u.mentioned || "(nothing)"}
+
+## THE MESSAGE TO ANSWER
+[human #${u.message.id}]
+${u.message.body}
+`;
 }
 
 export class RecordsRejected extends Error {}
@@ -463,27 +599,79 @@ Answer the same message again: the same prose, adjusted if the fix changes what 
 `;
 }
 
+export function renderRetryInSession(reason: string): string {
+  return `## YOUR PREVIOUS REPLY WAS REJECTED
+yagura stored nothing from it. Reason: ${reason}
+
+Answer the same message again: the same prose, adjusted if the fix changes what you tell the developer, and a corrected \`yagura\` block.
+`;
+}
+
+const k = (n: number) => `${Math.round(n / 1000)}k`;
+
+export function clearWatchmanSession(db: Db, threadId: number): boolean {
+  assertThreadFree(db, threadId);
+  if (!endSession(db, threadId, "cleared")) return false;
+  addMessage(db, {
+    threadId,
+    role: "system",
+    body: "New session. The next message starts the watchman fresh from yagura's records; nothing recorded was lost.",
+  });
+  return true;
+}
+
 export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: string): Promise<TurnResult> {
   const { db, boot } = ctx;
   const paths = layout(boot);
   assertThreadFree(db, threadId);
-  const human = addMessage(db, { threadId, role: "human", body: text });
   const setting = <K extends Parameters<typeof resolveSetting>[1]>(k: K) => resolveSetting(db, k).value;
   const harnessId = setting("role.watchman.harness");
   const adapter = ctx.adapters[harnessId];
   if (!adapter) throw new Error(`no adapter for harness ${harnessId}`);
 
-  const brief = buildWatchmanBrief(ctx, threadId, human);
+  let session = adapter.canResume ? currentSession<Seen>(db, threadId) : null;
+  const roll = setting("watchman.session_roll_tokens");
+  if (session && session.lastContextPeak > roll) {
+    endSession(db, threadId, "rolled");
+    addMessage(db, {
+      threadId,
+      role: "system",
+      body: `New session: the last one reached ${k(session.lastContextPeak)} tokens of context (it rolls at ${k(roll)}). The watchman starts fresh from yagura's records; nothing recorded was lost.`,
+    });
+    session = null;
+  }
+  const human = addMessage(db, { threadId, role: "human", body: text });
+  const fresh = () => buildWatchmanBrief(ctx, threadId, human);
+  let brief = session?.seen ? buildWatchmanUpdate(ctx, threadId, human, session.seen) : fresh();
   write(paths.turnBrief(threadId, human.id), brief.text);
   const logPath = paths.turnLog(threadId, human.id);
   const turnId = beginTurn(db, threadId, human.id, logPath);
   const cwd = paths.thread(threadId);
   mkdirSync(cwd, { recursive: true });
-  recordEvent(db, "watchman.turn", {}, { thread: threadId, message: human.id, contextTokens: brief.context.usedTokens, dropped: brief.context.dropped });
+  recordEvent(
+    db,
+    "watchman.turn",
+    {},
+    {
+      thread: threadId,
+      message: human.id,
+      contextTokens: brief.context.usedTokens,
+      dropped: brief.context.dropped,
+      resumes: session?.harnessSessionId ?? null,
+    },
+  );
 
-  const ask = async (prompt: string, log: string): Promise<{ text: string | null; problem: string | null }> => {
-    const session = await runAgentSession(ctx, {
-      recorder: turnRecorder(db, { id: turnId, threadId, messageId: human.id }),
+  const ask = async (prompt: string, log: string, resume?: string): Promise<{ text: string | null; problem: string | null; lost: boolean }> => {
+    let started = false;
+    const recorder = turnRecorder(db, { id: turnId, threadId, messageId: human.id });
+    const result = await runAgentSession(ctx, {
+      recorder: {
+        ...recorder,
+        session: (e) => {
+          started = true;
+          recorder.session(e);
+        },
+      },
       adapter,
       run: {
         prompt,
@@ -493,21 +681,23 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
         pluginDirs: [boot.skillsDir],
         addDirs: [],
         extraArgs: setting("harness.claude.extra_args"),
+        resume,
       },
       cwd,
       env: {},
       timeboxSeconds: setting("timebox.watchman_seconds"),
       logPath: log,
     });
-    if (session.final && !session.final.isError && !session.timedOut) return { text: session.final.text, problem: null };
+    const stopped = getTurn(db, turnId).state === "stopped";
+    if (result.final && !result.final.isError && !result.timedOut) return { text: result.final.text, problem: null, lost: false };
     return {
       text: null,
-      problem:
-        getTurn(db, turnId).state === "stopped"
-          ? "you stopped the watchman"
-          : session.timedOut
-            ? "the watchman ran out of time"
-            : `the watchman ended without a reply (exit ${session.exitCode ?? session.signal})`,
+      lost: Boolean(resume) && !started && !stopped,
+      problem: stopped
+        ? "you stopped the watchman"
+        : result.timedOut
+          ? "the watchman ran out of time"
+          : `the watchman ended without a reply (exit ${result.exitCode ?? result.signal})`,
     };
   };
   const attemptStore = async (text: string, log: string): Promise<{ stored: ReturnType<typeof storeTurn> | null; body: string; problem: string | null }> => {
@@ -524,19 +714,30 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
   };
 
   const out: TurnResult = { human, reply: null, proposal: null, applied: null, problem: null };
-  const first = await ask(brief.text, logPath);
+  let first = await ask(brief.text, logPath, session?.harnessSessionId);
+  if (first.lost) {
+    endSession(db, threadId, "lost");
+    addMessage(db, { threadId, role: "system", body: "The watchman's session could not be resumed, so this message starts a new one from yagura's records." });
+    brief = fresh();
+    write(paths.turnBrief(threadId, human.id), brief.text);
+    first = await ask(brief.text, logPath);
+  }
   if (!first.text) {
     out.problem = first.problem;
     addMessage(db, { threadId, role: "system", body: first.problem!, turnLog: logPath });
     endTurn(db, turnId, "failed");
     return out;
   }
+  const live = adapter.canResume ? getTurn(db, turnId).sessionId : null;
+  const harnessSession = live ? currentSession<Seen>(db, threadId)?.harnessSessionId : undefined;
   let log = logPath;
   let result = await attemptStore(first.text, log);
   if (!result.stored) {
     recordEvent(db, "watchman.records_rejected", {}, { thread: threadId, message: human.id, reason: result.problem });
     const retryLog = paths.turnLog(threadId, human.id).replace(/\.jsonl$/, ".retry.jsonl");
-    const retry = await ask(renderRetry(brief.text, first.text, result.problem!), retryLog);
+    const retry = harnessSession
+      ? await ask(renderRetryInSession(result.problem!), retryLog, harnessSession)
+      : await ask(renderRetry(brief.text, first.text, result.problem!), retryLog);
     if (retry.text) [result, log] = [await attemptStore(retry.text, retryLog), retryLog];
   }
   if (result.stored) {
@@ -547,6 +748,7 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
     out.reply = addMessage(db, { threadId, role: "watchman", body: result.body, turnLog: log });
     addMessage(db, { threadId, role: "system", body: `yagura rejected this turn's records twice, so nothing was stored or proposed: ${out.problem}` });
   }
+  if (live) markSeen(db, live, { ...brief.seen, lastMessageId: out.reply.id });
 
   if (out.proposal && getThread(db, threadId).autonomy === "go") {
     try {

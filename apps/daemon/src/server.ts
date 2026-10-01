@@ -22,6 +22,9 @@ import {
   listQuestions,
   listThreads,
   runWatchmanTurn,
+  clearWatchmanSession,
+  currentSession,
+  sessionStarts,
   searchMessages,
   setThreadAutonomy,
   answerGate,
@@ -479,7 +482,19 @@ export function createApp(opts: ServerOptions): Hono {
     decisions: listDecisions(db, id),
     questions: listQuestions(db, id),
     proposals: listProposals(db, id),
+    session: (() => {
+      const current = currentSession(db, id);
+      return current
+        ? { startedAt: current.startedAt, contextPeak: current.lastContextPeak, rollAt: resolveSetting(db, "watchman.session_roll_tokens").value }
+        : null;
+    })(),
+    sessionStarts: sessionStarts(db, id),
   });
+  const clearSession = (id: number) => {
+    if (busy(id)) return false;
+    clearWatchmanSession(db, id);
+    return true;
+  };
   const body = async (c: Context) => (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
 
   app.get("/api/mentions", (c) => c.json(suggestMentions(db, c.req.query("q") ?? "")));
@@ -500,8 +515,18 @@ export function createApp(opts: ServerOptions): Hono {
     getThread(db, id);
     if (typeof b.message !== "string" || !b.message.trim()) return c.json({ error: "message is required" }, 400);
     if (busy(id)) return c.json({ error: `thread ${id} is already waiting on the watchman` }, 409);
+    if (b.message.trim() === "/clear") {
+      clearSession(id);
+      return c.json(threadView(id));
+    }
     void talk(id, b.message.trim());
     return c.json(threadView(id), 202);
+  });
+  app.post("/api/threads/:id/clear", (c) => {
+    const id = Number(c.req.param("id"));
+    getThread(db, id);
+    if (!clearSession(id)) return c.json({ error: `thread ${id} is waiting on the watchman; stop it or wait before starting a new session` }, 409);
+    return c.json(threadView(id));
   });
   app.post("/api/threads/:id/autonomy", async (c) => {
     const id = Number(c.req.param("id"));

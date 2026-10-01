@@ -5,6 +5,17 @@ import { now, recordEvent, type Db } from "./store.js";
 
 export const TURN_STATES = ["running", "done", "failed", "stopped"] as const;
 export type TurnState = (typeof TURN_STATES)[number];
+export const SESSION_END_REASONS = ["cleared", "rolled", "lost"] as const;
+export type SessionEndReason = (typeof SESSION_END_REASONS)[number];
+
+export interface ThreadSession<S = unknown> {
+  id: number;
+  threadId: number;
+  harnessSessionId: string;
+  seen: S | null;
+  lastContextPeak: number;
+  startedAt: IsoTime;
+}
 
 export interface WatchmanTurn {
   id: number;
@@ -16,6 +27,7 @@ export interface WatchmanTurn {
   model: string | null;
   contextPeak: number;
   costUsd: number;
+  sessionId: number | null;
   logPath: string;
   startedAt: IsoTime;
   endedAt: IsoTime | null;
@@ -34,6 +46,7 @@ const toTurn = (r: Row): WatchmanTurn => ({
   model: (r.model as string | null) ?? null,
   contextPeak: r.context_peak as number,
   costUsd: (r.cost_usd as number | undefined) ?? 0,
+  sessionId: (r.session_id as number | null) ?? null,
   logPath: r.log_path as string,
   startedAt: r.started_at as IsoTime,
   endedAt: (r.ended_at as IsoTime | null) ?? null,
@@ -110,7 +123,9 @@ export function turnRecorder(db: Db, turn: { id: number; threadId: number; messa
       db.prepare("UPDATE watchman_turns SET pid = ? WHERE id = ?").run(pid, id);
       recordEvent(db, "watchman.started", {}, { thread: threadId, message: messageId, pid });
     },
-    session: (e) => db.prepare("UPDATE watchman_turns SET model = ? WHERE id = ?").run(e.model, id),
+    session: (e) => {
+      db.prepare("UPDATE watchman_turns SET model = ?, session_id = ? WHERE id = ?").run(e.model, attachSession(db, threadId, e.sessionId), id);
+    },
     usage: (contextPeak) => db.prepare("UPDATE watchman_turns SET context_peak = ? WHERE id = ?").run(contextPeak, id),
     cost: (usd) => db.prepare("UPDATE watchman_turns SET cost_usd = cost_usd + ? WHERE id = ?").run(usd, id),
     finished: (skills) => {
@@ -119,4 +134,51 @@ export function turnRecorder(db: Db, turn: { id: number; threadId: number; messa
       return missing;
     },
   };
+}
+
+export function currentSession<S>(db: Db, threadId: number): ThreadSession<S> | null {
+  const r = db
+    .prepare(
+      `SELECT s.*, (SELECT context_peak FROM watchman_turns WHERE session_id = s.id ORDER BY id DESC LIMIT 1) AS peak
+       FROM thread_sessions s WHERE s.thread_id = ? AND s.ended_at IS NULL`,
+    )
+    .get(threadId) as Row | undefined;
+  if (!r) return null;
+  return {
+    id: r.id as number,
+    threadId,
+    harnessSessionId: r.harness_session_id as string,
+    seen: r.seen_json ? (JSON.parse(r.seen_json as string) as S) : null,
+    lastContextPeak: (r.peak as number | null) ?? 0,
+    startedAt: r.started_at as IsoTime,
+  };
+}
+
+// The turn that reports a new harness session makes it the thread's current one.
+function attachSession(db: Db, threadId: number, harnessSessionId: string): number {
+  const current = currentSession(db, threadId);
+  if (current?.harnessSessionId === harnessSessionId) return current.id;
+  if (current) endSession(db, threadId, "rolled");
+  return Number(
+    db.prepare("INSERT INTO thread_sessions (thread_id, harness_session_id, started_at) VALUES (?, ?, ?)").run(threadId, harnessSessionId, now())
+      .lastInsertRowid,
+  );
+}
+
+export function endSession(db: Db, threadId: number, reason: SessionEndReason): boolean {
+  const ended = db.prepare("UPDATE thread_sessions SET ended_at = ?, ended_reason = ? WHERE thread_id = ? AND ended_at IS NULL").run(now(), reason, threadId);
+  if (ended.changes) recordEvent(db, "watchman.session_ended", {}, { thread: threadId, reason });
+  return ended.changes > 0;
+}
+
+export function markSeen(db: Db, sessionId: number, seen: unknown): void {
+  db.prepare("UPDATE thread_sessions SET seen_json = ? WHERE id = ?").run(JSON.stringify(seen), sessionId);
+}
+
+export function sessionStarts(db: Db, threadId: number): number[] {
+  return (
+    db
+      .prepare("SELECT MIN(message_id) AS m FROM watchman_turns WHERE thread_id = ? AND session_id IS NOT NULL GROUP BY session_id ORDER BY m")
+      .all(threadId) as { m: number }[]
+  ).map((r) => r.m);
 }

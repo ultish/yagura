@@ -1,5 +1,5 @@
 import { execFileSync, execSync } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const mode = process.env.FAKE_MODE;
 const emit = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
@@ -8,7 +8,8 @@ process.stdin.on("data", (d) => (brief += d));
 const resumeAt = process.argv.indexOf("--resume");
 process.stdin.on("end", () => {
   if (resumeAt > 0) return resumed(process.argv[resumeAt + 1]);
-  emit({ type: "system", subtype: "init", session_id: "s1", model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
+  const sessionId = process.env.YAGURA_ROLE === "watchman" ? `w-${process.pid}-${Date.now()}` : "s1";
+  emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
   const skills =
     {
       worker: ["yagura:yagura-worker", "pstack:poteto-mode"],
@@ -22,6 +23,7 @@ process.stdin.on("end", () => {
   skills.push(...(process.env.FAKE_SKILLS ?? "").split(",").filter(Boolean));
   if (mode !== "noskills")
     for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
+  if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
   if (process.env.YAGURA_ROLE === "rebase") return rebase();
   if (process.env.YAGURA_ROLE === "review-triage") return triage();
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
@@ -58,6 +60,7 @@ function resumed(sessionId) {
     process.exit(1);
   }
   emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
+  if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
   const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
   appendFileSync(file, `# fixed after findings: ${/run:\d+/.test(brief)}\n`);
   const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
@@ -141,7 +144,6 @@ function finish(text) {
 }
 
 function engine(role) {
-  if (role === "watchman") return watchman();
   if (role === "planner") {
     const workRows = [...brief.matchAll(/^\| U\d+ \| work \| (\w+)/gm)].map((m) => m[1]);
     const repo = /^## CODE[^\n]*\n- ([\w-]+):/m.exec(brief)[1];
@@ -222,10 +224,17 @@ function engine(role) {
   }
 }
 
-function watchman() {
-  const asked = /## THE MESSAGE TO ANSWER\n\[human #\d+\]\n(.*)/.exec(brief)[1];
+// A session remembers every prompt it was given, the way a real transcript does; FAKE_SEEN_LOG records each prompt for tests.
+function watchman(sessionId) {
+  const memory = `.fake-session-${sessionId}`;
+  const earlier = existsSync(memory) ? readFileSync(memory, "utf8") : "";
+  appendFileSync(memory, `${brief}\n`);
+  if (process.env.FAKE_SEEN_LOG) appendFileSync(process.env.FAKE_SEEN_LOG, `${JSON.stringify({ sessionId, resumed: resumeAt > 0, prompt: brief })}\n`);
+  const current = brief;
+  brief = earlier + brief;
+  const asked = [...brief.matchAll(/## THE MESSAGE TO ANSWER\n\[human #\d+\]\n(.*)/g)].at(-1)[1];
   if (asked.startsWith("typo")) {
-    const fixed = asked === "typo once" && brief.includes("## YOUR PREVIOUS REPLY WAS REJECTED");
+    const fixed = asked === "typo once" && current.includes("## YOUR PREVIOUS REPLY WAS REJECTED");
     const records = fixed ? { decisions: [{ text: "fixed on retry" }] } : { answered: [{ question: "Q99", answer: "x" }] };
     return finish(`${fixed ? "Corrected." : "First try."}\n\n\`\`\`yagura\n${JSON.stringify(records)}\n\`\`\``);
   }
@@ -263,20 +272,21 @@ function watchman() {
     after,
     spec: `# ${id}\n\n## Scope\nWrite the files.`,
   });
-  const records = brief.includes("[watchman #")
-    ? {
-        decisions: [{ text: "Timestamps are ignored", supersedes: /^- (D\d+):/m.exec(brief)[1] }],
-        answered: [{ question: /^- (Q\d+):/m.exec(brief)[1], answer: "local" }],
-      }
-    : {
-        title: "proto chain",
-        decisions: [{ text: "Build proto in a new repo" }],
-        questions: ["Which environment later?"],
-        proposal: {
-          summary: "two chained projects",
-          repos: [{ id: "proto", description: "a prototype", verifyPack: pack }],
-          projects: [project("proto-a", []), project("proto-b", ["proto-a"])],
-        },
-      };
+  const records =
+    earlier || brief.includes("[watchman #")
+      ? {
+          decisions: [{ text: "Timestamps are ignored", supersedes: [...current.matchAll(/^- (D\d+):/gm)].at(-1)?.[1] }],
+          answered: [...current.matchAll(/^- (Q\d+):/gm)].slice(-1).map((m) => ({ question: m[1], answer: "local" })),
+        }
+      : {
+          title: "proto chain",
+          decisions: [{ text: "Build proto in a new repo" }],
+          questions: ["Which environment later?"],
+          proposal: {
+            summary: "two chained projects",
+            repos: [{ id: "proto", description: "a prototype", verifyPack: pack }],
+            projects: [project("proto-a", []), project("proto-b", ["proto-a"])],
+          },
+        };
   finish(`Here is the plan.\n\n\`\`\`yagura\n${JSON.stringify(records)}\n\`\`\``);
 }

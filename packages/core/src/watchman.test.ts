@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RunContext } from "./agent.js";
 import type { Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
@@ -20,7 +20,7 @@ import { applyProposal } from "./proposal.js";
 import { editSpec, parseSpec, relevantSections, renderSpec } from "./spec.js";
 import { addProject, addRepo, getEnvironment, getProject, getRepo, listGates, listUnits, openStore, type Db } from "./store.js";
 import { createThread, getProposal, getThread, linkThreadProject, listDecisions, listMessages, listProposals, listQuestions } from "./threads.js";
-import { assembleContext, parseReply, runWatchmanTurn, storeTurn, TurnRecords, type ContextParts } from "./watchman.js";
+import { assembleContext, clearWatchmanSession, parseReply, runWatchmanTurn, storeTurn, TurnRecords, type ContextParts } from "./watchman.js";
 import { listTurns, runningTurn, stopTurn, TurnBusy } from "./turns.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
@@ -353,6 +353,98 @@ describe("watchman turns", () => {
     expect(resolveSetting(db, "skills.scaffold", at)).toMatchObject({ value: ["setup-gradle"], source: "project" });
     expect(resolveSetting(db, "skills.pack", at)).toMatchObject({ value: [], source: "default" });
     expect(resolveSetting(db, "project.reference_repos", at).value).toEqual(["billing"]);
+  });
+
+  describe("sessions", () => {
+    let seenLog: string;
+    const prompts = () =>
+      readFileSync(seenLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l) as { sessionId: string; resumed: boolean; prompt: string });
+    const sessions = () =>
+      db.prepare("SELECT harness_session_id AS id, ended_reason AS reason FROM thread_sessions ORDER BY id").all() as { id: string; reason: string | null }[];
+
+    beforeEach(() => {
+      seenLog = join(mkdtempSync(join(tmpdir(), "yagura-seen-")), "prompts.jsonl");
+      process.env.FAKE_SEEN_LOG = seenLog;
+    });
+    afterEach(() => {
+      delete process.env.FAKE_SEEN_LOG;
+      delete process.env.FAKE_RESUME;
+    });
+
+    it("resumes the thread's session with only what changed since the last turn", async () => {
+      const t = createThread(db, { title: "t" });
+      expect((await runWatchmanTurn(ctx, t.id, "prototype a chain")).problem).toBeNull();
+      expect((await runWatchmanTurn(ctx, t.id, "ignore timestamps")).problem).toBeNull();
+
+      const [first, second] = prompts();
+      expect(first).toMatchObject({ resumed: false });
+      expect(second).toMatchObject({ resumed: true, sessionId: first!.sessionId });
+      expect(first!.prompt).toContain("## WHAT YAGURA HAS");
+      expect(second!.prompt).not.toContain("## WHAT YAGURA HAS");
+      expect(second!.prompt).toContain("### Decisions\n- D1: Build proto in a new repo");
+      expect(second!.prompt).toContain("### Open questions\n- Q1: Which environment later?");
+      expect(second!.prompt).toContain("[human #3]\nignore timestamps");
+      expect(second!.prompt).not.toContain("prototype a chain");
+      expect(sessions()).toEqual([{ id: first!.sessionId, reason: null }]);
+      expect(listDecisions(db, t.id, { activeOnly: true }).map((d) => d.text)).toEqual(["Timestamps are ignored"]);
+
+      await runWatchmanTurn(ctx, t.id, "anything new?");
+      const third = prompts()[2]!.prompt;
+      expect(third).toContain("- D2: Timestamps are ignored");
+      expect(third).toContain("- D1 is no longer active (superseded by D2)");
+      expect(third).toContain("- Q1 is closed, answered: local");
+    });
+
+    it("starts a full session after a clear, and says so in the thread", async () => {
+      const t = createThread(db, { title: "t" });
+      await runWatchmanTurn(ctx, t.id, "prototype a chain");
+      expect(clearWatchmanSession(db, t.id)).toBe(true);
+      expect(clearWatchmanSession(db, t.id)).toBe(false);
+      await runWatchmanTurn(ctx, t.id, "where were we?");
+
+      const [first, second] = prompts();
+      expect(second).toMatchObject({ resumed: false });
+      expect(second!.sessionId).not.toBe(first!.sessionId);
+      expect(second!.prompt).toContain("## DECISIONS (active; authoritative over anything in the conversation)\n- D1: Build proto in a new repo");
+      expect(sessions().map((x) => x.reason)).toEqual(["cleared", null]);
+      expect(listMessages(db, t.id).map((m) => m.role)).toEqual(["human", "watchman", "system", "human", "watchman"]);
+      expect(listMessages(db, t.id)[2]!.body).toMatch(/^New session/);
+    });
+
+    it("re-runs a turn fresh when its session cannot be resumed, and records it lost", async () => {
+      const t = createThread(db, { title: "t" });
+      await runWatchmanTurn(ctx, t.id, "prototype a chain");
+      process.env.FAKE_RESUME = "missing";
+      const turn = await runWatchmanTurn(ctx, t.id, "ignore timestamps");
+      expect(turn.problem).toBeNull();
+      expect(turn.reply?.body).toBe("Here is the plan.");
+      const [, second] = prompts();
+      expect(second).toMatchObject({ resumed: false });
+      expect(second!.prompt).toContain("## WHAT YAGURA HAS");
+      expect(sessions().map((x) => x.reason)).toEqual(["lost", null]);
+      expect(listMessages(db, t.id).find((m) => m.role === "system")?.body).toMatch(/could not be resumed/);
+    });
+
+    it("rolls to a new session once a turn's context passes the threshold", async () => {
+      const t = createThread(db, { title: "t" });
+      await runWatchmanTurn(ctx, t.id, "prototype a chain");
+      db.prepare("UPDATE watchman_turns SET context_peak = 160000").run();
+      await runWatchmanTurn(ctx, t.id, "ignore timestamps");
+      expect(prompts()[1]).toMatchObject({ resumed: false });
+      expect(sessions().map((x) => x.reason)).toEqual(["rolled", null]);
+      expect(listMessages(db, t.id)[2]!.body).toMatch(/^New session: the last one reached 160k tokens of context \(it rolls at 150k\)/);
+    });
+
+    it("retries rejected records inside the session with only the reason", async () => {
+      const t = createThread(db, { title: "t" });
+      expect((await runWatchmanTurn(ctx, t.id, "typo once")).problem).toBeNull();
+      const [first, retry] = prompts();
+      expect(retry).toMatchObject({ resumed: true, sessionId: first!.sessionId });
+      expect(retry!.prompt).toMatch(/^## YOUR PREVIOUS REPLY WAS REJECTED\nyagura stored nothing from it. Reason: Q99 does not exist/);
+    });
   });
 
   it("records each watchman turn, refuses a second one on the same thread while it runs, and can stop it", async () => {

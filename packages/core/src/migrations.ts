@@ -293,6 +293,22 @@ CREATE TABLE disagreements (
 CREATE INDEX disagreements_unit ON disagreements (unit_id);
 `,
   },
+  {
+    version: 21,
+    sql: `
+CREATE TABLE thread_sessions (
+  id INTEGER PRIMARY KEY,
+  thread_id INTEGER NOT NULL REFERENCES threads (id),
+  harness_session_id TEXT NOT NULL,
+  seen_json TEXT,
+  started_at TEXT NOT NULL,
+  ended_at TEXT,
+  ended_reason TEXT CHECK (ended_reason IN ('cleared', 'rolled', 'lost'))
+);
+CREATE UNIQUE INDEX thread_sessions_current ON thread_sessions (thread_id) WHERE ended_at IS NULL;
+ALTER TABLE watchman_turns ADD COLUMN session_id INTEGER REFERENCES thread_sessions (id);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

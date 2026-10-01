@@ -336,7 +336,14 @@ describe("watchman API", () => {
       db,
       boot,
       token: "secret",
-      adapters: { claude: { id: "claude", command: (run) => ({ argv: [process.execPath, fakeAgent], stdin: run.prompt }), parse: parseClaudeLine } },
+      adapters: {
+        claude: {
+          id: "claude",
+          canResume: true,
+          command: (run) => ({ argv: [process.execPath, fakeAgent, ...(run.resume ? ["--resume", run.resume] : [])], stdin: run.prompt }),
+          parse: parseClaudeLine,
+        },
+      },
     });
     const started = await talkApp.request("/api/threads", { method: "POST", headers: auth, body: JSON.stringify({ message: "prototype a chain" }) });
     expect(started.status).toBe(202);
@@ -344,7 +351,13 @@ describe("watchman API", () => {
     const again = await talkApp.request(`/api/threads/${thread.id}/messages`, { method: "POST", headers: auth, body: JSON.stringify({ message: "and?" }) });
     expect(again.status).toBe(409);
 
-    let view: { busy: boolean; messages: { role: string; body: string }[]; proposals: { id: number; state: string }[] };
+    let view: {
+      busy: boolean;
+      messages: { id: number; role: string; body: string }[];
+      proposals: { id: number; state: string }[];
+      session: { contextPeak: number; rollAt: number } | null;
+      sessionStarts: number[];
+    };
     do {
       await new Promise((r) => setTimeout(r, 50));
       view = (await (await talkApp.request(`/api/threads/${thread.id}`, { headers: auth })).json()) as typeof view;
@@ -356,5 +369,15 @@ describe("watchman API", () => {
     expect(((await applied.json()) as { result: { projects: string[] } }).result.projects).toEqual(["proto-a", "proto-b"]);
     const found = (await (await talkApp.request("/api/search?q=prototype", { headers: auth })).json()) as { kind: string; messageId?: number }[];
     expect(found).toEqual([expect.objectContaining({ kind: "message", messageId: 1 })]);
+
+    expect(view.session).toMatchObject({ rollAt: 150000 });
+    expect(view.sessionStarts).toEqual([1]);
+    const cleared = await talkApp.request(`/api/threads/${thread.id}/messages`, { method: "POST", headers: auth, body: JSON.stringify({ message: "/clear" }) });
+    expect(cleared.status).toBe(200);
+    view = (await cleared.json()) as typeof view;
+    expect(view.session).toBeNull();
+    expect(view.messages.at(-1)).toMatchObject({ role: "system", body: expect.stringMatching(/^New session/) });
+    expect(view.messages.filter((m) => m.role === "human").map((m) => m.body)).toEqual(["prototype a chain"]);
+    expect((await talkApp.request(`/api/threads/${thread.id}/clear`, { method: "POST", headers: auth })).status).toBe(200);
   });
 });

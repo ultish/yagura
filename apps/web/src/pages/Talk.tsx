@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { api, navigate, useApi, useQuery, type Proposal, type ProjectSummary, type Thread, type ThreadMessage, type ThreadView } from "../api";
 import { clock } from "../lib/format";
 import { Inline, Markdown } from "../lib/markdown";
@@ -386,6 +386,7 @@ export function Talk({ threadId }: { threadId: number | null }) {
     setDraft({ text: say, key: Date.now() });
   }, [say, threadId]);
   const autonomy = useAction();
+  const session = useAction();
 
   const v = view.data;
   const messages = v ? (all ? v.messages : v.messages.slice(-SHOWN)) : [];
@@ -444,6 +445,28 @@ export function Talk({ threadId }: { threadId: number | null }) {
                   ))}
                 </span>
               )}
+              {v && (
+                <span style={{ marginLeft: "auto", display: "inline-flex", gap: 10, alignItems: "baseline" }}>
+                  {v.session && (
+                    <span
+                      className="mono muted"
+                      style={{ fontSize: 12 }}
+                      title="The watchman's context at its last turn; a new session starts when it passes the roll point"
+                    >
+                      session · {Math.round(v.session.contextPeak / 1000)}k of {Math.round(v.session.rollAt / 1000)}k
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={!v.session || busy || session.busy}
+                    title="Start the watchman fresh from yagura's records on the next message. Decisions, questions, spec, and messages stay. Typing /clear does the same."
+                    onClick={() => session.run(() => api(`/api/threads/${threadId}/clear`, { body: {} }))}
+                  >
+                    New session
+                  </button>
+                </span>
+              )}
             </div>
             <div style={{ flexGrow: 1, padding: "0 32px" }}>
               {view.error && (
@@ -462,13 +485,19 @@ export function Talk({ threadId }: { threadId: number | null }) {
                 </button>
               )}
               {messages.map((m) => (
-                <Message
-                  key={m.id}
-                  m={m}
-                  proposals={v!.proposals.filter((p) => p.messageId === m.id)}
-                  known={known}
-                  onEdit={(t) => setDraft({ text: t, key: Date.now() })}
-                />
+                <Fragment key={m.id}>
+                  {v!.sessionStarts.indexOf(m.id) > 0 && (
+                    <div className="mono muted session-mark" role="separator">
+                      new session
+                    </div>
+                  )}
+                  <Message
+                    m={m}
+                    proposals={v!.proposals.filter((p) => p.messageId === m.id)}
+                    known={known}
+                    onEdit={(t) => setDraft({ text: t, key: Date.now() })}
+                  />
+                </Fragment>
               ))}
               <div ref={bottom} />
             </div>

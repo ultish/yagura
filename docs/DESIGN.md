@@ -725,7 +725,7 @@ Answers to the questions this design left open (2026-09-26):
 7. **Agent communication (2026-09-29, user):** no chat between agents. A rejected worker resumes its own session with the verifier's findings instead of starting cold, within the limits in §13 "Resume on rejection"; one-way notices to siblings stay open until a real run needs them.
 8. **Judgment over rules (2026-09-30, user):** agents are trusted to know how to test; the verifier checks the worker did what was asked, tests what was built, and keeps the verify pack current (fixing or extending it, or running `maintain-verification-skill`); the worker never edits the pack; yagura agrees or disagrees only on facts it can check; environment values and notes are context, not checks, and failures surface from real use to the watchman and the developer; the audit trail (each agent's decisions and reasons, yagura's checks, cost) lets the developer disagree with any decision after the fact (§13 "Judgment, evidence, and the trail").
 
-## 21. The watchman as a live session (decided 2026-09-30, user; not built yet)
+## 21. The watchman as a live session (decided 2026-09-30, user; step 1 built 2026-10-02)
 
 Today each watchman message is a fresh harness session whose context yagura rebuilds from the store (§8a). The developer wants the conversation to feel like a Claude Code session: continuous, able to look things up and run read-only commands itself, with a "clear" that starts a new session. This section is the design; nothing here is built. It replaces §8a's "every message is a fresh harness session" and keeps the rest of §8a (records, mentions, proposals applied on Go).
 
@@ -772,6 +772,17 @@ The thread page shows a **New session** button, the session marker in the transc
 ### Proof
 
 Real SQLite and git; the fake agent extended to honour `--resume` and to attempt a denied tool. Tests: a second message resumes the first's session and its brief holds only the delta; clear ends the session and the next brief is full; a resume that fails re-runs fresh and records `lost`; a turn over the roll threshold starts a new session; the fake agent's write attempt is refused by the CLI guard even when the allow-list is widened; a read of another project's spec outside the thread's links is refused. Then one real `claude -p --resume` watchman exchange (Haiku) to capture the transcript as a fixture.
+
+### As built (step 1, 2026-10-02)
+
+- Migration 21: `thread_sessions(id, thread_id, harness_session_id, seen_json, started_at, ended_at, ended_reason)` with one open row per thread, and `watchman_turns.session_id`. A row is created when a turn's harness reports a session id it has not seen (`attachSession`), so a turn that never started leaves nothing behind.
+- What a session was shown is a snapshot (`Seen`: decision and open-question texts by id, proposal states, each project's rendered spec and status, standing orders, the catalog, and the last message id), stored after every turn that produced a reply. A resumed turn's brief (`buildWatchmanUpdate`) is the diff against it: new or edited decisions and questions, ones no longer active (with what superseded or answered them), proposal state changes, changed statuses and whole changed specs, changed standing orders or catalog, and messages since the last turn other than the watchman's own. The records the last reply created are listed with their ids, since the session wrote them without ids. A session with no snapshot yet is resumed with the full brief.
+- A rejected reply's retry resumes the same session with only the reason (`renderRetryInSession`); a harness that cannot resume still gets the full brief and the previous reply.
+- Lost: a resume that emits no session event (as `No conversation found` does) ends the session `lost`, adds a system message, and re-runs the turn with the full brief. A stopped turn is not treated as lost.
+- Roll: `watchman.session_roll_tokens` (default 150000, global); checked before the turn against the session's last turn's context peak.
+- Clear: `clearWatchmanSession` (refused while a turn runs), `POST /api/threads/:id/clear`, `/clear` sent as a message (API and `yagura talk`), `yagura thread clear <id>`. Clear, roll, and lost each add a system message saying why.
+- Dashboard: the thread header shows `session · Nk of 150k` and a New session button; the transcript draws a "new session" divider before the first message of each session after the first (`sessionStarts` in the thread view, from the turns, not from message text).
+- Not yet: messages sent while a turn runs are still refused (409), not queued.
 
 ### Open
 

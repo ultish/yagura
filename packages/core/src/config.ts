@@ -61,6 +61,12 @@ export const SETTINGS = {
   "role.watchman.model": z.string().nullable().default(null).describe("Model for the watchman (empty: the harness default)"),
   "timebox.watchman_seconds": z.number().int().positive().default(900).describe("How long one watchman turn may run"),
   "watchman.context_tokens": z.number().int().min(4000).default(40000).describe("Size budget for the watchman's brief"),
+  "watchman.session_roll_tokens": z
+    .number()
+    .int()
+    .min(10000)
+    .default(150000)
+    .describe("Start a new watchman session once a turn's context passes this many tokens"),
   "timebox.work_seconds": z.number().int().positive().default(1800).describe("How long a worker may run before it is stopped"),
   "skills.scaffold": z.array(z.string().min(1)).default([]).describe("Skills a scaffold unit (a new project's skeleton) must load"),
   "skills.work": z.array(z.string().min(1)).default([]).describe("Skills every worker must load"),
@@ -126,6 +132,7 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "role.watchman.model": [],
   "timebox.watchman_seconds": [],
   "watchman.context_tokens": [],
+  "watchman.session_roll_tokens": [],
   "timebox.work_seconds": PR,
   "work.resume_on_rejection": PR,
   "skills.scaffold": PRE,
