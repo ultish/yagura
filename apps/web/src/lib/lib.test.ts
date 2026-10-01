@@ -71,6 +71,19 @@ const attempt = (over: object) => ({ id: 9, unitId: 1, n: 1, state: "handed_off"
 const detail = (units: UnitView[], over: Partial<ProjectDetail> = {}): ProjectDetail => ({ units, gates: [], waiting: [], deps: [], ...over }) as ProjectDetail;
 const NOW = Date.parse("2026-09-27T00:12:00Z");
 
+describe("steering in the timeline", () => {
+  it("shows the developer's messages but not yagura's own prompt, which the harness echoes first", () => {
+    const t = buildTimeline([
+      line(0, 1, [{ kind: "session", sessionId: "s", model: "m", plugins: {} }]),
+      line(1, 2, [{ kind: "user_text", text: "# yagura brief" }]),
+      line(2, 3, [{ kind: "tool_call", id: "a", name: "Bash", input: { command: "sleep 4" }, parentId: null }]),
+      line(3, 4, [{ kind: "user_text", text: "use lib/parse.py instead" }]),
+      line(4, 5, [{ kind: "final", text: "done", isError: false, stopReason: null, costUsd: 0 }]),
+    ]);
+    expect(t.steps.map((s) => (s.kind === "you" ? `you: ${s.text}` : s.kind))).toEqual(["tool", "you: use lib/parse.py instead", "final"]);
+  });
+});
+
 describe("unit stages and status", () => {
   it("lights every stage of a landed unit", () => {
     const u = unit({ state: "landed", landedSha: "153a90b04b" as never, verdict: { id: 1, tier: "unit-verified", headSha: "x" } });

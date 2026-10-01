@@ -186,8 +186,18 @@ export type HarnessEvent =
   | { kind: "tool_call"; id: string; name: string; input: unknown; parentId: string | null }
   | { kind: "tool_result"; id: string; output: string; isError: boolean; parentId: string | null }
   | { kind: "usage"; outputTokens: number; contextTokens: number }
+  | { kind: "user_text"; text: string }
   | { kind: "final"; text: string; isError: boolean; stopReason: string | null; costUsd: number | null }
   | { kind: "ignored"; type: string };
+
+export interface Steer {
+  id: number;
+  body: string;
+  state: "pending" | "sent" | "delivered" | "undelivered";
+  reason: string | null;
+  logLine: number | null;
+  createdAt: string;
+}
 
 export type BellItem =
   | {

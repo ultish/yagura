@@ -3,6 +3,7 @@ import type { HarnessEvent, LogLine } from "../api";
 export type Step =
   | { kind: "skill"; id: string; at: number | null; skill: string; ok: boolean }
   | { kind: "text"; id: string; at: number | null; text: string }
+  | { kind: "you"; id: string; at: number | null; text: string }
   | {
       kind: "tool";
       id: string;
@@ -70,6 +71,8 @@ export function buildTimeline(lines: LogLine[]): Timeline {
     if (parent && parent.kind === "tool") parent.children.push(step);
     else t.steps.push(step);
   };
+  // The harness echoes every message it takes in; the first after a session starts is yagura's own prompt, the rest are the developer's.
+  let promptPending = false;
   for (const line of lines) {
     if (t.startedAt === null && line.at) t.startedAt = line.at;
     line.events.forEach((e: HarnessEvent, j) => {
@@ -78,14 +81,21 @@ export function buildTimeline(lines: LogLine[]): Timeline {
         case "session":
           t.model = e.model;
           t.plugins = e.plugins;
+          promptPending = true;
+          break;
+        case "user_text":
+          if (promptPending) promptPending = false;
+          else t.steps.push({ kind: "you", id, at: line.at, text: e.text });
           break;
         case "usage":
           t.contextPeak = Math.max(t.contextPeak, e.contextTokens);
           break;
         case "text":
+          promptPending = false;
           if (e.text.trim()) place({ kind: "text", id, at: line.at, text: e.text }, e.parentId);
           break;
         case "tool_call": {
+          promptPending = false;
           if (e.name === "Skill") {
             const step: Step = { kind: "skill", id, at: line.at, skill: String((e.input as { skill?: unknown })?.skill ?? "?"), ok: true };
             calls.set(e.id, step);

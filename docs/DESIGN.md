@@ -789,3 +789,23 @@ Real SQLite and git; the fake agent extended to honour `--resume` and to attempt
 - The exact `yagura` and `git` patterns in the allow-list; start narrow and widen from real use.
 - Whether the roll threshold should follow the model's context size instead of a fixed number.
 - Whether a cleared session's transcript should stay readable in the dashboard (leaning yes, from the harness's log that yagura already records per turn).
+
+## 22. Steering a running agent (decided and built 2026-10-02, user)
+
+The developer watches an agent's log live; when it goes off track they can tell it something without stopping it. Stopping with a note (§17) stays for when the attempt should be thrown away.
+
+### Mechanism
+
+- Every claude session runs with `--input-format stream-json --replay-user-messages`: the prompt is the first stdin line, and stdin stays open. Verified with a real `claude -p` probe (Haiku, 2026-10-02, $0.03, fixture `claude-steer.jsonl`): a message written while a tool call ran was taken in right after that call finished, within the same response; the agent changed course; the CLI echoes every message it takes in as a `user` line with `isReplay: true`, the prompt first. The probe also showed the process stays alive after its `result` until stdin closes.
+- A message is a row in `steers` (migration 22: body, state `pending` → `sent` → `delivered` or `undelivered`, reason, the log line it was read at). Each session polls its pending rows every second and writes them to stdin, so steering works whether the agent runs under the daemon or `yagura drive`. The echo marks a message delivered at its log line.
+- yagura closes stdin on the session's `result`, even when a message is still unread: answering it would start a new response whose text replaces the handoff. A message the agent never read is marked `undelivered` with the reason ("the agent finished before reading it", "the agent had already finished").
+- Any running attempt can be steered (worker, pack writer, verifier, triage, rebase, planner). Steering does not count as a try and does not change the attempt; it is recorded as an event (`attempt.steered`) and in the unit's story ("You told Worker U3.1", with read / not read).
+- Interfaces: `POST /api/attempts/:id/steer {message}` (409 when not running, 400 when the harness cannot take messages), `GET /api/attempts/:id/steers`, `yagura steer <project>/U<n> <message>`, and on the agent page a box under the live log that shows each message's state; read messages appear in the timeline as "you" at the point the agent read them (the harness's echo of yagura's own prompt is not shown).
+
+### Other harnesses
+
+Steering is offered only for an adapter that implements `message(text)` (claude today). Before adding it for grok, codex, or any later harness, probe it the same way and record what it does: whether it reads messages from stdin while running, whether a message is taken in between steps or only after the whole response, how (and whether) it echoes a message it took in, and whether it exits on its own after its final result or waits for stdin to close. Capture the transcript as a fixture. Until then those harnesses keep the one-shot prompt and the API refuses to steer them.
+
+### Open
+
+- The watchman still runs one `claude -p --resume` per message (§21); a long-lived watchman on the same stdin mechanism waits on whether the per-message start is slow in real use.

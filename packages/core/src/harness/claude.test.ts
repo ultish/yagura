@@ -39,8 +39,21 @@ describe("claude command", () => {
   it("builds a headless stream-json invocation with plugin dirs and optional model", () => {
     const run = { prompt: "brief", bin: null, model: null, permissionMode: "bypassPermissions", pluginDirs: ["/y/plugins/yagura"], addDirs: [], extraArgs: [] };
     expect(claudeAdapter.command(run)).toEqual({
-      argv: ["claude", "-p", "--output-format", "stream-json", "--verbose", "--permission-mode", "bypassPermissions", "--plugin-dir", "/y/plugins/yagura"],
-      stdin: "brief",
+      argv: [
+        "claude",
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--input-format",
+        "stream-json",
+        "--replay-user-messages",
+        "--permission-mode",
+        "bypassPermissions",
+        "--plugin-dir",
+        "/y/plugins/yagura",
+      ],
+      stdin: '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"brief"}]}}\n',
     });
     expect(claudeAdapter.command({ ...run, model: "opus" }).argv.slice(-2)).toEqual(["--model", "opus"]);
   });
@@ -69,5 +82,24 @@ describe("claude resume (real transcripts)", () => {
     const events = read("claude-resume-missing.jsonl");
     expect(events.some((e) => e.kind === "session")).toBe(false);
     expect(events).toEqual([{ kind: "final", text: "", isError: true, stopReason: null, costUsd: 0 }]);
+  });
+});
+
+describe("claude steering (real transcript)", () => {
+  const events = readFileSync(new URL("./fixtures/claude-steer.jsonl", import.meta.url), "utf8")
+    .split("\n")
+    .flatMap(parseClaudeLine);
+
+  it("echoes each message it takes in, the brief first and a mid-run message after the step in progress", () => {
+    const order = events
+      .filter((e) => e.kind === "user_text" || e.kind === "tool_call" || e.kind === "final")
+      .map((e) =>
+        e.kind === "user_text"
+          ? `you: ${e.text.slice(0, 20)}`
+          : e.kind === "tool_call"
+            ? `call: ${(e.input as { command: string }).command}`
+            : `final: ${e.text}`,
+      );
+    expect(order).toEqual(["you: Run these three comm", "call: sleep 4 && echo one", "you: Change of plan: stop", "call: echo PINEAPPLE", "final: Done."]);
   });
 });

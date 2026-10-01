@@ -45,6 +45,7 @@ export function parseClaudeLine(line: string): HarnessEvent[] {
 
   if (o.type === "user") {
     const message = o.message as { content: Block[] | string };
+    if (o.isReplay === true) return [{ kind: "user_text", text: stringifyContent(message.content) }];
     if (!Array.isArray(message.content)) return [];
     return message.content
       .filter((b) => b.type === "tool_result")
@@ -71,6 +72,8 @@ export function parseClaudeLine(line: string): HarnessEvent[] {
   return [{ kind: "ignored", type: [o.type, o.subtype].filter(Boolean).join(":") }];
 }
 
+const claudeMessage = (text: string) => `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }] } })}\n`;
+
 export const claudeAdapter: HarnessAdapter = {
   id: "claude",
   canResume: true,
@@ -81,6 +84,9 @@ export const claudeAdapter: HarnessAdapter = {
       "--output-format",
       "stream-json",
       "--verbose",
+      "--input-format",
+      "stream-json",
+      "--replay-user-messages",
       "--permission-mode",
       run.permissionMode,
       ...run.pluginDirs.flatMap((d) => ["--plugin-dir", d]),
@@ -89,7 +95,8 @@ export const claudeAdapter: HarnessAdapter = {
       ...(run.resume ? ["--resume", run.resume] : []),
       ...run.extraArgs,
     ];
-    return { argv, stdin: run.prompt };
+    return { argv, stdin: claudeMessage(run.prompt) };
   },
+  message: claudeMessage,
   parse: parseClaudeLine,
 };

@@ -7,6 +7,7 @@ import type { Bootstrap } from "./config.js";
 import type { Attempt, HarnessEvent, ProjectId, Role, Unit } from "./domain.js";
 import type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
 import { missingSkills } from "./pack.js";
+import { steerChannel, type SteerChannel } from "./steer.js";
 import { logTimesPath } from "./paths.js";
 import { getAttempt, getUnit, recordEvent, updateAttempt, type Db } from "./store.js";
 import type { AttemptId } from "./domain.js";
@@ -61,7 +62,10 @@ export interface SessionRecorder {
   usage(contextPeak: number, tokensOut: number): void;
   cost(usd: number): void;
   finished(skills: string[]): string[];
+  steers?: SteerChannel;
 }
+
+const STEER_POLL_MS = 1000;
 
 // A resumed session already loaded the skills its first round did, so those count toward METHOD.
 // Only the session yagura started for an attempt knows its token, so no other process can record evidence in that attempt's name.
@@ -91,6 +95,7 @@ export function attemptRecorder(
     session: (e) => updateAttempt(db, s.attempt.id, { pluginVersions: e.plugins, model: e.model, sessionId: e.sessionId }),
     usage: (contextPeak, tokensOut) => updateAttempt(db, s.attempt.id, { contextPeak, tokensOut }),
     cost: (usd) => db.prepare("UPDATE attempts SET cost_usd = cost_usd + ? WHERE id = ?").run(usd, s.attempt.id),
+    steers: steerChannel(db, s.attempt.id),
     finished: (skills) => {
       const missing = getAttempt(db, s.attempt.id).stopNote !== null ? [] : missingSkills(s.role, [...(s.inheritedSkills ?? []), ...skills], s.projectSkills);
       updateAttempt(db, s.attempt.id, { skills, missingSkills: missing });
@@ -130,7 +135,30 @@ export async function runAgentSession(
     },
   });
   s.recorder.started(child.pid ?? null);
-  child.stdin.end(stdin);
+  child.stdin.on("error", () => {});
+  // A harness that reads messages from stdin stays alive after its result until stdin closes. Input closes on the result even with a message unread:
+  // answering it would start a new response whose text replaces the handoff.
+  const inFlight: { id: number; body: string }[] = [];
+  let poll: NodeJS.Timeout | null = null;
+  const closeInput = () => {
+    if (poll) clearInterval(poll);
+    poll = null;
+    child.stdin.end();
+  };
+  if (s.adapter.message && s.recorder.steers) {
+    const { message } = s.adapter;
+    const steers = s.recorder.steers;
+    child.stdin.write(stdin);
+    poll = setInterval(() => {
+      for (const m of steers.pending()) {
+        child.stdin.write(message(m.body));
+        steers.sent(m.id);
+        inFlight.push(m);
+      }
+    }, STEER_POLL_MS);
+  } else if (s.adapter.message) {
+    child.stdin.write(stdin);
+  } else child.stdin.end(stdin);
 
   let final: FinalEvent | null = null;
   let lastActivity: string | null = null;
@@ -156,7 +184,9 @@ export async function runAgentSession(
     setTimeout(() => killGroup("SIGKILL"), KILL_GRACE_MS).unref();
   }, s.timeboxSeconds * 1000);
 
+  let lineNo = -1;
   for await (const line of createInterface({ input: child.stdout })) {
+    lineNo++;
     appendFileSync(s.logPath, `${line}\n`);
     appendFileSync(logTimesPath(s.logPath), `${Date.now()}\n`);
     let events: HarnessEvent[];
@@ -177,9 +207,14 @@ export async function runAgentSession(
         const skill = (e.input as { skill?: unknown } | null)?.skill;
         if (e.name === "Skill" && typeof skill === "string") skills.push(skill);
       }
+      if (e.kind === "user_text") {
+        const i = inFlight.findIndex((m) => m.body === e.text.trim());
+        if (i >= 0) s.recorder.steers?.delivered(inFlight.splice(i, 1)[0]!.id, lineNo);
+      }
       if (e.kind === "final") {
         final = e;
         if (e.costUsd) s.recorder.cost(e.costUsd);
+        if (s.adapter.message) closeInput();
       }
       ctx.onEvent?.(e);
     }
@@ -189,6 +224,9 @@ export async function runAgentSession(
     else child.once("exit", (code, signal) => resolve({ code, signal }));
   });
   clearTimeout(timer);
+  if (poll) clearInterval(poll);
+  for (const m of inFlight) s.recorder.steers?.undelivered(m.id, "the agent finished before reading it");
+  for (const m of s.recorder.steers?.pending() ?? []) s.recorder.steers?.undelivered(m.id, "the agent had already finished");
 
   const missing = s.recorder.finished(skills);
   return { final, exitCode: exit.code, signal: exit.signal, timedOut, stderrTail: stderr, lastActivity, skills, missingSkills: missing };

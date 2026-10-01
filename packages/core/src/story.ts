@@ -1,3 +1,4 @@
+import { listSteers } from "./steer.js";
 import { existsSync, readFileSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
 import { listDisagreements, type Disagreement } from "./disagreements.js";
@@ -297,6 +298,25 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
         : null,
     });
   }
+
+  for (const u of [unit, ...related])
+    for (const a of listAttempts(db, u.id))
+      for (const st of listSteers(db, a.id))
+        entries.push({
+          at: st.createdAt,
+          actor: "person",
+          who: `You told ${ROLE[u.type] ?? u.type} U${u.seq}.${a.n}`,
+          attempt: { id: a.id, unitSeq: u.seq, n: a.n, model: a.model, costUsd: 0 },
+          status:
+            st.state === "delivered"
+              ? { text: "read", tone: "pine" }
+              : st.state === "undelivered"
+                ? { text: `not read: ${st.reason}`, tone: "bell" }
+                : { text: "waiting for its current step", tone: "amber" },
+          body: st.body,
+          lines: [],
+          folded: null,
+        });
 
   for (const e of events.filter((x) => x.type === "gate.answered" && x.unit_id === unit.id))
     entries.push({

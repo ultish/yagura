@@ -7,7 +7,9 @@ import { setSetting, type Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
-import { parseClaudeLine } from "./harness/claude.js";
+import { claudeAdapter, parseClaudeLine } from "./harness/claude.js";
+import { addSteer, listSteers } from "./steer.js";
+import { unitStory } from "./story.js";
 import { layout } from "./paths.js";
 import { runWorkUnit } from "./runner.js";
 import { setEnvironmentNotes, setValue } from "./envvalues.js";
@@ -194,6 +196,77 @@ describe("runWorkUnit", () => {
     const done = await running;
     expect(done.state).toBe("stopped");
     expect(getUnit(db, unit.id)).toMatchObject({ state: "ready", notes: ["Operator stopped attempt 1: wrong approach; use the store"] });
+  });
+
+  describe("steering", () => {
+    const start = (timeboxSeconds = 60) => {
+      const bin = join(mkdtempSync(join(tmpdir(), "yagura-bin-")), "claude");
+      writeFileSync(bin, `#!/bin/sh\nexec "${process.execPath}" "${fakeAgent}" "$@"\n`, { mode: 0o755 });
+      setSetting(db, "global", "", "harness.claude.bin", bin);
+      const unit = addUnit(db, {
+        projectId: project,
+        type: "work",
+        repoId: "testbed" as RepoId,
+        goal: "g",
+        writeScope: ["app/**"],
+        acceptance: ["a"],
+        verify: "v",
+        timeboxSeconds,
+        maxAttempts: 1,
+      });
+      transitionUnit(db, unit.id, "ready");
+      return { unit, running: runWorkUnit({ db, boot, adapters: { claude: claudeAdapter }, cli: [] }, unit.id) };
+    };
+    const runningAttempt = async (unitId: number) => {
+      let attempt = listAttempts(db, unitId as never)[0];
+      for (let i = 0; i < 100 && !attempt?.pid; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        attempt = listAttempts(db, unitId as never)[0];
+      }
+      return attempt!;
+    };
+
+    it("hands a message to the running agent between steps, and it changes course in the same attempt", async () => {
+      process.env.FAKE_MODE = "steer";
+      const { unit, running } = start();
+      const attempt = await runningAttempt(unit.id);
+      addSteer(db, attempt.id, "use the existing store instead");
+      const done = await running;
+      expect(done).toMatchObject({ n: 1, state: "handed_off", handoffStatus: "success" });
+      expect(readFileSync(join(done.worktreePath!, "app/orders.py"), "utf8")).toContain("# steered: use the existing store instead");
+      const [steer] = listSteers(db, attempt.id);
+      expect(steer).toMatchObject({ state: "delivered", body: "use the existing store instead" });
+      const log = readFileSync(layout(boot).log(project, unit.seq, 1), "utf8").split("\n");
+      expect(JSON.parse(log[steer!.logLine!]!)).toMatchObject({ isReplay: true, message: { content: [{ text: "use the existing store instead" }] } });
+      expect(unitStory(db, boot, getUnit(db, unit.id)).entries.find((e) => e.actor === "person")).toMatchObject({
+        who: "You told Worker U1.1",
+        body: "use the existing store instead",
+        status: { text: "read", tone: "pine" },
+      });
+    });
+
+    it("closes the agent's input once it reports its result, so it exits instead of waiting out the timebox", async () => {
+      process.env.FAKE_MODE = "success";
+      const started = Date.now();
+      const { running } = start(30);
+      expect((await running).state).toBe("handed_off");
+      expect(Date.now() - started).toBeLessThan(10_000);
+    });
+
+    it("marks a message the agent finished without reading as not delivered, keeping its handoff", async () => {
+      process.env.FAKE_MODE = "success";
+      process.env.FAKE_DELAY_MS = "2500";
+      try {
+        const { unit, running } = start();
+        const attempt = await runningAttempt(unit.id);
+        addSteer(db, attempt.id, "too late");
+        expect(await running).toMatchObject({ state: "handed_off", handoffStatus: "success" });
+        expect(listSteers(db, attempt.id)).toMatchObject([{ state: "undelivered", reason: "the agent finished before reading it" }]);
+        expect(() => addSteer(db, attempt.id, "after the end")).toThrow(/not running/);
+      } finally {
+        delete process.env.FAKE_DELAY_MS;
+      }
+    });
   });
 
   describe("project skills and reference repos", () => {

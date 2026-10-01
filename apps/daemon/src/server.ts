@@ -50,6 +50,9 @@ import {
   setAndon,
   setSetting,
   stopAttempt,
+  addSteer,
+  listSteers,
+  SteerRefused,
   traceUnit,
   type ArtifactId,
   type AttemptId,
@@ -294,6 +297,20 @@ export function createApp(opts: ServerOptions): Hono {
   app.get("/api/attempts/:id/log", (c) => {
     const { lines, next } = readLog(opts, Number(c.req.param("id")) as AttemptId, Number(c.req.query("from") ?? 0));
     return c.json({ lines, next });
+  });
+
+  app.get("/api/attempts/:id/steers", (c) => c.json(listSteers(db, Number(c.req.param("id")) as AttemptId)));
+  app.post("/api/attempts/:id/steer", async (c) => {
+    const attempt = getAttempt(db, Number(c.req.param("id")) as AttemptId);
+    const b = (await c.req.json().catch(() => ({}))) as { message?: unknown };
+    if (!(opts.adapters ?? { claude: claudeAdapter })[attempt.harness]?.message)
+      return c.json({ error: `${attempt.harness} agents cannot take messages while they run` }, 400);
+    try {
+      return c.json(addSteer(db, attempt.id, String(b.message ?? "")));
+    } catch (e) {
+      if (e instanceof SteerRefused) return c.json({ error: e.message }, 409);
+      throw e;
+    }
   });
 
   app.post("/api/attempts/:id/stop", async (c) => {

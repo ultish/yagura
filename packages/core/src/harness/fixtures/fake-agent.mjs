@@ -4,9 +4,45 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 const mode = process.env.FAKE_MODE;
 const emit = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
 let brief = "";
-process.stdin.on("data", (d) => (brief += d));
 const resumeAt = process.argv.indexOf("--resume");
-process.stdin.on("end", () => {
+// Like claude -p --input-format stream-json: the first line is the prompt, later lines are messages taken in between steps, and the process exits only once stdin closes.
+const streaming = process.argv.includes("--input-format");
+const textOf = (line) =>
+  JSON.parse(line)
+    .message.content.map((c) => c.text)
+    .join("\n");
+const inbox = [];
+let waiting = null;
+if (streaming) {
+  let buf = "";
+  let started = false;
+  process.stdin.on("data", (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      if (!started) {
+        started = true;
+        brief = textOf(line);
+        main();
+      } else if (waiting) waiting(textOf(line));
+      else inbox.push(textOf(line));
+    }
+  });
+} else {
+  process.stdin.on("data", (d) => (brief += d));
+  process.stdin.on("end", main);
+}
+const nextMessage = (ms) =>
+  inbox.length
+    ? Promise.resolve(inbox.shift())
+    : new Promise((resolve) => {
+        const timer = setTimeout(() => ((waiting = null), resolve(null)), ms);
+        waiting = (text) => (clearTimeout(timer), (waiting = null), resolve(text));
+      });
+
+async function main() {
   if (resumeAt > 0) return resumed(process.argv[resumeAt + 1]);
   const sessionId = process.env.YAGURA_ROLE === "watchman" ? `w-${process.pid}-${Date.now()}` : "s1";
   emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
@@ -30,11 +66,18 @@ process.stdin.on("end", () => {
   if (mode === "hang") return setTimeout(() => {}, 60_000);
   if ((mode ?? "").startsWith("verify")) return verify(mode);
   const file = mode === "scope" ? "README.md" : "app/orders.py";
+  let steered = null;
+  if (mode === "steer") {
+    emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "w1", name: "Bash", input: { command: "sleep 1" } }] } });
+    steered = await nextMessage(Number(process.env.FAKE_STEER_WAIT_MS ?? 10000));
+    emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "w1", content: "" }] } });
+    if (steered) emit({ type: "user", message: { role: "user", content: [{ type: "text", text: steered }] }, isReplay: true });
+  }
   if (mode === "success-line") {
     const lines = readFileSync(file, "utf8").split("\n");
     lines[0] = "# edited by fake agent";
     writeFileSync(file, lines.join("\n"));
-  } else writeFileSync(file, `# edited by fake agent\n# brief had GOAL: ${brief.includes("## GOAL")}\n`);
+  } else writeFileSync(file, `# edited by fake agent\n# brief had GOAL: ${brief.includes("## GOAL")}\n${steered ? `# steered: ${steered}\n` : ""}`);
   const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
   g("add", file);
   g("commit", "-q", "-m", "fake agent work");
@@ -48,8 +91,8 @@ process.stdin.on("end", () => {
     mode === "nohandoff"
       ? "DONE"
       : `## Status\n${mode === "blocked" ? "blocked" : "success"}\n\n## Branch\n\`b\`\n\n## What I did\n- edited ${file}\n\n## Verification\nunit-verified\n\n## Evidence\n- python3 -m unittest -> ok\n`;
-  emit({ type: "result", subtype: "success", is_error: false, result: handoff, terminal_reason: "completed", total_cost_usd: 0.01 });
-});
+  finish(handoff);
+}
 
 // Mirrors real claude -p --resume (fixtures claude-resume*.jsonl): same session id, no replay, no fresh skill loads.
 function resumed(sessionId) {
@@ -143,7 +186,7 @@ function finish(text) {
   emit({ type: "result", subtype: "success", is_error: false, result: text, terminal_reason: "completed", total_cost_usd: 0.01 });
 }
 
-function engine(role) {
+async function engine(role) {
   if (role === "planner") {
     const workRows = [...brief.matchAll(/^\| U\d+ \| work \| (\w+)/gm)].map((m) => m[1]);
     const repo = /^## CODE[^\n]*\n- ([\w-]+):/m.exec(brief)[1];
@@ -176,8 +219,18 @@ function engine(role) {
   }
   if (role === "worker") {
     const base = /May write:\n- ([^*\n]+?)\/?\*\*/.exec(brief)[1];
+    let steered = null;
+    if (streaming && process.env.FAKE_STEER_WAIT_MS) {
+      emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "w1", name: "Bash", input: { command: "sleep 1 # waiting to be steered" } }] } });
+      steered = await nextMessage(Number(process.env.FAKE_STEER_WAIT_MS));
+      emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "w1", content: "" }] } });
+      if (steered) {
+        emit({ type: "user", message: { role: "user", content: [{ type: "text", text: steered }] }, isReplay: true });
+        emit({ type: "assistant", message: { content: [{ type: "text", text: `Understood: ${steered}` }] } });
+      }
+    }
     mkdirSync(base, { recursive: true });
-    writeFileSync(`${base}/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`, "work\n");
+    writeFileSync(`${base}/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`, steered ? `work, steered: ${steered}\n` : "work\n");
     const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
     g("add", "-A");
     g("commit", "-q", "-m", `work ${process.env.YAGURA_UNIT}`);

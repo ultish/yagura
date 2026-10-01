@@ -107,12 +107,13 @@ function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; 
           <span className="story-who">
             {a ? (
               <Link to={`/p/${story.projectId}/u/${a.unitSeq}/${a.n}`}>
-                <b>{entry.who}</b> · U{a.unitSeq}.{a.n}
+                <b>{entry.who}</b>
+                {entry.actor !== "person" && ` · U${a.unitSeq}.${a.n}`}
               </Link>
             ) : (
               <b>{entry.who}</b>
             )}
-            {a && (
+            {a && entry.actor !== "person" && (
               <>
                 {a.model && ` · ${modelName(a.model)}`} · ${a.costUsd.toFixed(2)}
               </>

@@ -18,6 +18,7 @@ import {
   listThreads,
   ProposalBody,
   runWatchmanTurn,
+  addSteer,
   clearWatchmanSession,
   searchMessages,
   setThreadAutonomy,
@@ -117,6 +118,7 @@ const USAGE = `yagura — agent orchestration
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...] [--reference <repo id>...]
   yagura project skills <id>                       checks the project's skills.* are installed where agents run
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
+  yagura steer <project>/U<n> <message>          tell a unit's running agent something; it reads it after its current step
   yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go | clear <id>
   yagura thread mentions <@project | @project/U3 | @project/U3.2 | @thread:4 | @repo:id>   conversations that mention it
   yagura proposal apply|discard <id>
@@ -188,12 +190,14 @@ function answersOf(raw: string[]): Record<string, string> {
 }
 
 function renderEvent(e: HarnessEvent): string | null {
-  const indent = e.kind !== "session" && e.kind !== "final" && e.kind !== "ignored" && e.kind !== "usage" && e.parentId ? "    " : "  ";
+  const indent = "parentId" in e && e.parentId ? "    " : "  ";
   switch (e.kind) {
     case "session":
       return `  session ${e.sessionId} · ${e.model ?? "default model"} · pstack ${e.plugins.pstack ?? "not loaded"}`;
     case "text":
       return `${indent}· ${e.text.split("\n")[0]!.slice(0, 160)}`;
+    case "user_text":
+      return `  > ${e.text.split("\n")[0]!.slice(0, 160)}`;
     case "tool_call": {
       const input = e.input as Record<string, unknown> | null;
       return `${indent}→ ${e.name} ${String(input?.skill ?? input?.command ?? input?.file_path ?? input?.pattern ?? input?.description ?? "").slice(0, 140)}`;
@@ -687,6 +691,17 @@ async function main() {
       if (!positionals[0]) fail(USAGE);
       const cleared = clearSetting(db, values.scope as SettingScope, values.id as string, positionals[0]!);
       console.log(cleared ? `${positionals[0]} cleared (${values.scope}${values.id ? ` ${values.id}` : ""})` : `${positionals[0]} was not set there`);
+      return;
+    }
+    case "steer": {
+      const [target, ...words] = rest;
+      const m = /^([\w-]+)\/U(\d+)$/.exec(target ?? "");
+      if (!m || !words.length) fail(USAGE);
+      const unit = getUnitBySeq(db, m![1] as ProjectId, Number(m![2]));
+      const attempt = listAttempts(db, unit.id).find((a) => a.state === "running");
+      if (!attempt) fail(`${target} has no running agent`);
+      const steer = addSteer(db, attempt!.id, words.join(" "));
+      console.log(`sent to ${target}.${attempt!.n} (steer ${steer.id}); it reads it after its current step`);
       return;
     }
     case "talk": {

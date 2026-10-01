@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, streamUrl, useApi, useNow, type Attempt, type AttemptDetail, type EvidenceRun, type LogLine, type ProjectDetail } from "../api";
+import { api, streamUrl, useApi, useNow, type Attempt, type AttemptDetail, type EvidenceRun, type LogLine, type ProjectDetail, type Steer } from "../api";
 import { slotLine } from "./environment-values";
 import { roleOf } from "../lib/units";
 import { clock, duration, modelName, tokens } from "../lib/format";
@@ -37,6 +37,58 @@ const rel = (at: number | null, start: number | null) => {
   return `+${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
+const STEER_STATE: Record<Steer["state"], string> = {
+  pending: "sending…",
+  sent: "sent · it reads this after its current step",
+  delivered: "read",
+  undelivered: "not read",
+};
+
+function SteerBox({ attemptId }: { attemptId: number }) {
+  const [text, setText] = useState("");
+  const steers = useApi<Steer[]>(`/api/attempts/${attemptId}/steers`, { poll: 2000 });
+  const action = useAction();
+  const open = (steers.data ?? []).filter((s) => s.state !== "delivered");
+  const send = () =>
+    action.run(async () => {
+      await api(`/api/attempts/${attemptId}/steer`, { body: { message: text } });
+      setText("");
+      steers.reload();
+    });
+  return (
+    <div className="steer-box">
+      {open.map((s) => (
+        <div key={s.id} className={`mono steer-pending${s.state === "undelivered" ? " s-bell" : ""}`}>
+          <span>{STEER_STATE[s.state]}</span>
+          {s.reason && <span> ({s.reason})</span>}: {s.body}
+        </div>
+      ))}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (text.trim()) void send();
+        }}
+        style={{ display: "flex", gap: 8 }}
+      >
+        <label htmlFor="steer" className="sr-only">
+          Tell the agent something
+        </label>
+        <input
+          id="steer"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Tell the agent something; it reads it after its current step"
+          style={{ flexGrow: 1, minWidth: 0, background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "8px 10px" }}
+        />
+        <button className="btn sm lamp" type="submit" disabled={action.busy || !text.trim()}>
+          Send
+        </button>
+      </form>
+      {action.error && <div className="s-bell">{action.error}</div>}
+    </div>
+  );
+}
+
 function StepRow({ step, start, live }: { step: Step; start: number | null; live: boolean }) {
   const time = (
     <span className="mono muted" style={{ fontSize: 11.5, width: 52, flexShrink: 0, paddingTop: 3 }}>
@@ -58,6 +110,13 @@ function StepRow({ step, start, live }: { step: Step; start: number | null; live
       );
     case "text":
       return wrap(<Markdown text={step.text} />);
+    case "you":
+      return wrap(
+        <div className="steer-said">
+          <span className="mono">you</span>
+          <Markdown text={step.text} />
+        </div>,
+      );
     case "final":
       return wrap(
         <details
@@ -420,6 +479,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
               {timeline.steps.map((s) => (
                 <StepRow key={s.id} step={s} start={start} live={!!live} />
               ))}
+              {a.state === "running" && !byYagura && <SteerBox attemptId={a.id} />}
             </>
           )}
           {view === "diff" && <DiffView attemptId={a.id} />}

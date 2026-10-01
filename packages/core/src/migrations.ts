@@ -309,6 +309,22 @@ CREATE UNIQUE INDEX thread_sessions_current ON thread_sessions (thread_id) WHERE
 ALTER TABLE watchman_turns ADD COLUMN session_id INTEGER REFERENCES thread_sessions (id);
 `,
   },
+  {
+    version: 22,
+    sql: `
+CREATE TABLE steers (
+  id INTEGER PRIMARY KEY,
+  attempt_id INTEGER NOT NULL REFERENCES attempts (id),
+  body TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'sent', 'delivered', 'undelivered')),
+  reason TEXT,
+  log_line INTEGER,
+  created_at TEXT NOT NULL,
+  delivered_at TEXT
+);
+CREATE INDEX steers_attempt ON steers (attempt_id);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;
