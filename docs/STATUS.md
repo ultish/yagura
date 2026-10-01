@@ -104,7 +104,7 @@ Gates inbox (2026-09-27, DESIGN §17 Gates "As built"), with gate timeouts that 
 
 Evidence viewer (2026-09-27, DESIGN §17 "As built (evidence viewer)"): the agent page has Log, Diff, and Evidence views. Proof: a fresh scratch home ran the fake chain (whose verifier now writes a note, an SVG, and a PNG to `$YAGURA_EVIDENCE`); on proto-b U6's verifier, the head run r20 showed its command, stdout, `notes/check.txt`, and the SVG rendered inline, the trunk run r17 showed exit 1 with its own note ("at base"), Diff showed U3's change from the mirror, and an agent-written `.html` file is served as sandboxed plain text (API test). Found on the way: the grid's run buttons were announced by their command; they now say "r17 s on trunk: exit 1. Show evidence".
 
-Next for the UI: repo browsing (prototype first; the user wants it VS Code-like, and DESIGN §17 has the Monaco read-only plan), "Message the agent" mid-run (needs `--input-format stream-json`), a watchman turn's live log inside the thread, and the "conversations about this" list on unit and agent pages (`GET /api/mentions/:token/messages` exists).
+Repo browsing is built (2026-10-01, DESIGN §17 "As built (repo browser)"). Next for the UI: "Message the agent" mid-run (needs `--input-format stream-json`), a watchman turn's live log inside the thread, and the "conversations about this" list on unit and agent pages (`GET /api/mentions/:token/messages` exists).
 
 Daemon/API (earlier in phase 4):
 

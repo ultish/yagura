@@ -16,6 +16,8 @@ import type {
   StoryEntry,
   StoryLine,
   UnitStory,
+  CommitUnit,
+  FileView,
 } from "@yagura/core";
 
 export type {
@@ -35,6 +37,8 @@ export type {
   StoryEntry,
   StoryLine,
   UnitStory,
+  CommitUnit,
+  FileView,
 };
 
 export interface ProjectSummary {

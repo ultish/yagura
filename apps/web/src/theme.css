@@ -688,3 +688,310 @@ textarea {
     text-align: left;
   }
 }
+
+/* The repo browser: explorer or history, the code in Monaco, and the story of the unit behind what you are looking at. */
+.repo {
+  padding-inline: 16px;
+  padding-block: 14px 24px;
+}
+.repo-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+  padding: 6px 2px 10px;
+}
+.repo-bar b {
+  color: var(--text);
+}
+.repo-body {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 320px;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  overflow: hidden;
+  height: calc(100vh - 150px);
+  min-height: 420px;
+  background: var(--bg2);
+}
+.repo-side {
+  border-right: 1px solid var(--line2);
+  overflow: auto;
+  padding: 8px 0;
+  font-size: 13.5px;
+}
+.repo-switch {
+  display: flex;
+  margin: 0 8px 8px;
+  border: 1px solid var(--btnline);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.repo-switch button {
+  flex: 1;
+  font: inherit;
+  font-size: 12.5px;
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.repo-switch button.on {
+  background: var(--panel);
+  color: var(--text);
+}
+.repo-h3 {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin: 4px 12px 6px;
+}
+.repo-node {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  color: var(--soft);
+  padding: 2px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.repo-node.dir {
+  color: var(--muted);
+}
+.repo-node:hover {
+  background: var(--panel);
+}
+.repo-node.on {
+  background: var(--line2);
+  color: var(--text);
+}
+.repo-mark {
+  font-size: 10px;
+  color: var(--faint);
+  width: 10px;
+}
+.repo-only {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--muted);
+  margin: 0 12px 6px;
+}
+.repo-commit {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--line2);
+  color: var(--soft);
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.repo-commit.on {
+  background: var(--line2);
+}
+.repo-commit-meta {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.repo-commit-meta b {
+  color: var(--amber-text);
+}
+.repo-commit-subject {
+  font-size: 13px;
+  line-height: 1.35;
+}
+.repo-main {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.repo-tabs {
+  display: flex;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line2);
+  background: var(--bg);
+}
+.repo-tab {
+  display: flex;
+  align-items: center;
+  border-right: 1px solid var(--line2);
+}
+.repo-tab button {
+  font: inherit;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  padding: 7px 4px 7px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.repo-tab .repo-tab-x {
+  padding: 7px 10px 7px 4px;
+  color: var(--faint);
+}
+.repo-tab.on {
+  background: var(--bg2);
+  box-shadow: inset 0 2px 0 var(--amber);
+}
+.repo-tab.on button:first-child {
+  color: var(--text);
+}
+.repo-monaco {
+  height: 100%;
+  min-height: 0;
+}
+.repo-pad {
+  padding: 10px 14px;
+}
+.repo-change {
+  overflow: auto;
+  min-height: 0;
+}
+.repo-change-head {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line2);
+  font-size: 13.5px;
+}
+.repo-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.repo-chips .chip {
+  cursor: pointer;
+  background: transparent;
+}
+.repo-diff {
+  font-size: 12.5px;
+  line-height: 1.6;
+  padding: 6px 0;
+}
+.repo-diff-row {
+  white-space: pre;
+  padding: 0 14px;
+}
+.repo-diff-row.add {
+  background: color-mix(in srgb, var(--pine) 12%, transparent);
+}
+.repo-diff-row.del {
+  background: color-mix(in srgb, var(--bell) 13%, transparent);
+}
+.repo-diff-row.hunk {
+  color: var(--info);
+}
+.repo-diff-row.file {
+  color: var(--text);
+  font-weight: 600;
+  background: var(--panel);
+  margin-top: 6px;
+}
+.repo-rail {
+  border-left: 1px solid var(--line2);
+  padding: 12px 14px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13.5px;
+}
+.repo-rail h4 {
+  font-size: 16px;
+  margin: 0;
+  text-wrap: balance;
+}
+.repo-rail-who {
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.repo-small {
+  font-size: 12.5px;
+}
+.repo-rail-story {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--soft);
+}
+.repo-rail-story li {
+  margin: 3px 0;
+}
+.repo-rail-story b {
+  font-weight: 500;
+  color: var(--text);
+}
+.repo-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+.linkish {
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--amber);
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* The unit gutter inside Monaco: a colour bar per unit, its label where its block starts. */
+.yg-u {
+  border-left: 3px solid var(--faint);
+  margin-left: 4px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  color: var(--soft);
+  padding-left: 5px;
+  white-space: nowrap;
+}
+.yg-c0 {
+  border-left-color: var(--amber);
+}
+.yg-c1 {
+  border-left-color: var(--pine);
+}
+.yg-c2 {
+  border-left-color: var(--info);
+}
+.yg-c3 {
+  border-left-color: var(--bell-text);
+}
+.yg-c4 {
+  border-left-color: var(--bronze);
+}
+@media (max-width: 900px) {
+  .repo-body {
+    grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+  .repo-side {
+    border-right: 0;
+    border-bottom: 1px solid var(--line2);
+    max-height: 220px;
+  }
+  .repo-main {
+    height: 60vh;
+  }
+  .repo-rail {
+    border-left: 0;
+    border-top: 1px solid var(--line2);
+  }
+}

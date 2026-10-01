@@ -29,7 +29,7 @@ function Line({ l }: { l: StoryLine }) {
   );
 }
 
-function DisagreeForm({ projectId, seq, entry, onDone }: { projectId: string; seq: number; entry: StoryEntry; onDone: () => void }) {
+export function DisagreeForm({ projectId, seq, entry, onDone }: { projectId: string; seq: number; entry: StoryEntry; onDone: () => void }) {
   const first = entry.lines.find((l) => l.kind === "chose" || l.kind === "noted") ?? entry.lines[0]!;
   const [ref, setRef] = useState(first.ref);
   const [reason, setReason] = useState("");

@@ -92,6 +92,10 @@ import {
   suggestRepoId,
   unitStory,
   recordDisagreement,
+  repoTree,
+  repoFile,
+  repoHistory,
+  repoChange,
 } from "@yagura/core";
 import { attemptDetail, attemptDiff, bell, capCounts, environmentDetail, environmentView, projectSummary, repoView, resolvedGates, unitView } from "./views.js";
 
@@ -388,6 +392,12 @@ export function createApp(opts: ServerOptions): Hono {
       throw e;
     }
   });
+  app.get("/api/repos/:id/tree", async (c) => c.json(await repoTree(db, boot, c.req.param("id") as RepoId)));
+  app.get("/api/repos/:id/file", async (c) => c.json(await repoFile(db, boot, c.req.param("id") as RepoId, c.req.query("path") ?? "")));
+  app.get("/api/repos/:id/history", async (c) =>
+    c.json(await repoHistory(db, boot, c.req.param("id") as RepoId, { path: c.req.query("path") || undefined, limit: Number(c.req.query("limit") ?? 100) })),
+  );
+  app.get("/api/repos/:id/change/:sha", async (c) => c.json(await repoChange(db, boot, c.req.param("id") as RepoId, c.req.param("sha"))));
   app.get("/api/repos/suggest-id", (c) => c.json({ id: suggestRepoId(c.req.query("source") ?? "") }));
 
   app.get("/api/settings", (c) =>

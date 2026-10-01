@@ -132,7 +132,7 @@ export function Repos() {
             return (
               <div key={v.repo.id} id={`repo-${v.repo.id}`} style={hash === v.repo.id ? { background: "var(--line2)" } : undefined}>
                 <Row
-                  seq={v.repo.id}
+                  seq={<Link to={`/r/${v.repo.id}`}>{v.repo.id}</Link>}
                   goal={
                     <span className="mono" style={{ fontSize: 14, overflowWrap: "anywhere" }}>
                       {v.repo.url}
@@ -147,6 +147,7 @@ export function Repos() {
                         {v.trunk ? ` at ${sha(v.trunk)}` : ""}
                       </span>
                       <span>{v.landedCount} landed</span>
+                      <Link to={`/r/${v.repo.id}`}>Browse the code</Link>
                       {v.lastLanded && (
                         <span>
                           last {sha(v.lastLanded.sha)} ·{" "}

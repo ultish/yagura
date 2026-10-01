@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { LiveContext, useApi, useLiveVersion, usePath } from "./api";
 import { Agent, UnitAgent } from "./pages/Agent";
 import { Unit } from "./pages/Unit";
+
+// The repo browser carries Monaco, so it loads only when opened.
+const Repo = lazy(() => import("./pages/Repo"));
 import { Agents } from "./pages/Agents";
 import { Home } from "./pages/Home";
 import { Project } from "./pages/Project";
@@ -34,7 +37,7 @@ const NAV = [
   { to: "/projects", label: "Projects", match: (p: string) => p === "/projects" || p.startsWith("/p/") },
   { to: "/agents", label: "Agents", match: (p: string) => p.startsWith("/agents") || p.startsWith("/a/") },
   { to: "/gates", label: "Gates", match: (p: string) => p === "/gates" },
-  { to: "/repos", label: "Repos", match: (p: string) => p === "/repos" },
+  { to: "/repos", label: "Repos", match: (p: string) => p === "/repos" || p.startsWith("/r/") },
   { to: "/environments", label: "Environments", match: (p: string) => p === "/environments" },
   { to: "/settings", label: "Settings", match: (p: string) => p === "/settings" },
 ];
@@ -96,6 +99,18 @@ function Routes() {
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)\/(\d+)\/?$/.exec(path))) return <UnitAgent projectId={m[1]!} seq={Number(m[2])} n={Number(m[3])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)\/?$/.exec(path))) return <Unit key={path} projectId={m[1]!} seq={Number(m[2])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/?$/.exec(path))) return <Project id={m[1]!} />;
+  if ((m = /^\/r\/([a-z][a-z0-9-]*)\/?$/.exec(path)))
+    return (
+      <Suspense
+        fallback={
+          <main style={{ padding: 36 }} className="muted">
+            Loading the editor…
+          </main>
+        }
+      >
+        <Repo key={m[1]} id={m[1]!} />
+      </Suspense>
+    );
   return (
     <main style={{ padding: 36 }}>
       <h1 className="serif">Nothing here</h1>
