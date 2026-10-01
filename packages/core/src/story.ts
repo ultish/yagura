@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
 import { listDisagreements, type Disagreement } from "./disagreements.js";
-import { spendsAttempt, type Attempt, type Handoff, type IsoTime, type Unit } from "./domain.js";
+import { spendsAttempt, type Attempt, type Handoff, type IsoTime, type Unit, type UnitId } from "./domain.js";
 import { getMergeRequest } from "./forge.js";
 import { parseHandoff } from "./handoff.js";
 import { liveVerdict } from "./land.js";
@@ -44,6 +44,24 @@ export interface UnitStory {
   started: IsoTime | null;
   ended: IsoTime | null;
   entries: StoryEntry[];
+  agents: StoryAgent[];
+}
+// Every session that worked on a unit: the planner run that planned it (shared with the units it planned alongside),
+// its own attempts, and the verifiers, triage, and rebases that targeted it.
+export interface StoryAgent {
+  attemptId: number;
+  role: string;
+  unitSeq: number;
+  n: number;
+  model: string | null;
+  startedAt: IsoTime | null;
+  endedAt: IsoTime | null;
+  costUsd: number;
+  outcome: string;
+  tone: "pine" | "amber" | "bell" | "muted";
+  counted: boolean;
+  shared: boolean;
+  note: string | null;
 }
 
 const bullets = (text: string) =>
@@ -89,17 +107,20 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
   const attemptOf = (u: Unit, a: Attempt) => ({ id: a.id, unitSeq: u.seq, n: a.n, model: a.model, costUsd: a.costUsd });
   const entries: StoryEntry[] = [];
 
+  let planUnit: Unit | null = null;
   const created = events.find((e) => e.type === "unit.state" && e.unit_id === unit.id && e.data.to === "ready");
   const drain = created?.data.drain as number | undefined;
   if (created && drain) {
     const summary = db
-      .prepare("SELECT data_json FROM events WHERE project_id = ? AND type = 'plan.drain_finished' AND json_extract(data_json, '$.drain') = ?")
-      .get(project.id, drain) as { data_json: string } | undefined;
+      .prepare("SELECT unit_id, data_json FROM events WHERE project_id = ? AND type = 'plan.drain_finished' AND json_extract(data_json, '$.drain') = ?")
+      .get(project.id, drain) as { unit_id: UnitId | null; data_json: string } | undefined;
+    planUnit = summary?.unit_id ? getUnit(db, summary.unit_id) : null;
+    const planAttempt = planUnit ? (listAttempts(db, planUnit.id).at(-1) ?? null) : null;
     entries.push({
       at: created.ts,
       actor: "planner",
       who: `Planner · drain ${drain}`,
-      attempt: null,
+      attempt: planUnit && planAttempt ? attemptOf(planUnit, planAttempt) : null,
       status: null,
       body: summary ? ((JSON.parse(summary.data_json) as { reason?: string }).reason ?? null) : null,
       lines: [],
@@ -338,6 +359,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     tier: verdict?.tier ?? null,
     pr: mr ? { number: mr.number, url: mr.url } : null,
     costUsd: allAttempts.reduce((s, a) => s + a.costUsd, 0),
+    agents: agentsOf(db, unit, related, planUnit, handoffOf, events),
     started: entries[0]?.at ?? null,
     ended: landed?.ts ?? null,
     entries,
@@ -365,4 +387,76 @@ function failReason(events: Ev[], unit: Unit, a: Attempt): string {
   const e = events.filter((x) => x.unit_id === unit.id && (x.type === "triage.failed" || x.type === "engine.error" || x.type === "rebase.failed"));
   const after = e.find((x) => a.startedAt && x.ts >= a.startedAt);
   return after ? String(after.data.reason ?? after.data.error ?? after.type) : a.state;
+}
+
+const ROLE: Partial<Record<string, string>> = {
+  plan: "Planner",
+  work: "Worker",
+  pack: "Pack writer",
+  verify: "Verifier",
+  "review-triage": "Review triage",
+  rebase: "Rebase",
+};
+
+function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, handoffOf: (u: Unit, a: Attempt) => Handoff | null, events: Ev[]): StoryAgent[] {
+  const rows: StoryAgent[] = [];
+  const add = (u: Unit, a: Attempt, shared: boolean) => {
+    if (a.harness.startsWith("yagura-") || !a.startedAt) return;
+    const h = a.state === "handed_off" ? handoffOf(u, a) : null;
+    const rejected = events.find((e) => e.unit_id === u.id && e.type === "unit.state" && e.data.to === "rejected" && sameAttempt(events, e, a.n));
+    // A triage or rebase session counts only if its unit finished on it; otherwise say what stopped it.
+    const finishes = u.type === "review-triage" || u.type === "rebase";
+    const next = listAttempts(db, u.id).find((x) => x.startedAt && x.startedAt > a.startedAt!)?.startedAt ?? "9999";
+    const finished =
+      finishes && events.some((e) => e.unit_id === u.id && (e.type === "triage.done" || e.type === "rebase.done") && e.ts >= a.startedAt! && e.ts < next);
+    const failedAfter = finishes && !finished ? { data: { reason: failReason(events, u, a) } } : undefined;
+    const verdict = u.type === "verify" ? events.find((e) => e.type === "verify.outcome" && e.data.verifyUnit === u.seq) : undefined;
+    const counted = a.state === "handed_off" && !rejected && !failedAfter && spendsAttempt(a);
+    const outcome = rejected
+      ? "rejected"
+      : failedAfter
+        ? "did not count"
+        : verdict
+          ? String(verdict.data.outcome)
+          : a.state === "handed_off"
+            ? (h?.status ?? "handed off")
+            : a.state === "running"
+              ? "running"
+              : a.state === "stopped"
+                ? "stopped"
+                : "failed";
+    const tone = outcome === "running" ? "amber" : !counted ? "bell" : outcome === "verified" || outcome === "success" ? "pine" : "amber";
+    const note = rejected
+      ? describeRejection(rejected.data)
+      : failedAfter
+        ? String(failedAfter.data.reason)
+        : verdict
+          ? String(verdict.data.reason)
+          : u.type === "plan"
+            ? planSummary(db, u)
+            : (bullets(h?.whatIDid ?? "")[0] ?? (a.failureMode ? `failed: ${a.failureMode}` : null));
+    rows.push({
+      attemptId: a.id,
+      role: ROLE[u.type] ?? u.type,
+      unitSeq: u.seq,
+      n: a.n,
+      model: a.model,
+      startedAt: a.startedAt,
+      endedAt: a.endedAt,
+      costUsd: a.costUsd,
+      outcome,
+      tone,
+      counted,
+      shared,
+      note,
+    });
+  };
+  if (planUnit) for (const a of listAttempts(db, planUnit.id).slice(-1)) add(planUnit, a, true);
+  for (const u of [unit, ...related]) for (const a of listAttempts(db, u.id)) add(u, a, false);
+  return rows.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
+}
+
+function planSummary(db: Db, plan: Unit): string | null {
+  const r = db.prepare("SELECT data_json FROM events WHERE type = 'plan.drain_finished' AND unit_id = ?").get(plan.id) as { data_json: string } | undefined;
+  return r ? ((JSON.parse(r.data_json) as { reason?: string }).reason ?? null) : null;
 }

@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
-import type { ProjectId, Repo, RepoId, Sha } from "./domain.js";
+import type { ProjectId, Repo, RepoId, Sha, Unit } from "./domain.js";
 import { ensureMirror, git } from "./git.js";
 import { layout } from "./paths.js";
-import { getRepo, type Db } from "./store.js";
+import { getRepo, listAttempts, type Db } from "./store.js";
 
 // Read-only views of a repo's trunk for the dashboard, straight from yagura's mirror. Every commit is tied to the unit
 // that landed it, by yagura's own record of the landed SHA first and the commit's trailers second, so code can always
@@ -90,19 +90,45 @@ export async function repoHistory(db: Db, boot: Bootstrap, repoId: RepoId, opts:
   return readCommits(db, mirror, ["--first-parent", `-n${opts.limit ?? 100}`, trunk, ...(opts.path ? ["--", opts.path] : [])]);
 }
 
+export interface Change {
+  commit: CommitUnit;
+  base: Sha;
+  files: string[];
+  stats: Record<string, { added: number; removed: number }>;
+  diff: string;
+  truncated: boolean;
+}
+
+async function diffOf(mirror: string, base: string, head: string): Promise<Omit<Change, "commit" | "base">> {
+  const files = (await git(["diff", "--name-only", "-z", base, head], { gitDir: mirror })).split("\0").filter(Boolean);
+  const stats: Change["stats"] = {};
+  for (const l of (await git(["diff", "--numstat", base, head], { gitDir: mirror })).split("\n").filter(Boolean)) {
+    const [added, removed, path] = l.split("\t") as [string, string, string];
+    stats[path] = { added: Number(added) || 0, removed: Number(removed) || 0 };
+  }
+  const diff = await git(["diff", "--stat", "--patch", "--no-color", base, head], { gitDir: mirror });
+  return { files, stats, diff: diff.slice(0, MAX_DIFF_BYTES), truncated: diff.length > MAX_DIFF_BYTES };
+}
+
 // What one commit on trunk changed, against its first parent, as a merge request shows it.
-export async function repoChange(
-  db: Db,
-  boot: Bootstrap,
-  repoId: RepoId,
-  sha: string,
-): Promise<{ commit: CommitUnit; files: string[]; diff: string; truncated: boolean }> {
+export async function repoChange(db: Db, boot: Bootstrap, repoId: RepoId, sha: string): Promise<Change> {
   if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error(`${sha} is not a commit`);
   const { mirror } = await mirrorOf(db, boot, repoId);
   const [commit] = await readCommits(db, mirror, ["--no-walk", sha]);
   if (!commit) throw new Error(`commit ${sha} not found`);
   const parent = await git(["rev-parse", "--verify", "--quiet", `${commit.sha}^1`], { gitDir: mirror }).catch(() => EMPTY_TREE);
-  const files = (await git(["diff", "--name-only", "-z", parent, commit.sha], { gitDir: mirror })).split("\0").filter(Boolean);
-  const diff = await git(["diff", "--stat", "--patch", "--no-color", parent, commit.sha], { gitDir: mirror });
-  return { commit, files, diff: diff.slice(0, MAX_DIFF_BYTES), truncated: diff.length > MAX_DIFF_BYTES };
+  return { commit, base: parent as Sha, ...(await diffOf(mirror, parent, commit.sha)) };
+}
+
+// What a unit changed: the commit that landed it, or, before it lands, its latest handed-off branch against its base.
+export async function unitCode(db: Db, boot: Bootstrap, unit: Unit): Promise<(Change & { source: "landed" | "branch"; branch: string | null }) | null> {
+  if (!unit.repoId) return null;
+  if (unit.landedSha) return { ...(await repoChange(db, boot, unit.repoId, unit.landedSha)), source: "landed", branch: null };
+  const work = listAttempts(db, unit.id)
+    .filter((a) => a.headSha && a.baseSha && a.state === "handed_off")
+    .at(-1);
+  if (!work) return null;
+  const { mirror } = await mirrorOf(db, boot, unit.repoId);
+  const [commit] = await readCommits(db, mirror, ["--no-walk", work.headSha!]);
+  return { commit: commit!, base: work.baseSha!, ...(await diffOf(mirror, work.baseSha!, work.headSha!)), source: "branch", branch: work.branch };
 }

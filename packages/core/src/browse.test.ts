@@ -2,12 +2,12 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { repoChange, repoFile, repoHistory, repoTree } from "./browse.js";
+import { repoChange, repoFile, repoHistory, repoTree, unitCode } from "./browse.js";
 import type { Bootstrap } from "./config.js";
 import type { ProjectId, RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import { layout } from "./paths.js";
-import { addProject, addRepo, addUnit, openStore, setLandedSha, type Db } from "./store.js";
+import { addProject, addRepo, addUnit, createAttempt, getUnitBySeq, openStore, setLandedSha, updateAttempt, type Db } from "./store.js";
 
 let db: Db;
 let boot: Bootstrap;
@@ -78,9 +78,36 @@ describe("browsing a repo's trunk", () => {
     await repoTree(db, boot, repo);
     const change = await repoChange(db, boot, repo, shas.landed.slice(0, 10));
     expect(change.files).toEqual(["README.md", "app/main.py"]);
+    expect(change.stats).toEqual({ "README.md": { added: 1, removed: 0 }, "app/main.py": { added: 1, removed: 0 } });
     expect(change.diff).toContain("+c = 4");
     expect(change.commit).toMatchObject({ projectId: "p", seq: 1 });
     expect((await repoChange(db, boot, repo, shas.init)).files).toEqual(["app/main.py", "logo.png"]);
     await expect(repoChange(db, boot, repo, "not-a-sha")).rejects.toThrow("not-a-sha is not a commit");
+  });
+
+  it("shows a unit's code: what landed, or its branch before it lands", async () => {
+    await repoTree(db, boot, repo);
+    const landed = await unitCode(db, boot, getUnitBySeq(db, "p" as ProjectId, 1));
+    expect(landed).toMatchObject({ source: "landed", files: ["README.md", "app/main.py"], base: shas.trailered });
+    const pending = addUnit(db, {
+      projectId: "p" as ProjectId,
+      type: "work",
+      repoId: repo,
+      goal: "change b",
+      writeScope: [],
+      acceptance: [],
+      verify: "v",
+      timeboxSeconds: 60,
+      maxAttempts: 1,
+    });
+    expect(await unitCode(db, boot, pending)).toBeNull();
+    const a = createAttempt(db, pending.id, "claude", null);
+    updateAttempt(db, a.id, { state: "handed_off", baseSha: shas.init as never, headSha: shas.trailered as never, branch: "yg/p/u2-1" });
+    expect(await unitCode(db, boot, getUnitBySeq(db, "p" as ProjectId, 2))).toMatchObject({
+      source: "branch",
+      branch: "yg/p/u2-1",
+      files: ["app/main.py"],
+      stats: { "app/main.py": { added: 1, removed: 1 } },
+    });
   });
 });

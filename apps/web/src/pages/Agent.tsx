@@ -328,7 +328,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
           <Link to={`/p/${u.projectId}`} style={{ textDecoration: "none" }}>
             {u.projectId}
           </Link>{" "}
-          · U{u.seq} · {role} · attempt {a.n}
+          / <Link to={`/p/${u.projectId}/u/${u.seq}`}>U{u.seq}</Link> / {role} U{u.seq}.{a.n}
           {a.resumesAttemptId && (
             <>
               {" "}
@@ -338,7 +338,13 @@ export function Agent({ attemptId }: { attemptId: number }) {
           {d.target && (
             <>
               {" "}
-              · verifies <Link to={`/p/${u.projectId}/u/${d.target.seq}`}>U{d.target.seq}</Link>
+              · for <Link to={`/p/${u.projectId}/u/${d.target.seq}`}>U{d.target.seq}</Link>
+            </>
+          )}
+          {u.type !== "plan" && (
+            <>
+              {" "}
+              · <Link to={`/p/${u.projectId}/u/${d.target?.seq ?? u.seq}?tab=code`}>the code it changed →</Link>
             </>
           )}
         </div>

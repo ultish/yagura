@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { api, useApi, type StoryEntry, type StoryLine, type UnitStory } from "../api";
-import { clock, modelName } from "../lib/format";
+import { api, useApi, useQuery, type StoryEntry, type StoryLine, type UnitCode, type UnitStory } from "../api";
+import { clock, duration, modelName } from "../lib/format";
 import { Inline } from "../lib/markdown";
 import { Link } from "../ui/Link";
 import { useAction } from "../ui/rows";
@@ -119,6 +119,11 @@ function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; 
             )}
           </span>
           {entry.status && <span className={`chip story-${entry.status.tone}`}>{entry.status.text}</span>}
+          {a && (
+            <Link className="story-open" to={`/p/${story.projectId}/u/${a.unitSeq}/${a.n}`}>
+              open agent →
+            </Link>
+          )}
         </div>
         {entry.body && (
           <div className="story-text">
@@ -167,8 +172,110 @@ function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; 
   );
 }
 
+function AgentsTab({ story }: { story: UnitStory }) {
+  if (!story.agents.length) return <div className="muted">No agent has worked on U{story.unit.seq} yet.</div>;
+  return (
+    <div className="hub-table-wrap">
+      <table className="hub-table">
+        <thead>
+          <tr>
+            <th>Agent</th>
+            <th>Started</th>
+            <th>Took</th>
+            <th className="num">Cost</th>
+            <th>Outcome</th>
+            <th>What it did</th>
+          </tr>
+        </thead>
+        <tbody>
+          {story.agents.map((a) => (
+            <tr key={a.attemptId} className={a.counted ? undefined : "dim"}>
+              <td>
+                <Link to={`/p/${story.projectId}/u/${a.unitSeq}/${a.n}`}>
+                  {a.role} U{a.unitSeq}.{a.n}
+                </Link>
+                {a.shared && <div className="muted hub-small">also planned other units</div>}
+              </td>
+              <td className="mono">{clock(a.startedAt)}</td>
+              <td className="mono">{a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "—"}</td>
+              <td className="num mono">${a.costUsd.toFixed(2)}</td>
+              <td>
+                <span className={`chip story-${a.tone}`}>{a.counted || a.outcome === "running" ? a.outcome : `${a.outcome} · not counted`}</span>
+              </td>
+              <td>{a.note ? <Inline text={a.note.split("\n")[0]!.slice(0, 220)} /> : <span className="muted">—</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="muted hub-small">
+        Every session that worked on U{story.unit.seq}: the planner run that planned it, its own attempts, and the verifiers, review triage, and rebases that
+        targeted it. Dimmed rows did not count.
+      </p>
+    </div>
+  );
+}
+
+function CodeTab({ story }: { story: UnitStory }) {
+  const u = story.unit;
+  const { data, error } = useApi<{ code: UnitCode | null }>(u.repoId ? `/api/projects/${story.projectId}/units/${u.seq}/code` : null);
+  if (!u.repoId) return <div className="muted">U{u.seq} does not change a repo.</div>;
+  if (error) return <div className="s-bell">{error}</div>;
+  if (!data) return <div className="muted">Loading…</div>;
+  const code = data.code;
+  if (!code) return <div className="muted">U{u.seq} has no code yet: nothing has been handed off.</div>;
+  const from = `from=${story.projectId}/${u.seq}`;
+  const editor = (extra: string) => `/r/${u.repoId}?${code.source === "landed" ? `change=${code.commit.sha}&` : ""}${extra}${from}`;
+  return (
+    <div className="hub-code">
+      {code.source === "branch" && (
+        <div className="hub-note">
+          Not on trunk yet: this is branch <span className="mono">{code.branch}</span> against the trunk it started from. The editor shows trunk, so it opens
+          after U{u.seq} lands.
+        </div>
+      )}
+      <div className="hub-files">
+        {code.files.map((f) => (
+          <div key={f} className="hub-file mono">
+            {code.source === "landed" ? <Link to={editor(`file=${encodeURIComponent(f)}&`)}>{f}</Link> : <span>{f}</span>}
+            <span className="s-pine">+{code.stats[f]?.added ?? 0}</span>
+            <span className="s-bell">−{code.stats[f]?.removed ?? 0}</span>
+          </div>
+        ))}
+      </div>
+      {code.source === "landed" && (
+        <div className="hub-actions">
+          <Link className="btn sm lamp" to={editor("")}>
+            Open this change in the editor
+          </Link>
+          <span className="muted hub-small">
+            The commit that landed, <span className="mono">{code.commit.sha.slice(0, 7)}</span>, against trunk before it.
+          </span>
+        </div>
+      )}
+      <div className="repo-diff mono hub-diff">
+        {code.diff
+          .split("\n")
+          .filter((l) => !l.startsWith("index ") && !l.startsWith("+++ ") && !l.startsWith("--- "))
+          .map((l, i) => {
+            const cls = l.startsWith("diff --git") ? "file" : l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : "";
+            return (
+              <div key={i} className={`repo-diff-row ${cls}`}>
+                {cls === "file" ? l.replace(/^diff --git a\/(\S+).*/, "$1") : l || " "}
+              </div>
+            );
+          })}
+        {code.truncated && <div className="muted repo-pad">The rest of this change is too large to show.</div>}
+      </div>
+    </div>
+  );
+}
+
+type HubTab = "story" | "agents" | "code";
+
 export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
   const { data: story, error, reload } = useApi<UnitStory>(`/api/projects/${projectId}/units/${seq}/story`);
+  const query = useQuery();
+  const tab: HubTab = query.get("tab") === "agents" ? "agents" : query.get("tab") === "code" ? "code" : "story";
   if (error)
     return (
       <main style={{ padding: 36 }} className="s-bell">
@@ -213,18 +320,44 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
           <Link to={`/p/${projectId}/u/${running.attempt.unitSeq}/${running.attempt.n}`}>running now · watch it live</Link>
         )}
       </div>
-      <div className="story-legend">
-        <span>
-          <span className="s-pine">✓</span> checked by yagura against runs it recorded
-        </span>
-        <span>· choice / note: judgment nobody checked</span>
-      </div>
-      <div className="story-ledger">
-        {story.entries.map((e, i) => (
-          <Entry key={`${e.at}-${i}`} story={story} entry={e} reload={reload} />
+      <div className="hub-tabs" role="tablist">
+        {(
+          [
+            ["story", "Story", null],
+            ["agents", "Agents", story.agents.length],
+            ["code", "Code", u.repoId ? "" : null],
+          ] as const
+        ).map(([k, label, n]) => (
+          <Link
+            key={k}
+            role="tab"
+            aria-selected={tab === k}
+            className={tab === k ? "on" : ""}
+            to={`/p/${projectId}/u/${u.seq}${k === "story" ? "" : `?tab=${k}`}`}
+          >
+            {label}
+            {typeof n === "number" && <span className="hub-n">{n}</span>}
+          </Link>
         ))}
-        {!story.entries.length && <div className="muted">Nothing has happened on U{u.seq} yet.</div>}
       </div>
+      {tab === "story" && (
+        <>
+          <div className="story-legend">
+            <span>
+              <span className="s-pine">✓</span> checked by yagura against runs it recorded
+            </span>
+            <span>· choice / note: judgment nobody checked</span>
+          </div>
+          <div className="story-ledger">
+            {story.entries.map((e, i) => (
+              <Entry key={`${e.at}-${i}`} story={story} entry={e} reload={reload} />
+            ))}
+            {!story.entries.length && <div className="muted">Nothing has happened on U{u.seq} yet.</div>}
+          </div>
+        </>
+      )}
+      {tab === "agents" && <AgentsTab story={story} />}
+      {tab === "code" && <CodeTab story={story} />}
     </main>
   );
 }

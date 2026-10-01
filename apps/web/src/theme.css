@@ -995,3 +995,121 @@ textarea {
     border-top: 1px solid var(--line2);
   }
 }
+
+/* The unit hub: Story, Agents, and Code as tabs of one unit. */
+.hub-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line2);
+  margin: 14px 0 16px;
+}
+.hub-tabs a {
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 14px;
+  font-size: 14px;
+}
+.hub-tabs a.on {
+  color: var(--text);
+  border-bottom-color: var(--amber);
+}
+.hub-n {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+  color: var(--faint);
+  margin-left: 5px;
+}
+.story-open {
+  font-size: 12px;
+}
+.hub-table-wrap {
+  overflow-x: auto;
+}
+.hub-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.hub-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line2);
+}
+.hub-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--line2);
+  vertical-align: baseline;
+}
+.hub-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.hub-table tr.dim td {
+  color: var(--muted);
+}
+.hub-small {
+  font-size: 12.5px;
+}
+.hub-note {
+  border-left: 2px solid var(--amber);
+  padding: 2px 0 2px 10px;
+  margin-bottom: 12px;
+  font-size: 13.5px;
+  color: var(--soft);
+}
+.hub-files {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+.hub-file {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 13px;
+}
+.hub-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.hub-actions .btn {
+  text-decoration: none;
+}
+.hub-diff {
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  background: var(--bg2);
+  max-height: 70vh;
+  overflow: auto;
+}
+.agents-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+.agents-filters label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.agents-filters select {
+  font: inherit;
+  font-size: 13px;
+  background: var(--bg2);
+  color: var(--text);
+  border: 1px solid var(--btnline);
+  border-radius: 4px;
+  padding: 3px 6px;
+}

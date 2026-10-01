@@ -96,6 +96,7 @@ import {
   repoFile,
   repoHistory,
   repoChange,
+  unitCode,
 } from "@yagura/core";
 import { attemptDetail, attemptDiff, bell, capCounts, environmentDetail, environmentView, projectSummary, repoView, resolvedGates, unitView } from "./views.js";
 
@@ -204,6 +205,9 @@ export function createApp(opts: ServerOptions): Hono {
   app.get("/api/projects/:id/units/:seq/story", (c) =>
     c.json(unitStory(db, boot, getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq"))))),
   );
+  app.get("/api/projects/:id/units/:seq/code", async (c) =>
+    c.json({ code: await unitCode(db, boot, getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")))) }),
+  );
   app.post("/api/projects/:id/units/:seq/disagreements", async (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
     const b = (await c.req.json()) as { ref?: string; about?: string; reason?: string; action?: string };
@@ -227,7 +231,12 @@ export function createApp(opts: ServerOptions): Hono {
     const attempts = rows.map((r) => {
       const a = getAttempt(db, r.id as AttemptId);
       const u = getUnit(db, a.unitId);
-      return { ...a, unit: { id: u.id, seq: u.seq, type: u.type, goal: u.goal, projectId: u.projectId, state: u.state } };
+      const target = u.targetUnitId ? getUnit(db, u.targetUnitId) : null;
+      return {
+        ...a,
+        unit: { id: u.id, seq: u.seq, type: u.type, goal: u.goal, projectId: u.projectId, state: u.state },
+        target: target ? { seq: target.seq, goal: target.goal } : null,
+      };
     });
     return c.json({
       attempts,

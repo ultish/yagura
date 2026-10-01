@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useApi, type CommitUnit, type FileView, type StoryEntry, type UnitStory } from "../api";
+import { useApi, useQuery, type CommitUnit, type FileView, type StoryEntry, type UnitStory } from "../api";
 import { clock } from "../lib/format";
 import { Inline } from "../lib/markdown";
 import { followTheme, languageOf, monaco } from "../lib/monaco";
@@ -135,7 +135,19 @@ function History({
   );
 }
 
-function CodeView({ repoId, path, projectId, onPick }: { repoId: string; path: string; projectId: string | null; onPick: (c: CommitUnit) => void }) {
+function CodeView({
+  repoId,
+  path,
+  projectId,
+  line,
+  onPick,
+}: {
+  repoId: string;
+  path: string;
+  projectId: string | null;
+  line: number | null;
+  onPick: (c: CommitUnit) => void;
+}) {
   const { data: file, error } = useApi<FileView>(`/api/repos/${repoId}/file?path=${encodeURIComponent(path)}`);
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -186,6 +198,12 @@ function CodeView({ repoId, path, projectId, onPick }: { repoId: string; path: s
     }
     style.textContent = labels.join("\n");
     const collection = ed.createDecorationsCollection(decorations);
+    if (line && line <= file.blame.length) {
+      ed.revealLineInCenter(line);
+      ed.setPosition({ lineNumber: line, column: 1 });
+      const sha = file.blame[line - 1];
+      if (sha && file.commits[sha]) onPick(file.commits[sha]!);
+    }
     const pickLine = (line: number | undefined) => {
       const sha = line ? file.blame[line - 1] : undefined;
       if (sha && file.commits[sha]) onPick(file.commits[sha]!);
@@ -196,7 +214,7 @@ function CodeView({ repoId, path, projectId, onPick }: { repoId: string; path: s
       subs.forEach((x) => x.dispose());
       collection.clear();
     };
-  }, [file, path, projectId, onPick]);
+  }, [file, path, projectId, line, onPick]);
   if (error) return <div className="s-bell repo-pad">{error}</div>;
   if (file?.binary) return <div className="muted repo-pad">{path} is a binary file.</div>;
   if (file?.tooLarge) return <div className="muted repo-pad">{path} is over 1 MB, too large to show here.</div>;
@@ -332,8 +350,17 @@ export default function Repo({ id }: { id: string }) {
     setActive(tabKey(t));
     if (t.kind === "file") setLastFile(t.path);
   };
+  // Other pages link here at a change, a file, or a line: ?change=<sha>&file=<path>&line=<n>&from=<project>/<seq>.
+  const query = useQuery();
+  const from = /^([a-z][a-z0-9-]*)\/(\d+)$/.exec(query.get("from") ?? "");
+  const line = Number(query.get("line")) || null;
   useEffect(() => {
-    if (tree && !tabs.length) {
+    if (!tree || tabs.length) return;
+    const change = query.get("change");
+    const file = query.get("file");
+    if (change) open({ kind: "change", sha: change, label: from ? `U${from[2]}` : short(change) });
+    if (file && tree.files.includes(file)) open({ kind: "file", path: file });
+    if (!change && !(file && tree.files.includes(file))) {
       const first = tree.files.find((f) => /^readme/i.test(f)) ?? tree.files[0];
       if (first) open({ kind: "file", path: first });
     }
@@ -362,6 +389,11 @@ export default function Repo({ id }: { id: string }) {
           {tree.branch} @ {short(tree.head)}
         </span>
         <span>read-only</span>
+        {from && (
+          <span>
+            opened from <Link to={`/p/${from[1]}/u/${from[2]}?tab=code`}>U{from[2]}'s change</Link>
+          </span>
+        )}
         <span style={{ marginLeft: "auto" }}>{tree.files.length} files</span>
       </div>
       <div className="repo-body">
@@ -413,7 +445,16 @@ export default function Repo({ id }: { id: string }) {
               </div>
             ))}
           </div>
-          {current?.kind === "file" && <CodeView key={current.path} repoId={id} path={current.path} projectId={projectId} onPick={setPicked} />}
+          {current?.kind === "file" && (
+            <CodeView
+              key={current.path}
+              repoId={id}
+              path={current.path}
+              projectId={projectId}
+              line={current.path === query.get("file") ? line : null}
+              onPick={setPicked}
+            />
+          )}
           {current?.kind === "change" && <ChangeView repoId={id} sha={current.sha} projectOf={projectOf} onOpen={(path) => open({ kind: "file", path })} />}
           {!current && <div className="muted repo-pad">Open a file from the explorer, or a change from the history.</div>}
         </section>

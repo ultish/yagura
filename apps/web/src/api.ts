@@ -41,6 +41,17 @@ export type {
   FileView,
 };
 
+export interface UnitCode {
+  source: "landed" | "branch";
+  branch: string | null;
+  commit: CommitUnit;
+  base: string;
+  files: string[];
+  stats: Record<string, { added: number; removed: number }>;
+  diff: string;
+  truncated: boolean;
+}
+
 export interface ProjectSummary {
   project: Project;
   workCounts: Record<string, number>;
@@ -143,6 +154,8 @@ export interface ProjectDetail extends ProjectSummary {
 
 export interface AgentRow extends Attempt {
   unit: { id: number; seq: number; type: string; goal: string; projectId: string; state: string };
+  // The unit a verifier, triage, or rebase worked for.
+  target: { seq: number; goal: string } | null;
 }
 
 export interface AttemptDetail {
