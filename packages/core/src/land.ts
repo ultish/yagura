@@ -3,7 +3,18 @@ import { dirname } from "node:path";
 import { resolveSetting, type Bootstrap } from "./config.js";
 import { PASS_TIERS, REBASE_HARNESS, spendsAttempt } from "./domain.js";
 import type { Attempt, Project, Repo, Sha, Unit, UnitId, VerdictId } from "./domain.js";
-import { forgeFor, ForgeError, getMergeRequest, recordMergeStatus, saveMergeRequest, setMergeState, type ForgeAdapter, type PrStatus } from "./forge.js";
+import {
+  forgeFor,
+  ForgeError,
+  getMergeRequest,
+  recordMergeStatus,
+  saveMergeRequest,
+  setMergeState,
+  type ForgeAdapter,
+  type PrStatus,
+  prNoun,
+  prRef,
+} from "./forge.js";
 import { gateResolved } from "./gates.js";
 import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWorktree, resolveRef } from "./git.js";
 import { layout } from "./paths.js";
@@ -132,8 +143,8 @@ async function squashOntoTrunk(l: Landing): Promise<Squash> {
 
 function triageOrBlock(l: Landing, number: number, fresh: Parameters<typeof queueTriage>[3]): LandResult {
   const triage = queueTriage(l.db, l.unit, number, fresh);
-  if (!triage) return block(l, `pull request #${number} has new review threads after ${MAX_TRIAGE_WAVES} triage waves; it needs you`);
-  const reason = `${fresh.length} review thread(s) on pull request #${number}; triaging in U${triage.seq}`;
+  if (!triage) return block(l, `${prRef(l.repo.forge, number)} has new review threads after ${MAX_TRIAGE_WAVES} triage waves; it needs you`);
+  const reason = `${fresh.length} review thread(s) on ${prRef(l.repo.forge, number)}; triaging in U${triage.seq}`;
   if (l.unit.state === "landing") transitionUnit(l.db, l.unit.id, "blocked", { reason, reviewUnit: triage.seq });
   return { unit: getUnit(l.db, l.unit.id), outcome: "triaging", landedSha: null, reason };
 }
@@ -264,14 +275,14 @@ async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, 
       baseSha: squash.trunk,
     });
     recordEvent(db, "pr.pushed", { projectId: l.project.id, unitId: l.unit.id }, { number: pr.number, url: pr.url, head: squash.landed, onto: squash.trunk });
-    return { unit: getUnit(db, l.unit.id), outcome: "proposed", landedSha: null, reason: `pull request #${pr.number}: ${pr.url}` };
+    return { unit: getUnit(db, l.unit.id), outcome: "proposed", landedSha: null, reason: `${prRef(l.repo.forge, pr.number)}: ${pr.url}` };
   } catch (e) {
     if (e instanceof ForgeError || (e as { code?: unknown }).code !== undefined)
       return block(
         l,
         /stale info/.test((e as Error).message)
           ? `${branch} changed outside yagura since its last push; yagura will not overwrite it`
-          : `could not open the pull request: ${lastLine((e as Error).message)}`,
+          : `could not open the ${prNoun(l.repo.forge)}: ${lastLine((e as Error).message)}`,
       );
     throw e;
   }
@@ -290,14 +301,14 @@ async function finishMerged(l: Landing, status: PrStatus, number: number): Promi
   await ensureMirror(l.repo.url, l.mirror);
   const patch = await patchId(l.mirror, `${merged}^1` as Sha, merged);
   setMergeState(l.db, l.unit.id, "merged", l.project.id, { number, sha: merged });
-  if (patch === l.verdict.patch_id) carryVerdict(l, merged, `merged as ${merged} (pull request #${number}); patch-id unchanged, carried forward`);
+  if (patch === l.verdict.patch_id) carryVerdict(l, merged, `merged as ${merged} (${prRef(l.repo.forge, number)}); patch-id unchanged, carried forward`);
   else {
-    const reason = `pull request #${number} merged as ${merged} with a patch other than the one verified; verdict not carried`;
+    const reason = `${prRef(l.repo.forge, number)} merged as ${merged} with a patch other than the one verified; verdict not carried`;
     l.db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, l.verdict.id);
     recordEvent(l.db, "pr.merged_unverified", { projectId: l.project.id, unitId: l.unit.id }, { number, sha: merged });
   }
   markLanded(l, merged, { pr: number });
-  return { unit: getUnit(l.db, l.unit.id), outcome: "landed", landedSha: merged, reason: `pull request #${number} merged` };
+  return { unit: getUnit(l.db, l.unit.id), outcome: "landed", landedSha: merged, reason: `${prRef(l.repo.forge, number)} merged` };
 }
 
 // A first failure on a head may be flaky and gets one re-run; failing again on the same head is the code's fault,
@@ -318,7 +329,7 @@ async function ciFailed(l: Landing, forge: ForgeAdapter, number: number, head: S
       unit: l.unit,
       outcome: "waiting",
       landedSha: null,
-      reason: `checks failed on pull request #${number} (${failing.join(", ")}); re-running the failed jobs once in case they were flaky`,
+      reason: `checks failed on ${prRef(l.repo.forge, number)} (${failing.join(", ")}); re-running the failed jobs once in case they were flaky`,
     };
   }
   recordEvent(db, "pr.checks_failed", refs, { number, head, checks: failing, rerun: [] });
@@ -326,10 +337,10 @@ async function ciFailed(l: Landing, forge: ForgeAdapter, number: number, head: S
   addUnitNote(
     db,
     l.unit.id,
-    `CI failed on pull request #${number} (${failing.join(", ")})${seen ? " again after a re-run, so it is not flaky" : ""}.${logs ? `\n${logs}` : ""}`,
+    `CI failed on ${prRef(l.repo.forge, number)} (${failing.join(", ")})${seen ? " again after a re-run, so it is not flaky" : ""}.${logs ? `\n${logs}` : ""}`,
   );
   updateAttempt(db, l.work.id, { rejection: "code-fault" });
-  const reason = `checks failed on pull request #${number}: ${failing.join(", ")}`;
+  const reason = `checks failed on ${prRef(l.repo.forge, number)}: ${failing.join(", ")}`;
   transitionUnit(db, l.unit.id, "blocked", { reason });
   const used = listAttempts(db, l.unit.id).filter(spendsAttempt).length;
   if (used >= l.unit.maxAttempts) return { unit: getUnit(db, l.unit.id), outcome: "blocked", landedSha: null, reason };
@@ -348,7 +359,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   if (!forge) return null;
   const project = getProject(db, unit.projectId);
   if (unit.state === "abandoned") {
-    await forge.close(mr.number, `yagura abandoned ${project.id}/U${unit.seq}, so this pull request will not be merged.`);
+    await forge.close(mr.number, `yagura abandoned ${project.id}/U${unit.seq}, so this ${prNoun(repo.forge)} will not be merged.`);
     setMergeState(db, unit.id, "closed", project.id, { number: mr.number, reason: "unit abandoned" });
     return null;
   }
@@ -367,7 +378,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   if (unit.state !== "landing") return null;
   if (status.state === "closed") {
     setMergeState(db, unit.id, "closed", project.id, { number: mr.number, reason: "closed on the forge" });
-    return block(l, `pull request #${mr.number} was closed without merging`);
+    return block(l, `${prRef(repo.forge, mr.number)} was closed without merging`);
   }
   if (status.headSha !== mr.headSha) {
     // Right after a push the forge can still report a head yagura pushed earlier; only a head yagura never pushed is someone else's.
@@ -375,12 +386,12 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
       .prepare("SELECT 1 FROM events WHERE type = 'pr.pushed' AND unit_id = ? AND json_extract(data_json, '$.head') = ?")
       .get(unit.id, status.headSha);
     if (ours) return { unit, outcome: "waiting", landedSha: null, reason: `the forge still shows the earlier push ${status.headSha.slice(0, 10)}` };
-    return block(l, `pull request #${mr.number}'s branch moved to ${status.headSha.slice(0, 10)} outside yagura`);
+    return block(l, `${prRef(repo.forge, mr.number)}'s branch moved to ${status.headSha.slice(0, 10)} outside yagura`);
   }
   if (status.merge === "behind" || status.merge === "conflict") {
     const squash = await squashOntoTrunk(l);
     if (squash.kind === "conflict")
-      return rebaseOrBlock(l, squash.trunk, `pull request #${mr.number} conflicts with ${repo.defaultBranch} at ${squash.trunk.slice(0, 10)}`);
+      return rebaseOrBlock(l, squash.trunk, `${prRef(repo.forge, mr.number)} conflicts with ${repo.defaultBranch} at ${squash.trunk.slice(0, 10)}`);
     if (squash.kind === "changed") return reverify(l, squash.trunk, squash.rebased);
     if (squash.kind === "empty") return block(l, `nothing left to land: ${l.repo.defaultBranch} at ${squash.trunk.slice(0, 10)} already has this change`);
     return propose(l, forge, squash);

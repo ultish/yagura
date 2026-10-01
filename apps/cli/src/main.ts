@@ -99,7 +99,7 @@ const USAGE = `yagura — agent orchestration
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
-  yagura repo set <id> [--url <url>] [--forge none|gh]   gh lands through pull requests (forge.repo, forge.merge_method)
+  yagura repo set <id> [--url <url>] [--forge none|gh|glab]   gh and glab land through pull/merge requests (forge.repo, forge.merge_method)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]
   yagura env set <id> [--capacity <n>] [--name <text>]

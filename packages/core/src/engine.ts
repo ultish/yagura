@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
-import { markMergeChecked, openMergeRequests } from "./forge.js";
+import { markMergeChecked, openMergeRequests, prNoun, prRef } from "./forge.js";
 import { parseHandoff } from "./handoff.js";
 import { landUnit, watchMergeRequest, type LandResult } from "./land.js";
 import { layout } from "./paths.js";
@@ -149,7 +149,7 @@ export class Engine {
             projectId: project.id,
             unitId: u.id,
             kind: "land",
-            question: `U${u.seq} is verified. ${onForge ? "Merge its pull request" : "Land it"} on ${u.repoId}?`,
+            question: `U${u.seq} is verified. ${onForge ? `Merge its ${prNoun(getRepo(this.db, u.repoId!).forge)}` : "Land it"} on ${u.repoId}?`,
             options: ["land", "hold"],
             defaultOption: "hold",
           });
@@ -173,11 +173,11 @@ export class Engine {
       if (this.inflight.has(key) || (mr.checkedAt && Date.now() - Date.parse(mr.checkedAt) < poll)) continue;
       this.start(
         key,
-        `watch pull request #${mr.number} for U${u.seq}`,
+        `watch ${prRef(mr.forge, mr.number)} for U${u.seq}`,
         () => watchMergeRequest(this.ctx, u.id).then((r) => this.logLanding(u, r)),
         (e) => {
           markMergeChecked(this.db, u.id);
-          this.log(`  ✗ pull request #${mr.number}: ${e instanceof Error ? e.message : String(e)}`);
+          this.log(`  ✗ ${prRef(mr.forge, mr.number)}: ${e instanceof Error ? e.message : String(e)}`);
         },
       );
     }

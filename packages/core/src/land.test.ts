@@ -13,7 +13,7 @@ import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { findByRef, findUnitsByCommit, traceUnit } from "./audit.js";
 import { setSetting } from "./config.js";
-import { getMergeRequest } from "./forge.js";
+import { getMergeRequest, gitlabRepoOf } from "./forge.js";
 import { landUnit, liveVerdict, watchMergeRequest } from "./land.js";
 import { layout } from "./paths.js";
 import { runRebaseUnit } from "./rebase.js";
@@ -509,6 +509,165 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     await watchMergeRequest(ctx, work.id);
     expect(replies()).toBe(1);
     expect(listThreadRows(db, work.id)[0]!.repliedAt).not.toBeNull();
+  });
+});
+
+describe("landing through a GitLab merge request (fake glab over a real origin)", () => {
+  type GlState = {
+    mrs: {
+      iid: number;
+      title: string;
+      description: string;
+      state: string;
+      detailed_merge_status?: string;
+      discussions: { id: string; individual_note: boolean; notes: Record<string, unknown>[] }[];
+    }[];
+    pipelines: { id: number; sha: string; status: string; jobs: { id: number; name: string; status: string; trace?: string; retries?: number }[] }[];
+    calls: string[];
+  };
+  const glState = () => JSON.parse(readFileSync(join(root, "glab.json"), "utf8")) as GlState;
+  const editGl = (fn: (s: GlState) => void) => {
+    const st = glState();
+    fn(st);
+    writeFileSync(join(root, "glab.json"), JSON.stringify(st));
+  };
+  const note = (username: string, body: string, extra: Record<string, unknown> = {}) => ({
+    id: Math.random(),
+    body,
+    system: false,
+    author: { username },
+    ...extra,
+  });
+
+  beforeEach(() => {
+    const bin = fixtures("fake-glab.mjs");
+    chmodSync(bin, 0o755);
+    process.env.FAKE_GLAB_STATE = join(root, "glab.json");
+    process.env.FAKE_GLAB_ORIGIN = origin;
+    setRepoForge(db, "testbed" as RepoId, "glab");
+    setSetting(db, "repo", "testbed", "forge.repo", "gitlab.dev.local/team/apps/sandbox");
+    setSetting(db, "global", "", "forge.glab_bin", bin);
+  });
+
+  it("opens one merge request and merges it when GitLab says it is mergeable, carrying the verdict to the merge commit", async () => {
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit();
+    const trunkBefore = await originMain();
+    const proposed = await landUnit(ctx, work.id);
+    expect(proposed).toMatchObject({ outcome: "proposed", reason: "merge request !1: https://gitlab.dev.local/team/apps/sandbox/-/merge_requests/1" });
+    expect(glState().mrs[0]).toMatchObject({ title: "Implement apply_discount. Then more detail.", state: "opened" });
+    expect(glState().mrs[0]!.description).toContain("Yagura-Unit: U1");
+    expect(getMergeRequest(db, work.id)).toMatchObject({ forge: "gitlab", forgeRepo: "gitlab.dev.local/team/apps/sandbox", number: 1, baseSha: trunkBefore });
+
+    const merged = await watchMergeRequest(ctx, work.id);
+    expect(merged?.outcome).toBe("landed");
+    const main = await originMain();
+    expect(merged?.landedSha).toBe(main);
+    expect(await git(["rev-list", "--parents", "-1", "main"], { cwd: origin })).toMatch(new RegExp(`^${main} ${trunkBefore} [0-9a-f]{40}$`));
+    expect(liveVerdict(db, work.id)!.head_sha).toBe(main);
+    const mergeCall = glState().calls.find((c) => c.startsWith("mr merge"))!;
+    expect(mergeCall).toBe(`mr merge 1 --repo team/apps/sandbox --sha ${getMergeRequest(db, work.id)!.headSha} --auto-merge=false --yes`);
+  });
+
+  it("waits while GitLab is still checking or the pipeline runs, and for the land gate under merge: human", async () => {
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    editGl((s) => (s.mrs[0]!.detailed_merge_status = "checking"));
+    expect((await watchMergeRequest(ctx, work.id))?.outcome).toBe("waiting");
+    const head = getMergeRequest(db, work.id)!.headSha;
+    editGl((s) => {
+      delete s.mrs[0]!.detailed_merge_status;
+      s.pipelines.push({ id: 5, sha: head, status: "running", jobs: [] });
+    });
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "waiting" });
+    editGl((s) => (s.pipelines[0]!.status = "success"));
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "waiting", reason: "waiting for the land gate" });
+    answerGate(
+      db,
+      addGate(db, { projectId: project, unitId: work.id, kind: "land", question: "land?", options: ["land", "hold"], defaultOption: "hold" }),
+      "land",
+    );
+    expect((await watchMergeRequest(ctx, work.id))?.outcome).toBe("landed");
+  });
+
+  it("retries a failed pipeline's jobs once, then sends the unit back with the job log", async () => {
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    const head = getMergeRequest(db, work.id)!.headSha;
+    editGl((s) =>
+      s.pipelines.push({
+        id: 9,
+        sha: head,
+        status: "failed",
+        jobs: [{ id: 41, name: "test", status: "failed", trace: "FAIL test_orders\nAssertionError: expected 3, got 4" }],
+      }),
+    );
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "waiting", reason: expect.stringMatching(/re-running the failed jobs once/) });
+    expect(glState().pipelines[0]!.jobs[0]!.retries).toBe(1);
+    const rework = await watchMergeRequest(ctx, work.id);
+    expect(rework).toMatchObject({ outcome: "rework", reason: "checks failed on merge request !1: pipeline" });
+    expect(rework!.unit.notes.at(-1)).toContain("test:\nFAIL test_orders\nAssertionError: expected 3, got 4");
+  });
+
+  it("triages GitLab discussions: fixes a diff thread, replies once even when GitLab answers 502, and skips resolved and system notes", async () => {
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    editGl((s) => {
+      s.mrs[0]!.discussions = [
+        {
+          id: "dA",
+          individual_note: false,
+          notes: [note("alice", "please fix the rounding here", { resolvable: true, resolved: false, position: { new_path: "app/orders.py", new_line: 1 } })],
+        },
+        { id: "dB", individual_note: false, notes: [note("carol", "old and done", { resolvable: true, resolved: true })] },
+        { id: "dC", individual_note: true, notes: [note("ultish", "is this quadratic?")] },
+        { id: "dD", individual_note: true, notes: [{ ...note("ultish", "added 1 commit"), system: true }] },
+      ];
+    });
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "triaging", reason: "2 review thread(s) on merge request !1; triaging in U3" });
+    process.env.FAKE_MODE = "success";
+    process.env.FAKE_GLAB_REPLY_FAIL = "after";
+    try {
+      expect(await runTriageUnit(ctx, getUnitBySeq(db, project, 3).id)).toMatchObject({ state: "handed_off" });
+    } finally {
+      delete process.env.FAKE_GLAB_REPLY_FAIL;
+    }
+    const brief = readFileSync(layout(ctx.boot).brief(project, 3, 1), "utf8");
+    expect(brief).toContain("- T1 · review comment by alice on app/orders.py:1\n> please fix the rounding here");
+    expect(brief).not.toContain("old and done");
+    expect(brief).toContain("Review threads on merge request !1.");
+    expect(listThreadRows(db, work.id).map((r) => [r.threadId, r.decision])).toEqual([
+      ["dA", "fixed"],
+      ["dC", "dismissed"],
+    ]);
+    process.env.FAKE_MODE = "verify-pass";
+    await runVerifyUnit(ctx, getUnitBySeq(db, project, 4).id);
+    await landUnit(ctx, work.id);
+    await watchMergeRequest(ctx, work.id);
+    const discussions = glState().mrs[0]!.discussions;
+    const replies = (id: string) => discussions.find((d) => d.id === id)!.notes.filter((n) => String(n.body).includes("<!-- yagura -->"));
+    expect(replies("dA").map((n) => n.body)).toEqual([expect.stringMatching(/^Fixed in [0-9a-f]{10} \(yagura p\/U1\): added the review fix/)]);
+    expect(discussions.filter((d) => d.individual_note && d.notes.some((n) => String(n.body).startsWith("the existing test covers this case")))).toHaveLength(
+      1,
+    );
+  });
+
+  it("blocks when the merge request is closed, and closes an abandoned unit's merge request with a note", async () => {
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    transitionUnit(db, work.id, "abandoned", { reason: "cancelled" });
+    expect(await watchMergeRequest(ctx, work.id)).toBeNull();
+    const mr = glState().mrs[0]!;
+    expect(mr.state).toBe("closed");
+    expect(mr.discussions.at(-1)!.notes[0]!.body).toBe("yagura abandoned p/U1, so this merge request will not be merged.\n\n<!-- yagura -->");
+  });
+
+  it("works out the GitLab project from the repo URL, nested groups included", () => {
+    expect(gitlabRepoOf("git@gitlab.dev.local:team/apps/sandbox.git")).toBe("gitlab.dev.local/team/apps/sandbox");
+    expect(gitlabRepoOf("https://gitlab.dev.local/team/sandbox")).toBe("gitlab.dev.local/team/sandbox");
+    expect(gitlabRepoOf("ssh://git@gitlab.dev.local:2222/team/sandbox.git")).toBe("gitlab.dev.local:2222/team/sandbox");
   });
 });
 

@@ -15,7 +15,7 @@ export interface PrStatus {
 }
 
 export interface ForgeAdapter {
-  kind: "github";
+  kind: "github" | "gitlab";
   repo: string;
   find(branch: string): Promise<{ number: number; url: string } | null>;
   open(pr: { branch: string; base: string; title: string; body: string }): Promise<{ number: number; url: string }>;
@@ -28,6 +28,11 @@ export interface ForgeAdapter {
   replyKeys(number: number): Promise<Set<string>>;
   reply(number: number, thread: Pick<PrThread, "id" | "kind">, body: string, key: string): Promise<void>;
 }
+
+// What the forge calls a change under review: "pull request #4" on GitHub, "merge request !4" on GitLab.
+const onGitlab = (forge: string) => forge === "glab" || forge === "gitlab";
+export const prNoun = (forge: string) => (onGitlab(forge) ? "merge request" : "pull request");
+export const prRef = (forge: string, n: number) => (onGitlab(forge) ? `merge request !${n}` : `pull request #${n}`);
 
 export type ThreadKind = "review-thread" | "comment" | "review";
 
@@ -110,13 +115,13 @@ export class ForgeError extends Error {}
 
 const LOG_LINES = 60;
 
-// Titles, bodies, and comments go to gh as arguments or stdin, never through a shell.
-function gh(bin: string, args: string[], stdin?: string): Promise<string> {
+// Titles, bodies, and comments go to gh and glab as arguments or stdin, never through a shell.
+function gh(bin: string, args: string[], stdin?: string, env: Record<string, string> = {}): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       bin,
       args,
-      { env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1" }, maxBuffer: 16 * 1024 * 1024 },
+      { env: { ...process.env, GH_PROMPT_DISABLED: "1", GLAB_NO_PROMPT: "1", NO_COLOR: "1", ...env }, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout, stderr) =>
         err ? reject(new ForgeError(`${bin} ${args.slice(0, 2).join(" ")} failed: ${(stderr || err.message).trim().split("\n")[0]}`)) : resolve(stdout.trim()),
     );
@@ -252,10 +257,173 @@ export function githubForge(bin: string, repo: string): ForgeAdapter {
   };
 }
 
+// GitLab: a merge request's discussions are its threads. A discussion of one note is a plain comment; the rest
+// (diff notes and started threads) are review threads, skipped once resolved. System notes are GitLab's own log.
+type GlNote = {
+  id: number;
+  body: string;
+  system: boolean;
+  author: { username: string } | null;
+  resolvable?: boolean;
+  resolved?: boolean;
+  position?: { new_path?: string; old_path?: string; new_line?: number | null; old_line?: number | null } | null;
+};
+export function readGitlabThreads(discussions: { id: string; individual_note: boolean; notes: GlNote[] }[]): PrThread[] {
+  const out: PrThread[] = [];
+  for (const d of discussions) {
+    const notes = d.notes.filter((n) => !n.system && !isYagura(n.body) && n.body.trim());
+    if (!notes.length || d.notes.some((n) => n.resolvable && n.resolved)) continue;
+    const first = d.notes[0]!;
+    out.push({
+      id: d.id,
+      kind: d.individual_note ? "comment" : "review-thread",
+      author: notes[0]!.author?.username ?? "ghost",
+      path: first.position?.new_path ?? first.position?.old_path ?? null,
+      line: first.position?.new_line ?? first.position?.old_line ?? null,
+      comments: notes.map((n) => n.body),
+    });
+  }
+  return out;
+}
+
+const GITLAB_MERGE: Record<string, MergeState> = {
+  mergeable: "clean",
+  need_rebase: "behind",
+  conflict: "conflict",
+  checking: "unknown",
+  unchecked: "unknown",
+  preparing: "unknown",
+};
+const PIPELINE_FAILED = new Set(["failed", "canceled"]);
+const PIPELINE_DONE = new Set(["success", "skipped", "manual", ...PIPELINE_FAILED]);
+
+export function readGitlabStatus(mr: {
+  state: string;
+  detailed_merge_status?: string;
+  has_conflicts?: boolean;
+  sha: string;
+  merge_commit_sha?: string | null;
+  squash_commit_sha?: string | null;
+  head_pipeline?: { status: string } | null;
+}): PrStatus {
+  const pipeline = mr.head_pipeline?.status;
+  const state = mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed";
+  return {
+    state,
+    merge: mr.has_conflicts ? "conflict" : (GITLAB_MERGE[mr.detailed_merge_status ?? ""] ?? "blocked"),
+    failing: pipeline && PIPELINE_FAILED.has(pipeline) ? ["pipeline"] : [],
+    pending: pipeline && !PIPELINE_DONE.has(pipeline) ? ["pipeline"] : [],
+    headSha: mr.sha as Sha,
+    // A fast-forward merge has no merge commit: the head itself is what landed.
+    mergedSha: state === "merged" ? ((mr.merge_commit_sha ?? mr.squash_commit_sha ?? mr.sha) as Sha) : null,
+  };
+}
+
+// forge.repo for GitLab is host/group/…/name; groups nest, so the first segment is always the host.
+export function gitlabForge(bin: string, repo: string): ForgeAdapter {
+  const [host, ...rest] = repo.split("/");
+  const path = rest.join("/");
+  const env = { GITLAB_HOST: host! };
+  const R = ["--repo", path];
+  const api = (args: string[], body?: unknown) =>
+    gh(
+      bin,
+      ["api", "--hostname", host!, ...args, ...(body === undefined ? [] : ["--input", "-", "--header", "Content-Type: application/json"])],
+      body === undefined ? undefined : JSON.stringify(body),
+      env,
+    );
+  const project = `projects/${encodeURIComponent(path)}`;
+  const iidOf = (url: string) => {
+    const n = /\/merge_requests\/(\d+)/.exec(url)?.[1];
+    if (!n) throw new ForgeError(`glab did not return a merge request URL: ${url.slice(0, 200)}`);
+    return Number(n);
+  };
+  const discussions = async (iid: number) =>
+    JSON.parse(await api(["--paginate", `${project}/merge_requests/${iid}/discussions?per_page=100`])) as Parameters<typeof readGitlabThreads>[0];
+  return {
+    kind: "gitlab",
+    repo,
+    async find(branch) {
+      const found = JSON.parse(await gh(bin, ["mr", "list", ...R, "--source-branch", branch, "--output", "json"], undefined, env)) as {
+        iid: number;
+        web_url: string;
+      }[];
+      return found[0] ? { number: found[0].iid, url: found[0].web_url } : null;
+    },
+    async open(mr) {
+      const printed = await gh(
+        bin,
+        ["mr", "create", ...R, "--source-branch", mr.branch, "--target-branch", mr.base, "--title", mr.title, "--description-file", "-", "--yes"],
+        mr.body,
+        env,
+      );
+      const url =
+        printed
+          .split("\n")
+          .find((l) => /\/merge_requests\/\d+/.test(l))
+          ?.trim() ?? printed;
+      return { number: iidOf(url), url: /(https?:\/\/\S+)/.exec(url)?.[1] ?? url };
+    },
+    async status(iid) {
+      return readGitlabStatus(JSON.parse(await gh(bin, ["mr", "view", String(iid), ...R, "--output", "json"], undefined, env)));
+    },
+    // GitLab merges by the project's own method; squash is the one choice a merge request can make.
+    async merge(iid, headSha, method) {
+      await gh(
+        bin,
+        ["mr", "merge", String(iid), ...R, "--sha", headSha, "--auto-merge=false", "--yes", ...(method === "squash" ? ["--squash"] : [])],
+        undefined,
+        env,
+      );
+    },
+    async close(iid, comment) {
+      await api(["--method", "POST", `${project}/merge_requests/${iid}/notes`], { body: marked(comment) });
+      await gh(bin, ["mr", "close", String(iid), ...R], undefined, env);
+    },
+    async failedRuns(headSha) {
+      const [pipeline] = JSON.parse(await api([`${project}/pipelines?sha=${headSha}&order_by=id&sort=desc&per_page=1`])) as { id: number }[];
+      if (!pipeline) return [];
+      const jobs = JSON.parse(await api([`${project}/pipelines/${pipeline.id}/jobs?scope[]=failed&per_page=100`])) as { id: number; name: string }[];
+      return Promise.all(
+        jobs.map(async (j) => ({
+          id: j.id,
+          name: j.name,
+          log: (await api([`${project}/jobs/${j.id}/trace`]).catch(() => "")).split("\n").slice(-LOG_LINES).join("\n"),
+        })),
+      );
+    },
+    async rerunFailed(jobId) {
+      await api(["--method", "POST", `${project}/jobs/${jobId}/retry`]);
+    },
+    async threads(iid) {
+      return readGitlabThreads(await discussions(iid));
+    },
+    async replyKeys(iid) {
+      return readReplyKeys(await discussions(iid));
+    },
+    async reply(iid, thread, body, key) {
+      if (thread.kind === "review-thread")
+        await api(["--method", "POST", `${project}/merge_requests/${iid}/discussions/${thread.id}/notes`], { body: keyed(body, key) });
+      else await api(["--method", "POST", `${project}/merge_requests/${iid}/notes`], { body: keyed(body, key) });
+    },
+  };
+}
+
+// git@host:group/sub/name.git, https://host/group/sub/name(.git), ssh://git@host/group/name
+export function gitlabRepoOf(url: string): string | null {
+  const m = /^(?:git@([^:]+):|(?:https?|ssh):\/\/(?:[^@/]+@)?([^/]+)\/)(.+?)(?:\.git)?\/?$/.exec(url);
+  return m ? `${m[1] ?? m[2]}/${m[3]}` : null;
+}
+
 export function forgeFor(db: Db, repo: Repo): ForgeAdapter | null {
   const at = { repoId: repo.id };
   if (repo.forge === "none") return null;
-  if (repo.forge === "glab") throw new ForgeError(`repo ${repo.id} is on GitLab, which yagura cannot land through yet`);
+  if (repo.forge === "glab") {
+    const name = resolveSetting(db, "forge.repo", at).value ?? gitlabRepoOf(repo.url);
+    if (!name || name.split("/").length < 3)
+      throw new ForgeError(`cannot tell which GitLab project ${repo.url} is; set forge.repo for repo ${repo.id} to host/group/name`);
+    return gitlabForge(resolveSetting(db, "forge.glab_bin").value, name);
+  }
   const name = resolveSetting(db, "forge.repo", at).value ?? forgeRepoOf(repo.url);
   if (!name) throw new ForgeError(`cannot tell which GitHub repo ${repo.url} is; set forge.repo for repo ${repo.id}`);
   return githubForge(resolveSetting(db, "forge.gh_bin").value, name);
