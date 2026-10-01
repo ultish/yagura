@@ -415,7 +415,7 @@ function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, ha
     const outcome = rejected
       ? "rejected"
       : failedAfter
-        ? "did not count"
+        ? "failed"
         : verdict
           ? String(verdict.data.outcome)
           : a.state === "handed_off"

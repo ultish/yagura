@@ -1050,6 +1050,9 @@ textarea {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+.hub-table .chip {
+  white-space: nowrap;
+}
 .hub-table tr.dim td {
   color: var(--muted);
 }

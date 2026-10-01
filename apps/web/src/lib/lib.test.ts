@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
 import { diffLines } from "./diff";
-import { duration, modelName } from "./format";
+import { clip, clock, duration, modelName } from "./format";
 import { ifUnanswered } from "./gates";
 import { mentionHref, mentionQuery } from "./mention";
 import { layoutScene, subLabel } from "./scene";
@@ -193,6 +193,15 @@ describe("mentions and formatting", () => {
   it("formats durations and model names", () => {
     expect([duration(54_000), duration(12 * 60_000), duration(63 * 60_000)]).toEqual(["54s", "12m", "1h 3m"]);
     expect(modelName("claude-opus-5-5")).toBe("opus-5.5");
+  });
+
+  it("dates a time by the local day, not the UTC one", () => {
+    expect([clock(new Date(2026, 9, 1, 0, 13).toISOString()), clock(new Date(2026, 8, 30, 23, 59).toISOString())]).toEqual(["10-01 00:13", "09-30 23:59"]);
+  });
+
+  it("clips a long line at a word and marks the cut", () => {
+    expect(clip("the three code units all edit wordstat.py, so they run in order", 40)).toBe("the three code units all edit…");
+    expect(clip("short", 40)).toBe("short");
   });
 
   it("says what happens to a gate nobody answers", () => {

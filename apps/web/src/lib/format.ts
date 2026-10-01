@@ -16,7 +16,15 @@ export function clock(iso: string | null | undefined): string {
   const d = new Date(iso);
   const sameDay = new Date().toDateString() === d.toDateString();
   const hm = d.toTimeString().slice(0, 5);
-  return sameDay ? hm : `${d.toISOString().slice(5, 10)} ${hm}`;
+  const md = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return sameDay ? hm : `${md} ${hm}`;
+}
+
+export function clip(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, max);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, "")}…`;
 }
 
 export function tokens(n: number): string {
