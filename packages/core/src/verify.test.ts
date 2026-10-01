@@ -231,6 +231,18 @@ describe("pack lifecycle scripts", () => {
     ]);
   });
 
+  it("shows later verifiers of the repo what the developer disagreed with", async () => {
+    const { target } = await workThenVerify("verify-pass");
+    const { recordDisagreement } = await import("./disagreements.js");
+    recordDisagreement(db, { unitId: target.id, ref: "x", about: "skipping non-ASCII input", reason: "always test accented letters", action: "note" });
+    transitionUnit(db, target.id, "verifying");
+    const again = addVerifyUnit(db, getUnit(db, target.id));
+    await runVerifyUnit(ctx, again.id);
+    expect(readFileSync(layout(ctx.boot).brief(project, again.seq, 1), "utf8")).toContain(
+      "## WHERE THE DEVELOPER DISAGREED WITH EARLIER WORK ON THIS REPO\nWeigh these when you decide what to test.\n- On p/U1, about skipping non-ASCII input: always test accented letters",
+    );
+  });
+
   it("drops a pack edit that yagura cannot read and does not accept the verdict", async () => {
     const { target, result } = await workThenVerify("verify-bad-pack");
     expect(result.decision).toMatchObject({

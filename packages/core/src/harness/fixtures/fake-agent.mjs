@@ -146,6 +146,13 @@ function engine(role) {
     const workRows = [...brief.matchAll(/^\| U\d+ \| work \| (\w+)/gm)].map((m) => m[1]);
     const repo = /^## CODE[^\n]*\n- ([\w-]+):/m.exec(brief)[1];
     const unit = (key, write) => ({ key, repo, goal: `write ${key}`, write: [write], accept: [`${key} file exists`], verify: "true", playbook: "feature" });
+    const disagreed = [...brief.matchAll(/^- D(\d+) on U\d+/gm)].map((m) => Number(m[1]));
+    if (disagreed.length)
+      return finish(
+        "Plan:\n```json\n" +
+          JSON.stringify({ add: disagreed.map((n) => ({ ...unit(`fix-d${n}`, `app/fix${n}/**`), disagreement: n })), summary: "fix forward" }) +
+          "\n```",
+      );
     const delta = !workRows.length
       ? { add: [unit("a", "app/a/**"), unit("b", "app/b/**"), unit("c", "app/a/extra/**")], summary: "three units" }
       : { done: workRows.every((s) => s === "landed"), summary: workRows.every((s) => s === "landed") ? "all landed" : "waiting" };

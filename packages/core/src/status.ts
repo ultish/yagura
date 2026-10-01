@@ -3,7 +3,8 @@ import type { Bootstrap } from "./config.js";
 import type { ProjectId } from "./domain.js";
 import { layout } from "./paths.js";
 import { readiness } from "./schedule.js";
-import { getProject, listAttempts, listDeps, listGates, listUnits, projectRepos, type Db } from "./store.js";
+import { listDisagreements } from "./disagreements.js";
+import { getProject, getUnit, listAttempts, listDeps, listGates, listUnits, projectRepos, type Db } from "./store.js";
 
 const HANDOFF_LIMIT = 3000;
 const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
@@ -93,6 +94,13 @@ ${notes.join("\n") || "(none)"}
 
 ## Open gates
 ${gates.join("\n") || "(none)"}
+
+## The developer disagrees (each needs a unit that fixes it forward; set "disagreement" on that unit)
+${
+  listDisagreements(db, { projectId, state: "open" })
+    .map((d) => `- D${d.id} on U${getUnit(db, d.unitId).seq}, about ${d.about}: ${d.reason}`)
+    .join("\n") || "(none)"
+}
 
 ## Since the last plan
 ${interesting.join("\n") || "(nothing new)"}

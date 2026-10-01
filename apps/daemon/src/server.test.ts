@@ -90,6 +90,25 @@ describe("daemon API", () => {
     expect((await get("/api/projects/nope")).status).toBe(404);
   });
 
+  it("tells a unit's story, records a disagreement on it, and refuses one without a reason", async () => {
+    const story = (await (await get("/api/projects/orders/units/1/story")).json()) as { unit: { seq: number }; entries: unknown[] };
+    expect(story.unit.seq).toBe(1);
+    expect(await (await post("/api/projects/orders/units/1/disagreements", { ref: "a1:chose:0", about: "x", reason: " ", action: "note" })).json()).toEqual({
+      error: "say why you disagree",
+    });
+    expect((await post("/api/projects/orders/units/1/disagreements", { ref: "a1:chose:0", about: "x", reason: "r", action: "maybe" })).status).toBe(400);
+    const made = await post("/api/projects/orders/units/1/disagreements", {
+      ref: "a1:chose:0",
+      about: "skipping tests",
+      reason: "always add one",
+      action: "note",
+    });
+    expect(made.status).toBe(201);
+    expect(await made.json()).toMatchObject({ about: "skipping tests", reason: "always add one", action: "note", state: "noted" });
+    const after = (await (await get("/api/projects/orders/units/1/story")).json()) as { entries: { who: string; body: string }[] };
+    expect(after.entries.at(-1)).toMatchObject({ who: "You disagreed", body: "About skipping tests: always add one" });
+  });
+
   it("lists running agents against the cap", async () => {
     expect(await (await get("/api/agents")).json()).toMatchObject({
       attempts: [{ state: "running", unit: { seq: 1, goal: "Implement create" } }],

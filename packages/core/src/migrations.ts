@@ -275,6 +275,24 @@ ALTER TABLE mr_threads ADD COLUMN replied_at TEXT;
 UPDATE mr_threads SET replied_at = created_at WHERE decision IN ('fixed', 'dismissed');
 `,
   },
+  {
+    version: 20,
+    sql: `
+CREATE TABLE disagreements (
+  id INTEGER PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects (id),
+  unit_id INTEGER NOT NULL REFERENCES units (id),
+  ref TEXT NOT NULL,
+  about TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('follow-up', 'note')),
+  state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'planned', 'noted')),
+  follow_up_unit_id INTEGER REFERENCES units (id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX disagreements_unit ON disagreements (unit_id);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

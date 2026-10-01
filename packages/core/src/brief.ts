@@ -157,6 +157,7 @@ export interface VerifyBrief {
   skills: string[];
   pack: { copy: string; lifecycle: string[] };
   earlier: string[];
+  developerNotes: string[];
 }
 
 const DIFF_LIMIT = 60_000;
@@ -204,7 +205,7 @@ Recipe from the unit: ${v.verifyRecipe}
 yagura ran the pack before you started${v.pack.lifecycle.length ? `:\n${list(v.pack.lifecycle)}` : " (checks above)."}
 
 Your editable copy is ${v.pack.copy}; every evidence run, on base and on head, uses your copy. If the pack is wrong (a command that cannot work, a deploy that no longer matches how the app runs) or does not check what this change built, fix or extend it there. Edit files only; do not run git. When you finish, yagura re-runs the doctor and every check on both sides with your copy, commits your edit on its own, and lands it after this unit. Say what you changed and why under Pack changes. For a pack that has drifted a long way, pstack:maintain-verification-skill guides a full pass.
-${v.earlier.length ? `\n## EARLIER VERIFICATIONS OF THIS UNIT\n${list(v.earlier)}\n` : ""}
+${v.earlier.length ? `\n## EARLIER VERIFICATIONS OF THIS UNIT\n${list(v.earlier)}\n` : ""}${v.developerNotes.length ? `\n## WHERE THE DEVELOPER DISAGREED WITH EARLIER WORK ON THIS REPO\nWeigh these when you decide what to test.\n${list(v.developerNotes)}\n` : ""}
 ## ENV
 ${list(Object.entries(v.leaseVars).map(([k, val]) => `${k}=${val}${v.envNotes[k] ? ` (${v.envNotes[k]})` : ""}`))}${v.environmentNotes.trim() ? `\n\nAbout this environment: ${v.environmentNotes.trim()}` : ""}
 
@@ -267,6 +268,7 @@ ${p.status}
 - \`deps\` names units that must land first: a key from this delta or an existing unit such as "U3".
 - \`playbook\` is one of: ${p.playbooks.join(", ")}.
 - \`scaffold\`: true marks the unit that builds a new project's skeleton. ${p.scaffoldSkills?.length ? `This project names scaffold skills (${p.scaffoldSkills.join(", ")}): when a repo has no project skeleton yet, make its first unit a scaffold unit and let later units build on it.` : "This project names no scaffold skills; leave it false."}${p.references?.length ? `\n- Workers get read-only checkouts of reference repos that already do it right (${p.references.join(", ")}); point at them in \`context\` when a unit should follow their shape.` : ""}
+- \`disagreement\` (optional): when a unit fixes forward something the developer disagreed with (listed under "The developer disagrees" with a D number), set it to that number, e.g. 4 for D4. Every open disagreement needs such a unit, or a planner gate that asks the developer how to proceed.
 - \`refs\` (optional) lists issue keys the unit addresses, e.g. "gitlab#123"; the project's own refs are added automatically.
 - A blocked or failed unit can be retried with a note that changes what the next attempt does, split into new units, or cancelled.
 - A unit that has not started can be amended in place, including its \`deps\` (the list replaces its old one). To move units off a blocked one, amend their deps; do not cancel and re-add them.

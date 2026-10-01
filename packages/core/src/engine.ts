@@ -220,6 +220,7 @@ export class Engine {
         `SELECT e.type, e.unit_id, e.data_json, u.type AS unit_type FROM events e LEFT JOIN units u ON u.id = e.unit_id WHERE e.project_id = ? AND e.id > ? AND (
            (e.type = 'unit.state' AND json_extract(e.data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(e.data_json, '$.drain') IS NULL AND json_extract(e.data_json, '$.rebaseUnit') IS NULL AND json_extract(e.data_json, '$.reviewUnit') IS NULL)
            OR (e.type IN ('gate.answered', 'gate.defaulted') AND COALESCE(json_extract(e.data_json, '$.kind'), '') NOT IN (${YAGURA_GATES.map(() => "?").join(", ")}))
+           OR (e.type = 'disagreement.recorded' AND json_extract(e.data_json, '$.action') = 'follow-up')
            OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed'))`,
       )
       .all(project.id, since, ...PLAN_TRIGGERS, ...YAGURA_GATES) as { type: string; unit_id: UnitId | null; data_json: string; unit_type: string | null }[];

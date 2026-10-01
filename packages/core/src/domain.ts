@@ -122,6 +122,10 @@ export type HandoffStatus = (typeof HANDOFF_STATUSES)[number];
 // yagura no longer rejects hard-coded values ("literals", until 2026-09-30); older databases still hold the value.
 export const REJECTIONS = ["code-fault", "literals", "scope", "skills", "conflict"] as const;
 export const PACK_EDIT_STATES = ["pending", "queued", "dropped"] as const;
+export const DISAGREEMENT_ACTIONS = ["follow-up", "note"] as const;
+export type DisagreementAction = (typeof DISAGREEMENT_ACTIONS)[number];
+export const DISAGREEMENT_STATES = ["open", "planned", "noted"] as const;
+export type DisagreementState = (typeof DISAGREEMENT_STATES)[number];
 export type PackEditState = (typeof PACK_EDIT_STATES)[number];
 export type Rejection = (typeof REJECTIONS)[number];
 
@@ -318,6 +322,7 @@ export interface Handoff {
   notes: string;
   followUps: string;
   packChanges: string;
+  findings: string;
   decisions: string;
   raw: string;
 }

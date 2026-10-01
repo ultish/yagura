@@ -1,6 +1,7 @@
 import picomatch from "picomatch";
 import { z } from "zod";
 import { resolveSetting } from "./config.js";
+import { listDisagreements, markPlanned } from "./disagreements.js";
 import { isBuild, type ProjectId, type RepoId, type Unit, type UnitId } from "./domain.js";
 import {
   addDep,
@@ -53,6 +54,7 @@ export const PlanUnit = z
     scaffold: z.boolean().default(false),
     timeboxMinutes: z.number().int().positive().max(240).optional(),
     refs: z.array(z.string().min(1)).default([]),
+    disagreement: z.number().int().positive().optional(),
     deps: Deps.default([]),
   })
   .strict();
@@ -199,6 +201,12 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
       if (drainId !== null) db.prepare("UPDATE units SET created_by_drain_id = ? WHERE id = ?").run(drainId, unit.id);
       transitionUnit(db, unit.id, "ready", { drain: drainId });
       created.set(a.key, getUnit(db, unit.id));
+      if (a.disagreement !== undefined) {
+        const d = listDisagreements(db, { projectId }).find((x) => x.id === a.disagreement);
+        if (!d) throw new PlanRejected(`${a.key}: there is no disagreement D${a.disagreement} in this project`);
+        if (d.state !== "open") throw new PlanRejected(`${a.key}: D${d.id} is already ${d.state}`);
+        markPlanned(db, d.id, unit.id);
+      }
     }
 
     const addDeps = (unit: Unit, name: string, deps: z.output<typeof Deps>) => {

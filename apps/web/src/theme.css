@@ -507,3 +507,184 @@ textarea {
     animation: none;
   }
 }
+
+/* The unit page: one ledger of who did what, each line with yagura's check where one exists. */
+.story {
+  max-width: 960px;
+  margin: 0 auto;
+  padding-inline: 24px;
+  padding-block: 28px 64px;
+}
+.story-crumb {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.story-title {
+  font-size: 19px;
+  max-width: 70ch;
+  line-height: 1.3;
+  margin: 6px 0 10px;
+  text-wrap: balance;
+}
+.story-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12.5px;
+  color: var(--muted);
+  margin: 14px 0 18px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line2);
+}
+.story-entry {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 14px;
+}
+.story-time {
+  font-size: 12px;
+  color: var(--faint);
+  text-align: right;
+  padding-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.story-body {
+  position: relative;
+  border-left: 1px solid var(--line2);
+  padding: 0 0 18px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.story-body::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--amber);
+}
+.story-entry.yagura .story-body::before {
+  border-color: var(--pine);
+}
+.story-entry.you .story-body::before {
+  border-color: var(--bell);
+  background: var(--bell);
+}
+.story-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+.story-who {
+  font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.story-who b {
+  color: var(--soft);
+  font-weight: 500;
+}
+.story-who a {
+  color: inherit;
+  text-decoration: none;
+}
+.story-who a:hover b {
+  color: var(--amber-text);
+}
+.story-pine {
+  color: var(--pine);
+}
+.story-amber {
+  color: var(--amber-text);
+}
+.story-bell {
+  color: var(--bell-text);
+}
+.story-muted {
+  color: var(--muted);
+}
+.story-text {
+  font-size: 14px;
+  color: var(--soft);
+}
+.story-lines {
+  margin: 2px 0 0;
+  padding-left: 18px;
+}
+.story-line {
+  margin: 3px 0;
+  font-size: 14px;
+  color: var(--soft);
+}
+.story-check {
+  font-size: 12.5px;
+  margin-left: 6px;
+}
+.story-disagreed {
+  font-size: 13px;
+  color: var(--bell-text);
+  margin-top: 2px;
+}
+.story-fold {
+  font-size: 13px;
+  color: var(--muted);
+}
+.story-fold summary {
+  cursor: pointer;
+}
+.story-fold ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.story-disagree {
+  color: var(--bell-text);
+  border-color: var(--bad-border);
+  margin-top: 4px;
+}
+.story-form {
+  margin-top: 8px;
+  border: 1px solid var(--bad-border);
+  border-radius: 6px;
+  padding: 12px;
+  background: var(--bg2);
+  display: grid;
+  gap: 10px;
+}
+.story-form fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.story-form legend,
+.story-field {
+  font-size: 13px;
+  color: var(--soft);
+}
+.story-field {
+  display: grid;
+  gap: 4px;
+}
+.story-choice {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13.5px;
+}
+@media (max-width: 640px) {
+  .story-entry {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .story-time {
+    text-align: left;
+  }
+}

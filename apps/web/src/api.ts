@@ -13,9 +13,29 @@ import type {
   ThreadMessage,
   ThreadQuestion,
   Unit,
+  StoryEntry,
+  StoryLine,
+  UnitStory,
 } from "@yagura/core";
 
-export type { Attempt, Environment, EvidenceRun, Gate, Project, Proposal, Repo, SettingInfo, Thread, ThreadDecision, ThreadMessage, ThreadQuestion, Unit };
+export type {
+  Attempt,
+  Environment,
+  EvidenceRun,
+  Gate,
+  Project,
+  Proposal,
+  Repo,
+  SettingInfo,
+  Thread,
+  ThreadDecision,
+  ThreadMessage,
+  ThreadQuestion,
+  Unit,
+  StoryEntry,
+  StoryLine,
+  UnitStory,
+};
 
 export interface ProjectSummary {
   project: Project;

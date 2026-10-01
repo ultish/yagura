@@ -22,6 +22,7 @@ import { parseHandoff } from "./handoff.js";
 import { loadPack, type VerifyPack } from "./pack.js";
 import { commitPackEdit, discardWorkspace, openPackWorkspace, stagePackChanges } from "./packedits.js";
 import { pauseEnvironment } from "./envpause.js";
+import { verifierNotes } from "./disagreements.js";
 import { acquireLease, keepable, keepLease, releaseLease } from "./leases.js";
 import { syncPackStatus } from "./repos.js";
 import { requiredProjectSkills } from "./skills.js";
@@ -317,6 +318,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
           .map((r) => `${r.label.slice(5)} on ${r.at === "base" ? "trunk" : "head"}: run:${r.id} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}`),
       },
       earlier: earlierVerifications(db, target),
+      developerNotes: verifierNotes(db, repo.id),
     });
     write(paths.brief(project.id, unit.seq, attempt.n), briefText);
 

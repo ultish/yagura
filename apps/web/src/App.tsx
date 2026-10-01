@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LiveContext, useApi, useLiveVersion, usePath } from "./api";
 import { Agent, UnitAgent } from "./pages/Agent";
+import { Unit } from "./pages/Unit";
 import { Agents } from "./pages/Agents";
 import { Home } from "./pages/Home";
 import { Project } from "./pages/Project";
@@ -92,8 +93,8 @@ function Routes() {
   if (path === "/settings") return <Settings />;
   if ((m = /^\/talk(?:\/(\d+))?\/?$/.exec(path))) return <Talk threadId={m[1] ? Number(m[1]) : null} />;
   if ((m = /^\/a\/(\d+)\/?$/.exec(path))) return <Agent key={m[1]} attemptId={Number(m[1])} />;
-  if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)(?:\/(\d+))?\/?$/.exec(path)))
-    return <UnitAgent projectId={m[1]!} seq={Number(m[2])} n={m[3] ? Number(m[3]) : null} />;
+  if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)\/(\d+)\/?$/.exec(path))) return <UnitAgent projectId={m[1]!} seq={Number(m[2])} n={Number(m[3])} />;
+  if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)\/?$/.exec(path))) return <Unit key={path} projectId={m[1]!} seq={Number(m[2])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/?$/.exec(path))) return <Project id={m[1]!} />;
   return (
     <main style={{ padding: 36 }}>

@@ -11,6 +11,7 @@ const SECTIONS = {
   notes: "notes",
   followUps: "suggested follow-ups",
   packChanges: "pack changes",
+  findings: "findings",
   decisions: "decisions",
 } as const;
 
@@ -52,6 +53,7 @@ export function parseHandoff(finalMessage: string): Handoff | null {
     notes: s.get("notes") ?? "",
     followUps: s.get("followUps") ?? "",
     packChanges: s.get("packChanges") ?? "",
+    findings: s.get("findings") ?? "",
     decisions: s.get("decisions") ?? "",
     raw: text,
   };

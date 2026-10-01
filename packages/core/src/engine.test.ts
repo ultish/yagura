@@ -300,6 +300,38 @@ describe("Engine", () => {
     expect(getProject(db, project).state).toBe("closed");
   }, 60_000);
 
+  it("tells a unit's story, and turns a disagreement with a landed unit into a follow-up that reopens the closed project", async () => {
+    const { unitStory } = await import("./story.js");
+    const { recordDisagreement, listDisagreements } = await import("./disagreements.js");
+    const engine = new Engine(ctx, { projectId: project, tickMs: 50 });
+    await engine.runUntilIdle();
+    expect(getProject(db, project).state).toBe("closed");
+    const a = listUnits(db, project).find((u) => u.type === "work")!;
+
+    const story = unitStory(db, ctx.boot, a);
+    expect(story.entries.map((e) => e.actor)).toEqual(["planner", "worker", "verifier", "yagura"]);
+    const [, worker, verifier, landed] = story.entries;
+    expect(worker!.lines[0]).toMatchObject({ kind: "claimed", checks: [{ ok: true, text: expect.stringMatching(/^verified by U\d+$/) }] });
+    expect(verifier!.lines[0]!.checks[0]).toMatchObject({ ok: true, text: expect.stringMatching(/^scenario run:\d+ passes on head and fails on trunk/) });
+    expect(landed!.lines[0]!.checks).toEqual([{ ok: true, text: "the merged patch is the one verified, so the verdict carries" }]);
+
+    const d = recordDisagreement(db, {
+      unitId: a.id,
+      ref: worker!.lines[0]!.ref,
+      about: worker!.lines[0]!.text,
+      reason: "the file should be named after the unit",
+      action: "follow-up",
+    });
+    expect(getProject(db, project).state).toBe("active");
+    await engine.runUntilIdle();
+    const [planned] = listDisagreements(db, { projectId: project });
+    const fix = listUnits(db, project).find((u) => u.id === planned!.followUpUnitId)!;
+    expect(planned).toMatchObject({ id: d.id, state: "planned" });
+    expect(fix).toMatchObject({ goal: `write fix-d${d.id}`, state: "landed" });
+    expect(getProject(db, project).state).toBe("closed");
+    expect(unitStory(db, ctx.boot, a).entries.at(-1)).toMatchObject({ who: "You disagreed", status: { text: `follow-up U${fix.seq}` } });
+  }, 60_000);
+
   it("blocks a unit that crashes before it starts instead of starting it again every tick", async () => {
     setSetting(db, "project", project, "role.worker.harness", "missing-harness");
     const log: string[] = [];

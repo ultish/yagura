@@ -90,6 +90,8 @@ import {
   type EnvironmentId,
   type Provider,
   suggestRepoId,
+  unitStory,
+  recordDisagreement,
 } from "@yagura/core";
 import { attemptDetail, attemptDiff, bell, capCounts, environmentDetail, environmentView, projectSummary, repoView, resolvedGates, unitView } from "./views.js";
 
@@ -193,6 +195,16 @@ export function createApp(opts: ServerOptions): Hono {
   app.get("/api/projects/:id/units/:seq", (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
     return c.json(traceUnit(db, boot, unit));
+  });
+
+  app.get("/api/projects/:id/units/:seq/story", (c) =>
+    c.json(unitStory(db, boot, getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq"))))),
+  );
+  app.post("/api/projects/:id/units/:seq/disagreements", async (c) => {
+    const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
+    const b = (await c.req.json()) as { ref?: string; about?: string; reason?: string; action?: string };
+    if (b.action !== "follow-up" && b.action !== "note") return c.json({ error: "action must be follow-up or note" }, 400);
+    return c.json(recordDisagreement(db, { unitId: unit.id, ref: b.ref ?? "", about: b.about ?? "", reason: b.reason ?? "", action: b.action }), 201);
   });
 
   app.get("/api/projects/:id/events", (c) => c.json(eventsSince(db, Number(c.req.query("since") ?? 0), c.req.param("id"))));
