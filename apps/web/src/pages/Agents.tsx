@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, useApi, useNow, type AgentRow, type WatchmanTurnRow } from "../api";
 import { roleOf } from "../lib/units";
-import { clock, duration, modelName, tokens } from "../lib/format";
+import { clock, duration, modelName, tokens, usd } from "../lib/format";
 import { Link } from "../ui/Link";
 import { Inline } from "../lib/markdown";
 import { Row, useAction } from "../ui/rows";
@@ -39,6 +39,7 @@ export function Agents() {
               <b>watchman</b>
             </span>
             <span>{modelName(t.model)}</span>
+            <span>{usd(t.costUsd)}</span>
             {t.contextPeak > 0 && <span>ctx {tokens(t.contextPeak)}</span>}
             <span>started {clock(t.startedAt)}</span>
           </>
@@ -99,6 +100,7 @@ export function Agents() {
               </span>
             )}
             <span>{modelName(a.model)}</span>
+            <span>{usd(a.costUsd)}</span>
             {a.contextPeak > 0 && <span>ctx {tokens(a.contextPeak)}</span>}
             <span>started {clock(a.startedAt)}</span>
           </>

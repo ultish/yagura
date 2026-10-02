@@ -449,6 +449,14 @@ export function projectRepos(db: Db, projectId: ProjectId): Repo[] {
   );
 }
 
+// What the project's agent sessions have cost; watchman turns belong to threads, which can span projects.
+export function projectCost(db: Db, projectId: ProjectId): number {
+  const r = db.prepare("SELECT COALESCE(SUM(a.cost_usd), 0) AS usd FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.project_id = ?").get(projectId) as {
+    usd: number;
+  };
+  return r.usd;
+}
+
 export function setAndon(db: Db, projectId: ProjectId, reason: string | null): void {
   db.prepare("UPDATE projects SET andon_reason = ? WHERE id = ?").run(reason, projectId);
   recordEvent(db, reason ? "project.andon" : "project.andon_cleared", { projectId }, { reason });

@@ -1,5 +1,5 @@
 import { useApi, type ProjectSummary } from "../api";
-import { clock, sha } from "../lib/format";
+import { clock, sha, spend } from "../lib/format";
 import { needsYou } from "../lib/scene";
 import { Link } from "../ui/Link";
 import { Inline } from "../lib/markdown";
@@ -61,6 +61,7 @@ export function Projects() {
                       {c.blocked ? <span>{c.blocked} blocked</span> : null}
                       <span>{(c.ready ?? 0) + (c.running ?? 0) + (c.verifying ?? 0) + (c.verified ?? 0) + (c.handed_off ?? 0)} in flight</span>
                       <span>{s.project.mergePolicy === "auto" ? "merges automatically" : "merge by hand"}</span>
+                      <span>{spend(s.costUsd, s.budgetUsd)}</span>
                       {s.lastLanded && (
                         <span>
                           last landed {sha(s.lastLanded.sha)} · U{s.lastLanded.seq}

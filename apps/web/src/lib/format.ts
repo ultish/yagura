@@ -36,3 +36,7 @@ export const sha = (s: string | null | undefined, n = 7) => (s ? s.slice(0, n) :
 export const modelName = (m: string | null | undefined) => (m ? m.replace(/^claude-/, "").replace(/-(\d+)-(\d+)$/, "-$1.$2") : "default model");
 
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+export const usd = (n: number) => `$${n.toFixed(2)}`;
+
+export const spend = (costUsd: number, budgetUsd: number | null) => (budgetUsd ? `${usd(costUsd)} of ${usd(budgetUsd)}` : `${usd(costUsd)} spent`);

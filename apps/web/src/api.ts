@@ -62,6 +62,8 @@ export interface ProjectSummary {
   blocked: number;
   lastLanded: { seq: number; sha: string; at: string } | null;
   summary: string | null;
+  costUsd: number;
+  budgetUsd: number | null;
 }
 
 export interface RepoView {
@@ -365,6 +367,7 @@ export function useQuery(): URLSearchParams {
 
 export interface WatchmanTurnRow {
   id: number;
+  costUsd: number;
   threadId: number;
   threadTitle: string;
   state: "running" | "done" | "failed" | "stopped";

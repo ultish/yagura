@@ -78,6 +78,12 @@ export const SETTINGS = {
     .nullable()
     .default(null)
     .describe("Wall-clock hours for the project: at 70% no new work starts and verified work lands; at 100% it stops (empty: no limit)"),
+  "project.budget_usd": z
+    .number()
+    .positive()
+    .nullable()
+    .default(null)
+    .describe("Dollars the project's agents may spend: once spent, nothing new starts and running agents finish (empty: no limit)"),
   "project.reference_repos": z.array(z.string().min(1)).default([]).describe("Registered repos that already do it right; workers get a read-only checkout"),
   "work.resume_on_rejection": z.boolean().default(true).describe("After a rejection, resume the worker's own session with the findings"),
   "work.resume_max_context": z
@@ -141,6 +147,7 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "skills.verify": PRE,
   "project.reference_repos": P,
   "project.budget_hours": P,
+  "project.budget_usd": P,
   "work.resume_max_context": PR,
   "timebox.verify_seconds": PRE,
   "verify.max_retries": P,

@@ -30,6 +30,7 @@ import {
   now,
   recordEvent,
   setAndon,
+  projectCost,
   setProjectState,
   transitionUnit,
   updateAttempt,
@@ -47,6 +48,7 @@ export interface EngineOptions {
 
 const TERMINAL = new Set(["landed", "done", "abandoned"]);
 export const LANDING_CUTOFF = 0.7;
+const COST_WARNING = 0.8;
 const PLAN_TRIGGERS = ["landed", "blocked", "abandoned"];
 const YAGURA_GATES = ["report", "land", "environment", "review"];
 
@@ -73,6 +75,7 @@ export class Engine {
   private readonly inflight = new Map<string, Promise<void>>();
   private readonly landingSaid = new Map<UnitId, string>();
   private readonly cutoffSaid = new Set<ProjectId>();
+  private readonly costSaid = new Set<ProjectId>();
   private readonly log: (line: string) => void;
 
   constructor(
@@ -366,6 +369,22 @@ export class Engine {
             `skills not installed where agents run: ${missing.map((c) => `${c.skill} (${c.purposes.join(", ")})`).join("; ")}. Install them or change the project's skills settings, then clear the andon`,
           );
         continue;
+      }
+      const budgetUsd = resolveSetting(this.db, "project.budget_usd", { projectId: project.id }).value;
+      if (budgetUsd !== null) {
+        const spent = projectCost(this.db, project.id);
+        if (spent >= budgetUsd && !project.andonReason) {
+          setAndon(
+            this.db,
+            project.id,
+            `the cost budget of $${budgetUsd.toFixed(2)} is used up ($${spent.toFixed(2)} spent); running agents finish and nothing new starts. Raise project.budget_usd to continue`,
+          );
+          continue;
+        }
+        if (spent >= budgetUsd * COST_WARNING && !this.costSaid.has(project.id)) {
+          this.costSaid.add(project.id);
+          this.log(`  ${project.id}: $${spent.toFixed(2)} of the $${budgetUsd.toFixed(2)} cost budget spent`);
+        }
       }
       const used = this.budgetUsed(project);
       if (used !== null && used >= 1 && !project.andonReason) {

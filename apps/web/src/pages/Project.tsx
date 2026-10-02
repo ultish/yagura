@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, navigate, useApi, useNow, type ProjectDetail, type UnitView } from "../api";
-import { modelName, sha, tokens } from "../lib/format";
+import { modelName, sha, spend, tokens } from "../lib/format";
 import { type Group, groupOf, isBuild, latestAttempt, openGateFor, statusLine, verifiersOf } from "../lib/units";
 import { Inline } from "../lib/markdown";
 import { Beacons } from "../scene/Beacons";
@@ -181,6 +181,7 @@ export function Project({ id }: { id: string }) {
     p.mergePolicy === "auto" ? "merges automatically" : "merge by hand",
     `≥ ${p.minTier}`,
     `${d.maxInFlight} agent slots`,
+    spend(d.costUsd, d.budgetUsd),
     ...p.refs,
     p.after.length ? `after ${p.after.join(", ")}` : "",
     p.state !== "active" ? p.state : "",

@@ -19,6 +19,7 @@ import {
   addRepo,
   getProject,
   getRepo,
+  setAndon,
   listAttempts,
   listUnits,
   openStore,
@@ -81,6 +82,27 @@ describe("Engine", () => {
     await engine.tick();
     expect(getProject(db, project).andonReason).toBe("the wall-clock budget of 1h is used up; what was verified has landed, and the rest waits for you");
   });
+
+  it("raises an andon once the project's agents have spent its cost budget, and starts nothing after", async () => {
+    setSetting(db, "project", project, "project.budget_usd", 0.035);
+    const log: string[] = [];
+    const engine = new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) });
+    await engine.runUntilIdle();
+    const andon = getProject(db, project).andonReason;
+    expect(andon).toMatch(
+      /^the cost budget of \$0\.04 is used up \(\$0\.0\d spent\); running agents finish and nothing new starts\. Raise project\.budget_usd to continue$/,
+    );
+    expect(log).toContain("  p: $0.03 of the $0.04 cost budget spent");
+    const sessions = (db.prepare("SELECT COUNT(*) AS n FROM attempts").get() as { n: number }).n;
+    expect(getProject(db, project).state).not.toBe("closed");
+    await engine.tick();
+    expect((db.prepare("SELECT COUNT(*) AS n FROM attempts").get() as { n: number }).n).toBe(sessions);
+
+    setSetting(db, "project", project, "project.budget_usd", 100);
+    setAndon(db, project, null);
+    await engine.runUntilIdle();
+    expect(getProject(db, project).state).toBe("closed");
+  }, 60_000);
 
   it("plans, runs disjoint units in parallel, serializes overlapping ones, verifies, lands, and closes", async () => {
     const log: string[] = [];

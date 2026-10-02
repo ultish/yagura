@@ -34,6 +34,7 @@ import {
   ProposalBody,
   readiness,
   resolveSetting,
+  projectCost,
   type Db,
   type ProjectId,
   type Unit,
@@ -68,6 +69,8 @@ export function projectSummary(db: Db, projectId: ProjectId) {
     blocked: counts.blocked ?? 0,
     lastLanded: lastLanded ? { seq: lastLanded.seq, sha: lastLanded.landedSha, at: lastLanded.updatedAt } : null,
     summary: latestDelta(db, projectId)?.summary ?? null,
+    costUsd: projectCost(db, projectId),
+    budgetUsd: resolveSetting(db, "project.budget_usd", { projectId }).value,
   };
 }
 
