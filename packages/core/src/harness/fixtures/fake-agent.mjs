@@ -1,5 +1,7 @@
 import { execFileSync, execSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const mode = process.env.FAKE_MODE;
 const emit = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
@@ -106,6 +108,10 @@ function resumed(sessionId) {
   }
   emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
+  if (process.env.YAGURA_ROLE === "review-triage") {
+    const before = readFileSync(join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`), "utf8");
+    return finish(`${before}\n## Outside scope\n- outside/extra.txt: the fix needs a test that proves it\n`);
+  }
   const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
   appendFileSync(file, `# fixed after findings: ${/run:\d+/.test(brief)}\n`);
   const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
@@ -116,7 +122,7 @@ function resumed(sessionId) {
     type: "result",
     subtype: "success",
     is_error: false,
-    result: `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file}\n\n## Verification\nunit-verified\n`,
+    result: `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file}\n\n## Verification\nunit-verified\n${process.env.FAKE_RESUME_JUSTIFY ? `\n## Outside scope\n- ${file}: the docs needed the new flag\n` : ""}`,
     terminal_reason: "completed",
     total_cost_usd: 0.01,
   });
@@ -132,9 +138,16 @@ function triage() {
     return fix ? `- T${t.n}: fixed — added the review fix to ${file}` : `- T${t.n}: dismissed — the existing test covers this case`;
   });
   if (lines.some((l) => l.includes("fixed"))) {
+    if (process.env.FAKE_TRIAGE_OUTSIDE) {
+      mkdirSync("outside", { recursive: true });
+      writeFileSync("outside/extra.txt", "a test the fix needs\n");
+      execFileSync("git", ["add", "outside/extra.txt"]);
+    }
     execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-qam", "review fixes"]);
   }
-  finish(`## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Decisions\n${lines.join("\n")}\n`);
+  const handoff = `## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Decisions\n${lines.join("\n")}\n`;
+  writeFileSync(join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`), handoff);
+  finish(handoff);
 }
 
 // FAKE_REVIEW: unset or "none" → no findings; "<severity>[:text]" → one finding on the first changed file; "write" → edits the worktree.

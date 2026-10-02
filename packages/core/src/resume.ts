@@ -19,13 +19,13 @@ const REJECTION_TEXT: Record<Rejection, string> = {
 
 export type ResumeChoice = { resume: Attempt; fresh: null } | { resume: null; fresh: string | null };
 
-// Resume only when the rejected worker can fix its own work in place; one resumed round, then a clean slate.
+// Resume only when the rejected worker can fix its own work in place (a failing check, or a path outside scope it can explain or revert); one resumed round, then a clean slate.
 export function chooseResume(attempts: Attempt[], opts: { enabled: boolean; canResume: boolean; maxContext: number }): ResumeChoice {
   const last = attempts.at(-1);
   if (!last?.rejection) return { resume: null, fresh: null };
   const fresh = (why: string): ResumeChoice => ({ resume: null, fresh: `attempt ${last.n} ${why}` });
   if (!opts.enabled) return fresh("is not resumed: resume on rejection is off");
-  if (last.rejection !== "code-fault") return fresh(`was rejected for ${REJECTION_TEXT[last.rejection]}`);
+  if (last.rejection !== "code-fault" && last.rejection !== "scope") return fresh(`was rejected for ${REJECTION_TEXT[last.rejection]}`);
   if (last.resumesAttemptId) return fresh("was already a resumed round");
   if (!opts.canResume) return fresh(`ran on ${last.harness}, which cannot resume`);
   if (!last.sessionId || !last.worktreePath || !last.branch || !last.baseSha) return fresh("left no session to resume");

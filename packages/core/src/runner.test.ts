@@ -116,6 +116,20 @@ describe("runWorkUnit", () => {
     expect(JSON.parse(ev.data_json)).toMatchObject({ paths: ["README.md"], reason: expect.stringContaining("needs a line in the docs") });
   });
 
+  it("resumes the worker's own session when it wrote outside scope without a reason, and accepts the reason it gives", async () => {
+    const { unit, attempt: first } = await run("scope");
+    expect(unit.state).toBe("rejected");
+    process.env.FAKE_RESUME_JUSTIFY = "1";
+    try {
+      transitionUnit(db, unit.id, "ready");
+      const second = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli: [] }, unit.id);
+      expect(second.resumesAttemptId).toBe(first.id);
+      expect(getUnit(db, unit.id).state).toBe("verifying");
+    } finally {
+      delete process.env.FAKE_RESUME_JUSTIFY;
+    }
+  });
+
   it("tells the next attempt why a path outside scope was rejected", async () => {
     const { unit } = await run("scope");
     expect(unit.notes.join("\n")).toContain("outside SCOPE without saying why");

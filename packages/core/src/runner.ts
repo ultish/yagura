@@ -273,7 +273,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         unit.id,
         scope.hard.length
           ? `Attempt ${attempt.n} wrote ${scope.hard.map((v) => v.path).join(", ")}, which yagura never allows (the verify pack). Leave it alone.`
-          : `Attempt ${attempt.n} changed ${scope.unjustified.map((v) => v.path).join(", ")} outside SCOPE without saying why. Stay inside SCOPE, or list each such path under "## Outside scope" in the handoff with the reason the work needs it.`,
+          : `Attempt ${attempt.n} changed ${scope.unjustified.map((v) => v.path).join(", ")} outside SCOPE without saying why. If the path is not needed, revert it and commit; if it is, list it under "## Outside scope" in your handoff with the reason the work needs it.`,
       );
       reject("scope", { reason: "scope", violations });
     } else if (handoff.status === "blocked") {

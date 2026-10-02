@@ -133,6 +133,18 @@ describe("Engine", () => {
       expect(getProject(db, project).state).toBe("closed");
     }, 60_000);
 
+    it("asks a triage agent that wrote outside the unit's scope to explain it in its own session, then lands", async () => {
+      process.env.FAKE_REVIEW = "blocking:please fix: the empty case is not handled";
+      process.env.FAKE_TRIAGE_OUTSIDE = "1";
+      try {
+        await run();
+      } finally {
+        delete process.env.FAKE_TRIAGE_OUTSIDE;
+      }
+      expect((db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'triage.asked_for_reason'").get() as { n: number }).n).toBeGreaterThan(0);
+      expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+    }, 60_000);
+
     it("keeps a nit as a note on the unit and lands without holding it", async () => {
       process.env.FAKE_REVIEW = "nit:a shorter name would read better";
       await run();

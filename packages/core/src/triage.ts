@@ -224,40 +224,58 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, target: target.seq });
   updateAttempt(db, attempt.id, { state: "running", startedAt: now(), worktreePath: worktree, branch, baseSha: verdict.head_sha });
 
-  const session = await runAgentSession(ctx, {
-    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "review-triage" }),
-    adapter,
-    run: {
-      prompt: briefText,
-      bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
-      model: setting("role.worker.model"),
-      permissionMode: setting("harness.claude.permission_mode"),
-      pluginDirs: [boot.skillsDir],
-      addDirs: [],
-      extraArgs: setting("harness.claude.extra_args"),
-    },
-    cwd: worktree,
-    env: envValues,
-    timeboxSeconds: unit.timeboxSeconds,
-    logPath: paths.log(project.id, unit.seq, attempt.n),
-  });
-
-  await discardLeftovers(worktree);
-  const head = await headSha(worktree);
-  const final = session.final;
-  const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
-  if (handoff) write(paths.handoff(project.id, unit.seq, attempt.n), final!.text);
-  const decisions = handoff ? parseDecisions(handoff.raw, rows.length) : new Map();
-  const changed = head !== verdict.head_sha;
-  const scope = changed
-    ? assessScope(
-        await changedPaths(worktree, work.baseSha!),
-        target.writeScope,
-        target.forbidScope,
-        [`${repo.verifyPackPath}/**`],
-        handoff?.outsideScope ?? "",
-      )
-    : { hard: [], justified: [], unjustified: [] };
+  const ask = (prompt: string, resume?: string) =>
+    runAgentSession(ctx, {
+      recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "review-triage" }),
+      adapter,
+      run: {
+        prompt,
+        bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
+        model: setting("role.worker.model"),
+        permissionMode: setting("harness.claude.permission_mode"),
+        pluginDirs: [boot.skillsDir],
+        addDirs: [],
+        extraArgs: setting("harness.claude.extra_args"),
+        resume,
+      },
+      cwd: worktree,
+      env: envValues,
+      timeboxSeconds: unit.timeboxSeconds,
+      logPath: resume ? paths.log(project.id, unit.seq, attempt.n).replace(/\.jsonl$/, ".resume.jsonl") : paths.log(project.id, unit.seq, attempt.n),
+    });
+  const judge = async (session: Awaited<ReturnType<typeof ask>>) => {
+    await discardLeftovers(worktree);
+    const head = await headSha(worktree);
+    const final = session.final;
+    const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
+    if (handoff) write(paths.handoff(project.id, unit.seq, attempt.n), final!.text);
+    const decisions = handoff ? parseDecisions(handoff.raw, rows.length) : new Map();
+    const changed = head !== verdict.head_sha;
+    const scope = changed
+      ? assessScope(
+          await changedPaths(worktree, work.baseSha!),
+          target.writeScope,
+          target.forbidScope,
+          [`${repo.verifyPackPath}/**`],
+          handoff?.outsideScope ?? "",
+        )
+      : { hard: [], justified: [], unjustified: [] };
+    return { session, head, handoff, decisions, changed, scope };
+  };
+  let judged = await judge(await ask(briefText));
+  // A path outside the estimate with no reason is the agent's to explain or undo in its own session, not a reason to throw the work away.
+  const sessionId = getAttempt(db, attempt.id).sessionId;
+  if (judged.scope.unjustified.length && !judged.scope.hard.length && judged.handoff && adapter.canResume && sessionId) {
+    const paths_ = judged.scope.unjustified.map((v) => v.path);
+    recordEvent(db, "triage.asked_for_reason", { projectId: project.id, unitId: unit.id, attemptId: attempt.id }, { paths: paths_ });
+    judged = await judge(
+      await ask(
+        `# yagura: your triage handoff was not accepted\n\nYou changed ${paths_.join(", ")} outside SCOPE without saying why. You are in the same worktree on the same branch. Either revert the path and commit, or keep it and list it with the reason the fix needs it under "## Outside scope". Then end with the complete handoff again, in the same format as before.`,
+        sessionId,
+      ),
+    );
+  }
+  const { session, head, handoff, decisions, changed, scope } = judged;
   const violations = [...scope.hard, ...scope.unjustified];
   const missing = rows.map((_, i) => i + 1).filter((i) => !decisions.has(i));
   const fixed = [...decisions.values()].some((d) => d.decision === "fixed");
