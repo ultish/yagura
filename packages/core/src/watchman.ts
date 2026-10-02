@@ -1,3 +1,4 @@
+import { promptPlugin } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { assertThreadFree, beginTurn, currentSession, endSession, endTurn, getTurn, markSeen, runningTurn, turnRecorder } from "./turns.js";
@@ -713,7 +714,7 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
         bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
         model: setting("role.watchman.model"),
         permissionMode: setting("harness.claude.watchman_permission_mode"),
-        pluginDirs: [boot.skillsDir],
+        pluginDirs: [promptPlugin(db, boot, null)],
         addDirs: linked,
         extraArgs: setting("harness.claude.extra_args"),
         resume,

@@ -1,3 +1,4 @@
+import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
@@ -289,7 +290,6 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
 
     const scenarioDir = join(boot.home, "projects", project.id, "scenarios", `u${unit.seq}.${attempt.n}`);
     mkdirSync(scenarioDir, { recursive: true });
-    const standingPath = paths.standingOrders(project.id);
     const briefText = renderVerifyBrief({
       target: { seq: target.seq, goal: target.goal, playbook: target.playbook, baseSha: work.baseSha!, headSha: work.headSha! },
       acceptance: target.acceptance,
@@ -309,7 +309,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       environmentNotes: environmentNotes(db, project.environmentId),
       deploys: !!pack.pack.deploy,
       timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
-      standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
+      standing: standingFor(db, boot, project.id, "verifier"),
       skills: projectSkills,
       pack: {
         copy: join(workspace!.path, repo.verifyPackPath),
@@ -330,7 +330,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
         bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
         model: setting("role.verifier.model"),
         permissionMode: setting("harness.claude.permission_mode"),
-        pluginDirs: [boot.skillsDir],
+        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "verifier" })],
         addDirs: [head, baseWorktree(head), workspace!.path, ...sources.map((s) => s.path)],
         extraArgs: setting("harness.claude.extra_args"),
       },

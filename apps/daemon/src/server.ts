@@ -4,6 +4,12 @@ import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
   addUnitNote,
+  PROMPT_ROLES,
+  defaultGuidance,
+  effectiveGuidance,
+  getPromptText,
+  setPromptText,
+  type PromptRole,
   getMessage,
   readTurnCalls,
   bumpMaxAttempts,
@@ -558,6 +564,59 @@ export function createApp(opts: ServerOptions): Hono {
     const thread = createThread(db, { title: b.message.trim().slice(0, 60), autonomy: b.autonomy === "go" ? "go" : "propose" });
     void talk(thread.id, b.message.trim());
     return c.json(threadView(thread.id), 202);
+  });
+  const ROLE_UNIT: Record<PromptRole, string> = {
+    planner: "plan",
+    worker: "work",
+    verifier: "verify",
+    reviewer: "review",
+    "review-triage": "review-triage",
+    rebase: "rebase",
+    pack: "pack",
+    watchman: "",
+  };
+  const promptsView = (projectId: string | null) => ({
+    projectId,
+    allNotes: projectId ? getPromptText(db, "project", projectId, "all", "notes") : null,
+    roles: PROMPT_ROLES.filter((r) => !projectId || r !== "watchman").map((role) => {
+      const last = projectId
+        ? (db
+            .prepare(
+              "SELECT a.id FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.project_id = ? AND u.type = ? AND a.harness NOT LIKE 'yagura-%' ORDER BY a.id DESC LIMIT 1",
+            )
+            .get(projectId, ROLE_UNIT[role]) as { id: number } | undefined)
+        : undefined;
+      const e = effectiveGuidance(db, boot, role, projectId);
+      return {
+        role,
+        default: defaultGuidance(boot, role),
+        global: getPromptText(db, "global", "", role, "guidance"),
+        project: projectId ? getPromptText(db, "project", projectId, role, "guidance") : null,
+        source: e.source,
+        sha: e.sha,
+        notes: projectId ? getPromptText(db, "project", projectId, role, "notes") : null,
+        lastAttemptId: last?.id ?? null,
+      };
+    }),
+  });
+  app.get("/api/prompts", (c) => {
+    const projectId = c.req.query("project") || null;
+    if (projectId) getProject(db, projectId as ProjectId);
+    return c.json(promptsView(projectId));
+  });
+  app.put("/api/prompts", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as { scope?: string; projectId?: string; role?: string; kind?: string; text?: string | null };
+    if (b.scope !== "global" && b.scope !== "project") return c.json({ error: "scope must be global or project" }, 400);
+    if (b.kind !== "guidance" && b.kind !== "notes") return c.json({ error: "kind must be guidance or notes" }, 400);
+    if (b.role !== "all" && !(PROMPT_ROLES as readonly string[]).includes(b.role ?? ""))
+      return c.json({ error: `role must be one of ${PROMPT_ROLES.join(", ")} or all` }, 400);
+    if (b.scope === "project") getProject(db, (b.projectId ?? "") as ProjectId);
+    try {
+      setPromptText(db, b.scope, b.scope === "project" ? b.projectId! : "", b.role as PromptRole | "all", b.kind, b.text ?? null);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
+    return c.json(promptsView(b.scope === "project" ? b.projectId! : null));
   });
   app.get("/api/threads/:id", (c) => c.json(threadView(Number(c.req.param("id")))));
   const turnAdapter = () => (opts.adapters ?? { claude: claudeAdapter })[resolveSetting(db, "role.watchman.harness").value as string] ?? claudeAdapter;

@@ -1,3 +1,4 @@
+import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
@@ -219,7 +220,6 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const spec = readSpec(paths.spec(project.id));
   const specText = spec ? renderSpec(spec) : "";
   const conventions = ["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md"].filter((f) => existsSync(`${worktree}/${f}`));
-  const standingPath = paths.standingOrders(project.id);
   const briefText = renderBrief({
     goal: `Review the code of U${target.seq} (${target.goal}) before it lands. Read the change, judge it as a careful senior reviewer of this repo would, and report findings. You change nothing.`,
     repo: { id: repo.id, worktree, branch, baseSha: head },
@@ -241,7 +241,7 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
     forbidden: ["no edits, commits, or any other change to the worktree", "no git push, rebase, merge, or branch switching", "no findings outside the change"],
     method: "Load the yagura-reviewer skill first and follow it. Then load any review skills METHOD names below and use them.",
     report: REVIEW_REPORT,
-    standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
+    standing: standingFor(db, boot, project.id, "reviewer"),
   }).replace(
     "Load the yagura-reviewer skill first and follow it. Then load any review skills METHOD names below and use them.",
     `Load the yagura-reviewer skill first and follow it.${setting("skills.review").length ? ` Then load ${setting("skills.review").join(", ")} with the Skill tool (required) and use them.` : ""}`,
@@ -258,7 +258,7 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
       bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
       model: setting("role.reviewer.model"),
       permissionMode: setting("harness.claude.permission_mode"),
-      pluginDirs: [boot.skillsDir],
+      pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "reviewer" })],
       addDirs: [],
       extraArgs: setting("harness.claude.extra_args"),
     },

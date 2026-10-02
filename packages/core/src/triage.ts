@@ -1,3 +1,4 @@
+import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
@@ -199,7 +200,6 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   mkdirSync(dirname(worktree), { recursive: true });
   await addWorktree(mirror, worktree, branch, verdict.head_sha);
   const envValues = valueMap(db, project.environmentId);
-  const standingPath = paths.standingOrders(project.id);
   const briefText = renderBrief({
     goal: `Triage the review threads on ${ref} for U${target.seq} (${target.goal}). For each thread decide: fixed (change the code on this branch and commit), dismissed (the reviewer is wrong, and you can show why concretely), or asked (only the developer can decide).`,
     repo: { id: repo.id, worktree, branch, baseSha: verdict.head_sha },
@@ -218,7 +218,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     method:
       "Load the yagura-review-triage skill first and follow it. Then load pstack:poteto-mode with the Skill tool (required) and follow its bug-fix playbook for each thread you fix, proving the fault with a failing check first.",
     report: TRIAGE_REPORT,
-    standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
+    standing: standingFor(db, boot, project.id, "review-triage"),
   });
   write(paths.brief(project.id, unit.seq, attempt.n), briefText);
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, target: target.seq });
@@ -233,7 +233,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
         bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
         model: setting("role.worker.model"),
         permissionMode: setting("harness.claude.permission_mode"),
-        pluginDirs: [boot.skillsDir],
+        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "review-triage" })],
         addDirs: [],
         extraArgs: setting("harness.claude.extra_args"),
         resume,

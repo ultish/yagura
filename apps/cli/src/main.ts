@@ -99,6 +99,11 @@ import {
   type SettingScope,
   isBuild,
   jobLabel,
+  PROMPT_ROLES,
+  effectiveGuidance,
+  setPromptText,
+  standingFor,
+  type PromptRole,
 } from "@yagura/core";
 
 const USAGE = `yagura — agent orchestration
@@ -146,6 +151,9 @@ const USAGE = `yagura — agent orchestration
   yagura settings [--project <id>] [--repo <id>]
   yagura settings export > settings.yaml     every explicitly set value, by layer
   yagura settings import <file.yaml>         set every value in the file (others are kept)
+  yagura prompt show <role> [--project <id>]        a role's guidance and where it comes from (default, global, or the project's)
+  yagura prompt set <role|all> (--project <id> | --global) [--notes] <file | ->   override a role's guidance, or set notes (all = every role)
+  yagura prompt reset <role|all> (--project <id> | --global) [--notes]           back to the next layer
   yagura set <key> <json> [--scope global|environment|repo|project] [--id <scope id>]
   yagura unset <key> [--scope global|environment|repo|project] [--id <scope id>]   back to the next layer's value`;
 
@@ -707,6 +715,30 @@ async function main() {
       const result = await gitRead(db, boot, rest);
       process.stdout.write(result.output);
       process.exitCode = result.code;
+      return;
+    }
+    case "prompt": {
+      const { positionals, values } = args({ project: { type: "string" }, global: { type: "boolean" }, notes: { type: "boolean" } });
+      const [verb, role, file] = positionals;
+      if (!verb || !role || (role !== "all" && !(PROMPT_ROLES as readonly string[]).includes(role)))
+        fail(`role is one of ${PROMPT_ROLES.join(", ")}${verb === "show" ? "" : ", or all"}\n${USAGE}`);
+      const projectId = (values.project as string | undefined) ?? null;
+      if (projectId) getProject(db, projectId as ProjectId);
+      if (verb === "show") {
+        if (role === "all") fail("show takes one role");
+        const e = effectiveGuidance(db, boot, role as PromptRole, projectId);
+        console.log(`# ${role} guidance (${e.source}, version ${e.sha})\n\n${e.text}`);
+        if (projectId) {
+          const notes = standingFor(db, boot, projectId, role as PromptRole);
+          console.log(`# notes in its brief\n\n${notes || "(none)"}`);
+        }
+        return;
+      }
+      if (verb !== "set" && verb !== "reset") fail(USAGE);
+      if (!!values.global === !!projectId) fail("say where: --project <id> or --global");
+      const text = verb === "reset" ? null : readFileSync(file === "-" || !file ? 0 : file, "utf8");
+      setPromptText(db, values.global ? "global" : "project", projectId ?? "", role as PromptRole | "all", values.notes ? "notes" : "guidance", text);
+      console.log(`${role} ${values.notes ? "notes" : "guidance"} ${verb === "reset" ? "reset" : "set"} (${values.global ? "global" : projectId})`);
       return;
     }
     case "logs": {

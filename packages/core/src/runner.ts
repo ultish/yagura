@@ -1,3 +1,4 @@
+import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
@@ -129,7 +130,6 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   const projectSkills = requiredProjectSkills(db, unit);
   const sources = await mountSources(ctx, unit, worktree);
   const references = await referenceCheckouts(ctx, project.id, unit.seq, from?.n ?? attempt.n, setting("project.reference_repos"));
-  const standingPath = paths.standingOrders(project.id);
   const packForbid = isPack ? [] : [`${repo.verifyPackPath}/**`];
   const env = project.environmentId ? getEnvironment(db, project.environmentId) : null;
   const envValues = valueMap(db, project.environmentId);
@@ -178,7 +178,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       (unit.scaffold ? " This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more." : "") +
       skillMethod(projectSkills),
     report: HANDOFF_TEMPLATE,
-    standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
+    standing: standingFor(db, boot, project.id, isPack ? "pack" : "worker"),
   };
   const briefText = from
     ? renderResumePrompt({
@@ -205,7 +205,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
       model: setting("role.worker.model"),
       permissionMode: setting("harness.claude.permission_mode"),
-      pluginDirs: [boot.skillsDir],
+      pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: isPack ? "pack" : "worker" })],
       addDirs: [...sources.map((s) => s.path), ...references.map((r) => r.path)],
       extraArgs: setting("harness.claude.extra_args"),
       resume: from?.sessionId ?? undefined,

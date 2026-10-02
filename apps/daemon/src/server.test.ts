@@ -80,6 +80,31 @@ const post = (path: string, body: unknown) =>
   app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("daemon API", () => {
+  it("shows each role's guidance with where it comes from, and sets and resets a project's", async () => {
+    const put = (body: object) =>
+      app.request("/api/prompts", {
+        method: "PUT",
+        headers: { authorization: "Bearer secret", "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    type View = {
+      roles: { role: string; source: string; project: string | null; notes: string | null; lastAttemptId: number | null }[];
+      allNotes: string | null;
+    };
+    const view = (await (await get(`/api/prompts?project=${project}`)).json()) as View;
+    expect(view.roles.map((r) => r.role)).toEqual(["planner", "worker", "verifier", "reviewer", "review-triage", "rebase", "pack"]);
+    expect(view.roles.find((r) => r.role === "worker")).toMatchObject({ source: "default", lastAttemptId: expect.any(Number) });
+    const set = (await (
+      await put({ scope: "project", projectId: project, role: "planner", kind: "guidance", text: "One unit per feature, with its tests." })
+    ).json()) as View;
+    expect(set.roles.find((r) => r.role === "planner")).toMatchObject({ source: "project", project: "One unit per feature, with its tests.\n" });
+    await put({ scope: "project", projectId: project, role: "all", kind: "notes", text: "Python 3.9 only." });
+    const reset = (await (await put({ scope: "project", projectId: project, role: "planner", kind: "guidance", text: null })).json()) as View;
+    expect(reset.roles.find((r) => r.role === "planner")!.source).toBe("default");
+    expect(reset.allNotes).toBe("Python 3.9 only.\n");
+    expect((await put({ scope: "project", projectId: project, role: "watchman", kind: "guidance", text: "x" })).status).toBe(400);
+  });
+
   it("requires the token when bound beyond localhost, by header or query", async () => {
     expect((await app.request("/api/projects")).status).toBe(401);
     expect((await app.request("/api/projects?token=secret")).status).toBe(200);

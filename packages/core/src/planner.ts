@@ -1,3 +1,4 @@
+import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
@@ -99,13 +100,12 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
   try {
     const status = generateStatus(db, boot, projectId, since);
     write(join(boot.home, "projects", projectId, "status.md"), status);
-    const standingPath = paths.standingOrders(projectId);
     const briefText = renderPlanBrief({
       project: { id: project.id, goal: project.goal, predicate: project.predicate, minTier: project.minTier },
       repos: checkouts.map(({ id, path, trunkSha }) => ({ id, path, trunkSha })),
       status,
       playbooks: WORK_PLAYBOOKS,
-      standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
+      standing: standingFor(db, boot, projectId, "planner"),
       timeboxMinutes: setting("timebox.work_seconds") / 60,
       specPath: existsSync(paths.spec(projectId)) ? paths.spec(projectId) : null,
       scaffoldSkills: resolveSetting(db, "skills.scaffold", { projectId, environmentId: project.environmentId }).value,
@@ -123,7 +123,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
         bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
         model: setting("role.planner.model"),
         permissionMode: setting("harness.claude.permission_mode"),
-        pluginDirs: [boot.skillsDir],
+        pluginDirs: [promptPlugin(db, boot, projectId, { attemptId: attempt.id, role: "planner" })],
         addDirs: checkouts.slice(1).map((c) => c.path),
         extraArgs: setting("harness.claude.extra_args"),
       },

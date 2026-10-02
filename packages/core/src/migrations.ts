@@ -388,6 +388,27 @@ UPDATE attempts SET agent_no = (
 );
 `,
   },
+  {
+    version: 27,
+    sql: `
+CREATE TABLE prompt_texts (
+  scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
+  scope_id TEXT NOT NULL DEFAULT '',
+  role TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('guidance', 'notes')),
+  text TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (scope, scope_id, role, kind)
+);
+CREATE TABLE prompt_versions (
+  sha TEXT PRIMARY KEY,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+ALTER TABLE attempts ADD COLUMN guidance_sha TEXT;
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

@@ -1,3 +1,4 @@
+import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
@@ -77,7 +78,6 @@ export async function runRebaseUnit(ctx: RunContext, unitId: UnitId): Promise<At
   mkdirSync(dirname(worktree), { recursive: true });
   await addWorktree(mirror, worktree, branch, verdict.head_sha);
   const envValues = valueMap(db, project.environmentId);
-  const standingPath = paths.standingOrders(project.id);
   const briefText = renderBrief({
     goal: `Rebase this branch onto ${repo.defaultBranch} at ${trunk} (run \`git rebase ${trunk}\`) and resolve the conflicts so both trunk's changes and this branch's change (U${target.seq}: ${target.goal}) survive. Change nothing else.`,
     repo: { id: repo.id, worktree, branch, baseSha: verdict.head_sha },
@@ -95,7 +95,7 @@ export async function runRebaseUnit(ctx: RunContext, unitId: UnitId): Promise<At
     ],
     method: "Load the yagura-rebase skill first and follow it. Then use cursor-team-kit:fix-merge-conflicts to resolve the conflicts.",
     report: HANDOFF_TEMPLATE,
-    standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8") : "",
+    standing: standingFor(db, boot, project.id, "rebase"),
   });
   write(paths.brief(project.id, unit.seq, attempt.n), briefText);
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, target: target.seq });
@@ -109,7 +109,7 @@ export async function runRebaseUnit(ctx: RunContext, unitId: UnitId): Promise<At
       bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
       model: setting("role.worker.model"),
       permissionMode: setting("harness.claude.permission_mode"),
-      pluginDirs: [boot.skillsDir],
+      pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "rebase" })],
       addDirs: [],
       extraArgs: setting("harness.claude.extra_args"),
     },
