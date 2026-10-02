@@ -256,6 +256,14 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
   };
 }
 
+// Markdown joins the lines of a paragraph (GitLab does; GitHub's pull requests do not), so the trailer block would read as one line.
+// A trailing backslash is a hard break on both.
+export function prBody(message: string): string {
+  const trailer = (line: string | undefined) => line !== undefined && /^[A-Z][\w-]*: /.test(line);
+  const lines = message.trimEnd().split("\n");
+  return `${lines.map((line, i) => (trailer(line) && trailer(lines[i + 1]) ? `${line}\\` : line)).join("\n")}\n`;
+}
+
 // The push lands before the pull request opens, so when opening fails the branch still holds yagura's push and no pull request records it.
 function lastBranchPush(db: Db, unitId: UnitId, branch: string): Sha | null {
   const row = db
@@ -285,7 +293,7 @@ async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, 
     const pr =
       (existing?.state === "open" ? { number: existing.number, url: existing.url } : null) ??
       (await forge.find(branch)) ??
-      (await forge.open({ branch, base: l.repo.defaultBranch, title: l.unit.goal, body: squash.message }));
+      (await forge.open({ branch, base: l.repo.defaultBranch, title: l.unit.goal, body: prBody(squash.message) }));
     saveMergeRequest(db, {
       unitId: l.unit.id,
       forge: forge.kind,

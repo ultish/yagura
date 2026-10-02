@@ -14,7 +14,7 @@ import { parseClaudeLine } from "./harness/claude.js";
 import { findByRef, findUnitsByCommit, traceUnit } from "./audit.js";
 import { resolveSetting, setSetting } from "./config.js";
 import { getMergeRequest, gitlabRepoOf } from "./forge.js";
-import { landUnit, liveVerdict, retryState, watchMergeRequest } from "./land.js";
+import { landUnit, liveVerdict, prBody, retryState, watchMergeRequest } from "./land.js";
 import { layout } from "./paths.js";
 import { runRebaseUnit } from "./rebase.js";
 import { listThreadRows, parseDecisions, runTriageUnit } from "./triage.js";
@@ -677,7 +677,7 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     const proposed = await landUnit(ctx, work.id);
     expect(proposed).toMatchObject({ outcome: "proposed", reason: "merge request !1: https://gitlab.dev.local/team/apps/sandbox/-/merge_requests/1" });
     expect(glState().mrs[0]).toMatchObject({ title: "Implement apply_discount. Then more detail.", state: "opened" });
-    expect(glState().mrs[0]!.description).toContain("Yagura-Unit: U1");
+    expect(glState().mrs[0]!.description).toMatch(/\nYagura-Project: p\\\nYagura-Unit: U1\\\n/);
     expect(getMergeRequest(db, work.id)).toMatchObject({ forge: "gitlab", forgeRepo: "gitlab.dev.local/team/apps/sandbox", number: 1, baseSha: trunkBefore });
 
     const merged = await watchMergeRequest(ctx, work.id);
@@ -813,6 +813,14 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     expect(gitlabRepoOf("git@gitlab.dev.local:team/apps/sandbox.git")).toBe("gitlab.dev.local/team/apps/sandbox");
     expect(gitlabRepoOf("https://gitlab.dev.local/team/sandbox")).toBe("gitlab.dev.local/team/sandbox");
     expect(gitlabRepoOf("ssh://git@gitlab.dev.local:2222/team/sandbox.git")).toBe("gitlab.dev.local:2222/team/sandbox");
+  });
+});
+
+describe("prBody", () => {
+  it("ends every trailer line but the last with a hard break, and leaves the rest alone", () => {
+    expect(prBody("write a\n\nWhy: it was asked for.\n\nYagura-Project: p\nYagura-Unit: U2\nYagura-Verdict: unit-verified by U5\n")).toBe(
+      "write a\n\nWhy: it was asked for.\n\nYagura-Project: p\\\nYagura-Unit: U2\\\nYagura-Verdict: unit-verified by U5\n",
+    );
   });
 });
 
