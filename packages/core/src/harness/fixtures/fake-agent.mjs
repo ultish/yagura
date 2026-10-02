@@ -67,7 +67,7 @@ async function main() {
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
   if (mode === "hang") return setTimeout(() => {}, 60_000);
   if ((mode ?? "").startsWith("verify")) return verify(mode);
-  const file = mode === "scope" ? "README.md" : "app/orders.py";
+  const file = mode === "scope" || mode === "scope-justified" ? "README.md" : "app/orders.py";
   let steered = null;
   if (mode === "steer") {
     emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "w1", name: "Bash", input: { command: "sleep 1" } }] } });
@@ -92,7 +92,7 @@ async function main() {
   const handoff =
     mode === "nohandoff"
       ? "DONE"
-      : `## Status\n${mode === "blocked" ? "blocked" : "success"}\n\n## Branch\n\`b\`\n\n## What I did\n- edited ${file}\n\n## Verification\nunit-verified\n\n## Evidence\n- python3 -m unittest -> ok\n`;
+      : `## Status\n${mode === "blocked" ? "blocked" : "success"}\n\n## Branch\n\`b\`\n\n## What I did\n- edited ${file}\n\n## Verification\nunit-verified\n\n## Evidence\n- python3 -m unittest -> ok\n${mode === "scope-justified" ? "\n## Outside scope\n- README.md: the new flag needs a line in the docs\n" : ""}`;
   finish(handoff);
 }
 
@@ -235,7 +235,7 @@ async function engine(role) {
     return finish("## Status\nsuccess\n\n## Verification\nunit-verified\n\n## What I did\n- wrote .agents/verify/verify.json\n");
   }
   if (role === "worker") {
-    const base = /May write:\n- ([^*\n]+?)\/?\*\*/.exec(brief)[1];
+    const base = /Expected to write:\n- ([^*\n]+?)\/?\*\*/.exec(brief)[1];
     let steered = null;
     if (streaming && process.env.FAKE_STEER_WAIT_MS) {
       emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "w1", name: "Bash", input: { command: "sleep 1 # waiting to be steered" } }] } });

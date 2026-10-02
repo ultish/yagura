@@ -13,6 +13,7 @@ const SECTIONS = {
   packChanges: "pack changes",
   findings: "findings",
   decisions: "decisions",
+  outsideScope: "outside scope",
 } as const;
 
 function splitSections(text: string): Map<string, string> {
@@ -55,6 +56,7 @@ export function parseHandoff(finalMessage: string): Handoff | null {
     packChanges: s.get("packChanges") ?? "",
     findings: s.get("findings") ?? "",
     decisions: s.get("decisions") ?? "",
+    outsideScope: s.get("outsideScope") ?? "",
     raw: text,
   };
 }

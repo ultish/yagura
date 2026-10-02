@@ -173,7 +173,7 @@ The planner is a fresh harness call, not a standing session.
   - `write_scope` overlap within a repo → the later unit gets an implicit dependency (serialized), never concurrent;
   - budget and in-flight caps respected;
   - decision recorded in `decisions.tsv`.
-- **After work:** the diff's touched paths must be inside `write_scope` (else `rejected: scope`); `git merge-tree` against the repo frontier must be clean (else the daemon creates a rebase `work` unit).
+- **After work:** the planner's `write_scope` is an estimate, not a wall (decided 2026-10-02, developer: the planner cannot know the exact files before the work exists). Paths the diff touched outside it must be named, with a reason, in the handoff's `## Outside scope` section; unexplained ones are `rejected: scope` with a note telling the next attempt why, and explained ones are recorded (`attempt.beyond_scope`) and handed to the reviewer, who judges whether the reason holds. The verify pack stays a hard wall, because yagura's own evidence depends on it. Triage and rebase units use the same rule; `git merge-tree` against the repo frontier must be clean (else the daemon creates a rebase `work` unit).
 
 Parallelism is therefore dynamic (the planner proposes any shape at any drain) but safe (the daemon decides what actually runs together).
 

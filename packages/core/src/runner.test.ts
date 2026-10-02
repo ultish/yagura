@@ -109,6 +109,18 @@ describe("runWorkUnit", () => {
     expect(JSON.parse(ev.data_json).violations).toEqual([{ path: "README.md", reason: "outside-write-scope" }]);
   });
 
+  it("accepts work that wrote outside its scope when the handoff says why, and records it", async () => {
+    const { unit } = await run("scope-justified");
+    expect(unit.state).toBe("verifying");
+    const ev = db.prepare("SELECT data_json FROM events WHERE type = 'attempt.beyond_scope'").get() as { data_json: string };
+    expect(JSON.parse(ev.data_json)).toMatchObject({ paths: ["README.md"], reason: expect.stringContaining("needs a line in the docs") });
+  });
+
+  it("tells the next attempt why a path outside scope was rejected", async () => {
+    const { unit } = await run("scope");
+    expect(unit.notes.join("\n")).toContain("outside SCOPE without saying why");
+  });
+
   it("gives the agent the environment's values with their notes, and leaves judging a hard-coded value to the verifier", async () => {
     addEnvironment(db, { id: "dev", name: "dev", provider: "local-process", capacity: 1 });
     setProjectEnvironment(db, project, "dev" as EnvironmentId);

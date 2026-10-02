@@ -222,10 +222,11 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const briefText = renderBrief({
     goal: `Review the code of U${target.seq} (${target.goal}) before it lands. Read the change, judge it as a careful senior reviewer of this repo would, and report findings. You change nothing.`,
     repo: { id: repo.id, worktree, branch, baseSha: head },
-    scope: { write: ["nothing: this is a read-only review"], forbid: ["**"] },
+    scope: { write: ["nothing: this is a read-only review"], forbid: [], hard: ["**"] },
     context: [
       `The change to review: \`git diff ${base}..${head}\` in your worktree${since ? " (only the fixes made after the last review)" : ""}.\n${stat}`,
       `The verifier proved its behaviour at ${verdict.tier}; you judge the code itself: correctness the checks miss, design, fit with the repo's existing code and conventions, duplication, error handling, security, and tests that would not catch a regression.`,
+      ...beyondScope(db, target.id),
       ...(conventions.length ? [`The repo's own conventions: ${conventions.join(", ")}`] : []),
       ...projectDecisions(db, project.id).map((d) => `Agreed with the developer: ${d}`),
       ...(specText ? [`The project's spec:\n${specText.slice(0, 6000)}`] : []),
@@ -333,4 +334,15 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
     if (!triage) transitionUnit(db, target.id, "blocked", { reason: `U${unit.seq}'s review raised findings after the last triage wave; it needs you` });
   }
   return getAttempt(db, attempt.id);
+}
+
+// The planner's scope is an estimate; a worker that went past it said why in its handoff, and the reviewer judges whether that was warranted.
+function beyondScope(db: Db, unitId: UnitId): string[] {
+  const rows = db.prepare("SELECT data_json FROM events WHERE unit_id = ? AND type = 'attempt.beyond_scope' ORDER BY id DESC LIMIT 1").all(unitId) as {
+    data_json: string;
+  }[];
+  return rows.map((r) => {
+    const d = JSON.parse(r.data_json) as { paths: string[]; reason: string };
+    return `The worker changed paths the planner did not expect (${d.paths.join(", ")}) and said why:\n${d.reason}\nJudge whether that was warranted; an unnecessary change or an unrelated one is a finding.`;
+  });
 }

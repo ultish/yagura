@@ -11,7 +11,7 @@ import { parseHandoff } from "./handoff.js";
 import { verifiedHead } from "./land.js";
 import { layout, unitRef } from "./paths.js";
 import { addVerifyUnit } from "./runner.js";
-import { checkScope } from "./scope.js";
+import { assessScope } from "./scope.js";
 import {
   addGate,
   addUnit,
@@ -202,7 +202,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const briefText = renderBrief({
     goal: `Triage the review threads on ${ref} for U${target.seq} (${target.goal}). For each thread decide: fixed (change the code on this branch and commit), dismissed (the reviewer is wrong, and you can show why concretely), or asked (only the developer can decide).`,
     repo: { id: repo.id, worktree, branch, baseSha: verdict.head_sha },
-    scope: { write: target.writeScope, forbid: [...target.forbidScope, `${repo.verifyPackPath}/**`] },
+    scope: { write: target.writeScope, forbid: target.forbidScope, hard: [`${repo.verifyPackPath}/**`] },
     context: triageContext(
       rows,
       all.filter((r) => r.waveUnitId !== unit.id),
@@ -248,9 +248,16 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   if (handoff) write(paths.handoff(project.id, unit.seq, attempt.n), final!.text);
   const decisions = handoff ? parseDecisions(handoff.raw, rows.length) : new Map();
   const changed = head !== verdict.head_sha;
-  const violations = changed
-    ? checkScope(await changedPaths(worktree, work.baseSha!), target.writeScope, [...target.forbidScope, `${repo.verifyPackPath}/**`])
-    : [];
+  const scope = changed
+    ? assessScope(
+        await changedPaths(worktree, work.baseSha!),
+        target.writeScope,
+        target.forbidScope,
+        [`${repo.verifyPackPath}/**`],
+        handoff?.outsideScope ?? "",
+      )
+    : { hard: [], justified: [], unjustified: [] };
+  const violations = [...scope.hard, ...scope.unjustified];
   const missing = rows.map((_, i) => i + 1).filter((i) => !decisions.has(i));
   const fixed = [...decisions.values()].some((d) => d.decision === "fixed");
   const problem = !handoff
@@ -260,7 +267,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
       : fixed && !changed
         ? "a thread was marked fixed but nothing was committed"
         : violations.length
-          ? `the fix touched paths outside U${target.seq}'s scope: ${violations.map((v) => v.path).join(", ")}`
+          ? `the fix touched paths outside U${target.seq}'s scope without saying why: ${violations.map((v) => v.path).join(", ")} (list them under "## Outside scope" with the reason)`
           : null;
   updateAttempt(db, attempt.id, {
     state: handoff ? "handed_off" : "failed",

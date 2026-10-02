@@ -10,7 +10,7 @@ import { parseHandoff } from "./handoff.js";
 import { liveVerdict } from "./land.js";
 import { layout, unitRef } from "./paths.js";
 import { addVerifyUnit } from "./runner.js";
-import { checkScope } from "./scope.js";
+import { assessScope } from "./scope.js";
 import { addUnit, createAttempt, getAttempt, getProject, getRepo, getUnit, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
 
 export const MAX_REBASES = 2;
@@ -68,7 +68,7 @@ export async function runRebaseUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const briefText = renderBrief({
     goal: `Rebase this branch onto ${repo.defaultBranch} at ${trunk} (run \`git rebase ${trunk}\`) and resolve the conflicts so both trunk's changes and this branch's change (U${target.seq}: ${target.goal}) survive. Change nothing else.`,
     repo: { id: repo.id, worktree, branch, baseSha: verdict.head_sha },
-    scope: { write: target.writeScope, forbid: [...target.forbidScope, `${repo.verifyPackPath}/**`] },
+    scope: { write: target.writeScope, forbid: target.forbidScope, hard: [`${repo.verifyPackPath}/**`] },
     context: unit.context,
     readonly: [],
     acceptance: target.acceptance,
@@ -116,7 +116,14 @@ export async function runRebaseUnit(ctx: RunContext, unitId: UnitId): Promise<At
     () => true,
     () => false,
   );
-  const violations = checkScope(await changedPaths(worktree, trunk), target.writeScope, [...target.forbidScope, `${repo.verifyPackPath}/**`]);
+  const scope = assessScope(
+    await changedPaths(worktree, trunk),
+    target.writeScope,
+    target.forbidScope,
+    [`${repo.verifyPackPath}/**`],
+    handoff?.outsideScope ?? "",
+  );
+  const violations = [...scope.hard, ...scope.unjustified];
   const problem = !handoff
     ? "the rebase agent ended without a handoff"
     : handoff.status !== "success"

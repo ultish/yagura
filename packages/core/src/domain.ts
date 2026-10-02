@@ -308,7 +308,7 @@ export interface Verdict {
 export interface RenderedBrief {
   goal: string;
   repo: { id: RepoId; worktree: string; branch: string; baseSha: Sha };
-  scope: { write: string[]; forbid: string[] };
+  scope: { write: string[]; forbid: string[]; hard?: string[] };
   context: string[];
   readonly: { repoId: RepoId; path: string; sha: Sha }[];
   acceptance: string[];
@@ -334,6 +334,7 @@ export interface Handoff {
   packChanges: string;
   findings: string;
   decisions: string;
+  outsideScope: string;
   raw: string;
 }
 

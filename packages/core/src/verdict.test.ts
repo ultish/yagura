@@ -32,6 +32,7 @@ const handoff = (verification: Handoff["verification"], evidence: string[]): Han
   packChanges: "",
   findings: "",
   decisions: "",
+  outsideScope: "",
   raw: "",
 });
 

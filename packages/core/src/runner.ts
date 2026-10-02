@@ -23,7 +23,7 @@ import { LEASE_VARS } from "./leases.js";
 import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
 import { classifyFailure, parseHandoff, syntheticFailureHandoff } from "./handoff.js";
 import { layout, unitRef } from "./paths.js";
-import { checkScope } from "./scope.js";
+import { assessScope } from "./scope.js";
 import {
   getEnvironment,
   addUnit,
@@ -136,7 +136,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   const brief: RenderedBrief = {
     goal: unit.goal,
     repo: { id: repo.id, worktree, branch, baseSha: base },
-    scope: { write: unit.writeScope, forbid: [...unit.forbidScope, ...packForbid] },
+    scope: { write: unit.writeScope, forbid: unit.forbidScope, hard: packForbid },
     context: [
       ...(isPack
         ? packContract({
@@ -258,9 +258,25 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       selfTier: handoff.verification === "not-verified" ? null : handoff.verification,
     });
     transitionUnit(db, unit.id, "handed_off", { attempt: attempt.n, status: handoff.status, head, leftovers: leftovers.paths });
-    const violations = checkScope(touched, unit.writeScope, [...unit.forbidScope, ...packForbid]);
-    if (violations.length) reject("scope", { reason: "scope", violations });
-    else if (handoff.status === "blocked") {
+    const scope = assessScope(touched, unit.writeScope, unit.forbidScope, packForbid, handoff.outsideScope);
+    const violations = [...scope.hard, ...scope.unjustified];
+    if (!violations.length && scope.justified.length)
+      recordEvent(
+        db,
+        "attempt.beyond_scope",
+        { projectId: project.id, unitId: unit.id, attemptId: attempt.id },
+        { paths: scope.justified.map((v) => v.path), reason: handoff.outsideScope },
+      );
+    if (violations.length) {
+      addUnitNote(
+        db,
+        unit.id,
+        scope.hard.length
+          ? `Attempt ${attempt.n} wrote ${scope.hard.map((v) => v.path).join(", ")}, which yagura never allows (the verify pack). Leave it alone.`
+          : `Attempt ${attempt.n} changed ${scope.unjustified.map((v) => v.path).join(", ")} outside SCOPE without saying why. Stay inside SCOPE, or list each such path under "## Outside scope" in the handoff with the reason the work needs it.`,
+      );
+      reject("scope", { reason: "scope", violations });
+    } else if (handoff.status === "blocked") {
       transitionUnit(db, unit.id, "blocked", { reason: "agent reported blocked" });
     } else if (head === base) {
       transitionUnit(db, unit.id, "blocked", { reason: "handed off with no commits" });

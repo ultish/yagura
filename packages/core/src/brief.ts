@@ -23,6 +23,9 @@ Self-report the strongest evidence you produced for the change itself, not for i
 ## Decisions
 - <each choice you made that the brief did not settle, what you deliberately did not do, and why>
 
+## Outside scope
+- <each path you changed that SCOPE did not list, and why the work needed it; "(none)" if you stayed inside>
+
 ## Notes, concerns, deviations
 - <assumptions, surprises, anything the planner must know>
 
@@ -52,7 +55,7 @@ export function renderBrief(b: RenderedBrief): string {
   const env = Object.entries(b.env).map(([k, v]) => `${k}=${v}${b.envNotes?.[k] ? ` (${b.envNotes[k]})` : ""}`);
   return `# yagura brief
 
-You are running inside yagura. You cannot ask questions: everything you need is below. Work only in your worktree, stay inside SCOPE, and end with the handoff in REPORT as your final message.
+You are running inside yagura. You cannot ask questions: everything you need is below. Work only in your worktree, stay inside SCOPE where you can, and end with the handoff in REPORT as your final message.
 
 ## GOAL
 ${b.goal}
@@ -64,10 +67,13 @@ ${b.goal}
 - commit your work to this branch; do not push
 
 ## SCOPE
-May write:
+The planner's estimate of what this needs, made before the work existed. Prefer to stay inside it. If the work truly needs another file (a test for your change, a caller you must update), change it and list the path with the reason under "Outside scope" in your handoff; a path outside SCOPE with no reason is rejected, and the verifier and reviewer judge the reasons.
+Expected to write:
 ${list(b.scope.write)}
-Must not write:
+Avoid (the planner's guess; justify if you must):
 ${list(b.scope.forbid)}
+Never write (yagura rejects it):
+${list(b.scope.hard ?? [])}
 
 ## CONTEXT
 ${list(b.context)}
@@ -262,7 +268,7 @@ ${p.status}
 ## HOW TO PLAN
 - Only plan what the state calls for. Do not re-add work that is running, verifying, landed, or queued.
 - Each unit is one worker session in one repo: small enough for about ${Math.round(p.timeboxMinutes)} minutes of focused work, complete enough to verify on its own.
-- \`write\` lists the paths the unit may change (globs). Leave out each repo's verify pack (\`.agents/verify\` unless the repo says otherwise): the verifiers keep it working, and a worker cannot change it. When the pack should check something new, say so in the unit's \`context\`; its verifier will extend the pack. Units whose write scopes overlap in the same repo run one after another; give independent work disjoint scopes so it can run in parallel.
+- \`write\` lists the paths you expect the unit to change (globs): an estimate, not a wall. A worker that needs more says why in its handoff and the reviewer judges it; only the verify pack is off limits. Leave out each repo's verify pack (\`.agents/verify\` unless the repo says otherwise): the verifiers keep it working, and a worker cannot change it. When the pack should check something new, say so in the unit's \`context\`; its verifier will extend the pack. Units whose write scopes overlap in the same repo run one after another; give independent work disjoint scopes so it can run in parallel.
 - \`accept\` lines are checkable statements a verifier can prove by running code, one behaviour each.
 - \`verify\` is the command a worker runs to check itself (for example the repo's test command).
 - \`deps\` names units that must land first: a key from this delta or an existing unit such as "U3".
