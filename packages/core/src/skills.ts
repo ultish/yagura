@@ -5,7 +5,7 @@ import { resolveSetting, type Bootstrap } from "./config.js";
 import type { ProjectId, Unit } from "./domain.js";
 import { getProject, projectRepos, type Db } from "./store.js";
 
-export const SKILL_PURPOSES = ["scaffold", "work", "pack", "verify"] as const;
+export const SKILL_PURPOSES = ["scaffold", "work", "pack", "verify", "review"] as const;
 export type SkillPurpose = (typeof SKILL_PURPOSES)[number];
 
 export const claudeConfigDir = (env: NodeJS.ProcessEnv = process.env) => env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");

@@ -2,7 +2,7 @@ import picomatch from "picomatch";
 import { z } from "zod";
 import { resolveSetting } from "./config.js";
 import { listDisagreements, markPlanned } from "./disagreements.js";
-import { isBuild, type ProjectId, type RepoId, type Unit, type UnitId } from "./domain.js";
+import { TERMINAL_STATES, isBuild, type ProjectId, type RepoId, type Unit, type UnitId } from "./domain.js";
 import {
   addDep,
   addGate,
@@ -111,8 +111,6 @@ export function extractDelta(message: string): Extracted {
 
 export class PlanRejected extends Error {}
 
-const TERMINAL = new Set(["landed", "done", "abandoned"]);
-
 function scopeBase(glob: string): string[] {
   return picomatch
     .scan(glob)
@@ -220,7 +218,7 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
     for (const a of delta.add) addDeps(created.get(a.key)!, a.key, a.deps);
 
     const serialize = (unit: Unit) => {
-      for (const other of listUnits(db, projectId).filter((u) => isBuild(u) && !TERMINAL.has(u.state)))
+      for (const other of listUnits(db, projectId).filter((u) => isBuild(u) && !TERMINAL_STATES.has(u.state)))
         if (other.id < unit.id && other.repoId === unit.repoId && scopesOverlap(unit.writeScope, other.writeScope))
           addDep(db, { unitId: unit.id, dependsOn: other.id, kind: "scope-overlap" });
     };
@@ -256,7 +254,7 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
 
     for (const c of delta.cancel) {
       const u = unitRef(c.unit, "cancel");
-      if (TERMINAL.has(u.state)) warnings.push(`${c.unit} is already ${u.state}`);
+      if (TERMINAL_STATES.has(u.state)) warnings.push(`${c.unit} is already ${u.state}`);
       else if (u.state === "running") warnings.push(`${c.unit} is running and was not cancelled; cancel it again after it hands off`);
       else transitionUnit(db, u.id, "abandoned", { by: "planner", reason: c.reason, drain: drainId });
     }

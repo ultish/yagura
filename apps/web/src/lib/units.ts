@@ -4,7 +4,14 @@ import { duration, sha } from "./format";
 
 export const isBuild = (u: { type: string }) => u.type === "work" || u.type === "pack";
 
-const ROLES: Record<string, string> = { plan: "planner", work: "worker", verify: "verifier", pack: "pack writer" };
+const ROLES: Record<string, string> = {
+  plan: "planner",
+  work: "worker",
+  verify: "verifier",
+  pack: "pack writer",
+  review: "reviewer",
+  "review-triage": "review triage",
+};
 export const roleOf = (unitType: string, harness?: string) =>
   harness === "yagura-proof" ? "pack proof" : harness === "yagura-rebase" ? "rebase" : (ROLES[unitType] ?? unitType);
 
@@ -95,10 +102,21 @@ export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: 
         ? { text: `U${verifier!.seq} is verifying (${elapsed(v, now)}).`, tone: "lamp" }
         : { text: `Verification queued${verifier ? ` (U${verifier.seq})` : ""}.`, tone: "info" };
     }
-    case "verified":
+    case "verified": {
+      const review = d.units
+        .filter((x) => (x.type === "review" || x.type === "review-triage") && x.targetUnitId === u.id && !["done", "landed", "abandoned"].includes(x.state))
+        .at(-1);
+      if (review)
+        return review.state === "blocked"
+          ? { text: `Verified; its ${review.type === "review" ? "review" : "review triage"} U${review.seq} is blocked.`, tone: "bell" }
+          : {
+              text: `Verified; ${review.type === "review" ? "code review" : "triage of the review findings"} in U${review.seq} before it lands.`,
+              tone: "lamp",
+            };
       return openGateFor(d, u)
         ? { text: `Verified${verifier ? ` by U${verifier.seq}` : ""} at ${u.verdict?.tier ?? "?"}. Ready to land on ${repo}.`, tone: "bell" }
         : { text: `Verified at ${u.verdict?.tier ?? "?"}. Landing next.`, tone: "info" };
+    }
     case "landing":
       return { text: `Landing on ${repo}.`, tone: "lamp" };
     case "landed":

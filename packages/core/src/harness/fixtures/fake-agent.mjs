@@ -52,6 +52,7 @@ async function main() {
       pack: ["yagura:yagura-pack"],
       rebase: ["yagura:yagura-rebase"],
       "review-triage": ["yagura:yagura-review-triage"],
+      reviewer: ["yagura:yagura-reviewer"],
       planner: ["yagura:yagura-planner"],
       verifier: ["yagura:yagura-verifier"],
       watchman: ["yagura:yagura-watchman"],
@@ -62,6 +63,7 @@ async function main() {
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
   if (process.env.YAGURA_ROLE === "rebase") return rebase();
   if (process.env.YAGURA_ROLE === "review-triage") return triage();
+  if (process.env.YAGURA_ROLE === "reviewer") return reviewer();
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
   if (mode === "hang") return setTimeout(() => {}, 60_000);
   if ((mode ?? "").startsWith("verify")) return verify(mode);
@@ -133,6 +135,21 @@ function triage() {
     execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-qam", "review fixes"]);
   }
   finish(`## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Decisions\n${lines.join("\n")}\n`);
+}
+
+// FAKE_REVIEW: unset or "none" → no findings; "<severity>[:text]" → one finding on the first changed file; "write" → edits the worktree.
+// A re-review (the brief says "fixes only") finds nothing, so a fixed change settles.
+function reviewer() {
+  const [, base, head] = /git diff ([0-9a-f]{40})\.\.([0-9a-f]{40})/.exec(brief);
+  const file = execFileSync("git", ["diff", "--name-only", `${base}..${head}`], { encoding: "utf8" })
+    .trim()
+    .split("\n")[0];
+  const want = brief.includes("only the fixes made after the last review") ? "none" : (process.env.FAKE_REVIEW ?? "none");
+  if (want === "write") writeFileSync(file, "reviewer was here\n");
+  const [severity, ...rest] = want.split(":");
+  const text = rest.join(":") || "please fix: this branch has no test for the empty case";
+  const findings = want === "none" || want === "write" ? "- none" : `- F1 [${severity}] ${file}:1 — ${text}`;
+  finish(`## Status\nsuccess\n\n## Findings\n${findings}\n\n## Notes, concerns, deviations\n- none\n`);
 }
 
 // Replays the branch onto the named trunk commit, keeping the branch's side of each conflict.

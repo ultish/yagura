@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RunContext } from "./agent.js";
 import { setSetting, type Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
@@ -103,6 +103,83 @@ describe("Engine", () => {
     await engine.runUntilIdle();
     expect(getProject(db, project).state).toBe("closed");
   }, 60_000);
+
+  describe("code review (§24)", () => {
+    const run = async () => {
+      const log: string[] = [];
+      await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();
+      return log;
+    };
+    const units = (type: string) => listUnits(db, project).filter((u) => u.type === type);
+    afterEach(() => {
+      delete process.env.FAKE_REVIEW;
+    });
+
+    it("turns a blocking finding into a triage fix, verifies and re-reviews the fix, then lands", async () => {
+      process.env.FAKE_REVIEW = "blocking:please fix: the empty case is not handled";
+      await run();
+      expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+      expect(units("review").length).toBe(6);
+      expect(units("review").map((u) => u.goal.replace(/: write \w$/, ""))).toContain("Review U2 again (round 2, the fixes only)");
+      const threads = db.prepare("SELECT thread_id, author, decision FROM mr_threads ORDER BY rowid").all() as {
+        thread_id: string;
+        author: string;
+        decision: string;
+      }[];
+      expect(threads.length).toBe(3);
+      expect(threads.every((t) => /^review:U\d+:F1$/.test(t.thread_id) && t.author === "yagura reviewer" && t.decision === "fixed")).toBe(true);
+      const files = (await git(["ls-tree", "-r", "--name-only", "main"], { cwd: origin })).split("\n").filter((f) => f.startsWith("app/"));
+      for (const f of files) expect(await git(["show", `main:${f}`], { cwd: origin })).toContain("# review fix T1");
+      expect(getProject(db, project).state).toBe("closed");
+    }, 60_000);
+
+    it("keeps a nit as a note on the unit and lands without holding it", async () => {
+      process.env.FAKE_REVIEW = "nit:a shorter name would read better";
+      await run();
+      expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+      expect(units("review-triage")).toEqual([]);
+      expect(units("work")[0]!.notes.some((n) => /^Reviewer nit \(U\d+\) app\/a\/p-U\d+\.txt:1: a shorter name would read better$/.test(n))).toBe(true);
+    }, 60_000);
+
+    it("asks the developer before a security finding is dismissed, then fixes it as answered", async () => {
+      const { listGates, answerGate } = await import("./store.js");
+      process.env.FAKE_REVIEW = "blocking:the secret token is written to the log";
+      await run();
+      const asks = () => listGates(db, project, "open").filter((g) => g.kind === "review");
+      expect(asks().length).toBeGreaterThan(0);
+      expect(asks()[0]!.question).toMatch(
+        /^On U\d+'s review, yagura reviewer wrote: "\[blocking\] the secret token is written to the log"\. This touches security/,
+      );
+      expect(units("work").some((u) => u.state === "landed")).toBe(false);
+      for (let i = 0; i < 5 && asks().length; i++) {
+        for (const g of asks()) answerGate(db, g.id, "fix");
+        await run();
+      }
+      expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+      expect((db.prepare("SELECT decision FROM mr_threads").all() as { decision: string }[]).map((r) => r.decision)).toEqual(["fixed", "fixed", "fixed"]);
+    }, 60_000);
+
+    it("lands without a reviewer in a project that switched review off", async () => {
+      setSetting(db, "project", project, "review.enabled", false);
+      process.env.FAKE_REVIEW = "blocking:please fix: never seen";
+      await run();
+      expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+      expect(units("review")).toEqual([]);
+    }, 60_000);
+
+    it("rejects a reviewer that changes the worktree, and blocks the review after its second try", async () => {
+      process.env.FAKE_REVIEW = "write";
+      await run();
+      const review = units("review")[0]!;
+      expect(review.state).toBe("blocked");
+      expect(listAttempts(db, review.id).length).toBe(2);
+      const reason = db.prepare("SELECT data_json FROM events WHERE type = 'review.failed' AND unit_id = ? ORDER BY id DESC LIMIT 1").get(review.id) as {
+        data_json: string;
+      };
+      expect(JSON.parse(reason.data_json).reason).toMatch(/^the reviewer changed the worktree \(app\/\w\/p-U\d+\.txt\); a review changes nothing$/);
+      expect(units("work").every((u) => u.state !== "landed")).toBe(true);
+    }, 60_000);
+  });
 
   it("plans, runs disjoint units in parallel, serializes overlapping ones, verifies, lands, and closes", async () => {
     const log: string[] = [];
@@ -331,8 +408,9 @@ describe("Engine", () => {
     const a = listUnits(db, project).find((u) => u.type === "work")!;
 
     const story = unitStory(db, ctx.boot, a);
-    expect(story.entries.map((e) => e.actor)).toEqual(["planner", "worker", "verifier", "yagura"]);
-    const [, worker, verifier, landed] = story.entries;
+    expect(story.entries.map((e) => e.actor)).toEqual(["planner", "worker", "verifier", "reviewer", "yagura"]);
+    expect(story.entries[3]).toMatchObject({ who: "Reviewer", status: { text: "nothing to settle", tone: "pine" }, lines: [{ text: "No findings." }] });
+    const [, worker, verifier, , landed] = story.entries;
     expect(worker!.lines[0]).toMatchObject({ kind: "claimed", checks: [{ ok: true, text: expect.stringMatching(/^verified by U\d+$/) }] });
     expect(verifier!.lines[0]!.checks[0]).toMatchObject({ ok: true, text: expect.stringMatching(/^scenario run:\d+ passes on head and fails on trunk/) });
     expect(landed!.lines[0]!.checks).toEqual([{ ok: true, text: "the merged patch is the one verified, so the verdict carries" }]);

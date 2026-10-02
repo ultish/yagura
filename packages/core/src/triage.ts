@@ -21,6 +21,7 @@ import {
   getProject,
   getRepo,
   getUnit,
+  listUnits,
   now,
   recordEvent,
   transitionUnit,
@@ -29,6 +30,9 @@ import {
 } from "./store.js";
 
 export const MAX_TRIAGE_WAVES = 3;
+
+// Findings from yagura's own reviewer live only in yagura; nothing on the forge answers to them.
+export const isReviewThread = (threadId: string) => /^review:U\d+:F\d+$/.test(threadId);
 export const PR_THREAD_DECISIONS = ["fixed", "dismissed", "asked"] as const;
 export type PrThreadDecision = (typeof PR_THREAD_DECISIONS)[number];
 
@@ -94,14 +98,14 @@ export function freshThreads(db: Db, unitId: UnitId, threads: PrThread[]): { thr
 export const triageWaves = (db: Db, target: Unit) =>
   (db.prepare("SELECT COUNT(*) AS n FROM units WHERE type = 'review-triage' AND target_unit_id = ?").get(target.id) as { n: number }).n;
 
-export function queueTriage(db: Db, target: Unit, number: number, fresh: { thread: PrThread; directive: string | null }[]): Unit | null {
+export function queueTriage(db: Db, target: Unit, ref: string, fresh: { thread: PrThread; directive: string | null }[]): Unit | null {
   if (triageWaves(db, target) >= MAX_TRIAGE_WAVES) return null;
   const unit = addUnit(db, {
     projectId: target.projectId,
     type: "review-triage",
     repoId: target.repoId,
     targetUnitId: target.id,
-    goal: `Triage ${fresh.length} review thread(s) on ${prRef(getRepo(db, target.repoId!).forge, number)} for U${target.seq}: ${target.goal}`,
+    goal: `Triage ${fresh.length} review thread(s) on ${ref} for U${target.seq}: ${target.goal}`,
     writeScope: target.writeScope,
     forbidScope: target.forbidScope,
     acceptance: target.acceptance,
@@ -169,8 +173,12 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   if (unit.state !== "ready") throw new Error(`U${unit.seq} is ${unit.state}, not ready`);
   const target = getUnit(db, unit.targetUnitId);
   const { verdict, work } = verifiedHead(db, target);
+  // Review threads come from the forge's pull request, or from yagura's own reviewer before anything is pushed.
   const mr = getMergeRequest(db, target.id);
-  if (!mr) throw new Error(`U${target.seq} has nothing open for review on the forge`);
+  const reviewer = listUnits(db, target.projectId)
+    .filter((u) => u.type === "review" && u.targetUnitId === target.id)
+    .at(-1);
+  const ref = mr ? prRef(mr.forge, mr.number) : reviewer ? `U${reviewer.seq}'s review` : `U${target.seq}'s review`;
   const project = getProject(db, unit.projectId);
   const repo = getRepo(db, unit.repoId);
   const sctx = { projectId: project.id, repoId: repo.id };
@@ -192,13 +200,13 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const envValues = valueMap(db, project.environmentId);
   const standingPath = paths.standingOrders(project.id);
   const briefText = renderBrief({
-    goal: `Triage the review threads on ${prRef(mr.forge, mr.number)} for U${target.seq} (${target.goal}). For each thread decide: fixed (change the code on this branch and commit), dismissed (the reviewer is wrong, and you can show why concretely), or asked (only the developer can decide).`,
+    goal: `Triage the review threads on ${ref} for U${target.seq} (${target.goal}). For each thread decide: fixed (change the code on this branch and commit), dismissed (the reviewer is wrong, and you can show why concretely), or asked (only the developer can decide).`,
     repo: { id: repo.id, worktree, branch, baseSha: verdict.head_sha },
     scope: { write: target.writeScope, forbid: [...target.forbidScope, `${repo.verifyPackPath}/**`] },
     context: triageContext(
       rows,
       all.filter((r) => r.waveUnitId !== unit.id),
-      prRef(mr.forge, mr.number),
+      ref,
     ),
     readonly: [],
     acceptance: target.acceptance,
@@ -270,7 +278,6 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     return getAttempt(db, attempt.id);
   }
 
-  const forge = forgeFor(db, repo)!;
   const asked: string[] = [];
   for (const [i, row] of rows.entries()) {
     let { decision, reason } = decisions.get(i + 1)!;
@@ -285,7 +292,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
         projectId: project.id,
         unitId: target.id,
         kind: "review",
-        question: `On ${prRef(mr.forge, mr.number)}, ${row.author} wrote: "${text.slice(0, 400)}". ${reason} Fix it or dismiss it?`,
+        question: `On ${ref}, ${row.author} wrote: "${text.slice(0, 400)}". ${reason} Fix it or dismiss it?`,
         options: ["fix", "dismiss"],
       });
       asked.push(`T${i + 1}`);
@@ -307,17 +314,19 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
       // The fixes are the target's to verify, on a head yagura records for it at no cost to the target's tries.
       const onTarget = createAttempt(db, target.id, REBASE_HARNESS, null);
       updateAttempt(db, onTarget.id, { state: "handed_off", baseSha: work.baseSha, headSha: head, branch, startedAt: now(), endedAt: now() });
-      const reason = `review fixes from U${unit.seq} on ${prRef(mr.forge, mr.number)}`;
+      const reason = `review fixes from U${unit.seq} on ${ref}`;
       db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, verdict.id);
       transitionUnit(db, target.id, "verifying", { reason, reviewUnit: unit.seq });
       addVerifyUnit(db, getUnit(db, target.id));
-    } else if (!asked.length)
+    } else if (!asked.length && getUnit(db, target.id).state !== "verified")
       transitionUnit(db, target.id, "verified", { reason: `review threads answered by U${unit.seq}; nothing to change`, reviewUnit: unit.seq });
   })();
   recordEvent(db, "triage.done", refs, { target: target.seq, head, changed, asked });
-  await postReplies(db, forge, target, mr.number).catch((e: unknown) =>
-    recordEvent(db, "triage.reply_deferred", refs, { error: e instanceof Error ? e.message : String(e) }),
-  );
+  const forge = mr ? forgeFor(db, repo) : null;
+  if (mr && forge)
+    await postReplies(db, forge, target, mr.number).catch((e: unknown) =>
+      recordEvent(db, "triage.reply_deferred", refs, { error: e instanceof Error ? e.message : String(e) }),
+    );
   return getAttempt(db, attempt.id);
 }
 
@@ -325,7 +334,9 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
 // the PR watcher posts whatever is still pending on every poll, and each reply goes out once.
 export async function postReplies(db: Db, forge: ForgeAdapter, target: Unit, number: number): Promise<number> {
   let posted = 0;
-  const pending = listThreadRows(db, target.id).filter((r) => (r.decision === "fixed" || r.decision === "dismissed") && !r.repliedAt);
+  const pending = listThreadRows(db, target.id).filter(
+    (r) => (r.decision === "fixed" || r.decision === "dismissed") && !r.repliedAt && !isReviewThread(r.threadId),
+  );
   if (!pending.length) return 0;
   const already = await forge.replyKeys(number);
   for (const row of pending) {

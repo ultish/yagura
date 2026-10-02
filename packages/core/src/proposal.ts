@@ -62,6 +62,7 @@ export const ProposalBody = z
                 work: z.array(z.string().min(1)).optional(),
                 pack: z.array(z.string().min(1)).optional(),
                 verify: z.array(z.string().min(1)).optional(),
+                review: z.array(z.string().min(1)).optional(),
               })
               .strict()
               .default({}),

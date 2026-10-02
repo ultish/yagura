@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
-import { isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
+import { TERMINAL_STATES, isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
 import { markMergeChecked, openMergeRequests, prNoun, prRef } from "./forge.js";
 import { parseHandoff } from "./handoff.js";
 import { landUnit, watchMergeRequest, type LandResult } from "./land.js";
@@ -11,7 +11,8 @@ import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runRebaseUnit } from "./rebase.js";
 import { reverifyAgainstSources, sourceDeps, staleSource } from "./sources.js";
-import { runTriageUnit } from "./triage.js";
+import { queueTriage, runTriageUnit } from "./triage.js";
+import { queueReview, reviewStatus, runReviewUnit } from "./review.js";
 import { addVerifyUnit, runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
@@ -46,7 +47,6 @@ export interface EngineOptions {
   log?: (line: string) => void;
 }
 
-const TERMINAL = new Set(["landed", "done", "abandoned"]);
 export const LANDING_CUTOFF = 0.7;
 const COST_WARNING = 0.8;
 const PLAN_TRIGGERS = ["landed", "blocked", "abandoned"];
@@ -140,6 +140,19 @@ export class Engine {
         this.log(`  U${u.seq} re-verifies: ${stale}`);
         continue;
       }
+      // Nothing lands before its code review settles (§24): queue the review, or the next triage wave once the developer answered.
+      const review = reviewStatus(this.db, u);
+      if (review.state === "needed") {
+        const r = queueReview(this.db, u, review.since);
+        this.log(`  U${r.seq}: ${r.goal}`);
+        continue;
+      }
+      if (review.state === "answered") {
+        const t = queueTriage(this.db, u, `U${u.seq}'s review`, review.fresh);
+        if (t) this.log(`  U${t.seq}: ${t.goal}`);
+        continue;
+      }
+      if (review.state !== "settled") continue;
       // One lander per repo: a unit whose pull request is open stays landing until it merges.
       if (listUnits(this.db, project.id).some((x) => x.repoId === u.repoId && x.state === "landing")) continue;
       const onForge = getRepo(this.db, u.repoId!).forge !== "none";
@@ -227,7 +240,7 @@ export class Engine {
            OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed'))`,
       )
       .all(project.id, since, ...PLAN_TRIGGERS, ...YAGURA_GATES) as { type: string; unit_id: UnitId | null; data_json: string; unit_type: string | null }[];
-    const open = () => listUnits(this.db, project.id).some((u) => isBuild(u) && !TERMINAL.has(u.state) && u.state !== "blocked");
+    const open = () => listUnits(this.db, project.id).some((u) => isBuild(u) && !TERMINAL_STATES.has(u.state) && u.state !== "blocked");
     return events.some((e) => {
       if (e.type !== "unit.state" || (JSON.parse(e.data_json) as { to: string }).to !== "landed") return true;
       if (e.unit_type === "pack") return false;
@@ -244,7 +257,11 @@ export class Engine {
     for (const u of r.ready) {
       if (this.inflight.has(`unit:${u.id}`) || !this.mayStart(project, u)) continue;
       const sctx = { projectId: project.id, repoId: u.repoId, environmentId: u.type === "verify" ? project.environmentId : null };
-      const harness = resolveSetting(this.db, u.type === "verify" ? "role.verifier.harness" : "role.worker.harness", sctx).value;
+      const harness = resolveSetting(
+        this.db,
+        u.type === "verify" ? "role.verifier.harness" : u.type === "review" ? "role.reviewer.harness" : "role.worker.harness",
+        sctx,
+      ).value;
       if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return;
       if (runningAttempts(this.db, { harness }) >= resolveSetting(this.db, "max_parallel_per_harness").value) return;
       if (
@@ -259,7 +276,9 @@ export class Engine {
             ? () => runRebaseUnit(this.ctx, u.id)
             : u.type === "review-triage"
               ? () => runTriageUnit(this.ctx, u.id)
-              : () => runWorkUnit(this.ctx, u.id);
+              : u.type === "review"
+                ? () => runReviewUnit(this.ctx, u.id)
+                : () => runWorkUnit(this.ctx, u.id);
       this.start(`unit:${u.id}`, `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}`, run, (e) => this.recoverCrashed(u.id, e));
     }
   }
@@ -278,7 +297,7 @@ export class Engine {
   private maybeClose(project: Project): boolean {
     const delta = latestDelta(this.db, project.id);
     const units = listUnits(this.db, project.id).filter((u) => u.type !== "plan");
-    if (!delta?.done || this.planNeeded(project) || units.some((u) => !TERMINAL.has(u.state) && u.state !== "blocked")) return false;
+    if (!delta?.done || this.planNeeded(project) || units.some((u) => !TERMINAL_STATES.has(u.state) && u.state !== "blocked")) return false;
     if ([...this.inflight.keys()].some((k) => k === `plan:${project.id}`)) return false;
     setProjectState(this.db, project.id, "closed");
     this.log(`✔ project ${project.id} closed: ${delta.summary}`);
@@ -424,9 +443,16 @@ export class Engine {
       if (p.andonReason) return true;
       if (this.planNeeded(p)) return false;
       if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
-      if (listUnits(this.db, p.id).some((u) => u.state === "verified" && (p.mergePolicy === "auto" || landApproved(this.db, p.id, u)))) return false;
+      if (listUnits(this.db, p.id).some((u) => u.state === "verified" && this.wouldMove(p, u))) return false;
       return !listUnits(this.db, p.id).some((u) => isBuild(u) && (u.state === "failed" || u.state === "rejected"));
     });
+  }
+
+  // A verified unit the engine would act on now: queue its review or triage, or land it.
+  private wouldMove(p: Project, u: Unit): boolean {
+    const review = reviewStatus(this.db, u).state;
+    if (review === "needed" || review === "answered") return true;
+    return review === "settled" && (p.mergePolicy === "auto" || landApproved(this.db, p.id, u));
   }
 
   recoverOrphans(): number {

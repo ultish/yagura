@@ -30,7 +30,7 @@ export type ProjectState = (typeof PROJECT_STATES)[number];
 export const MERGE_POLICIES = ["auto", "human"] as const;
 export type MergePolicy = (typeof MERGE_POLICIES)[number];
 
-export const UNIT_TYPES = ["plan", "work", "verify", "measure", "pack", "rebase", "ci-fix", "review-triage", "land", "release"] as const;
+export const UNIT_TYPES = ["plan", "work", "verify", "measure", "pack", "rebase", "ci-fix", "review-triage", "review", "land", "release"] as const;
 export type UnitType = (typeof UNIT_TYPES)[number];
 
 // Units that change a repo and land: an agent writes them on a branch, they are verified, and they land on trunk.
@@ -38,7 +38,7 @@ export const BUILD_TYPES: ReadonlySet<UnitType> = new Set(["work", "pack"]);
 export const isBuild = (u: { type: UnitType }) => BUILD_TYPES.has(u.type);
 export const BUILD_TYPES_SQL = `(${[...BUILD_TYPES].map((t) => `'${t}'`).join(", ")})`;
 
-export const ROLES = ["planner", "worker", "verifier", "pack", "rebase", "ci-fix", "review-triage", "watchman"] as const;
+export const ROLES = ["planner", "worker", "verifier", "pack", "rebase", "ci-fix", "review-triage", "reviewer", "watchman"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_OF: Record<UnitType, Role | null> = {
@@ -50,6 +50,7 @@ export const ROLE_OF: Record<UnitType, Role | null> = {
   rebase: "rebase",
   "ci-fix": "ci-fix",
   "review-triage": "review-triage",
+  review: "reviewer",
   land: null,
   release: null,
 };
@@ -86,6 +87,8 @@ export const UNIT_TRANSITIONS: Record<UnitState, readonly UnitState[]> = {
   done: [],
   abandoned: [],
 };
+
+export const TERMINAL_STATES: ReadonlySet<UnitState> = new Set(["landed", "done", "abandoned"]);
 
 export function canTransition(from: UnitState, to: UnitState): boolean {
   return UNIT_TRANSITIONS[from].includes(to);

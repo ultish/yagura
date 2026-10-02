@@ -1,4 +1,33 @@
-export const MIGRATIONS: readonly { version: number; sql: string }[] = [
+import type BetterSqlite3 from "better-sqlite3";
+
+// A migration that rebuilds a table (SQLite cannot change a CHECK in place) runs with foreign keys off, then checks them.
+export interface Migration {
+  version: number;
+  sql?: string;
+  rebuild?: (db: BetterSqlite3.Database) => void;
+}
+
+// Adds the review unit type to the units table's CHECKs, whatever columns earlier migrations gave it.
+function addReviewUnitType(db: BetterSqlite3.Database): void {
+  const { sql } = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'units'").get() as { sql: string };
+  if (sql.includes("'review',")) return;
+  const next = sql
+    .replace("'review-triage', 'land'", "'review-triage', 'review', 'land'")
+    .replace("type NOT IN ('verify', 'rebase', 'ci-fix', 'review-triage')", "type NOT IN ('verify', 'rebase', 'ci-fix', 'review-triage', 'review')")
+    .replace(/^CREATE TABLE units\b/, "CREATE TABLE units_next");
+  if (!next.includes("'review', 'land'") || !next.includes("'review-triage', 'review')"))
+    throw new Error("migration 24: the units table is not in the expected shape");
+  const indexes = (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'units' AND sql IS NOT NULL").all() as { sql: string }[]).map(
+    (r) => r.sql,
+  );
+  db.exec(next);
+  db.exec("INSERT INTO units_next SELECT * FROM units");
+  db.exec("DROP TABLE units");
+  db.exec("ALTER TABLE units_next RENAME TO units");
+  for (const i of indexes) db.exec(i);
+}
+
+export const MIGRATIONS: readonly Migration[] = [
   {
     version: 2,
     sql: `
@@ -332,6 +361,7 @@ ALTER TABLE repos ADD COLUMN push_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (pu
 ALTER TABLE projects ADD COLUMN land TEXT CHECK (land IN ('pr', 'push'));
 `,
   },
+  { version: 24, rebuild: addReviewUnitType },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

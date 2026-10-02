@@ -55,6 +55,8 @@ export const SETTINGS = {
   "role.worker.model": z.string().nullable().default(null).describe("Model for workers (empty: the harness default)"),
   "role.verifier.harness": z.string().default("claude").describe("Harness that runs verifiers"),
   "role.verifier.model": z.string().nullable().default(null).describe("Model for verifiers (empty: the harness default)"),
+  "role.reviewer.harness": z.string().default("claude").describe("Harness that runs code reviewers"),
+  "role.reviewer.model": z.string().nullable().default(null).describe("Model for code reviewers (empty: the harness default)"),
   "role.planner.harness": z.string().default("claude").describe("Harness that runs planners"),
   "role.planner.model": z.string().nullable().default(null).describe("Model for planners (empty: the harness default)"),
   "role.watchman.harness": z.string().default("claude").describe("Harness that runs the watchman"),
@@ -72,6 +74,14 @@ export const SETTINGS = {
   "skills.work": z.array(z.string().min(1)).default([]).describe("Skills every worker must load"),
   "skills.pack": z.array(z.string().min(1)).default([]).describe("Skills the verify pack writer must load"),
   "skills.verify": z.array(z.string().min(1)).default([]).describe("Skills every verifier must load"),
+  "skills.review": z.array(z.string().min(1)).default([]).describe("Skills every code reviewer must load"),
+  "review.enabled": z.boolean().default(true).describe("A reviewer agent reads every verified change before it may land"),
+  "review.max_rounds": z
+    .number()
+    .int()
+    .min(0)
+    .default(1)
+    .describe("How many times a change fixed after review is reviewed again before open findings go to the developer"),
   "project.budget_hours": z
     .number()
     .positive()
@@ -133,6 +143,8 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "role.worker.model": PR,
   "role.verifier.harness": PRE,
   "role.verifier.model": PRE,
+  "role.reviewer.harness": PR,
+  "role.reviewer.model": PR,
   "role.planner.harness": P,
   "role.planner.model": P,
   "role.watchman.harness": [],
@@ -146,6 +158,9 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "skills.work": PRE,
   "skills.pack": PRE,
   "skills.verify": PRE,
+  "skills.review": PR,
+  "review.enabled": PR,
+  "review.max_rounds": PR,
   "project.reference_repos": P,
   "project.budget_hours": P,
   "project.budget_usd": P,

@@ -28,7 +28,7 @@ describe("schema", () => {
         seq: i + 1,
         type,
         repo_id: type === "plan" || type === "measure" ? null : "testbed",
-        target_unit_id: ["verify", "rebase", "ci-fix", "review-triage"].includes(type) ? 1 : null,
+        target_unit_id: ["verify", "rebase", "ci-fix", "review-triage", "review"].includes(type) ? 1 : null,
       }),
     );
     UNIT_STATES.forEach((state) => db.prepare("UPDATE units SET state = ? WHERE seq = 1").run(state));

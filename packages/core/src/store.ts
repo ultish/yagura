@@ -47,10 +47,20 @@ export function schemaVersion(db: Db): number {
 function migrate(db: Db): void {
   for (const m of MIGRATIONS) {
     if (m.version <= schemaVersion(db)) continue;
-    db.transaction(() => {
-      db.exec(m.sql);
-      db.prepare("UPDATE schema_version SET version = ?").run(m.version);
-    })();
+    if (m.rebuild) db.pragma("foreign_keys = OFF");
+    try {
+      db.transaction(() => {
+        if (m.sql) db.exec(m.sql);
+        if (m.rebuild) {
+          m.rebuild(db);
+          const broken = db.pragma("foreign_key_check") as unknown[];
+          if (broken.length) throw new Error(`migration ${m.version} broke ${broken.length} foreign key(s)`);
+        }
+        db.prepare("UPDATE schema_version SET version = ?").run(m.version);
+      })();
+    } finally {
+      if (m.rebuild) db.pragma("foreign_keys = ON");
+    }
   }
 }
 

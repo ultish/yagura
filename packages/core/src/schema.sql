@@ -72,7 +72,7 @@ CREATE TABLE units (
   id INTEGER PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects (id),
   seq INTEGER NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('plan', 'work', 'verify', 'measure', 'pack', 'rebase', 'ci-fix', 'review-triage', 'land', 'release')),
+  type TEXT NOT NULL CHECK (type IN ('plan', 'work', 'verify', 'measure', 'pack', 'rebase', 'ci-fix', 'review-triage', 'review', 'land', 'release')),
   state TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft', 'ready', 'running', 'handed_off', 'verifying', 'verified', 'landing', 'landed', 'done', 'rejected', 'failed', 'blocked', 'abandoned')),
   repo_id TEXT REFERENCES repos (id),
   target_unit_id INTEGER REFERENCES units (id),
@@ -91,7 +91,7 @@ CREATE TABLE units (
   updated_at TEXT NOT NULL,
   UNIQUE (project_id, seq),
   CHECK (type IN ('plan', 'measure') OR repo_id IS NOT NULL),
-  CHECK (type NOT IN ('verify', 'rebase', 'ci-fix', 'review-triage') OR target_unit_id IS NOT NULL)
+  CHECK (type NOT IN ('verify', 'rebase', 'ci-fix', 'review-triage', 'review') OR target_unit_id IS NOT NULL)
 );
 CREATE INDEX units_project_state ON units (project_id, state);
 CREATE INDEX units_target ON units (target_unit_id);

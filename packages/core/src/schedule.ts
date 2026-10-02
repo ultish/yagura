@@ -1,9 +1,8 @@
-import { isBuild, spendsAttempt, type Attempt, type FailureMode, type ProjectId, type Unit } from "./domain.js";
+import { TERMINAL_STATES, isBuild, spendsAttempt, type Attempt, type FailureMode, type ProjectId, type Unit } from "./domain.js";
 import { editPackUnitIds } from "./packedits.js";
 import { pausedBy } from "./envpause.js";
 import { getProject, listDeps, listUnits, type Db } from "./store.js";
 
-const TERMINAL = new Set(["landed", "done", "abandoned"]);
 const SATISFIES_DEP = new Set(["landed", "done"]);
 // A needs-source consumer builds against the upstream's verified head, so it can start before that lands.
 const SATISFIES_SOURCE = new Set(["verified", "landing", "landed", "done"]);
@@ -23,10 +22,10 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
   const environmentId = getProject(db, projectId).environmentId;
   const pause = pausedBy(db, environmentId);
   for (const u of units) {
-    if (u.state !== "ready" || (!isBuild(u) && u.type !== "verify" && u.type !== "rebase" && u.type !== "review-triage")) continue;
+    if (u.state !== "ready" || (!isBuild(u) && u.type !== "verify" && u.type !== "rebase" && u.type !== "review-triage" && u.type !== "review")) continue;
     if (u.type === "verify") {
       const target = u.targetUnitId ? byId.get(u.targetUnitId) : undefined;
-      const pack = units.find((p) => p.type === "pack" && p.repoId === u.repoId && !TERMINAL.has(p.state) && !fromEdits.has(p.id));
+      const pack = units.find((p) => p.type === "pack" && p.repoId === u.repoId && !TERMINAL_STATES.has(p.state) && !fromEdits.has(p.id));
       if (pause) result.waiting.push({ unit: u, reason: `verification on ${environmentId} is paused until gate ${pause} is answered` });
       else if (pack && target?.type !== "pack") result.waiting.push({ unit: u, reason: `waiting for the verify pack (U${pack.seq}, now ${pack.state})` });
       else result.ready.push(u);
@@ -35,7 +34,7 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
     let reason: string | null = null;
     for (const d of deps.filter((x) => x.unitId === u.id)) {
       const on = byId.get(d.dependsOn)!;
-      if (d.kind === "scope-overlap" ? TERMINAL.has(on.state) : (d.kind === "needs-source" ? SATISFIES_SOURCE : SATISFIES_DEP).has(on.state)) continue;
+      if (d.kind === "scope-overlap" ? TERMINAL_STATES.has(on.state) : (d.kind === "needs-source" ? SATISFIES_SOURCE : SATISFIES_DEP).has(on.state)) continue;
       if (d.kind !== "scope-overlap" && on.state === "abandoned") {
         result.stuck.push({ unit: u, reason: `depends on U${on.seq}, which was abandoned` });
         reason = null;

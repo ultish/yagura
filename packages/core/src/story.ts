@@ -25,7 +25,7 @@ export interface StoryLine {
   checks: StoryCheck[];
   disagreements: Disagreement[];
 }
-export type Actor = "planner" | "worker" | "verifier" | "review-triage" | "rebase" | "pack" | "person" | "yagura";
+export type Actor = "planner" | "worker" | "verifier" | "reviewer" | "review-triage" | "rebase" | "pack" | "person" | "yagura";
 export interface StoryEntry {
   at: IsoTime;
   actor: Actor;
@@ -257,6 +257,42 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       folded: null,
     });
 
+  // Each finding with what became of it: fixed in which commit, dismissed and why, asked, or kept as a note.
+  for (const r of related.filter((u) => u.type === "review")) {
+    const last = listAttempts(db, r.id)
+      .filter((a) => a.state === "handed_off")
+      .at(-1);
+    const done = events.find((e) => e.unit_id === r.id && e.type === "review.done");
+    if (!last || !done) continue;
+    const ref = `a${last.id}`;
+    const findings = done.data.findings as { n: number; severity: string; path: string; line: number | null; text: string }[];
+    const lines = findings.length
+      ? findings.map((f, i) => {
+          const t = threads.find((x) => x.threadId === `review:U${r.seq}:F${f.n}`);
+          const fate =
+            f.severity === "nit"
+              ? "kept as a note"
+              : !t?.decision
+                ? "being triaged"
+                : t.decision === "fixed"
+                  ? `fixed${t.commitSha ? ` in ${t.commitSha.slice(0, 10)}` : ""}: ${t.reason ?? ""}`
+                  : `${t.decision}: ${t.reason ?? ""}`;
+          return line(`${ref}:finding:${i}`, "claimed", `[${f.severity}] ${f.path}${f.line ? `:${f.line}` : ""} — ${f.text} → ${fate}`);
+        })
+      : [line(`${ref}:finding:0`, "claimed", "No findings.")];
+    const blocking = findings.filter((f) => f.severity !== "nit").length;
+    entries.push({
+      at: last.startedAt ?? r.createdAt,
+      actor: "reviewer",
+      who: /again/.test(r.goal) ? "Reviewer (the fixes)" : "Reviewer",
+      attempt: attemptOf(r, last),
+      status: blocking ? { text: `${blocking} to settle`, tone: "amber" } : { text: "nothing to settle", tone: "pine" },
+      body: null,
+      lines,
+      folded: null,
+    });
+  }
+
   for (const t of related.filter((u) => u.type === "review-triage" || u.type === "rebase")) {
     const attempts = listAttempts(db, t.id);
     const done = attempts.filter((a) => a.state === "handed_off" && events.some((e) => e.unit_id === t.id && e.type === "unit.state" && e.data.to === "done"));
@@ -415,6 +451,7 @@ const ROLE: Partial<Record<string, string>> = {
   pack: "Pack writer",
   verify: "Verifier",
   "review-triage": "Review triage",
+  review: "Reviewer",
   rebase: "Rebase",
 };
 
