@@ -13,7 +13,7 @@ import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { findByRef, findUnitsByCommit, traceUnit } from "./audit.js";
 import { resolveSetting, setSetting } from "./config.js";
-import { getMergeRequest, gitlabRepoOf } from "./forge.js";
+import { getMergeRequest, gitlabRepoOf, readableTrace } from "./forge.js";
 import { landUnit, liveVerdict, prBody, retryState, watchMergeRequest } from "./land.js";
 import { layout } from "./paths.js";
 import { runRebaseUnit } from "./rebase.js";
@@ -813,6 +813,19 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     expect(gitlabRepoOf("git@gitlab.dev.local:team/apps/sandbox.git")).toBe("gitlab.dev.local/team/apps/sandbox");
     expect(gitlabRepoOf("https://gitlab.dev.local/team/sandbox")).toBe("gitlab.dev.local/team/sandbox");
     expect(gitlabRepoOf("ssh://git@gitlab.dev.local:2222/team/sandbox.git")).toBe("gitlab.dev.local:2222/team/sandbox");
+  });
+});
+
+describe("readableTrace (a real GitLab job trace)", () => {
+  it("drops the timestamp and stream prefixes, colour codes, and section markers", () => {
+    const lines = readableTrace(readFileSync(fixtures("gitlab-job-trace.txt"), "utf8")).split("\n");
+    expect(lines[0]).toBe("Running with gitlab-runner 19.4.1 (3c39fceb)");
+    expect(lines.slice(-4)).toEqual([
+      `$ if [ -n "$(git ls-files '*ci-break*')" ]; then echo "ci-break: failing on purpose"; exit 1; fi # collapsed multi-line command`,
+      "ci-break: failing on purpose",
+      "Cleaning up project directory and file based variables",
+      "ERROR: Job failed: exit status 1",
+    ]);
   });
 });
 

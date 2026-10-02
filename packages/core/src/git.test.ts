@@ -57,6 +57,15 @@ describe("git", () => {
     expect(await resolveRef(mirror, "yg/p/u1-1")).toMatch(/^[0-9a-f]{40}$/);
     expect(await resolveRef(mirror, "origin/main")).toBe(await headSha(origin));
   });
+
+  it("brings a mirror up to date for many callers at once (a planner and workers starting together)", async () => {
+    for (let i = 0; i < 3; i++) {
+      writeFileSync(join(origin, "app/orders.py"), `x = ${10 + i}\n`);
+      await commitAll(origin, `upstream moves ${i}`, author);
+      await Promise.all(Array.from({ length: 8 }, () => ensureMirror(origin, mirror)));
+      expect(await resolveRef(mirror, "origin/main")).toBe(await headSha(origin));
+    }
+  });
 });
 
 describe("scope", () => {

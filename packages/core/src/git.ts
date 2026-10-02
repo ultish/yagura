@@ -20,7 +20,17 @@ export async function git(args: string[], opts: { cwd?: string; gitDir?: string 
 // every worktree of a mirror reads the mirror's info/exclude.
 const GENERATED = ["__pycache__/", "*.py[cod]", ".pytest_cache/", ".mypy_cache/", ".ruff_cache/", "node_modules/", ".gradle/", ".DS_Store"];
 
-export async function ensureMirror(url: string, gitDir: string): Promise<void> {
+// Concurrent fetches into one mirror race for its ref locks and all but one fail ("cannot lock ref"), so each mirror
+// is brought up to date one call at a time in this process; a lock held by another process gets one retry.
+const mirrorQueue = new Map<string, Promise<void>>();
+
+export function ensureMirror(url: string, gitDir: string): Promise<void> {
+  const next = (mirrorQueue.get(gitDir) ?? Promise.resolve()).catch(() => {}).then(() => updateMirror(url, gitDir));
+  mirrorQueue.set(gitDir, next);
+  return next;
+}
+
+async function updateMirror(url: string, gitDir: string): Promise<void> {
   if (!existsSync(gitDir)) {
     await git(["clone", "--bare", "--quiet", url, gitDir]);
     await git(["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"], { gitDir });
@@ -33,7 +43,12 @@ export async function ensureMirror(url: string, gitDir: string): Promise<void> {
     appendFileSync(exclude, `${current && !current.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`);
   }
   if ((await git(["remote", "get-url", "origin"], { gitDir })) !== url) await git(["remote", "set-url", "origin", url], { gitDir });
-  await git(["fetch", "--quiet", "--prune", "origin"], { gitDir });
+  const fetch = () => git(["fetch", "--quiet", "--prune", "origin"], { gitDir });
+  await fetch().catch(async (e: unknown) => {
+    if (!/cannot lock ref|Unable to create .*\.lock/.test(String((e as { stderr?: string }).stderr ?? e))) throw e;
+    await new Promise((r) => setTimeout(r, 500));
+    await fetch();
+  });
 }
 
 export async function readFileAt(gitDir: string, ref: string, path: string): Promise<string | null> {

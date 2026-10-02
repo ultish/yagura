@@ -1,0 +1,30 @@
+2026-10-02T10:44:01.310822Z 00O [0KRunning with gitlab-runner 19.4.1 (3c39fceb)[0;m
+2026-10-02T10:44:01.310847Z 00O [0K  on yagura-proof r-mNkXHuf, system ID: r_d55nenFVN1gM[0;m
+2026-10-02T10:44:01.310848Z 00O [0K  UUID: 01a0fc30-2e92-7b89-bc03-0eb9baadd1c8[0;m
+2026-10-02T10:44:01.310891Z 00O section_start:1790937841:prepare_executor[0K
+2026-10-02T10:44:01.310894Z 00O+[0K[36;1mPreparing the "shell" executor[0;m[0;m
+2026-10-02T10:44:01.311737Z 00O [0KUsing Shell (bash) executor...[0;m
+2026-10-02T10:44:01.311739Z 00O section_end:1790937841:prepare_executor[0K
+2026-10-02T10:44:01.312664Z 00O+section_start:1790937841:prepare_script[0K
+2026-10-02T10:44:01.312670Z 00O+[0K[36;1mPreparing environment[0;m[0;m
+2026-10-02T10:44:01.318510Z 01O Running on bb7091cb3b40...
+2026-10-02T10:44:01.319191Z 00O section_end:1790937841:prepare_script[0K
+2026-10-02T10:44:01.319531Z 00O+section_start:1790937841:get_sources[0K
+2026-10-02T10:44:01.319535Z 00O+[0K[36;1mGetting source from Git repository[0;m[0;m
+2026-10-02T10:44:01.333635Z 01O [32;1mGitaly correlation ID: 01M3Y3DFFCJ5Z9PPYJ5DBZEERJ[0;m
+2026-10-02T10:44:01.336310Z 01O [32;1mFetching changes with git depth set to 20...[0;m
+2026-10-02T10:44:01.337286Z 01O Reinitialized existing Git repository in /home/gitlab-runner/builds/r-mNkXHuf/0/root/yagura-sandbox/.git/
+2026-10-02T10:44:01.482807Z 01O [32;1mChecking out 35882c23 as detached HEAD (ref is yg/glci/u3)...[0;m
+2026-10-02T10:44:01.508148Z 01O 
+2026-10-02T10:44:01.508157Z 01O [32;1mSkipping Git submodules setup[0;m
+2026-10-02T10:44:01.510579Z 00O section_end:1790937841:get_sources[0K
+2026-10-02T10:44:01.511976Z 00O+section_start:1790937841:step_script[0K
+2026-10-02T10:44:01.511986Z 00O+[0K[36;1mExecuting "step_script" stage of the job script[0;m[0;m
+2026-10-02T10:44:01.516755Z 01O [32;1m$ test -f README.md[0;m
+2026-10-02T10:44:01.516759Z 01O [32;1m$ if [ -n "$(git ls-files '*ci-break*')" ]; then echo "ci-break: failing on purpose"; exit 1; fi # collapsed multi-line command[0;m
+2026-10-02T10:44:01.517437Z 01O ci-break: failing on purpose
+2026-10-02T10:44:01.517568Z 00O section_end:1790937841:step_script[0K
+2026-10-02T10:44:01.517907Z 00O+section_start:1790937841:cleanup_file_variables[0K
+2026-10-02T10:44:01.517913Z 00O+[0K[36;1mCleaning up project directory and file based variables[0;m[0;m
+2026-10-02T10:44:01.526255Z 00O section_end:1790937841:cleanup_file_variables[0K
+2026-10-02T10:44:01.526366Z 00O [31;1mERROR: Job failed: exit status 1[0;m

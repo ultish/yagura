@@ -334,6 +334,22 @@ export function readGitlabStatus(mr: {
   };
 }
 
+// A GitLab job trace carries a timestamp and stream prefix on every line (runner 17+), colour codes, and section markers.
+export function readableTrace(trace: string): string {
+  return trace
+    .split("\n")
+    .map((line) =>
+      line
+        .replace(/^\d{4}-\d\d-\d\dT[\d:.]+Z \d\d[OE]\+?/, "")
+        .replace(/section_(start|end):\d+:[\w-]+(\[collapsed=true\])?/g, "")
+        .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
+        .replace(/\r/g, "")
+        .trim(),
+    )
+    .filter(Boolean)
+    .join("\n");
+}
+
 // forge.repo for GitLab is host/group/…/name; groups nest, so the first segment is always the host.
 export function gitlabForge(bin: string, repo: string): ForgeAdapter {
   const [host, ...rest] = repo.split("/");
@@ -404,7 +420,10 @@ export function gitlabForge(bin: string, repo: string): ForgeAdapter {
         jobs.map(async (j) => ({
           id: j.id,
           name: j.name,
-          log: (await api([`${project}/jobs/${j.id}/trace`]).catch(() => "")).split("\n").slice(-LOG_LINES).join("\n"),
+          log: readableTrace(await api([`${project}/jobs/${j.id}/trace`]).catch(() => ""))
+            .split("\n")
+            .slice(-LOG_LINES)
+            .join("\n"),
         })),
       );
     },
