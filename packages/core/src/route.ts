@@ -23,7 +23,8 @@ export function inferForge(db: Db, url: string): Forge | null {
   const host = hostOf(url);
   if (!host) return null;
   if (host === "github.com") return "gh";
-  return resolveSetting(db, "forge.glab_hosts").value.some((h) => h.toLowerCase() === host) ? "glab" : null;
+  const withPort = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? new URL(url).host.toLowerCase() : host;
+  return resolveSetting(db, "forge.glab_hosts").value.some((h) => [host, withPort].includes(h.toLowerCase())) ? "glab" : null;
 }
 
 export function chooseRoute(db: Db, url: string, choice: { forge?: Forge; land?: "push" }): { forge: Forge; pushConfirmed: boolean } {

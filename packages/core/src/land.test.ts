@@ -12,9 +12,9 @@ import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { findByRef, findUnitsByCommit, traceUnit } from "./audit.js";
-import { setSetting } from "./config.js";
+import { resolveSetting, setSetting } from "./config.js";
 import { getMergeRequest, gitlabRepoOf } from "./forge.js";
-import { landUnit, liveVerdict, watchMergeRequest } from "./land.js";
+import { landUnit, liveVerdict, retryState, watchMergeRequest } from "./land.js";
 import { layout } from "./paths.js";
 import { runRebaseUnit } from "./rebase.js";
 import { listThreadRows, parseDecisions, runTriageUnit } from "./triage.js";
@@ -791,6 +791,22 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     expect(mr.discussions.at(-1)!.notes[0]!.body).toBe(
       "**yagura** · automated, posted with this account\n\nyagura abandoned p/U1, so this merge request will not be merged.\n\n<!-- yagura -->",
     );
+  });
+
+  it("lands a unit again on retry after its branch was pushed but the merge request could not open, without a new attempt", async () => {
+    const work = await verifiedUnit();
+    const bin = resolveSetting(db, "forge.glab_bin").value;
+    setSetting(db, "global", "", "forge.glab_bin", join(root, "no-glab"));
+    expect((await landUnit(ctx, work.id)).outcome).toBe("blocked");
+    expect(getUnit(db, work.id).state).toBe("blocked");
+    expect(await git(["rev-parse", "--verify", "--quiet", "refs/heads/yg/p/u1"], { cwd: origin })).toMatch(/^[0-9a-f]{40}$/);
+
+    setSetting(db, "global", "", "forge.glab_bin", bin);
+    await advanceTrunk("README.md", "moved\n");
+    expect(retryState(db, getUnit(db, work.id))).toBe("verified");
+    transitionUnit(db, work.id, retryState(db, getUnit(db, work.id)), { by: "operator" });
+    expect(await landUnit(ctx, work.id)).toMatchObject({ outcome: "proposed", reason: expect.stringMatching(/^merge request !1:/) });
+    expect(listAttempts(db, work.id).length).toBe(1);
   });
 
   it("works out the GitLab project from the repo URL, nested groups included", () => {

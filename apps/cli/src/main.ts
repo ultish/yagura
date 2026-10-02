@@ -40,6 +40,7 @@ import {
   addUnitNote,
   evidenceCli,
   agentRefusal,
+  retryState,
   gitRead,
   landUnit,
   listEvidenceRuns,
@@ -132,7 +133,7 @@ const USAGE = `yagura — agent orchestration
   yagura andon <project> --reason <text> | --clear
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
-  yagura unit reject|requeue <project> <unit#> [--note <text>]
+  yagura unit reject|requeue <project> <unit#> [--note <text>]   requeue lands a blocked unit that is still verified again
   yagura run <project> <unit#>           run a ready work unit
   yagura verify <project> <unit#>        run the queued verify unit for a unit in verifying
   yagura land <project> <unit#>          land a verified unit onto its repo's default branch
@@ -346,7 +347,7 @@ async function main() {
         if (values.note) addUnitNote(db, u.id, values.note);
         const direct = positionals[0] === "requeue" && (u.state === "blocked" || u.state === "failed");
         if (!direct && u.state !== "rejected") transitionUnit(db, u.id, "rejected", { by: "operator", note: values.note ?? null });
-        if (positionals[0] === "requeue") transitionUnit(db, u.id, "ready", { by: "operator" });
+        if (positionals[0] === "requeue") transitionUnit(db, u.id, direct ? retryState(db, u) : "ready", { by: "operator" });
         console.log(`U${u.seq} → ${getUnitBySeq(db, projectId, u.seq).state}`);
         return;
       }

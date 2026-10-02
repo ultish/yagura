@@ -26,6 +26,12 @@ process.stdin.on("end", () => {
   if (verb === "list")
     return out(state.mrs.filter((m) => m.source_branch === flag("--source-branch") && m.state === "opened").map(({ iid, web_url }) => ({ iid, web_url })));
   if (verb === "create") {
+    // Like the real glab: it reads the working directory's remotes despite --repo, and fails when none is the project's host.
+    let remotes = "";
+    try {
+      remotes = execFileSync("git", ["remote", "-v"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    } catch {}
+    if (remotes && !remotes.includes(process.env.GITLAB_HOST)) fail("Failed to create merge request.");
     const iid = state.mrs.length + 1;
     const web_url = `https://${process.env.GITLAB_HOST}/${flag("--repo")}/-/merge_requests/${iid}`;
     state.mrs.push({
@@ -111,7 +117,8 @@ process.stdin.on("end", () => {
 
 function api() {
   const method = (flag("--method") ?? "GET").toUpperCase();
-  if (flag("--hostname") !== process.env.GITLAB_HOST) fail("api --hostname does not match GITLAB_HOST");
+  if (flag("--hostname")) fail("Error parsing --hostname: invalid hostname.");
+  if (!process.env.GITLAB_HOST) fail("GITLAB_HOST is not set");
   const skip = new Set(["--hostname", "--method", "--input", "--header"]);
   const path = rest.find((a, i) => !a.startsWith("--") && !skip.has(rest[i - 1]));
   const body = rest.includes("--input") ? JSON.parse(stdin) : null;

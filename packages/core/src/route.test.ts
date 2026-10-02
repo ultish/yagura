@@ -5,7 +5,7 @@ import { openStore } from "./store.js";
 
 describe("chooseRoute", () => {
   const db = openStore(":memory:");
-  setSetting(db, "global", "", "forge.glab_hosts", ["gitlab.internal"]);
+  setSetting(db, "global", "", "forge.glab_hosts", ["gitlab.internal", "localhost:8080"]);
   const route = (url: string, choice: Parameters<typeof chooseRoute>[2] = {}) => chooseRoute(db, url, choice);
 
   it("works out pull requests for github.com and merge requests for a listed GitLab host", () => {
@@ -13,6 +13,8 @@ describe("chooseRoute", () => {
     expect(route("git@github.com:ultish/yagura-sandbox.git")).toEqual({ forge: "gh", pushConfirmed: false });
     expect(route("git@gitlab.internal:team/billing.git")).toEqual({ forge: "glab", pushConfirmed: false });
     expect(route("https://GITLAB.internal/team/billing.git")).toEqual({ forge: "glab", pushConfirmed: false });
+    expect(route("https://gitlab.internal:8443/team/billing.git")).toEqual({ forge: "glab", pushConfirmed: false });
+    expect(route("http://localhost:8080/root/sandbox.git")).toEqual({ forge: "glab", pushConfirmed: false });
   });
 
   it("refuses to guess for any other remote, and takes an explicit choice", () => {

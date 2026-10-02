@@ -5,6 +5,7 @@ import { streamSSE } from "hono/streaming";
 import {
   addUnitNote,
   bumpMaxAttempts,
+  retryState,
   logTimesPath,
   threadsForProject,
   transitionUnit,
@@ -284,8 +285,9 @@ export function createApp(opts: ServerOptions): Hono {
     if (!["blocked", "failed", "rejected"].includes(unit.state))
       return c.json({ error: `U${unit.seq} is ${unit.state}; only blocked, failed, or rejected units can be retried` }, 409);
     if (note) addUnitNote(db, unit.id, `Operator: ${note}`);
-    bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).length + 1);
-    transitionUnit(db, unit.id, "ready", { by: "operator", note: note || null });
+    const next = retryState(db, unit);
+    if (next === "ready") bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).length + 1);
+    transitionUnit(db, unit.id, next, { by: "operator", note: note || null });
     return c.json(unitView(db, getUnit(db, unit.id)));
   });
 

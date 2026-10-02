@@ -70,6 +70,11 @@ export function liveVerdict(db: Db, unitId: UnitId): LiveVerdict | null {
   );
 }
 
+// A unit blocked after verification (a forge error, a closed merge request) still holds its proof: retrying lands it again rather than rebuilding it.
+export function retryState(db: Db, unit: { id: UnitId; state: string }): "verified" | "ready" {
+  return unit.state === "blocked" && liveVerdict(db, unit.id) ? "verified" : "ready";
+}
+
 interface Landing {
   db: Db;
   boot: Bootstrap;
@@ -251,13 +256,23 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
   };
 }
 
+// The push lands before the pull request opens, so when opening fails the branch still holds yagura's push and no pull request records it.
+function lastBranchPush(db: Db, unitId: UnitId, branch: string): Sha | null {
+  const row = db
+    .prepare(
+      "SELECT data_json FROM events WHERE unit_id = ? AND type = 'pr.branch_pushed' AND json_extract(data_json, '$.branch') = ? ORDER BY id DESC LIMIT 1",
+    )
+    .get(unitId, branch) as { data_json: string } | undefined;
+  return row ? (JSON.parse(row.data_json) as { head: Sha }).head : null;
+}
+
 // One pull request per unit, on a branch yagura owns; pushing again updates it.
 async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, { kind: "squashed" }>): Promise<LandResult> {
   const { db } = l;
   const branch = `${resolveSetting(db, "git.branch_prefix", { projectId: l.project.id, repoId: l.repo.id }).value}/${l.project.id}/u${l.unit.seq}`;
   try {
     // Overwrite the branch only if it still holds what yagura last pushed there (or does not exist yet), so a person's push is never lost.
-    const expected = getMergeRequest(db, l.unit.id)?.headSha ?? "";
+    const expected = getMergeRequest(db, l.unit.id)?.headSha ?? lastBranchPush(db, l.unit.id, branch) ?? "";
     const push = () =>
       git(["push", "--quiet", `--force-with-lease=refs/heads/${branch}:${expected}`, "origin", `${squash.landed}:refs/heads/${branch}`], { gitDir: l.mirror });
     // GitHub sometimes refuses a push for a moment; one retry separates that from a real rejection.
@@ -265,6 +280,7 @@ async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, 
       await new Promise((r) => setTimeout(r, 2000));
       await push();
     });
+    recordEvent(db, "pr.branch_pushed", { projectId: l.project.id, unitId: l.unit.id }, { branch, head: squash.landed });
     const existing = getMergeRequest(db, l.unit.id);
     const pr =
       (existing?.state === "open" ? { number: existing.number, url: existing.url } : null) ??

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { tmpdir } from "node:os";
 import { resolveSetting } from "./config.js";
 import type { IsoTime, Repo, Sha, UnitId } from "./domain.js";
 import { now, recordEvent, type Db } from "./store.js";
@@ -125,7 +126,8 @@ function gh(bin: string, args: string[], stdin?: string, env: Record<string, str
     const child = execFile(
       bin,
       args,
-      { env: { ...process.env, GH_PROMPT_DISABLED: "1", GLAB_NO_PROMPT: "1", NO_COLOR: "1", ...env }, maxBuffer: 16 * 1024 * 1024 },
+      // Outside any checkout: glab mr create reads the working directory's git remotes even when --repo names the project.
+      { cwd: tmpdir(), env: { ...process.env, GH_PROMPT_DISABLED: "1", GLAB_NO_PROMPT: "1", NO_COLOR: "1", ...env }, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout, stderr) =>
         err ? reject(new ForgeError(`${bin} ${args.slice(0, 2).join(" ")} failed: ${(stderr || err.message).trim().split("\n")[0]}`)) : resolve(stdout.trim()),
     );
@@ -336,12 +338,13 @@ export function readGitlabStatus(mr: {
 export function gitlabForge(bin: string, repo: string): ForgeAdapter {
   const [host, ...rest] = repo.split("/");
   const path = rest.join("/");
+  // glab api --hostname refuses a host with a port (localhost:8080); GITLAB_HOST alone selects the host for every command.
   const env = { GITLAB_HOST: host! };
   const R = ["--repo", path];
   const api = (args: string[], body?: unknown) =>
     gh(
       bin,
-      ["api", "--hostname", host!, ...args, ...(body === undefined ? [] : ["--input", "-", "--header", "Content-Type: application/json"])],
+      ["api", ...args, ...(body === undefined ? [] : ["--input", "-", "--header", "Content-Type: application/json"])],
       body === undefined ? undefined : JSON.stringify(body),
       env,
     );
