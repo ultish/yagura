@@ -140,7 +140,19 @@ function ProposalCard({ p, onEdit }: { p: Proposal & { routes?: Record<string, {
   );
 }
 
-function Message({ m, proposals, known, onEdit }: { m: ThreadMessage; proposals: Proposal[]; known: ReadonlySet<string>; onEdit: (t: string) => void }) {
+function Message({
+  m,
+  proposals,
+  known,
+  queued,
+  onEdit,
+}: {
+  m: ThreadMessage;
+  proposals: Proposal[];
+  known: ReadonlySet<string>;
+  queued: boolean;
+  onEdit: (t: string) => void;
+}) {
   const r = ROLE[m.role];
   return (
     <div style={{ display: "flex", gap: 16, padding: "14px 0", borderTop: "1px solid var(--line2)" }}>
@@ -149,6 +161,11 @@ function Message({ m, proposals, known, onEdit }: { m: ThreadMessage; proposals:
         <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>
           {clock(m.createdAt)}
         </div>
+        {queued && (
+          <div style={{ fontSize: 11, marginTop: 3, color: "var(--amber)" }} title="Sent while the watchman was replying; it is answered right after this turn">
+            queued
+          </div>
+        )}
       </div>
       <div style={{ flexGrow: 1, minWidth: 0, fontSize: 15, lineHeight: 1.55, color: m.role === "system" ? "var(--soft)" : "var(--text)" }}>
         {m.role === "watchman" && m.turnLog && <TurnCallsFor messageId={m.id} />}
@@ -349,7 +366,7 @@ function Composer({ threadId, busy, initial, draftKey }: { threadId: number | nu
       {busy && (
         <div className="mono" style={{ fontSize: 12, color: "var(--amber)", display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
           <span className="pulse" style={{ width: 8, height: 8, borderRadius: 4, background: "var(--lamp)" }} />
-          the watchman is reading the records and replying…
+          the watchman is replying… messages you send now are answered next
         </div>
       )}
       <MentionInput
@@ -358,7 +375,7 @@ function Composer({ threadId, busy, initial, draftKey }: { threadId: number | nu
         onSubmit={() => void send()}
         label="Message the watchman"
         placeholder="Message the watchman"
-        disabled={action.busy || busy}
+        disabled={action.busy}
         autoFocus
       />
       {action.error && (
@@ -499,6 +516,7 @@ export function Talk({ threadId }: { threadId: number | null }) {
                     m={m}
                     proposals={v!.proposals.filter((p) => p.messageId === m.id)}
                     known={known}
+                    queued={v!.queued.includes(m.id)}
                     onEdit={(t) => setDraft({ text: t, key: Date.now() })}
                   />
                 </Fragment>

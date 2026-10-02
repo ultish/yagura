@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -381,7 +381,13 @@ describe("watchman API", () => {
     expect(started.status).toBe(202);
     const { thread } = (await started.json()) as { thread: { id: number } };
     const again = await talkApp.request(`/api/threads/${thread.id}/messages`, { method: "POST", headers: auth, body: JSON.stringify({ message: "and?" }) });
-    expect(again.status).toBe(409);
+    expect(again.status).toBe(202);
+    const queued = (await again.json()) as { queued: number[]; messages: { id: number; role: string; body: string }[] };
+    expect(queued.messages.map((m) => [m.role, m.body])).toEqual([
+      ["human", "prototype a chain"],
+      ["human", "and?"],
+    ]);
+    expect(queued.queued).toEqual([2]);
 
     let view: {
       busy: boolean;
@@ -394,8 +400,9 @@ describe("watchman API", () => {
       await new Promise((r) => setTimeout(r, 50));
       view = (await (await talkApp.request(`/api/threads/${thread.id}`, { headers: auth })).json()) as typeof view;
     } while (view.busy);
-    expect(view.messages.map((m) => m.role)).toEqual(["human", "watchman"]);
+    expect(view.messages.map((m) => m.role)).toEqual(["human", "human", "watchman", "watchman"]);
     expect(view.proposals.map((p) => p.state)).toEqual(["pending"]);
+    expect(readFileSync(layout(boot).turnBrief(thread.id, 2), "utf8")).toContain("and?");
     const calls = (await (await talkApp.request(`/api/messages/${view.messages[1]!.id}/calls`, { headers: auth })).json()) as {
       calls: { name: string; outcome: string }[];
       running: boolean;
@@ -419,7 +426,7 @@ describe("watchman API", () => {
     view = (await cleared.json()) as typeof view;
     expect(view.session).toBeNull();
     expect(view.messages.at(-1)).toMatchObject({ role: "system", body: expect.stringMatching(/^New session/) });
-    expect(view.messages.filter((m) => m.role === "human").map((m) => m.body)).toEqual(["prototype a chain"]);
+    expect(view.messages.filter((m) => m.role === "human").map((m) => m.body)).toEqual(["prototype a chain", "and?"]);
     expect((await talkApp.request(`/api/threads/${thread.id}/clear`, { method: "POST", headers: auth })).status).toBe(200);
   });
 });

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { assertThreadFree, beginTurn, currentSession, endSession, endTurn, getTurn, markSeen, turnRecorder } from "./turns.js";
+import { assertThreadFree, beginTurn, currentSession, endSession, endTurn, getTurn, markSeen, runningTurn, turnRecorder } from "./turns.js";
 import { z } from "zod";
 import { runAgentSession, write, type RunContext, type SessionRecorder } from "./agent.js";
 import { resolveSetting } from "./config.js";
@@ -632,7 +632,27 @@ export function clearWatchmanSession(db: Db, threadId: number): boolean {
   return true;
 }
 
-export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: string): Promise<TurnResult> {
+// A human message after the thread's latest turn's own message is waiting for its turn (or was sent while one ran).
+export function queuedMessages(db: Db, threadId: number): ThreadMessage[] {
+  const last = (db.prepare("SELECT MAX(message_id) AS m FROM watchman_turns WHERE thread_id = ?").get(threadId) as { m: number | null }).m ?? 0;
+  return listMessages(db, threadId).filter((m) => m.role === "human" && m.id > last);
+}
+
+export function queueMessage(db: Db, threadId: number, text: string): ThreadMessage {
+  return addMessage(db, { threadId, role: "human", body: text });
+}
+
+// Everything sent while a turn ran is answered by one turn, the watchman reading them in order.
+export async function runQueuedTurns(ctx: RunContext, threadId: number): Promise<void> {
+  for (;;) {
+    const queued = queuedMessages(ctx.db, threadId);
+    if (queued.length === 0 || runningTurn(ctx.db, threadId)) return;
+    const result = await runWatchmanTurn(ctx, threadId, queued.at(-1)!.body, queued.at(-1)!);
+    if (!result.reply) return;
+  }
+}
+
+export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: string, existing?: ThreadMessage): Promise<TurnResult> {
   const { db, boot } = ctx;
   const paths = layout(boot);
   assertThreadFree(db, threadId);
@@ -652,7 +672,7 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
     });
     session = null;
   }
-  const human = addMessage(db, { threadId, role: "human", body: text });
+  const human = existing ?? addMessage(db, { threadId, role: "human", body: text });
   const fresh = () => buildWatchmanBrief(ctx, threadId, human);
   let brief = session?.seen ? buildWatchmanUpdate(ctx, threadId, human, session.seen) : fresh();
   write(paths.turnBrief(threadId, human.id), brief.text);
@@ -765,7 +785,8 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
     out.reply = addMessage(db, { threadId, role: "watchman", body: result.body, turnLog: log });
     addMessage(db, { threadId, role: "system", body: `yagura rejected this turn's records twice, so nothing was stored or proposed: ${out.problem}` });
   }
-  if (live) markSeen(db, live, { ...brief.seen, lastMessageId: out.reply.id });
+  const undelivered = queuedMessages(db, threadId).find((m) => m.id > human.id);
+  if (live) markSeen(db, live, { ...brief.seen, lastMessageId: undelivered ? undelivered.id - 1 : out.reply.id });
 
   if (out.proposal && getThread(db, threadId).autonomy === "go") {
     try {

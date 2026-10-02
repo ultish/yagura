@@ -247,6 +247,7 @@ export interface ThreadView {
   proposals: (Proposal & { routes?: Record<string, { text: string; ok: boolean }> })[];
   session: { startedAt: string; contextPeak: number; rollAt: number } | null;
   sessionStarts: number[];
+  queued: number[];
 }
 
 export interface Suggestion {

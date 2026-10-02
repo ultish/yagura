@@ -25,6 +25,9 @@ import {
   listQuestions,
   listThreads,
   runWatchmanTurn,
+  runQueuedTurns,
+  queueMessage,
+  queuedMessages,
   clearWatchmanSession,
   currentSession,
   sessionStarts,
@@ -512,11 +515,15 @@ export function createApp(opts: ServerOptions): Hono {
   });
 
   const busy = (threadId: number) => runningTurn(db, threadId) !== null;
-  const talk = (threadId: number, text: string) =>
-    runWatchmanTurn({ db, boot, adapters: opts.adapters ?? { claude: claudeAdapter }, cli: opts.cli ?? [] }, threadId, text).catch((e: unknown) => {
-      if (e instanceof TurnBusy) return;
-      addMessage(db, { threadId, role: "system", body: `the watchman failed: ${e instanceof Error ? e.message : String(e)}` });
-    });
+  const talk = (threadId: number, text: string) => {
+    const ctx = { db, boot, adapters: opts.adapters ?? { claude: claudeAdapter }, cli: opts.cli ?? [] };
+    return runWatchmanTurn(ctx, threadId, text)
+      .then((r) => (r.reply ? runQueuedTurns(ctx, threadId) : undefined))
+      .catch((e: unknown) => {
+        if (e instanceof TurnBusy) return;
+        addMessage(db, { threadId, role: "system", body: `the watchman failed: ${e instanceof Error ? e.message : String(e)}` });
+      });
+  };
   const threadView = (id: number) => ({
     thread: getThread(db, id),
     projects: getThread(db, id).projects.map((p) => projectSummary(db, p)),
@@ -532,6 +539,7 @@ export function createApp(opts: ServerOptions): Hono {
         : null;
     })(),
     sessionStarts: sessionStarts(db, id),
+    queued: busy(id) ? queuedMessages(db, id).map((m) => m.id) : [],
   });
   const clearSession = (id: number) => {
     if (busy(id)) return false;
@@ -568,10 +576,14 @@ export function createApp(opts: ServerOptions): Hono {
     const b = await body(c);
     getThread(db, id);
     if (typeof b.message !== "string" || !b.message.trim()) return c.json({ error: "message is required" }, 400);
-    if (busy(id)) return c.json({ error: `thread ${id} is already waiting on the watchman` }, 409);
     if (b.message.trim() === "/clear") {
+      if (busy(id)) return c.json({ error: `thread ${id} is waiting on the watchman; stop it or wait before starting a new session` }, 409);
       clearSession(id);
       return c.json(threadView(id));
+    }
+    if (busy(id)) {
+      queueMessage(db, id, b.message.trim());
+      return c.json(threadView(id), 202);
     }
     void talk(id, b.message.trim());
     return c.json(threadView(id), 202);

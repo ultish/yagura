@@ -787,7 +787,7 @@ Real SQLite and git; the fake agent extended to honour `--resume` and to attempt
 - Roll: `watchman.session_roll_tokens` (default 150000, global); checked before the turn against the session's last turn's context peak.
 - Clear: `clearWatchmanSession` (refused while a turn runs), `POST /api/threads/:id/clear`, `/clear` sent as a message (API and `yagura talk`), `yagura thread clear <id>`. Clear, roll, and lost each add a system message saying why.
 - Dashboard: the thread header shows `session · Nk of 150k` and a New session button; the transcript draws a "new session" divider before the first message of each session after the first (`sessionStarts` in the thread view, from the turns, not from message text).
-- Not yet: messages sent while a turn runs are still refused (409), not queued.
+- Queueing (2026-10-02): see "As built (queue)" below.
 
 ### As built (steps 2 and 3, 2026-10-02)
 
@@ -797,6 +797,12 @@ Real SQLite and git; the fake agent extended to honour `--resume` and to attempt
 - The brief's LOOKING THINGS UP section says what the watchman can read and run.
 - Proof: tests for the guard (every read allowed, every write and unknown command refused, any role), `yagura git` against a real mirror (reads, refused subcommands and options, stale refs, trunk by default), the adapter flags, and the watchman's run options. Real (Haiku, $0.17, fixtures `claude-watchman-tools.jsonl` and `claude-watchman-resume.jsonl`): asked for a word in a registered repo's README, the watchman found it with `yagura git`; `yagura set`, `cat /etc/hosts`, a redirect, `find` outside, and Write were refused and the setting was unchanged; the next message resumed the same session in 8 s and read the trunk log.
 - Gaps: a broad `Bash(…)` allow rule in the developer's own settings still applies to the watchman (only the five tools above are denied outright).
+
+### As built (queue, 2026-10-02)
+
+- A message sent while a turn runs is saved at once (`queueMessage`), shown in the transcript with a `queued` tag, and answered by the next turn: when a turn ends with a reply, `runQueuedTurns` runs one turn for everything sent meanwhile, the last message as the turn's own and the earlier ones in "Messages since your last turn" (or the recent-messages section of a fresh brief), so the watchman reads them in order. A queued message is a human message after the thread's latest turn's message (`queuedMessages`); no new table.
+- A turn's end marks as seen only up to the message before the first undelivered one, so a queued message is never skipped by the next delta.
+- A stopped or failed turn leaves its queue alone; the next message you send carries it. `/clear` is still refused while a turn runs. The CLI's `yagura talk` still refuses a busy thread. The composer stays usable while the watchman replies.
 
 ### As built (step 4, 2026-10-02)
 
