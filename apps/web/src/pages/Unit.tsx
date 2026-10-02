@@ -3,6 +3,7 @@ import { api, useApi, useQuery, type StoryEntry, type StoryLine, type UnitCode, 
 import { clip, clock, duration, modelName, when } from "../lib/format";
 import { Inline } from "../lib/markdown";
 import { Link } from "../ui/Link";
+import { RunningDot } from "../ui/Running";
 import { useAction } from "../ui/rows";
 
 const JUDGMENT: Record<string, string> = { chose: "choice", noted: "note" };
@@ -201,7 +202,10 @@ function AgentsTab({ story }: { story: UnitStory }) {
               <td className="mono">{a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "—"}</td>
               <td className="num mono">${a.costUsd.toFixed(2)}</td>
               <td>
-                <span className={`chip story-${a.tone}`}>{a.counted || a.outcome === "running" ? a.outcome : `${a.outcome} · not counted`}</span>
+                <span className={`chip story-${a.tone}`}>
+                  {a.outcome === "running" && <RunningDot />}
+                  {a.counted || a.outcome === "running" ? a.outcome : `${a.outcome} · not counted`}
+                </span>
               </td>
               <td>{a.note ? <Inline text={clip(a.note.split("\n")[0]!, 220)} /> : <span className="muted">—</span>}</td>
             </tr>

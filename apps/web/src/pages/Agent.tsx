@@ -18,6 +18,7 @@ import { clock, duration, modelName, tokens, when } from "../lib/format";
 import { Inline, Markdown } from "../lib/markdown";
 import { buildTimeline, type Step } from "../lib/timeline";
 import { Link } from "../ui/Link";
+import { RunningDot } from "../ui/Running";
 import { DiffView, RunView } from "../ui/evidence";
 import { NoteForm, useAction } from "../ui/rows";
 
@@ -348,7 +349,7 @@ function AgentFlow({ d }: { d: AttemptDetail }) {
               </Link>
             )}
             <span className={`story-${x.tone}`} title={x.outcome}>
-              {x.tone === "pine" ? "✓" : x.tone === "bell" ? "✗" : x.outcome === "running" ? "…" : "·"}
+              {x.tone === "pine" ? "✓" : x.tone === "bell" ? "✗" : x.outcome === "running" ? <RunningDot /> : "·"}
             </span>
           </span>
         ))}
@@ -493,6 +494,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
           />
         )}
         <div className={`s-${status.tone}`} style={{ fontSize: 14 }}>
+          {a.state === "running" && <RunningDot />}
           {status.text}
         </div>
         <AgentFlow d={d} />

@@ -3,6 +3,7 @@ import { api, useApi, useNow, type AgentRow, type WatchmanTurnRow } from "../api
 import { roleOf } from "../lib/units";
 import { duration, modelName, tokens, usd, when } from "../lib/format";
 import { Link } from "../ui/Link";
+import { RunningDot } from "../ui/Running";
 import { Inline } from "../lib/markdown";
 import { Row, useAction } from "../ui/rows";
 
@@ -90,7 +91,12 @@ export function Agents() {
           </Link>
         }
         goal={<Inline text={a.target?.goal ?? a.unit.goal} />}
-        status={outcome + (a.missingSkills.length ? ` Skipped ${a.missingSkills.join(", ")}.` : "")}
+        status={
+          <>
+            {a.state === "running" && <RunningDot />}
+            {outcome + (a.missingSkills.length ? ` Skipped ${a.missingSkills.join(", ")}.` : "")}
+          </>
+        }
         tone={a.state === "running" ? "lamp" : a.state === "failed" || a.missingSkills.length ? "bell" : a.handoffStatus === "success" ? "pine" : "muted"}
         facts={
           <>
