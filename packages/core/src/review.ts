@@ -5,7 +5,7 @@ import { renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { TERMINAL_STATES, type Attempt, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
-import { forgeFor, getMergeRequest, prRef, type PrThread } from "./forge.js";
+import { type ForgeAdapter, type PrThread } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, git, headSha } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { verifiedHead } from "./land.js";
@@ -106,6 +106,50 @@ export function reviewStatus(db: Db, target: Unit): ReviewStatus {
 }
 
 const isBuildTarget = (u: Unit) => u.type === "work" || u.type === "pack";
+
+export interface FindingFate extends Finding {
+  fate: string;
+}
+
+// Each finding of a finished review with what became of it, as the story and the pull request tell it.
+export function findingFates(db: Db, review: Unit): FindingFate[] | null {
+  const done = db.prepare("SELECT data_json FROM events WHERE type = 'review.done' AND unit_id = ? ORDER BY id DESC LIMIT 1").get(review.id) as
+    { data_json: string } | undefined;
+  if (!done || !review.targetUnitId) return null;
+  const threads = listThreadRows(db, review.targetUnitId);
+  return (JSON.parse(done.data_json).findings as Finding[]).map((f) => {
+    const t = threads.find((x) => x.threadId === `review:U${review.seq}:F${f.n}`);
+    const fate =
+      f.severity === "nit"
+        ? "kept as a note"
+        : !t?.decision
+          ? "being triaged"
+          : t.decision === "fixed"
+            ? `fixed${t.commitSha ? ` in ${t.commitSha.slice(0, 10)}` : ""}: ${t.reason ?? ""}`
+            : `${t.decision}: ${t.reason ?? ""}`;
+    return { ...f, fate };
+  });
+}
+
+// One comment per finished review on the unit's pull request, so people reviewing it there see what yagura's reviewer found and what became of it.
+export async function postReviewComments(db: Db, forge: ForgeAdapter, target: Unit, number: number): Promise<number> {
+  const reviews = reviewsOf(db, target).filter((r) => r.state === "done");
+  if (!reviews.length) return 0;
+  const posted = await forge.replyKeys(number);
+  let n = 0;
+  for (const r of reviews) {
+    const key = `${target.projectId}/U${r.seq}/review`;
+    const fates = findingFates(db, r);
+    if (!fates || posted.has(key)) continue;
+    const title = `yagura's code review (U${r.seq}${/again/.test(r.goal) ? ", the fixes" : ""})`;
+    const body = fates.length
+      ? `${title}:\n\n${fates.map((f) => `- [${f.severity}] \`${f.path}${f.line ? `:${f.line}` : ""}\` ${f.text}\n  → ${f.fate}`).join("\n")}`
+      : `${title}: nothing to raise.`;
+    await forge.reply(number, { id: `review-U${r.seq}`, kind: "comment" }, body, key);
+    n++;
+  }
+  return n;
+}
 
 export function queueReview(db: Db, target: Unit, since: Sha | null): Unit {
   const round = reviewsOf(db, target).length + 1;
@@ -287,19 +331,6 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
     }));
     const triage = queueTriage(db, getUnit(db, target.id), `U${unit.seq}'s review`, fresh);
     if (!triage) transitionUnit(db, target.id, "blocked", { reason: `U${unit.seq}'s review raised findings after the last triage wave; it needs you` });
-    const mr = getMergeRequest(db, target.id);
-    const forge = mr ? forgeFor(db, repo) : null;
-    if (mr && forge && mr.state === "open")
-      await forge
-        .reply(
-          mr.number,
-          { id: `review-U${unit.seq}`, kind: "comment" },
-          `yagura's reviewer (U${unit.seq}) raised ${raised.length} finding(s); triage is handling them:\n\n${raised.map((f) => `- [${f.severity}] \`${f.path}${f.line ? `:${f.line}` : ""}\` ${f.text}`).join("\n")}`,
-          `${project.id}/U${unit.seq}/review`,
-        )
-        .catch((e: unknown) =>
-          recordEvent(db, "review.comment_failed", refs, { error: e instanceof Error ? e.message : String(e), pr: prRef(mr.forge, mr.number) }),
-        );
   }
   return getAttempt(db, attempt.id);
 }

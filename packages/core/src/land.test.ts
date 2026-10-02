@@ -19,6 +19,7 @@ import { layout } from "./paths.js";
 import { runRebaseUnit } from "./rebase.js";
 import { listThreadRows, parseDecisions, runTriageUnit } from "./triage.js";
 import { runWorkUnit } from "./runner.js";
+import { queueReview, runReviewUnit } from "./review.js";
 import { failurePolicy } from "./schedule.js";
 import {
   addEnvironment,
@@ -26,6 +27,7 @@ import {
   addProject,
   addRepo,
   addUnit,
+  getUnit,
   getUnitBySeq,
   listAttempts,
   listGates,
@@ -325,6 +327,25 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(live(work.id).head_sha).toBe(main);
     expect(getMergeRequest(db, work.id)!.state).toBe("merged");
     expect(ghState().calls.filter((c) => c.startsWith("pr merge"))).toEqual([`pr merge 1 --repo ultish/sandbox --rebase --match-head-commit ${mr.headSha}`]);
+  });
+
+  it("posts what yagura's reviewer found, and what became of it, on the pull request once", async () => {
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit();
+    const review = queueReview(db, getUnit(db, work.id), null);
+    process.env.FAKE_REVIEW = "nit:a clearer name would help";
+    try {
+      await runReviewUnit(ctx, review.id);
+    } finally {
+      delete process.env.FAKE_REVIEW;
+    }
+    await landUnit(ctx, work.id);
+    await watchMergeRequest(ctx, work.id);
+    const comments = (ghState().prs[0] as unknown as { comments: { body: string }[] }).comments;
+    expect(comments).toHaveLength(1);
+    expect(comments[0]!.body).toMatch(
+      new RegExp(`^yagura's code review \\(U${review.seq}\\):\\n\\n- \\[nit\\] \`app/orders\\.py:1\` a clearer name would help\\n  → kept as a note`),
+    );
   });
 
   it("waits for the land gate under merge: human, then merges", async () => {

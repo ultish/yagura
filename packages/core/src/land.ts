@@ -15,6 +15,7 @@ import {
   prNoun,
   prRef,
 } from "./forge.js";
+import { postReviewComments } from "./review.js";
 import { routeProblem } from "./route.js";
 import { gateResolved } from "./gates.js";
 import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWorktree, resolveRef } from "./git.js";
@@ -278,6 +279,9 @@ async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, 
       baseSha: squash.trunk,
     });
     recordEvent(db, "pr.pushed", { projectId: l.project.id, unitId: l.unit.id }, { number: pr.number, url: pr.url, head: squash.landed, onto: squash.trunk });
+    await postReviewComments(db, forge, l.unit, pr.number).catch((e: unknown) =>
+      recordEvent(db, "review.comment_deferred", { projectId: l.project.id, unitId: l.unit.id }, { error: e instanceof Error ? e.message : String(e) }),
+    );
     return { unit: getUnit(db, l.unit.id), outcome: "proposed", landedSha: null, reason: `${prRef(l.repo.forge, pr.number)}: ${pr.url}` };
   } catch (e) {
     if (e instanceof ForgeError || (e as { code?: unknown }).code !== undefined)
@@ -369,6 +373,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   const status = await forge.status(mr.number);
   recordMergeStatus(db, unit.id, status);
   await postReplies(db, forge, unit, mr.number);
+  await postReviewComments(db, forge, unit, mr.number);
   if (!["landing", "blocked"].includes(unit.state)) return null;
   const l = landing(ctx, unit);
   if (status.state === "merged") return finishMerged(l, status, mr.number);

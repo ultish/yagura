@@ -10,6 +10,7 @@ import { listPackEdits } from "./packedits.js";
 import { layout } from "./paths.js";
 import { getGate, getProject, getUnit, listAttempts, listUnits, type Db } from "./store.js";
 import { isReviewThread, listThreadRows } from "./triage.js";
+import { findingFates } from "./review.js";
 
 // A unit's page reads as one story: who did what, what each chose, and what yagura checked about it. Agents' lines are
 // judgment unless a check sits beside them; a check is something yagura proved from its own records.
@@ -266,22 +267,11 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     const done = events.find((e) => e.unit_id === r.id && e.type === "review.done");
     if (!last || !done) continue;
     const ref = `a${last.id}`;
-    const findings = done.data.findings as { n: number; severity: string; path: string; line: number | null; text: string }[];
-    const lines = findings.length
-      ? findings.map((f, i) => {
-          const t = threads.find((x) => x.threadId === `review:U${r.seq}:F${f.n}`);
-          const fate =
-            f.severity === "nit"
-              ? "kept as a note"
-              : !t?.decision
-                ? "being triaged"
-                : t.decision === "fixed"
-                  ? `fixed${t.commitSha ? ` in ${t.commitSha.slice(0, 10)}` : ""}: ${t.reason ?? ""}`
-                  : `${t.decision}: ${t.reason ?? ""}`;
-          return line(`${ref}:finding:${i}`, "claimed", `[${f.severity}] ${f.path}${f.line ? `:${f.line}` : ""} — ${f.text} → ${fate}`);
-        })
+    const fates = findingFates(db, r) ?? [];
+    const lines = fates.length
+      ? fates.map((f, i) => line(`${ref}:finding:${i}`, "claimed", `[${f.severity}] ${f.path}${f.line ? `:${f.line}` : ""} — ${f.text} → ${f.fate}`))
       : [line(`${ref}:finding:0`, "claimed", "No findings.")];
-    const raised = findings.filter((f) => f.severity !== "nit");
+    const raised = fates.filter((f) => f.severity !== "nit");
     const open = raised.filter((f) => {
       const t = threads.find((x) => x.threadId === `review:U${r.seq}:F${f.n}`);
       return !t?.decision || (t.decision === "asked" && t.gateId !== null && getGate(db, t.gateId).state === "open");

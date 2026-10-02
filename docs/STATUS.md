@@ -1,6 +1,6 @@
 # yagura build status
 
-Updated 2026-10-02 (handoff). §23 (the landing route is chosen, never defaulted) and §24 (code review before landing, `review.enabled` per project) are built. Fourth real run (review on, through PRs) done at $1.21. Next: put the review's findings on the pull request, then the developer's pick. Everything else below is history, newest first within each topic.
+Updated 2026-10-02 (handoff). §23 (the landing route is chosen, never defaulted) and §24 (code review before landing, `review.enabled` per project) are built. Fourth real run (review on, through PRs) done at $1.21. The review's findings now go on the pull request as one comment per review. Next: the developer's pick (search box, retro watch, §21 steps 2–4). Everything else below is history, newest first within each topic.
 
 **Resume here (handoff, 2026-10-02):**
 
