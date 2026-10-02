@@ -809,3 +809,55 @@ Steering is offered only for an adapter that implements `message(text)` (claude 
 ### Open
 
 - The watchman still runs one `claude -p --resume` per message (§21); a long-lived watchman on the same stdin mechanism waits on whether the per-message start is slow in real use.
+
+## 23. The landing route is chosen, never defaulted (decided 2026-10-02, user; not built)
+
+The third real run landed two projects by pushing squashed commits to the sandbox's `main` although the developer asked for one PR per change: the repo had been registered without `--forge gh`, `none` was the silent default, and nothing showed the route before Go. A repo's landing route must be a deliberate choice that everyone can see, and the server should refuse what yagura must never do.
+
+### Server side: protect trunk
+
+The only hard guarantee is the forge's own rule. On GitHub, a branch protection rule on trunk that requires a pull request; on GitLab, a protected branch with "Allowed to push: No one" and merges through merge requests. A misconfigured yagura then fails loudly (the push is refused, the unit blocks with git's error) instead of landing quietly. yagura documents this in the repo setup and `yagura doctor` warns when a repo with a forge has an unprotected trunk (read through `gh api` / `glab api`; a failed read is a warning, not an error).
+
+### yagura side
+
+- **Route is part of registration.** `yagura repo add <url>` sets `forge` from the host: `gh` for `github.com`, `glab` for any host listed in the global setting `forge.glab_hosts` (the air-gapped GitLab hosts have their own names). For any other remote URL it refuses until the developer passes `--forge gh|glab` or `--land push`. Local paths and `file://` bare repos (tests, proofs) may push without asking. The CLI and the Repos page's form both say which route was chosen.
+- **Pushing to trunk is explicit.** `repos.forge = 'none'` on a remote URL is only set by an explicit `--land push` (or the Repos page's "pushes to trunk" choice), recorded as an event. Existing remote repos with `none` and no such event are treated as unconfirmed: landing blocks with "how should sbx land: through PRs (gh), merge requests (glab), or by pushing to main?" until answered.
+- **Everyone sees the route.** The Repos page shows it per repo ("through PRs (gh)", "through merge requests (glab)", "pushes to main"); the watchman's catalog lists it per registered repo; the proposal card shows it beside each project.
+- **A request is checked against the route.** A proposal project carries `land: "pr" | "push"` (the watchman sets it from the conversation; omitted means the repo's route). `validateProposal` rejects `land: "pr"` on a repo that pushes, and `land: "push"` on a repo with a forge, with a reason the watchman relays ("sbx has no forge, so it would push to main; register it with --forge gh or agree to push"). The project stores the chosen route; landing refuses to take any other.
+
+### Proof
+
+Tests: `repo add` infers `gh` for a github.com URL and `glab` for a listed host, refuses an unknown remote host without a choice, and accepts a bare path; a proposal with `land: "pr"` on a pushing repo is rejected with that reason; landing blocks on an unconfirmed remote `none` repo; the proposal card and Repos page show the route (browser). On the sandbox (with the developer's yes): turn on branch protection requiring a PR, and show that a forced direct push is refused and blocks the unit with git's error.
+
+## 24. Code review before landing (decided 2026-10-02, user; not built)
+
+Nothing reviews a change's code before it lands. The verifier proves behaviour with evidence yagura captures; review triage answers what people write on a pull request. With `merge: auto`, a change can land that does the right thing badly: wrong place, duplicated logic, a security slip, against the repo's conventions. A reviewer agent reads every verified change before it may land, and its findings go through the review-triage loop that already exists.
+
+### Setting
+
+- `review.enabled` (boolean, default `true`), overridable per project, per repo, and globally, so a project can switch review on or off for itself. The project page's Settings panel shows it like any other setting.
+- `role.reviewer.harness`, `role.reviewer.model` (empty: the harness default), and `skills.review` (skills every reviewer must load, enforced like `skills.verify`; for example the developer's own code-review skills). The reviewer gets the developer's whole harness like every agent.
+- `review.max_rounds` (default 1): how many times a fixed change is reviewed again before remaining findings go to the developer.
+
+### Flow
+
+1. A work, pack, or ci-fix unit is verified. With review enabled, yagura queues a `review` unit targeting it (new unit type, in `UNIT_TYPES` and the schema `CHECK`; it counts against `project.max_in_flight` and the cost budget). The target waits in `verified`; it may not land until its review is settled.
+2. The reviewer runs in a read-only worktree at the verified head with the overlay skill `yagura-reviewer` (required). Its brief holds the unit's goal and acceptance, the project's spec and the thread's active decisions, the diff against the base, the verifier's verdict and cited runs, and the repo's conventions file if there is one. It does not get the worker's handoff, so it judges the code rather than the worker's account of it. Any write is a rejection.
+3. Its handoff ends with `## Findings`, one line each: `- F1 [blocking|should|nit] path:line — what is wrong and why, and what would fix it`, or `- none`. yagura refuses a handoff without the section, a finding without a location in the diff, or a severity outside the three.
+4. `blocking` and `should` findings become threads in `mr_threads` (author `yagura reviewer`, source `review`). With a forge they are also posted on the pull request as review comments (marked as the reviewer's, so the watcher does not treat them as yagura's own replies), and the pull request opens at review time so a person can see them. Then the existing loop handles them: a `review-triage` unit fixes or dismisses each, a dismissal of anything about security, auth, secrets, data, or migrations becomes a question for the developer, fixes are verified before the target moves on, and the decisions are recorded.
+5. `nit` findings go into the unit's notes and the planner's suggested follow-ups; they never hold a merge.
+6. The review is settled when every blocking and should thread is fixed (and verified), dismissed, or answered by the developer. A fixed change is reviewed again, only over the fix, up to `review.max_rounds`; after that, open findings become one question for the developer. Then landing proceeds as today: `merge: auto` merges, `merge: human` waits at its land gate with the findings visible on the PR.
+
+With review disabled for a project, step 1 is skipped and verified units land as today.
+
+### Dashboard
+
+The unit story gets a "Reviewer" entry with each finding (severity, location, and what became of it: fixed in which commit, dismissed with what reason, or asked); the Agents tab lists the reviewer's sessions; the project page shows "reviewing" as a unit's stage between verified and landing.
+
+### Proof
+
+Tests with the fake agent: a review with one blocking finding becomes a triage that fixes it, the fix is verified and reviewed again, and the unit lands; a nit lands as a note without holding the merge; a security dismissal becomes a developer question; `review.enabled` false on one project lands without a reviewer while another project in the same repo is reviewed; a reviewer that writes is rejected. Then one real run on the sandbox with review on, through PRs, including at least one real finding taken through triage.
+
+### Order
+
+Build §23 first (it is small and stops the harm), then §24.
