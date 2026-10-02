@@ -16,6 +16,7 @@ import {
   prRef,
 } from "./forge.js";
 import { postReviewComments } from "./review.js";
+import { startRetroWatch } from "./retro.js";
 import { routeProblem } from "./route.js";
 import { gateResolved } from "./gates.js";
 import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWorktree, resolveRef } from "./git.js";
@@ -201,6 +202,7 @@ function markLanded(l: Landing, sha: Sha, data: Record<string, unknown>): void {
   setLandedSha(l.db, l.unit.id, sha);
   markPackProven(l.db, l.unit, sha);
   transitionUnit(l.db, l.unit.id, "landed", { sha, ...data });
+  startRetroWatch(l.db, l.unit, sha);
   recordEvent(
     l.db,
     "unit.landed",

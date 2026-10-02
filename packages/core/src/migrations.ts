@@ -362,6 +362,22 @@ ALTER TABLE projects ADD COLUMN land TEXT CHECK (land IN ('pr', 'push'));
 `,
   },
   { version: 24, rebuild: addReviewUnitType },
+  {
+    version: 25,
+    sql: `
+CREATE TABLE retro_watches (
+  unit_id INTEGER PRIMARY KEY REFERENCES units (id),
+  sha TEXT NOT NULL,
+  until TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'watching' CHECK (state IN ('watching', 'passed', 'failed', 'reverted', 'expired')),
+  reruns INTEGER NOT NULL DEFAULT 0,
+  detail TEXT,
+  fix_unit_id INTEGER REFERENCES units (id),
+  checked_at TEXT,
+  created_at TEXT NOT NULL
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

@@ -20,6 +20,7 @@ import { runRebaseUnit } from "./rebase.js";
 import { listThreadRows, parseDecisions, runTriageUnit } from "./triage.js";
 import { runWorkUnit } from "./runner.js";
 import { queueReview, runReviewUnit } from "./review.js";
+import { checkRetroWatch, getRetroWatch, startRetroWatch } from "./retro.js";
 import { failurePolicy } from "./schedule.js";
 import {
   addEnvironment,
@@ -132,6 +133,29 @@ describe("landing route", () => {
     const result = await landUnit(ctx, work.id);
     expect(result.unit.state).toBe("blocked");
     expect(result.reason).toMatch(/^p was agreed to land through pull or merge requests, but testbed has no forge/);
+  });
+});
+
+describe("retro watch without a forge", () => {
+  it("notices someone reverting a landed commit on trunk, and notes it on the unit", async () => {
+    const work = await verifiedUnit();
+    const landed = (await landUnit(ctx, work.id)).landedSha!;
+    const clone = join(root, "reverter");
+    await git(["clone", "--quiet", origin, clone]);
+    await git(["-c", "user.name=t", "-c", "user.email=t@t", "revert", "--no-edit", landed], { cwd: clone });
+    await git(["push", "--quiet", "origin", "HEAD:main"], { cwd: clone });
+    const said = await checkRetroWatch(ctx, getRetroWatch(db, work.id)!);
+    expect(said).toMatch(/^U1 was reverted: [0-9a-f]{10} reverted it on main: Revert "Implement apply_discount/);
+    expect(getRetroWatch(db, work.id)!.state).toBe("reverted");
+    expect(getUnit(db, work.id).notes.at(-1)).toMatch(/^Reverted on trunk after landing: /);
+  });
+
+  it("expires quietly when there is no forge CI and nobody reverted it", async () => {
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    db.prepare("UPDATE retro_watches SET until = ?").run(new Date(Date.now() - 1000).toISOString());
+    expect(await checkRetroWatch(ctx, getRetroWatch(db, work.id)!)).toBeNull();
+    expect(getRetroWatch(db, work.id)).toMatchObject({ state: "expired", detail: "no forge CI to watch; no revert seen" });
   });
 });
 
@@ -466,6 +490,51 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     editPr({ state: "CLOSED" });
     expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "blocked", reason: "pull request #1 was closed without merging" });
     expect(getMergeRequest(db, work.id)!.state).toBe("closed");
+  });
+
+  describe("retro watch", () => {
+    const landThroughPr = async () => {
+      setMergePolicy(db, project, "auto");
+      const work = await verifiedUnit();
+      await landUnit(ctx, work.id);
+      const merged = await watchMergeRequest(ctx, work.id);
+      return { work, sha: merged!.landedSha! };
+    };
+    const failingRun = (sha: string) =>
+      editState({ runs: [{ databaseId: 70, name: "unit tests", head: sha, conclusion: "failure", log: "FAILED test_total (expected 8, got 7)" }] });
+
+    it("re-runs a trunk CI failure once, then queues a fix with the failing job's log", async () => {
+      const { work, sha } = await landThroughPr();
+      expect(getRetroWatch(db, work.id)).toMatchObject({ state: "watching", sha, reruns: 0 });
+      failingRun(sha);
+      expect(await checkRetroWatch(ctx, getRetroWatch(db, work.id)!)).toBe(`U1: trunk CI failed on ${sha.slice(0, 10)}; re-running unit tests once`);
+      expect(ghState().runs![0]!.reruns).toBe(1);
+      expect(await checkRetroWatch(ctx, getRetroWatch(db, work.id)!)).toMatch(
+        /^U1: trunk CI failed again; queued U\d+: Fix trunk: unit tests fails on [0-9a-f]{10} after U1 landed/,
+      );
+      const watch = getRetroWatch(db, work.id)!;
+      expect(watch).toMatchObject({ state: "failed", detail: `trunk CI failed on ${sha.slice(0, 10)}: unit tests` });
+      const fix = getUnit(db, watch.fixUnitId!);
+      expect(fix).toMatchObject({ type: "work", state: "ready", playbook: "bug-fix", writeScope: ["app/**"] });
+      expect(fix.context[0]).toContain("FAILED test_total (expected 8, got 7)");
+      expect(getUnit(db, work.id).notes.at(-1)).toBe(`Trunk CI failed after it landed (unit tests); fixing in U${fix.seq}.`);
+    });
+
+    it("ends the watch when trunk CI passes, and reverts instead of fixing when the project allows it", async () => {
+      const { work, sha } = await landThroughPr();
+      editState({ runs: [{ databaseId: 71, name: "unit tests", head: sha, conclusion: "success" }] });
+      expect(await checkRetroWatch(ctx, getRetroWatch(db, work.id)!)).toBe("U1: trunk CI passed");
+      expect(getRetroWatch(db, work.id)!.state).toBe("passed");
+
+      setSetting(db, "project", project, "project.auto_revert", true);
+      startRetroWatch(db, getUnit(db, work.id), sha as never);
+      failingRun(sha);
+      await checkRetroWatch(ctx, getRetroWatch(db, work.id)!);
+      await checkRetroWatch(ctx, getRetroWatch(db, work.id)!);
+      const fix = getUnit(db, getRetroWatch(db, work.id)!.fixUnitId!);
+      expect(fix.goal).toBe(`Revert U1 (${sha.slice(0, 10)}) on trunk: unit tests fails after it landed`);
+      expect(fix.acceptance[0]).toBe(`trunk no longer contains U1's change: \`git revert --no-edit ${sha}\` and nothing else`);
+    });
   });
 
   it("closes the pull request of an abandoned unit with a comment", async () => {

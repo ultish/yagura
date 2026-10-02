@@ -367,6 +367,23 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       folded: null,
     });
 
+  for (const e of events.filter((x) => x.unit_id === unit.id && ["retro.passed", "retro.failed", "retro.reverted"].includes(x.type)))
+    entries.push({
+      at: e.ts,
+      actor: "yagura",
+      who: "After landing",
+      attempt: null,
+      status:
+        e.type === "retro.passed"
+          ? { text: "trunk CI passed", tone: "pine" }
+          : e.type === "retro.failed"
+            ? { text: "trunk CI failed", tone: "bell" }
+            : { text: "reverted", tone: "bell" },
+      body: `${String(e.data.detail ?? "")}${e.data.fixUnit ? `; ${e.type === "retro.failed" ? "fix" : "follow-up"} queued as U${getUnit(db, e.data.fixUnit as never).seq}` : ""}`,
+      lines: [],
+      folded: null,
+    });
+
   const landed = events.find((e) => e.type === "unit.landed" && e.unit_id === unit.id);
   const verdict = liveVerdict(db, unit.id);
   if (landed) {

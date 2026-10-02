@@ -49,7 +49,11 @@ process.stdin.on("end", () => {
   if (group === "run") {
     const runs = state.runs ?? [];
     if (verb === "list")
-      return out(runs.filter((r) => r.head === flag("--commit")).map(({ databaseId, name, conclusion }) => ({ databaseId, name, conclusion })));
+      return out(
+        runs
+          .filter((r) => r.head === flag("--commit"))
+          .map(({ databaseId, name, conclusion, status }) => ({ databaseId, name, conclusion, status: status ?? "completed" })),
+      );
     const r = runs.find((x) => x.databaseId === Number(rest[0]));
     if (!r) fail(`no run ${rest[0]}`);
     if (verb === "view") return console.log(r.log ?? "");

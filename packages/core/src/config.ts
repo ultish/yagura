@@ -75,6 +75,13 @@ export const SETTINGS = {
   "skills.pack": z.array(z.string().min(1)).default([]).describe("Skills the verify pack writer must load"),
   "skills.verify": z.array(z.string().min(1)).default([]).describe("Skills every verifier must load"),
   "skills.review": z.array(z.string().min(1)).default([]).describe("Skills every code reviewer must load"),
+  "retro.watch_minutes": z
+    .number()
+    .int()
+    .min(0)
+    .default(60)
+    .describe("Minutes to watch trunk after a unit lands: its CI on the forge, and anyone reverting it (0: off)"),
+  "project.auto_revert": z.boolean().default(false).describe("When trunk CI breaks after a landing, revert the change instead of fixing forward"),
   "review.enabled": z.boolean().default(true).describe("A reviewer agent reads every verified change before it may land"),
   "review.max_rounds": z
     .number()
@@ -160,6 +167,8 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "skills.verify": PRE,
   "skills.review": PR,
   "review.enabled": PR,
+  "retro.watch_minutes": PR,
+  "project.auto_revert": P,
   "review.max_rounds": PR,
   "project.reference_repos": P,
   "project.budget_hours": P,

@@ -13,6 +13,7 @@ import { runRebaseUnit } from "./rebase.js";
 import { reverifyAgainstSources, sourceDeps, staleSource } from "./sources.js";
 import { queueTriage, runTriageUnit } from "./triage.js";
 import { queueReview, reviewStatus, runReviewUnit } from "./review.js";
+import { checkRetroWatch, watchingFor } from "./retro.js";
 import { addVerifyUnit, runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
@@ -237,7 +238,7 @@ export class Engine {
            (e.type = 'unit.state' AND json_extract(e.data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(e.data_json, '$.drain') IS NULL AND json_extract(e.data_json, '$.rebaseUnit') IS NULL AND json_extract(e.data_json, '$.reviewUnit') IS NULL)
            OR (e.type IN ('gate.answered', 'gate.defaulted') AND COALESCE(json_extract(e.data_json, '$.kind'), '') NOT IN (${YAGURA_GATES.map(() => "?").join(", ")}))
            OR (e.type = 'disagreement.recorded' AND json_extract(e.data_json, '$.action') = 'follow-up')
-           OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed'))`,
+           OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed', 'retro.reverted'))`,
       )
       .all(project.id, since, ...PLAN_TRIGGERS, ...YAGURA_GATES) as { type: string; unit_id: UnitId | null; data_json: string; unit_type: string | null }[];
     const open = () => listUnits(this.db, project.id).some((u) => isBuild(u) && !TERMINAL_STATES.has(u.state) && u.state !== "blocked");
@@ -378,6 +379,7 @@ export class Engine {
     if (expired) this.log(`  deleted ${expired} kept slot(s) past their time`);
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
+    for (const project of this.scope()) this.retro(project);
     for (const project of this.scope().filter((p) => p.state === "active")) {
       const missing = projectSkillChecks(this.db, this.ctx.boot, project.id).filter((c) => !c.installed);
       if (missing.length) {
@@ -446,6 +448,21 @@ export class Engine {
       if (listUnits(this.db, p.id).some((u) => u.state === "verified" && this.wouldMove(p, u))) return false;
       return !listUnits(this.db, p.id).some((u) => isBuild(u) && (u.state === "failed" || u.state === "rejected"));
     });
+  }
+
+  // Landed commits are watched for a while, whatever state their project is in: trunk CI on the forge, and reverts.
+  private retro(project: Project): void {
+    const poll = resolveSetting(this.db, "forge.poll_seconds").value * 1000;
+    for (const w of watchingFor(this.db, project.id)) {
+      const key = `retro:${w.unitId}`;
+      if (this.inflight.has(key) || (w.checkedAt && Date.now() - Date.parse(w.checkedAt) < poll)) continue;
+      this.start(
+        key,
+        `retro watch ${project.id} ${w.sha.slice(0, 10)}`,
+        () => checkRetroWatch(this.ctx, w).then((said) => said && this.log(`  ${said}`)),
+        () => undefined,
+      );
+    }
   }
 
   // A verified unit the engine would act on now: queue its review or triage, or land it.
