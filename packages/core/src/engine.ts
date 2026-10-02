@@ -41,10 +41,12 @@ import {
 import { postReport, reportKey, type ReportKind } from "./report.js";
 import { listThreads } from "./threads.js";
 import { runVerifyUnit } from "./verify.js";
+import { sweepWorktrees } from "./worktrees.js";
 
 export interface EngineOptions {
   projectId?: ProjectId;
   tickMs?: number;
+  sweepMs?: number;
   log?: (line: string) => void;
 }
 
@@ -74,6 +76,7 @@ function suggestsFollowUps(db: Db, boot: RunContext["boot"], unitId: UnitId): bo
 
 export class Engine {
   private readonly inflight = new Map<string, Promise<void>>();
+  private lastSweep = 0;
   private readonly landingSaid = new Map<UnitId, string>();
   private readonly cutoffSaid = new Set<ProjectId>();
   private readonly costSaid = new Set<ProjectId>();
@@ -375,6 +378,11 @@ export class Engine {
 
   async tick(): Promise<void> {
     if (this.inflight.size === 0) await reapLeases(this.db, this.ctx.boot);
+    if (Date.now() - this.lastSweep > (this.opts.sweepMs ?? SWEEP_MS)) {
+      this.lastSweep = Date.now();
+      const swept = await sweepWorktrees(this.db, this.ctx.boot);
+      if (swept) this.log(`  removed ${swept} checkout(s) of finished units`);
+    }
     const expired = await reapKept(this.db, this.ctx.boot);
     if (expired) this.log(`  deleted ${expired} kept slot(s) past their time`);
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
@@ -516,6 +524,8 @@ export class Engine {
     }
   }
 }
+
+const SWEEP_MS = 60_000;
 
 function landApproved(db: Db, projectId: ProjectId, u: Unit): boolean {
   const gate = listGates(db, projectId)

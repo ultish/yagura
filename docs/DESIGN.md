@@ -112,6 +112,8 @@ The store is **outside every git repo**, owned by the daemon, the only writer. T
   cache/repos/<repo>.git    bare mirror; worktrees are added from it
 ```
 
+**Worktree lifetime (2026-10-02, `worktrees.ts`).** Each attempt gets its own worktree, and a verification adds a trunk checkout (`.base`) and a pack workspace (`.pack`), so a unit leaves about five full checkouts. They stay while the unit can still continue (running, verifying, landing, rejected, blocked, failed: a reworked unit resumes its worker in the same worktree and session) and are deleted once the unit is landed, done, or abandoned: evidence is stored as artifacts, diffs come from the mirror, and a rework whose worktree is gone starts fresh. The engine sweeps once a minute (`git worktree remove`, then `prune`). A unit that stays blocked keeps its checkouts until it is retried or abandoned.
+
 Core tables: `settings` (layered config, §16), `environments`, `repos`, `projects`, `project_repos`, `units`, `unit_deps`, `attempts` (incl. plugin versions and models used), `leases`, `artifacts`, `verdicts`, `measurements`, `gates`, `mr_state` + `mr_decisions` (§15), `evidence_runs` (one row per command yagura ran for a verifier, with its checkout, SHA, exit, and tamper flag), `events` (append-only; the dashboard's SSE feed and the audit log), and an FTS5 index over handoffs, briefs, and log text (§17).
 
 Schema changes ship as numbered migrations applied on open (`packages/core/src/migrations.ts`); `schema.sql` is the version-1 baseline.

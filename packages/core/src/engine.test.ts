@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -233,6 +233,14 @@ describe("Engine", () => {
     const workAttempt = listAttempts(db, a!)[0]!;
     const diff = await diffRange(layout(ctx.boot).mirror("testbed" as RepoId), workAttempt.baseSha!, workAttempt.headSha!);
     expect(diff).toContain(`+++ b/app/a/p-U${work[0]!.seq}.txt\n@@ -0,0 +1 @@\n+work`);
+
+    const checkouts = join(ctx.boot.home, "worktrees", "testbed");
+    expect(readdirSync(checkouts).length).toBeGreaterThan(9);
+    const sweep: string[] = [];
+    await new Engine(ctx, { projectId: project, sweepMs: 0, log: (l) => sweep.push(l) }).tick();
+    expect(readdirSync(checkouts)).toEqual([]);
+    expect(await git(["worktree", "list", "--porcelain"], { gitDir: layout(ctx.boot).mirror("testbed" as RepoId) })).not.toContain("worktree " + checkouts);
+    expect(sweep[0]).toMatch(/^ {2}removed \d+ checkout\(s\) of finished units$/);
   }, 60_000);
 
   it("writes, proves, and lands a verify pack first on a repo without one, then verifies work with it", async () => {
