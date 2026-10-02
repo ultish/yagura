@@ -23,6 +23,8 @@ export interface ForgeAdapter {
   merge(number: number, headSha: Sha, method: "rebase" | "squash" | "merge"): Promise<void>;
   close(number: number, comment: string): Promise<void>;
   failedRuns(headSha: Sha): Promise<{ id: number; name: string; log: string }[]>;
+  // CI on a commit as a whole: none ran, still running, all passed, or something failed.
+  commitChecks(sha: Sha): Promise<"none" | "pending" | "success" | "failure">;
   rerunFailed(runId: number): Promise<void>;
   threads(number: number): Promise<PrThread[]>;
   replyKeys(number: number): Promise<Set<string>>;
@@ -48,7 +50,9 @@ export interface PrThread {
 
 // Everything yagura posts carries this marker, so its own replies never read as new review activity.
 export const YAGURA_MARK = "<!-- yagura -->";
-export const marked = (body: string) => `${body}\n\n${YAGURA_MARK}`;
+// yagura posts through the developer's own account, so every post says up front who wrote it.
+export const POST_LABEL = "**yagura** · automated, posted with this account";
+export const marked = (body: string) => `${POST_LABEL}\n\n${body}\n\n${YAGURA_MARK}`;
 // GitHub can report a failure for a reply it did post, so each reply carries a key yagura checks before posting again.
 const keyed = (body: string, key: string) => `${marked(body)}\n<!-- yagura-reply:${key} -->`;
 
@@ -233,6 +237,15 @@ export function githubForge(bin: string, repo: string): ForgeAdapter {
     async rerunFailed(runId) {
       await gh(bin, ["run", "rerun", String(runId), ...R, "--failed"]);
     },
+    async commitChecks(sha) {
+      const runs = JSON.parse(await gh(bin, ["run", "list", ...R, "--commit", sha, "--json", "databaseId,name,status,conclusion"])) as {
+        status: string;
+        conclusion: string;
+      }[];
+      if (!runs.length) return "none";
+      if (runs.some((r) => r.status !== "completed")) return "pending";
+      return runs.some((r) => ["failure", "timed_out", "startup_failure"].includes(r.conclusion)) ? "failure" : "success";
+    },
     async threads(number) {
       const [owner, name] = repoParts.slice(-2);
       return readThreads(
@@ -394,6 +407,12 @@ export function gitlabForge(bin: string, repo: string): ForgeAdapter {
     },
     async rerunFailed(jobId) {
       await api(["--method", "POST", `${project}/jobs/${jobId}/retry`]);
+    },
+    async commitChecks(sha) {
+      const [pipeline] = JSON.parse(await api([`${project}/pipelines?sha=${sha}&order_by=id&sort=desc&per_page=1`])) as { status: string }[];
+      if (!pipeline) return "none";
+      if (["failed", "canceled"].includes(pipeline.status)) return "failure";
+      return pipeline.status === "success" ? "success" : "pending";
     },
     async threads(iid) {
       return readGitlabThreads(await discussions(iid));

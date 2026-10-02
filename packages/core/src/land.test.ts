@@ -344,7 +344,9 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     const comments = (ghState().prs[0] as unknown as { comments: { body: string }[] }).comments;
     expect(comments).toHaveLength(1);
     expect(comments[0]!.body).toMatch(
-      new RegExp(`^yagura's code review \\(U${review.seq}\\):\\n\\n- \\[nit\\] \`app/orders\\.py:1\` a clearer name would help\\n  → kept as a note`),
+      new RegExp(
+        `^\\*\\*yagura\\*\\* · automated, posted with this account\\n\\nyagura's code review \\(U${review.seq}\\):\\n\\n- \\[nit\\] \`app/orders\\.py:1\` a clearer name would help\\n  → kept as a note`,
+      ),
     );
   });
 
@@ -471,7 +473,10 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     await landUnit(ctx, work.id);
     transitionUnit(db, work.id, "abandoned", { reason: "cancelled" });
     expect(await watchMergeRequest(ctx, work.id)).toBeNull();
-    expect(ghState().prs[0]).toMatchObject({ state: "CLOSED", comment: "yagura abandoned p/U1, so this pull request will not be merged.\n\n<!-- yagura -->" });
+    expect(ghState().prs[0]).toMatchObject({
+      state: "CLOSED",
+      comment: "**yagura** · automated, posted with this account\n\nyagura abandoned p/U1, so this pull request will not be merged.\n\n<!-- yagura -->",
+    });
   });
 
   it("triages review threads: fixes one, replies to a dismissal, asks you about a security one, and merges after your answer", async () => {
@@ -500,9 +505,11 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(brief).not.toContain("old and resolved");
     const pr = () => ghState().prs[0] as unknown as { threads: { comments: { body: string }[] }[]; comments: { body: string }[] };
     expect(pr().threads[0]!.comments[1]!.body).toMatch(
-      /^Fixed in [0-9a-f]{10} \(yagura p\/U1\): added the review fix to app\/orders.py\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/RT_1 -->$/,
+      /^\*\*yagura\*\* · automated, posted with this account\n\nFixed in [0-9a-f]{10} \(yagura p\/U1\): added the review fix to app\/orders.py\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/RT_1 -->$/,
     );
-    expect(pr().threads[1]!.comments[1]!.body).toMatch(/^the existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:/);
+    expect(pr().threads[1]!.comments[1]!.body).toMatch(
+      /^\*\*yagura\*\* · automated, posted with this account\n\nthe existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:/,
+    );
     const ask = listGates(db, project, "open").find((g) => g.kind === "review")!;
     expect(ask.question).toMatch(/^On pull request #1, bob wrote: "security: this logs the auth token"\. This touches security, auth, or data/);
     expect(listThreadRows(db, work.id).map((r) => [r.threadId, r.decision])).toEqual([
@@ -521,7 +528,9 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "triaging", reason: "1 review thread(s) on pull request #1; triaging in U5" });
     await runTriageUnit(ctx, getUnitBySeq(db, project, 5).id);
     expect(readFileSync(layout(ctx.boot).brief(project, 5, 1), "utf8")).toContain("The developer decided: dismiss. Do that.");
-    expect(pr().comments.at(-1)!.body).toMatch(/^the existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/IC_1 -->$/);
+    expect(pr().comments.at(-1)!.body).toMatch(
+      /^\*\*yagura\*\* · automated, posted with this account\n\nthe existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/IC_1 -->$/,
+    );
     expect(getUnitBySeq(db, project, 1).state).toBe("verified");
     await landUnit(ctx, work.id);
     expect((await watchMergeRequest(ctx, work.id))?.outcome).toBe("landed");
@@ -691,10 +700,16 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     await watchMergeRequest(ctx, work.id);
     const discussions = glState().mrs[0]!.discussions;
     const replies = (id: string) => discussions.find((d) => d.id === id)!.notes.filter((n) => String(n.body).includes("<!-- yagura -->"));
-    expect(replies("dA").map((n) => n.body)).toEqual([expect.stringMatching(/^Fixed in [0-9a-f]{10} \(yagura p\/U1\): added the review fix/)]);
-    expect(discussions.filter((d) => d.individual_note && d.notes.some((n) => String(n.body).startsWith("the existing test covers this case")))).toHaveLength(
-      1,
-    );
+    expect(replies("dA").map((n) => n.body)).toEqual([
+      expect.stringMatching(/^\*\*yagura\*\* · automated, posted with this account\n\nFixed in [0-9a-f]{10} \(yagura p\/U1\): added the review fix/),
+    ]);
+    expect(
+      discussions.filter(
+        (d) =>
+          d.individual_note &&
+          d.notes.some((n) => String(n.body).startsWith("**yagura** · automated, posted with this account\n\nthe existing test covers this case")),
+      ),
+    ).toHaveLength(1);
   });
 
   it("blocks when the merge request is closed, and closes an abandoned unit's merge request with a note", async () => {
@@ -704,7 +719,9 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     expect(await watchMergeRequest(ctx, work.id)).toBeNull();
     const mr = glState().mrs[0]!;
     expect(mr.state).toBe("closed");
-    expect(mr.discussions.at(-1)!.notes[0]!.body).toBe("yagura abandoned p/U1, so this merge request will not be merged.\n\n<!-- yagura -->");
+    expect(mr.discussions.at(-1)!.notes[0]!.body).toBe(
+      "**yagura** · automated, posted with this account\n\nyagura abandoned p/U1, so this merge request will not be merged.\n\n<!-- yagura -->",
+    );
   });
 
   it("works out the GitLab project from the repo URL, nested groups included", () => {
