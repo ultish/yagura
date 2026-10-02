@@ -223,6 +223,20 @@ export type BellItem =
     }
   | { kind: "proposal"; id: string; threadId: number; threadTitle: string; proposalId: number; summary: string; at: string };
 
+export interface TurnCall {
+  name: string;
+  arg: string;
+  outcome: "ok" | "error" | "refused";
+  why: string | null;
+  output: string | null;
+  atMs: number | null;
+}
+
+export interface TurnCalls {
+  calls: TurnCall[];
+  running: boolean;
+}
+
 export interface ThreadView {
   thread: Thread;
   busy: boolean;

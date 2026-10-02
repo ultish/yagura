@@ -730,7 +730,7 @@ Answers to the questions this design left open (2026-09-26):
 7. **Agent communication (2026-09-29, user):** no chat between agents. A rejected worker resumes its own session with the verifier's findings instead of starting cold, within the limits in §13 "Resume on rejection"; one-way notices to siblings stay open until a real run needs them.
 8. **Judgment over rules (2026-09-30, user):** agents are trusted to know how to test; the verifier checks the worker did what was asked, tests what was built, and keeps the verify pack current (fixing or extending it, or running `maintain-verification-skill`); the worker never edits the pack; yagura agrees or disagrees only on facts it can check; environment values and notes are context, not checks, and failures surface from real use to the watchman and the developer; the audit trail (each agent's decisions and reasons, yagura's checks, cost) lets the developer disagree with any decision after the fact (§13 "Judgment, evidence, and the trail").
 
-## 21. The watchman as a live session (decided 2026-09-30, user; steps 1–3 built 2026-10-02)
+## 21. The watchman as a live session (decided 2026-09-30, user; steps 1–4 built 2026-10-02)
 
 Today each watchman message is a fresh harness session whose context yagura rebuilds from the store (§8a). The developer wants the conversation to feel like a Claude Code session: continuous, able to look things up and run read-only commands itself, with a "clear" that starts a new session. This section is the design; steps 1–3 are built (see "As built" below). It replaces §8a's "every message is a fresh harness session" and keeps the rest of §8a (records, mentions, proposals applied on Go).
 
@@ -796,7 +796,14 @@ Real SQLite and git; the fake agent extended to honour `--resume` and to attempt
 - The role guard (`agentRefusal`, first thing in the CLI): with `YAGURA_ROLE` set, for every agent role and not only the watchman, the CLI runs only reads and `evidence` (which has its own token) and refuses everything else with exit 2, failing closed on anything it does not recognise. No per-turn secret: the guard trips on the role claim, not on proof of it, and dropping the claim (`env -u`, `YAGURA_ROLE= yagura …`) is itself a command outside the allow-list (a real probe: `FOO=1 echo hi` was refused even with `Bash(echo hi:*)` allowed). Workers run under `bypassPermissions`, so for them the guard is the only stop. The daemon API has no role check: agents have no network tool and no Bash beyond the list.
 - The brief's LOOKING THINGS UP section says what the watchman can read and run.
 - Proof: tests for the guard (every read allowed, every write and unknown command refused, any role), `yagura git` against a real mirror (reads, refused subcommands and options, stale refs, trunk by default), the adapter flags, and the watchman's run options. Real (Haiku, $0.17, fixtures `claude-watchman-tools.jsonl` and `claude-watchman-resume.jsonl`): asked for a word in a registered repo's README, the watchman found it with `yagura git`; `yagura set`, `cat /etc/hosts`, a redirect, `find` outside, and Write were refused and the setting was unchanged; the next message resumed the same session in 8 s and read the trunk log.
-- Gaps: a broad `Bash(…)` allow rule in the developer's own settings still applies to the watchman (only the five tools above are denied outright). Step 4 (tool calls and denials in the transcript) is not built.
+- Gaps: a broad `Bash(…)` allow rule in the developer's own settings still applies to the watchman (only the five tools above are denied outright).
+
+### As built (step 4, 2026-10-02)
+
+- Chosen from three mocks on real data (summary line, steps between the words, a side rail): the summary line. Each watchman reply with a turn log gets one line above its words, `10 tool calls · 3 allowed · 1 errored · 6 refused` (refused in red), that opens to the list: time into the turn, the call (`yagura git …` shown without `Bash`), a pill, why it was refused, and its output on click. While a turn runs, a live box under the last message shows the calls so far and the latest one.
+- `readTurnCalls` (`turncalls.ts`) pairs `tool_call` and `tool_result` events from the turn's log (the retry log too, when records were rejected) and classes a result `refused` (the harness's permission denial, a disabled tool, or the CLI role guard), `error` (it ran and failed), or `ok`. API: `GET /api/messages/:id/calls`, `GET /api/threads/:id/live-calls`.
+- Tested against the real Haiku transcript `claude-watchman-tools.jsonl` (ten calls, six refused) and checked in the browser.
+- The context meter and session divider were already in the header and transcript (step 1).
 
 ### Open
 

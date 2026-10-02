@@ -4,6 +4,8 @@ import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
   addUnitNote,
+  getMessage,
+  readTurnCalls,
   bumpMaxAttempts,
   retryState,
   logTimesPath,
@@ -550,6 +552,17 @@ export function createApp(opts: ServerOptions): Hono {
     return c.json(threadView(thread.id), 202);
   });
   app.get("/api/threads/:id", (c) => c.json(threadView(Number(c.req.param("id")))));
+  const turnAdapter = () => (opts.adapters ?? { claude: claudeAdapter })[resolveSetting(db, "role.watchman.harness").value as string] ?? claudeAdapter;
+  app.get("/api/messages/:id/calls", (c) => {
+    const m = getMessage(db, Number(c.req.param("id")));
+    const logs = m.turnLog ? [m.turnLog.replace(/\.retry\.jsonl$/, ".jsonl"), m.turnLog] : [];
+    return c.json({ ...readTurnCalls(turnAdapter(), [...new Set(logs)]), running: false });
+  });
+  app.get("/api/threads/:id/live-calls", (c) => {
+    const turn = runningTurn(db, Number(c.req.param("id")));
+    if (!turn) return c.json({ calls: [], running: false });
+    return c.json({ ...readTurnCalls(turnAdapter(), [turn.logPath]), running: true });
+  });
   app.post("/api/threads/:id/messages", async (c) => {
     const id = Number(c.req.param("id"));
     const b = await body(c);

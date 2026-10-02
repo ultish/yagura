@@ -5,6 +5,7 @@ import { Inline, Markdown } from "../lib/markdown";
 import { needsYou } from "../lib/scene";
 import { Link } from "../ui/Link";
 import { MentionInput } from "../ui/MentionInput";
+import { LiveTurnCalls, TurnCallsFor } from "../ui/TurnCalls";
 import { useAction } from "../ui/rows";
 
 const ROLE = {
@@ -150,6 +151,7 @@ function Message({ m, proposals, known, onEdit }: { m: ThreadMessage; proposals:
         </div>
       </div>
       <div style={{ flexGrow: 1, minWidth: 0, fontSize: 15, lineHeight: 1.55, color: m.role === "system" ? "var(--soft)" : "var(--text)" }}>
+        {m.role === "watchman" && m.turnLog && <TurnCallsFor messageId={m.id} />}
         <Markdown text={m.body} known={known} />
         {proposals.map((p) => (
           <ProposalCard key={p.id} p={p} onEdit={onEdit} />
@@ -501,6 +503,14 @@ export function Talk({ threadId }: { threadId: number | null }) {
                   />
                 </Fragment>
               ))}
+              {busy && threadId !== null && (
+                <div style={{ display: "flex", gap: 16, padding: "14px 0", borderTop: "1px solid var(--line2)" }}>
+                  <div style={{ width: 86, flexShrink: 0 }} />
+                  <div style={{ flexGrow: 1, minWidth: 0 }}>
+                    <LiveTurnCalls threadId={threadId} />
+                  </div>
+                </div>
+              )}
               <div ref={bottom} />
             </div>
           </>

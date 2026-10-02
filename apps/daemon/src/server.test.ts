@@ -396,6 +396,16 @@ describe("watchman API", () => {
     } while (view.busy);
     expect(view.messages.map((m) => m.role)).toEqual(["human", "watchman"]);
     expect(view.proposals.map((p) => p.state)).toEqual(["pending"]);
+    const calls = (await (await talkApp.request(`/api/messages/${view.messages[1]!.id}/calls`, { headers: auth })).json()) as {
+      calls: { name: string; outcome: string }[];
+      running: boolean;
+    };
+    expect(calls.running).toBe(false);
+    expect(calls.calls.every((c) => c.outcome === "ok")).toBe(true);
+    expect((await (await talkApp.request(`/api/threads/${thread.id}/live-calls`, { headers: auth })).json()) as { running: boolean }).toEqual({
+      calls: [],
+      running: false,
+    });
 
     const applied = await talkApp.request(`/api/proposals/${view.proposals[0]!.id}/apply`, { method: "POST", headers: auth });
     expect(((await applied.json()) as { result: { projects: string[] } }).result.projects).toEqual(["proto-a", "proto-b"]);

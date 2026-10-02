@@ -25,7 +25,7 @@ The one list of open work; the sections below are history. Each line says where 
 
 **Phase 7, more harnesses (DESIGN §19, §13, §22).** grok is blocked (no credit, so no real transcript to build the parser on); codex is not installed here. Each needs a real probe for session resume and stdin steering. Also pack manifests for pstack-claude forks, and measurement-driven hillclimb projects.
 
-**The watchman (DESIGN §21).** Step 4: tool calls, refusals, and a context meter in the thread (UI: prototype first). Queue messages sent while a turn runs (refused with 409 today).
+**The watchman (DESIGN §21).** Steps 1–4 are built (step 4, 2026-10-02: a summary line of tool calls and refusals above each reply, a live box during a turn). Queue messages sent while a turn runs (refused with 409 today).
 
 **Proofs on real agents.** A blocking or should review finding through triage (about $1–2 on the GitHub sandbox). A trunk CI failure on GitHub (the sandbox has no Actions workflow; adding one changes the developer's repo, so ask). The yagura label on a real GitHub PR (seen on GitLab).
 
