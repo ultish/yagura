@@ -292,6 +292,7 @@ function toAttempt(r: Record<string, unknown>): Attempt {
     id: r.id as AttemptId,
     unitId: r.unit_id as UnitId,
     n: r.n as number,
+    agentNo: r.agent_no as number,
     state: r.state as Attempt["state"],
     harness: r.harness as string,
     model: (r.model as string | null) ?? null,
@@ -324,7 +325,16 @@ function toAttempt(r: Record<string, unknown>): Attempt {
 export function createAttempt(db: Db, unitId: UnitId, harness: string, model: string | null): Attempt {
   const id = db.transaction(() => {
     const n = (db.prepare("SELECT COALESCE(MAX(n), 0) + 1 AS next FROM attempts WHERE unit_id = ?").get(unitId) as { next: number }).next;
-    return Number(db.prepare("INSERT INTO attempts (unit_id, n, harness, model) VALUES (?, ?, ?, ?)").run(unitId, n, harness, model).lastInsertRowid);
+    const agentNo = (
+      db
+        .prepare(
+          "SELECT COUNT(*) + 1 AS next FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.project_id = (SELECT project_id FROM units WHERE id = ?)",
+        )
+        .get(unitId) as { next: number }
+    ).next;
+    return Number(
+      db.prepare("INSERT INTO attempts (unit_id, n, agent_no, harness, model) VALUES (?, ?, ?, ?, ?)").run(unitId, n, agentNo, harness, model).lastInsertRowid,
+    );
   })();
   return getAttempt(db, id as AttemptId);
 }

@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, streamUrl, useApi, useNow, type Attempt, type AttemptDetail, type EvidenceRun, type LogLine, type ProjectDetail, type Steer } from "../api";
+import {
+  api,
+  streamUrl,
+  useApi,
+  useNow,
+  type Attempt,
+  type AttemptDetail,
+  type EvidenceRun,
+  type LogLine,
+  type ProjectDetail,
+  type Steer,
+  type UnitStory,
+} from "../api";
 import { slotLine } from "./environment-values";
 import { roleOf } from "../lib/units";
 import { clock, duration, modelName, tokens, when } from "../lib/format";
@@ -295,6 +307,56 @@ function EvidenceGrid({ runs, selected, onPick }: { runs: EvidenceRun[]; selecte
   );
 }
 
+// The order the agents worked on a unit, each linked, so the way from a worker to the verifier that sent it back is one click.
+function AgentFlow({ d }: { d: AttemptDetail }) {
+  const workSeq = d.target?.seq ?? (d.unit.type === "plan" ? null : d.unit.seq);
+  const story = useApi<UnitStory>(workSeq === null ? null : `/api/projects/${d.project.id}/units/${workSeq}/story`, {
+    poll: d.attempt.state === "running" ? 4000 : undefined,
+  });
+  const agents = story.data?.agents ?? [];
+  const at = agents.findIndex((x) => x.attemptId === d.attempt.id);
+  if (workSeq === null || agents.length < 2 || at < 0) return null;
+  const prev = agents[at - 1];
+  const next = agents[at + 1];
+  const hop = (x: (typeof agents)[number], arrow: string) => (
+    <Link to={`/a/${x.attemptId}`} style={{ textDecoration: "none" }}>
+      {arrow} {x.role} A{x.agentNo} <span className={`chip story-${x.tone}`}>{x.outcome}</span>
+    </Link>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div className="mono" style={{ fontSize: 12.5, display: "flex", gap: 18, flexWrap: "wrap" }}>
+        {prev ? hop(prev, "◂ before:") : <span className="muted">first agent on U{workSeq}</span>}
+        {next ? hop(next, "next ▸") : <span className="muted">latest agent on U{workSeq}</span>}
+      </div>
+      <div
+        className="mono"
+        style={{ fontSize: 12, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}
+        aria-label={`Agents that worked on U${workSeq}`}
+      >
+        <span className="muted">U{workSeq} flow</span>
+        {agents.map((x, i) => (
+          <span key={x.attemptId} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+            {i > 0 && <span className="muted">→</span>}
+            {x.attemptId === d.attempt.id ? (
+              <b aria-current="step" style={{ borderBottom: "2px solid var(--lamp)" }}>
+                A{x.agentNo} {x.role}
+              </b>
+            ) : (
+              <Link to={`/a/${x.attemptId}`} title={`${x.outcome}${x.counted ? "" : " · not counted"}`}>
+                A{x.agentNo} {x.role}
+              </Link>
+            )}
+            <span className={`story-${x.tone}`} title={x.outcome}>
+              {x.tone === "pine" ? "✓" : x.tone === "bell" ? "✗" : x.outcome === "running" ? "…" : "·"}
+            </span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function statusOf(d: AttemptDetail, now: number, lastActivity: string | null): { text: string; tone: string } {
   const a = d.attempt;
   const lower = roleOf(d.unit.type, d.attempt.harness);
@@ -387,11 +449,11 @@ export function Agent({ attemptId }: { attemptId: number }) {
           <Link to={`/p/${u.projectId}`} style={{ textDecoration: "none" }}>
             {u.projectId}
           </Link>{" "}
-          / <Link to={`/p/${u.projectId}/u/${u.seq}`}>U{u.seq}</Link> / {role} U{u.seq}.{a.n}
+          / <Link to={`/p/${u.projectId}/u/${d.target?.seq ?? u.seq}`}>U{d.target?.seq ?? u.seq}</Link> / {role} A{a.agentNo}
           {a.resumesAttemptId && (
             <>
               {" "}
-              · resumes <Link to={`/a/${a.resumesAttemptId}`}>try {u.attempts.find((x) => x.id === a.resumesAttemptId)?.n ?? "?"}</Link>
+              · resumes <Link to={`/a/${a.resumesAttemptId}`}>A{u.attempts.find((x) => x.id === a.resumesAttemptId)?.agentNo ?? "?"}</Link>
             </>
           )}
           {d.target && (
@@ -433,6 +495,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
         <div className={`s-${status.tone}`} style={{ fontSize: 14 }}>
           {status.text}
         </div>
+        <AgentFlow d={d} />
         <div className="facts">
           <span>
             <b>{byYagura ? "run by yagura, no agent" : modelName(a.model ?? timeline.model)}</b>
@@ -533,7 +596,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
             <h2 className="h2">{a.resumesAttemptId ? "Resumed" : "Brief"}</h2>
             {a.resumesAttemptId ? (
               <div style={{ fontSize: 13.5, marginTop: 6 }}>
-                Same session, worktree, and branch as try {u.attempts.find((x) => x.id === a.resumesAttemptId)?.n ?? "?"}; yagura sent the rejection and its
+                Same session, worktree, and branch as A{u.attempts.find((x) => x.id === a.resumesAttemptId)?.agentNo ?? "?"}; yagura sent the rejection and its
                 findings instead of a new brief.
               </div>
             ) : (
@@ -591,11 +654,11 @@ export function Agent({ attemptId }: { attemptId: number }) {
                 <div key={x.id}>
                   {x.id === a.id ? (
                     <span className={x.state === "running" ? "s-lamp" : undefined}>
-                      try {x.n} · {x.state} (this one)
+                      A{x.agentNo} · {x.state} (this one)
                     </span>
                   ) : (
                     <Link to={`/a/${x.id}`}>
-                      try {x.n} · {x.state}
+                      A{x.agentNo} · {x.state}
                       {x.resumesAttemptId ? " · resumed" : ""}
                       {x.rejection
                         ? ` · rejected: ${REJECTION_LABEL[x.rejection]}`
@@ -649,4 +712,28 @@ export function UnitAgent({ projectId, seq, n }: { projectId: string; seq: numbe
       </main>
     );
   return <Agent key={attempt.id} attemptId={attempt.id} />;
+}
+
+export function AgentByNo({ projectId, agentNo }: { projectId: string; agentNo: number }) {
+  const { data, error } = useApi<ProjectDetail>(`/api/projects/${projectId}`);
+  if (error)
+    return (
+      <main style={{ padding: 36 }} className="s-bell">
+        {error}
+      </main>
+    );
+  if (!data)
+    return (
+      <main style={{ padding: 36 }} className="muted">
+        Loading…
+      </main>
+    );
+  const attempt = data.units.flatMap((u) => u.attempts).find((a) => a.agentNo === agentNo);
+  return attempt ? (
+    <Agent attemptId={attempt.id} />
+  ) : (
+    <main style={{ padding: 36 }}>
+      No agent A{agentNo} in {projectId}.
+    </main>
+  );
 }

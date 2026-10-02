@@ -125,7 +125,7 @@ const USAGE = `yagura — agent orchestration
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
   yagura steer <project>/U<n> <message>          tell a unit's running agent something; it reads it after its current step
   yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go | clear <id>
-  yagura thread mentions <@project | @project/U3 | @project/U3.2 | @thread:4 | @repo:id>   conversations that mention it
+  yagura thread mentions <@project | @project/U3 | @project/A7 | @thread:4 | @repo:id>   conversations that mention it
   yagura proposal apply|discard <id>
   yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
   yagura daemon                          run yagura for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)

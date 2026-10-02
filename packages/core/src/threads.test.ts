@@ -90,9 +90,15 @@ describe("mentions", () => {
     });
     createAttempt(db, u.id, "claude", null);
     const t = createThread(db, { title: "diffing" });
-    expect(parseMentions("see @kafka-diff/U1.1, @kafka-diff and me@mail.com @ghost")).toEqual(["kafka-diff/U1.1", "kafka-diff", "ghost"]);
-    const m = addMessage(db, { threadId: t.id, role: "human", body: "why is @kafka-diff/U1 stuck? compare @kafka-diff/U1.1 and @nope" });
+    expect(parseMentions("see @kafka-diff/U1.1, @kafka-diff/A7 @kafka-diff and me@mail.com @ghost")).toEqual([
+      "kafka-diff/U1.1",
+      "kafka-diff/A7",
+      "kafka-diff",
+      "ghost",
+    ]);
+    const m = addMessage(db, { threadId: t.id, role: "human", body: "why is @kafka-diff/U1 stuck? compare @kafka-diff/U1.1 and @kafka-diff/A1 and @nope" });
     expect(db.prepare("SELECT kind, ref FROM message_refs WHERE message_id = ? ORDER BY ref").all(m.id)).toEqual([
+      { kind: "attempt", ref: "kafka-diff/A1" },
       { kind: "unit", ref: "kafka-diff/U1" },
       { kind: "attempt", ref: "kafka-diff/U1.1" },
     ]);
@@ -100,7 +106,8 @@ describe("mentions", () => {
     expect(messagesMentioning(db, "kafka-diff").map((x) => x.messageId)).toEqual([m.id]);
     expect(suggestMentions(db, "@kaf").map((s) => s.token)).toEqual(["kafka-diff"]);
     expect(suggestMentions(db, "kafka-diff/U").map((s) => s.token)).toEqual(["kafka-diff/U1"]);
-    expect(suggestMentions(db, "kafka-diff/U1.").map((s) => s.token)).toEqual(["kafka-diff/U1.1"]);
+    expect(suggestMentions(db, "kafka-diff/U1.").map((s) => s.token)).toEqual(["kafka-diff/A1"]);
+    expect(suggestMentions(db, "kafka-diff/a").map((s) => s.token)).toEqual(["kafka-diff/A1"]);
     expect(suggestMentions(db, "diffing").map((s) => s.token)).toContain(`thread:${t.id}`);
   });
 });

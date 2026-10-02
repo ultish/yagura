@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api, useApi, useQuery, type StoryEntry, type StoryLine, type UnitCode, type UnitStory } from "../api";
-import { clip, clock, duration, modelName } from "../lib/format";
+import { clip, clock, duration, modelName, when } from "../lib/format";
 import { Inline } from "../lib/markdown";
 import { Link } from "../ui/Link";
 import { useAction } from "../ui/rows";
@@ -106,9 +106,9 @@ function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; 
         <div className="story-head">
           <span className="story-who">
             {a ? (
-              <Link to={`/p/${story.projectId}/u/${a.unitSeq}/${a.n}`}>
+              <Link to={`/a/${a.id}`}>
                 <b>{entry.who}</b>
-                {entry.actor !== "person" && ` · U${a.unitSeq}.${a.n}`}
+                {entry.actor !== "person" && ` · A${a.agentNo}`}
               </Link>
             ) : (
               <b>{entry.who}</b>
@@ -121,7 +121,7 @@ function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; 
           </span>
           {entry.status && <span className={`chip story-${entry.status.tone}`}>{entry.status.text}</span>}
           {a && (
-            <Link className="story-open" to={`/p/${story.projectId}/u/${a.unitSeq}/${a.n}`}>
+            <Link className="story-open" to={`/a/${a.id}`}>
               open agent →
             </Link>
           )}
@@ -181,7 +181,7 @@ function AgentsTab({ story }: { story: UnitStory }) {
         <thead>
           <tr>
             <th>Agent</th>
-            <th>Started</th>
+            <th>When</th>
             <th>Took</th>
             <th className="num">Cost</th>
             <th>Outcome</th>
@@ -192,12 +192,12 @@ function AgentsTab({ story }: { story: UnitStory }) {
           {story.agents.map((a) => (
             <tr key={a.attemptId} className={a.counted ? undefined : "dim"}>
               <td>
-                <Link to={`/p/${story.projectId}/u/${a.unitSeq}/${a.n}`}>
-                  {a.role} U{a.unitSeq}.{a.n}
+                <Link to={`/a/${a.attemptId}`}>
+                  {a.role} A{a.agentNo}
                 </Link>
                 {a.shared && <div className="muted hub-small">also planned other units</div>}
               </td>
-              <td className="mono">{clock(a.startedAt)}</td>
+              <td className="mono">{when(a.startedAt, a.endedAt, false)}</td>
               <td className="mono">{a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "—"}</td>
               <td className="num mono">${a.costUsd.toFixed(2)}</td>
               <td>
@@ -317,9 +317,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             {story.ended ? ` → ${clock(story.ended)}` : ""}
           </span>
         )}
-        {u.state === "running" && running?.attempt && (
-          <Link to={`/p/${projectId}/u/${running.attempt.unitSeq}/${running.attempt.n}`}>running now · watch it live</Link>
-        )}
+        {u.state === "running" && running?.attempt && <Link to={`/a/${running.attempt.id}`}>running now · watch it live</Link>}
       </div>
       <div className="hub-tabs" role="tablist">
         {(

@@ -260,6 +260,7 @@ export interface Attempt {
   id: AttemptId;
   unitId: UnitId;
   n: number;
+  agentNo: number;
   state: AttemptState;
   harness: string;
   model: string | null;

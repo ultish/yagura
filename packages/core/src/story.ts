@@ -31,7 +31,7 @@ export interface StoryEntry {
   at: IsoTime;
   actor: Actor;
   who: string;
-  attempt: { id: number; unitSeq: number; n: number; model: string | null; costUsd: number } | null;
+  attempt: { id: number; unitSeq: number; n: number; agentNo: number; model: string | null; costUsd: number } | null;
   status: { text: string; tone: "pine" | "amber" | "bell" | "muted" } | null;
   body: string | null;
   lines: StoryLine[];
@@ -55,6 +55,7 @@ export interface StoryAgent {
   role: string;
   unitSeq: number;
   n: number;
+  agentNo: number;
   model: string | null;
   startedAt: IsoTime | null;
   endedAt: IsoTime | null;
@@ -106,7 +107,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       .map((t, i) => line(`${ref}:chose:${i}`, "chose", t)),
     ...bullets(h.notes).map((t, i) => line(`${ref}:noted:${i}`, "noted", t)),
   ];
-  const attemptOf = (u: Unit, a: Attempt) => ({ id: a.id, unitSeq: u.seq, n: a.n, model: a.model, costUsd: a.costUsd });
+  const attemptOf = (u: Unit, a: Attempt) => ({ id: a.id, unitSeq: u.seq, n: a.n, agentNo: a.agentNo, model: a.model, costUsd: a.costUsd });
   const entries: StoryEntry[] = [];
 
   let planUnit: Unit | null = null;
@@ -151,7 +152,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     if (a.harness.startsWith("yagura-")) continue;
     const h = a.state === "handed_off" ? handoffOf(unit, a) : null;
     if (!h) {
-      folded.push(`${unit.seq}.${a.n}: ${a.state}${a.failureMode ? ` (${a.failureMode})` : ""}${spendsAttempt(a) ? "" : ", not counted"}`);
+      folded.push(`A${a.agentNo}: ${a.state}${a.failureMode ? ` (${a.failureMode})` : ""}${spendsAttempt(a) ? "" : ", not counted"}`);
       continue;
     }
     const ref = `a${a.id}`;
@@ -296,7 +297,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     const attempts = listAttempts(db, t.id);
     const done = attempts.filter((a) => a.state === "handed_off" && events.some((e) => e.unit_id === t.id && e.type === "unit.state" && e.data.to === "done"));
     const last = done.at(-1) ?? null;
-    const failedTries = attempts.filter((a) => a !== last && a.startedAt).map((a) => `${t.seq}.${a.n}: ${failReason(events, t, a)}`);
+    const failedTries = attempts.filter((a) => a !== last && a.startedAt).map((a) => `A${a.agentNo}: ${failReason(events, t, a)}`);
     if (!last) continue;
     const h = handoffOf(t, last);
     const ref = `a${last.id}`;
@@ -342,8 +343,8 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
         entries.push({
           at: st.createdAt,
           actor: "person",
-          who: `You told ${ROLE[u.type] ?? u.type} U${u.seq}.${a.n}`,
-          attempt: { id: a.id, unitSeq: u.seq, n: a.n, model: a.model, costUsd: 0 },
+          who: `You told ${ROLE[u.type] ?? u.type} A${a.agentNo}`,
+          attempt: { id: a.id, unitSeq: u.seq, n: a.n, agentNo: a.agentNo, model: a.model, costUsd: 0 },
           status:
             st.state === "delivered"
               ? { text: "read", tone: "pine" }
@@ -517,6 +518,7 @@ function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, ha
       role: ROLE[u.type] ?? u.type,
       unitSeq: u.seq,
       n: a.n,
+      agentNo: a.agentNo,
       model: a.model,
       startedAt: a.startedAt,
       endedAt: a.endedAt,

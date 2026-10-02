@@ -239,7 +239,7 @@ describe("runWorkUnit", () => {
       const log = readFileSync(layout(boot).log(project, unit.seq, 1), "utf8").split("\n");
       expect(JSON.parse(log[steer!.logLine!]!)).toMatchObject({ isReplay: true, message: { content: [{ text: "use the existing store instead" }] } });
       expect(unitStory(db, boot, getUnit(db, unit.id)).entries.find((e) => e.actor === "person")).toMatchObject({
-        who: "You told Worker U1.1",
+        who: "You told Worker A1",
         body: "use the existing store instead",
         status: { text: "read", tone: "pine" },
       });

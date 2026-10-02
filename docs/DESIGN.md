@@ -219,7 +219,7 @@ A **proposal** (`proposal.ts`) has `repos[]`, each either a new repo (id, descri
 
 The **engine** activates a `framing` project once all its `after` projects are closed; with `phase_gate` it first opens a `phase` gate (`start | hold`). It posts a **report** into each open thread when a linked project closes, raises andon, or is stuck (blocked work, nothing running or ready, no plan due); `threads.reported_json` keeps the last report key per project so each state is reported once. A report is a system message built from records (landed units with SHA, tier, and a `yagura trace` hint; blocked units with reasons; still-open units; how to run each repo from its trunk verify pack; open gates and questions) and rings the bell as a `report` gate (`seen`). Answering a report gate does not trigger planning.
 
-**Mentions.** Any message can point at yagura's records with `@project`, `@project/U3` (unit), `@project/U3.2` (one attempt), `@thread:4`, or `@repo:id`. Every stored message, human or watchman, is scanned; resolved mentions go into `message_refs` (migration 6), so "which conversations discuss U3" is a query (`yagura thread mentions`, `GET /api/mentions/:token/messages`; a project token also finds mentions of its units). Mentioned records are described in the watchman brief (MENTIONED, fixed priority, each capped at ~2k tokens): a project's status, a unit's or attempt's state, attempts, blocked reason, notes, last handoff and log path, a thread's active decisions, a repo's facts. `GET /api/mentions?q=` serves the dashboard's `@` autocomplete (projects and repos by id, units by `project/U…` or goal words, attempts by `project/U3.…`, threads by title).
+**Mentions.** Any message can point at yagura's records with `@project`, `@project/U3` (unit), `@project/A7` (one agent run; `@project/U3.2`, unit 3's second try, still resolves), `@thread:4`, or `@repo:id`. Every stored message, human or watchman, is scanned; resolved mentions go into `message_refs` (migration 6), so "which conversations discuss U3" is a query (`yagura thread mentions`, `GET /api/mentions/:token/messages`; a project token also finds mentions of its units). Mentioned records are described in the watchman brief (MENTIONED, fixed priority, each capped at ~2k tokens): a project's status, a unit's or attempt's state, attempts, blocked reason, notes, last handoff and log path, a thread's active decisions, a repo's facts. `GET /api/mentions?q=` serves the dashboard's `@` autocomplete (projects and repos by id, units by `project/U…` or goal words, attempts by `project/U3.…`, threads by title).
 
 ### Project chains and spec import
 
@@ -576,7 +576,7 @@ Every landed unit is **one squashed commit** on trunk (the agent's own commits s
 ```
 Yagura-Project: orders
 Yagura-Unit: U2
-Yagura-Attempt: U2.1 (claude-opus-5-5, pstack 0.5.0)
+Yagura-Attempt: A2 (U2, claude-opus-5-5, pstack 0.5.0)
 Yagura-Branch: yg/orders/u2-1
 Yagura-Verdict: unit-verified by U3 (run:13, run:14)
 Yagura-Link: http://devvm:7300/p/orders/u/2

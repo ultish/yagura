@@ -86,7 +86,7 @@ export function Agents() {
         key={a.id}
         seq={
           <Link to={`/a/${a.id}`}>
-            {a.unit.projectId} · {roleOf(a.unit.type, a.harness)} U{a.unit.seq}.{a.n}
+            {a.unit.projectId} · {roleOf(a.unit.type, a.harness)} A{a.agentNo}
           </Link>
         }
         goal={<Inline text={a.target?.goal ?? a.unit.goal} />}

@@ -13,7 +13,7 @@ export interface Mention {
   projectId: ProjectId | null;
 }
 
-const MENTION = /(?<![\w@])@(thread:\d+|repo:[a-z][a-z0-9-]*|[a-z][a-z0-9-]*(?:\/U\d+(?:\.\d+)?)?)/g;
+const MENTION = /(?<![\w@])@(thread:\d+|repo:[a-z][a-z0-9-]*|[a-z][a-z0-9-]*(?:\/(?:U\d+(?:\.\d+)?|A\d+))?)/g;
 
 export function parseMentions(text: string): string[] {
   return [...new Set([...text.matchAll(MENTION)].map((m) => m[1]!.replace(/[-.]+$/, "")))];
@@ -21,13 +21,21 @@ export function parseMentions(text: string): string[] {
 
 const exists = (db: Db, sql: string, ...args: unknown[]) => !!db.prepare(sql).get(...args);
 
+function agentUnit(db: Db, projectId: ProjectId, agentNo: number): { unitSeq: number; n: number } | null {
+  const r = db
+    .prepare("SELECT u.seq AS unitSeq, a.n AS n FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.project_id = ? AND a.agent_no = ?")
+    .get(projectId, agentNo) as { unitSeq: number; n: number } | undefined;
+  return r ?? null;
+}
+
 export function resolveMention(db: Db, token: string): Mention | null {
   if (token.startsWith("thread:"))
     return exists(db, "SELECT 1 FROM threads WHERE id = ?", Number(token.slice(7))) ? { kind: "thread", ref: token, projectId: null } : null;
   if (token.startsWith("repo:")) return exists(db, "SELECT 1 FROM repos WHERE id = ?", token.slice(5)) ? { kind: "repo", ref: token, projectId: null } : null;
-  const m = /^([a-z][a-z0-9-]*)(?:\/U(\d+)(?:\.(\d+))?)?$/.exec(token);
+  const m = /^([a-z][a-z0-9-]*)(?:\/(?:U(\d+)(?:\.(\d+))?|A(\d+)))?$/.exec(token);
   if (!m || !exists(db, "SELECT 1 FROM projects WHERE id = ?", m[1])) return null;
   const projectId = m[1] as ProjectId;
+  if (m[4]) return agentUnit(db, projectId, Number(m[4])) ? { kind: "attempt", ref: token, projectId } : null;
   if (!m[2]) return { kind: "project", ref: token, projectId };
   const unit = db.prepare("SELECT id FROM units WHERE project_id = ? AND seq = ?").get(projectId, Number(m[2])) as { id: number } | undefined;
   if (!unit) return null;
@@ -76,6 +84,16 @@ export interface Suggestion {
 export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[] {
   const q = query.replace(/^@/, "").toLowerCase();
   const out: Suggestion[] = [];
+  const agentRef = /^([a-z][a-z0-9-]*)\/a(\d*)$/.exec(q);
+  if (agentRef) {
+    const rows = db
+      .prepare(
+        `SELECT a.agent_no, a.state, u.seq, u.type FROM attempts a JOIN units u ON u.id = a.unit_id
+         WHERE u.project_id = ? AND CAST(a.agent_no AS TEXT) LIKE ? ORDER BY a.agent_no DESC LIMIT ?`,
+      )
+      .all(agentRef[1], `${agentRef[2] ?? ""}%`, limit) as { agent_no: number; state: string; seq: number; type: string }[];
+    return rows.map((r) => ({ token: `${agentRef[1]}/A${r.agent_no}`, kind: "attempt" as const, label: `${r.type} agent for U${r.seq} · ${r.state}` }));
+  }
   const unitRef = /^([a-z][a-z0-9-]*)\/(?:u(\d*)(?:\.(\d*))?)?$/.exec(q);
   if (unitRef) {
     const units = db
@@ -85,8 +103,12 @@ export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[]
       .all(unitRef[1], `${unitRef[2] ?? ""}%`, limit) as { id: number; seq: number; type: string; state: string; goal: string }[];
     for (const u of units) {
       if (unitRef[3] !== undefined) {
-        const attempts = db.prepare("SELECT n, state FROM attempts WHERE unit_id = ? ORDER BY n").all(u.id) as { n: number; state: string }[];
-        for (const a of attempts) out.push({ token: `${unitRef[1]}/U${u.seq}.${a.n}`, kind: "attempt", label: `attempt ${a.n} of U${u.seq} · ${a.state}` });
+        const attempts = db.prepare("SELECT n, agent_no AS agentNo, state FROM attempts WHERE unit_id = ? ORDER BY n").all(u.id) as {
+          n: number;
+          agentNo: number;
+          state: string;
+        }[];
+        for (const a of attempts) out.push({ token: `${unitRef[1]}/A${a.agentNo}`, kind: "attempt", label: `agent A${a.agentNo} for U${u.seq} · ${a.state}` });
       } else out.push({ token: `${unitRef[1]}/U${u.seq}`, kind: "unit", label: `${u.type} · ${u.state} · ${u.goal}` });
     }
     return out.slice(0, limit);
@@ -134,7 +156,7 @@ function describeUnit(db: Db, boot: Bootstrap, unit: Unit, onlyAttempt: number |
   if (unit.notes.length) lines.push(`- notes: ${unit.notes.join(" / ")}`);
   for (const a of attempts) {
     lines.push(
-      `- attempt ${a.n}: ${a.state}${a.handoffStatus ? ` ${a.handoffStatus}` : ""}${a.failureMode ? ` (${a.failureMode})` : ""} · ${a.model ?? a.harness}${a.missingSkills.length ? ` · skipped ${a.missingSkills.join(", ")}` : ""}${a.stopNote ? ` · stopped: ${a.stopNote}` : ""}`,
+      `- agent A${a.agentNo} (try ${a.n}): ${a.state}${a.handoffStatus ? ` ${a.handoffStatus}` : ""}${a.failureMode ? ` (${a.failureMode})` : ""} · ${a.model ?? a.harness}${a.missingSkills.length ? ` · skipped ${a.missingSkills.join(", ")}` : ""}${a.stopNote ? ` · stopped: ${a.stopNote}` : ""}`,
     );
   }
   const last = attempts.filter((a) => a.endedAt).at(-1);
@@ -165,7 +187,13 @@ export function describeMention(db: Db, boot: Bootstrap, m: Mention): string {
       "\n",
     );
   }
-  const [, seq, n] = /\/U(\d+)(?:\.(\d+))?$/.exec(m.ref)!;
+  const agent = /\/A(\d+)$/.exec(m.ref);
+  const [, seq, n] = agent
+    ? (() => {
+        const r = agentUnit(db, m.projectId!, Number(agent[1]))!;
+        return ["", String(r.unitSeq), String(r.n)];
+      })()
+    : /\/U(\d+)(?:\.(\d+))?$/.exec(m.ref)!;
   const project = getProject(db, m.projectId!);
   return `- project ${project.id} (${project.state})\n${describeUnit(db, boot, getUnitBySeq(db, project.id, Number(seq)), n ? Number(n) : null)}`;
 }

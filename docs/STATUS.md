@@ -15,6 +15,8 @@ Updated 2026-10-02 (handoff for a cleared session, end of session 108e02dc). Bui
 - **Machine.** The Mac's data volume was 99% full (4.3 GB free of 460 GB) on 2026-10-02, not from yagura (its homes are a few MB).
 - **Data.** Scratch homes live in session directories that may be gone: this session's `…/108e02dc-…/scratchpad/yg1` (GitLab, now dead) and `yh6` (watchman tools); fourth run `…/cbf62733-…/scratchpad/yh5`; second run's view-only copy `…/e699d45d-…/scratchpad/yh2-story` (andon raised; do not clear). Prototypes: search https://claude.ai/artifact/Fmgm89ZWDRWoKCBG5Nj69b, unit hub https://claude.ai/artifact/NTCdJLxANBL9aVV2TQ9vtk.
 
+**Naming and flow (2026-10-02, developer's call):** units are the slices of work; agents are the processes that finish them. Every agent run has a per-project number, `A1`, `A2`, … in the order it started (`attempts.agent_no`, migration 26, backfilled by id), shown everywhere instead of `U3.2`; a retry is the next number. `@project/A7` mentions it (old `U3.2` still resolves), `/p/<project>/a/7` opens it, the commit trailer reads `Yagura-Attempt: A2 (U2, model, pstack x)`. The agent page has "◂ before / next ▸" links and the whole flow of the unit (planner → worker → verifier → …, each linked, ✓/✗), and shows the date and time span of the run; the Agents list and the unit's Agents tab show date and time too. The beacon dots on the project page open their agent run. Open: the project's unit list still contains verify and plan units as rows (U4 "Verify U2"); the developer's model is that those are agents of the work unit, not units.
+
 ## What's left (2026-10-02)
 
 The one list of open work; the sections below are history. Each line says where it is designed.

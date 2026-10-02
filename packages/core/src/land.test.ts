@@ -172,7 +172,7 @@ describe("landUnit (forge none)", () => {
     const message = await git(["log", "-1", "--format=%B", "main"], { cwd: origin });
     expect(message).toMatch(/^Implement apply_discount\n\n- edited app\/orders.py\n\n/);
     expect(message).toContain("Yagura-Project: p\nYagura-Unit: U1\n");
-    expect(message).toMatch(/Yagura-Attempt: U1\.1 \(fake-model, pstack 0\.5\.0\)/);
+    expect(message).toMatch(/Yagura-Attempt: A1 \(U1, fake-model, pstack 0\.5\.0\)/);
     expect(message).toContain("Yagura-Branch: yg/p/u1-1");
     expect(message).toMatch(/Yagura-Verdict: unit-verified by U2 \(run:\d+/);
     expect(message).toContain("Yagura-Link: http://devvm:7300/p/p/u/1");

@@ -226,10 +226,11 @@ describe("layoutScene", () => {
 
 describe("mentions and formatting", () => {
   it("maps mention tokens to pages", () => {
-    expect(["kafka-diff", "kafka-diff/U3", "kafka-diff/U3.2", "thread:4", "repo:jsondiff"].map(mentionHref)).toEqual([
+    expect(["kafka-diff", "kafka-diff/U3", "kafka-diff/U3.2", "kafka-diff/A7", "thread:4", "repo:jsondiff"].map(mentionHref)).toEqual([
       "/p/kafka-diff",
       "/p/kafka-diff/u/3",
       "/p/kafka-diff/u/3/2",
+      "/p/kafka-diff/a/7",
       "/talk/4",
       "/repos#jsondiff",
     ]);

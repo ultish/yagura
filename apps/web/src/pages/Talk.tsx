@@ -422,7 +422,7 @@ export function Talk({ threadId }: { threadId: number | null }) {
             </h1>
             <p className="muted" style={{ maxWidth: 640, fontSize: 15, lineHeight: 1.6 }}>
               Describe what you want built or changed. The watchman asks only what it must, records every decision, and proposes projects for you to start with
-              Go. Mention anything with @: a project, a unit like @orders/U3, one agent run like @orders/U3.2, a thread, or a repo.
+              Go. Mention anything with @: a project, a unit like @orders/U3, one agent run like @orders/A7, a thread, or a repo.
             </p>
           </div>
         ) : (

@@ -378,6 +378,16 @@ CREATE TABLE retro_watches (
 );
 `,
   },
+  {
+    version: 26,
+    sql: `
+ALTER TABLE attempts ADD COLUMN agent_no INTEGER;
+UPDATE attempts SET agent_no = (
+  SELECT COUNT(*) FROM attempts a2 JOIN units u2 ON u2.id = a2.unit_id
+  WHERE u2.project_id = (SELECT project_id FROM units WHERE id = attempts.unit_id) AND a2.id <= attempts.id
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

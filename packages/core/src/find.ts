@@ -155,13 +155,13 @@ export function find(db: Db, query: string): FindResult {
   const handoffs = wordsClause("s.body", words);
   for (const r of db
     .prepare(
-      `SELECT s.body, s.ref_id, u.project_id, u.seq, u.type, a.n FROM search s JOIN attempts a ON a.id = CAST(s.ref_id AS INTEGER) JOIN units u ON u.id = a.unit_id
+      `SELECT s.body, s.ref_id, u.project_id, u.seq, u.type, a.n, a.agent_no FROM search s JOIN attempts a ON a.id = CAST(s.ref_id AS INTEGER) JOIN units u ON u.id = a.unit_id
        WHERE s.kind = 'handoff' AND ${handoffs.sql} ORDER BY a.id DESC LIMIT ${PER_KIND}`,
     )
     .all(...handoffs.args) as Row[])
     hits.push({
       kind: "handoff",
-      ref: `${r.project_id}/U${r.seq}.${r.n}`,
+      ref: `${r.project_id}/A${r.agent_no}`,
       href: `/a/${r.ref_id}`,
       title: `${r.type} handoff`,
       meta: "handoff",
