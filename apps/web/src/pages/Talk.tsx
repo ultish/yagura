@@ -15,7 +15,7 @@ const ROLE = {
 
 interface ProposalBody {
   summary: string;
-  repos?: { id: string; description?: string; existing?: string }[];
+  repos?: { id: string; description?: string; existing?: string; forge?: string; land?: string }[];
   environments?: (
     | { id: string; template: string; answers?: Record<string, string> }
     | { id: string; provider?: string; capacity?: number; presets?: string[]; values?: { name: string; value: string }[] }
@@ -33,7 +33,7 @@ interface ProposalBody {
   amend?: { project: string; units: { key: string; goal: string }[] }[];
 }
 
-function ProposalCard({ p, onEdit }: { p: Proposal; onEdit: (text: string) => void }) {
+function ProposalCard({ p, onEdit }: { p: Proposal & { routes?: Record<string, { text: string; ok: boolean }> }; onEdit: (text: string) => void }) {
   const action = useAction();
   const body = p.body as ProposalBody;
   const pending = p.state === "pending";
@@ -51,6 +51,7 @@ function ProposalCard({ p, onEdit }: { p: Proposal; onEdit: (text: string) => vo
           <li key={`r${r.id}`}>
             {r.existing ? "existing" : "new"} repo <span className="mono">{r.id}</span>
             {r.existing ? `: ${r.existing}` : r.description ? `: ${r.description}` : ""}
+            {r.forge ? ` · forge ${r.forge}` : r.land === "push" ? " · pushes to its default branch" : ""}
           </li>
         ))}
         {body.environments?.map((e) => (
@@ -96,6 +97,7 @@ function ProposalCard({ p, onEdit }: { p: Proposal; onEdit: (text: string) => vo
                 done when: <Inline text={pr.predicate} />
               </span>
               <span>merge {pr.merge ?? "human"}</span>
+              {p.routes?.[pr.id] && <span className={p.routes[pr.id]!.ok ? undefined : "s-bell"}>{p.routes[pr.id]!.text}</span>}
               <span>≥ {pr.minTier ?? "unit-verified"}</span>
               {pr.after?.length ? <span>after {pr.after.join(", ")}</span> : null}
               {pr.units?.length ? <span>{pr.units.length} starting units</span> : null}

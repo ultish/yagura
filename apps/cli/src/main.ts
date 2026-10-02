@@ -18,6 +18,8 @@ import {
   listThreads,
   ProposalBody,
   runWatchmanTurn,
+  RouteNeeded,
+  describeRoute,
   addSteer,
   clearWatchmanSession,
   searchMessages,
@@ -45,7 +47,7 @@ import {
   setProjectEnvironment,
   setRepoUrl,
   setRepoForge,
-  FORGES,
+  getRepo,
   type Forge,
   type EnvironmentId,
   type Provider,
@@ -96,12 +98,12 @@ import {
 
 const USAGE = `yagura — agent orchestration
 
-  yagura repo add <git URL> [--id <id>]   mirror an existing repo; default branch and verify pack are read from it
+  yagura repo add <git URL> [--id <id>] [--forge gh|glab | --land push]   mirror an existing repo; github.com lands through pull requests, hosts in forge.glab_hosts through merge requests; any other remote needs --forge or --land push
   yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified] [--issue <ref>...]
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
-  yagura repo set <id> [--url <url>] [--forge none|gh|glab]   gh and glab land through pull/merge requests (forge.repo, forge.merge_method)
+  yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab land through pull/merge requests (forge.repo, forge.merge_method)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]
   yagura env set <id> [--capacity <n>] [--name <text>]
@@ -224,17 +226,34 @@ function printRecords(threadId: number, sinceMessageId: number) {
 async function main() {
   switch (command) {
     case "repo": {
-      const { positionals, values } = args({ id: { type: "string" }, url: { type: "string" }, forge: { type: "string" } });
-      if (positionals[0] === "set" && positionals[1] && (values.url || values.forge)) {
-        if (values.forge && !(FORGES as readonly string[]).includes(values.forge)) fail(`--forge must be one of ${FORGES.join(", ")}`);
-        if (values.url) setRepoUrl(db, positionals[1] as RepoId, values.url);
-        if (values.forge) setRepoForge(db, positionals[1] as RepoId, values.forge as Forge);
-        console.log(`repo ${positionals[1]}:${values.url ? ` url → ${values.url}` : ""}${values.forge ? ` forge → ${values.forge}` : ""}`);
+      const { positionals, values } = args({ id: { type: "string" }, url: { type: "string" }, forge: { type: "string" }, land: { type: "string" } });
+      if (values.forge && values.forge !== "gh" && values.forge !== "glab") fail("--forge must be gh or glab (to push to the default branch, use --land push)");
+      if (values.land && values.land !== "push") fail("--land takes push");
+      if (positionals[0] === "set" && positionals[1] && (values.url || values.forge || values.land)) {
+        if (values.forge && values.land) fail("choose --forge or --land push, not both");
+        const id = positionals[1] as RepoId;
+        if (values.url) setRepoUrl(db, id, values.url);
+        if (values.forge) setRepoForge(db, id, values.forge as Forge);
+        if (values.land) setRepoForge(db, id, "none", true);
+        console.log(`repo ${id}:${values.url ? ` url → ${values.url}` : ""}${values.forge || values.land ? ` lands ${describeRoute(getRepo(db, id))}` : ""}`);
         return;
       }
       if (positionals[0] !== "add" || !positionals[1] || positionals[2]) fail(USAGE);
-      const { repo, inspection } = await registerRepo({ db, boot }, { source: positionals[1]!, id: values.id as string | undefined });
-      console.log(`repo ${repo.id} → ${repo.url} (${repo.defaultBranch} at ${inspection.trunk.slice(0, 10)}, verify pack ${repo.packStatus})`);
+      if (values.forge && values.land) fail("choose --forge or --land push, not both");
+      let registered;
+      try {
+        registered = await registerRepo(
+          { db, boot },
+          { source: positionals[1]!, id: values.id as string | undefined, forge: values.forge as Forge | undefined, land: values.land as "push" | undefined },
+        );
+      } catch (e) {
+        if (e instanceof RouteNeeded) fail(`${e.message}\n  e.g. yagura repo add ${positionals[1]} --forge gh`);
+        throw e;
+      }
+      const { repo, inspection } = registered!;
+      console.log(
+        `repo ${repo.id} → ${repo.url} (${repo.defaultBranch} at ${inspection.trunk.slice(0, 10)}, verify pack ${repo.packStatus}); lands ${describeRoute(repo)}`,
+      );
       for (const n of inspection.notes) console.log(`  note: ${n}`);
       return;
     }

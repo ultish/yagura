@@ -15,6 +15,7 @@ import {
   prNoun,
   prRef,
 } from "./forge.js";
+import { routeProblem } from "./route.js";
 import { gateResolved } from "./gates.js";
 import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWorktree, resolveRef } from "./git.js";
 import { layout } from "./paths.js";
@@ -216,6 +217,8 @@ export async function landUnit(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId)
   if (busy) throw new Error(`U${busy.seq} is already landing in ${l.repo.id}; one lander per repo`);
 
   transitionUnit(db, unit.id, "landing", { verdict: l.verdict.id });
+  const route = routeProblem(l.project, l.repo);
+  if (route) return block(l, route);
   let forge: ForgeAdapter | null;
   try {
     forge = forgeFor(db, l.repo);

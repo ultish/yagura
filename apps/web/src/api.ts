@@ -69,6 +69,7 @@ export interface ProjectSummary {
 export interface RepoView {
   repo: Repo;
   trunk: string | null;
+  route: { text: string; confirmed: boolean };
   pack: { ok: true; checks: { name: string; tier: string }[] } | { ok: false; reason: string } | null;
   projects: { id: string; state: string }[];
   landingQueue: { projectId: string; seq: number; goal: string; at: string }[];
@@ -229,7 +230,7 @@ export interface ThreadView {
   messages: ThreadMessage[];
   decisions: ThreadDecision[];
   questions: ThreadQuestion[];
-  proposals: Proposal[];
+  proposals: (Proposal & { routes?: Record<string, { text: string; ok: boolean }> })[];
   session: { startedAt: string; contextPeak: number; rollAt: number } | null;
   sessionStarts: number[];
 }

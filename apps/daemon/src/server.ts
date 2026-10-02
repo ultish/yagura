@@ -53,6 +53,8 @@ import {
   addSteer,
   listSteers,
   SteerRefused,
+  RouteNeeded,
+  proposalRoutes,
   traceUnit,
   type ArtifactId,
   type AttemptId,
@@ -411,12 +413,17 @@ export function createApp(opts: ServerOptions): Hono {
     return c.json(await Promise.all(ids.map((id) => repoView(db, boot, id))));
   });
   app.post("/api/repos", async (c) => {
-    const b = (await c.req.json()) as { source?: string; id?: string };
+    const b = (await c.req.json()) as { source?: string; id?: string; forge?: string; land?: string };
     if (!b.source?.trim()) return c.json({ error: "give a local path or a git URL" }, 400);
+    if (b.forge && b.forge !== "gh" && b.forge !== "glab") return c.json({ error: "forge must be gh or glab" }, 400);
     try {
-      const { repo, inspection } = await registerRepo({ db, boot }, { source: b.source, id: b.id });
+      const { repo, inspection } = await registerRepo(
+        { db, boot },
+        { source: b.source, id: b.id, forge: b.forge as "gh" | "glab" | undefined, land: b.land === "push" ? "push" : undefined },
+      );
       return c.json({ ...(await repoView(db, boot, repo.id)), notes: inspection.notes }, 201);
     } catch (e) {
+      if (e instanceof RouteNeeded) return c.json({ error: e.message, needsRoute: true }, 400);
       if (e instanceof RepoUnusable) return c.json({ error: e.message }, e.message.includes("already") ? 409 : 400);
       throw e;
     }
@@ -498,7 +505,7 @@ export function createApp(opts: ServerOptions): Hono {
     messages: listMessages(db, id),
     decisions: listDecisions(db, id),
     questions: listQuestions(db, id),
-    proposals: listProposals(db, id),
+    proposals: listProposals(db, id).map((p) => ({ ...p, routes: proposalRoutes(db, p.body) })),
     session: (() => {
       const current = currentSession(db, id);
       return current

@@ -34,6 +34,8 @@ import {
   ProposalBody,
   readiness,
   resolveSetting,
+  describeRoute,
+  isRemote,
   projectCost,
   type Db,
   type ProjectId,
@@ -208,6 +210,7 @@ export async function repoView(db: Db, boot: Bootstrap, repoId: RepoId) {
   return {
     repo,
     trunk,
+    route: { text: `lands ${describeRoute(repo)}`, confirmed: !(repo.forge === "none" && isRemote(repo.url) && !repo.pushConfirmed) },
     pack: pack
       ? pack.ok
         ? { ok: true as const, checks: pack.pack.checks.map((c) => ({ name: c.name, tier: c.tier })) }

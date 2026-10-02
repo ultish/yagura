@@ -212,8 +212,12 @@ describe("daemon API", () => {
       repo: { id: "billing", url: origin, defaultBranch: "main", packStatus: "unproven" },
       pack: { ok: true, checks: [{ name: "unit", tier: "unit-verified" }] },
       trunk: expect.stringMatching(/^[0-9a-f]{40}$/),
+      route: { text: "lands by pushing to main", confirmed: true },
       notes: [],
     });
+    const unknown = await post("/api/repos", { source: "git@git.example.com:team/x.git" });
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toMatchObject({ needsRoute: true, error: expect.stringMatching(/cannot tell how git@git.example.com:team\/x.git lands/) });
     expect((await post("/api/repos", { source: origin, id: "billing-2" })).status).toBe(409);
     expect(await (await post("/api/repos", { source: join(boot.home, "nowhere") })).json()).toMatchObject({ error: expect.stringMatching(/cannot read/) });
 

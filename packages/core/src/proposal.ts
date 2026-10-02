@@ -5,21 +5,22 @@ import { z } from "zod";
 import { write } from "./agent.js";
 import { resolveSetting, setSetting, type Bootstrap } from "./config.js";
 import { SKILL_PURPOSES } from "./skills.js";
-import { MERGE_POLICIES, PASS_TIERS, type EnvironmentId, type ProjectId, type RepoId } from "./domain.js";
+import { LAND_ROUTES, MERGE_POLICIES, PASS_TIERS, type EnvironmentId, type LandRoute, type ProjectId, type RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import { VerifyPack } from "./pack.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta, PlanRejected, PlanUnit } from "./plan.js";
 import { checkRepoFree, inspectRepo, packStatusOf, REPO_ID, RepoUnusable, resolveSource, type RepoInspection } from "./repos.js";
+import { chooseRoute, describeRoute, isRemote, routeOf, RouteNeeded } from "./route.js";
 import { parseSpec, writeSpec } from "./spec.js";
 import { ValueInvalid } from "./envvalues.js";
-import { addEnvironment, addProject, addRepo, getEnvironment, getProject, recordEvent, setProjectState, type Db } from "./store.js";
+import { addEnvironment, addProject, addRepo, getEnvironment, getProject, getRepo, recordEvent, setProjectState, type Db } from "./store.js";
 import { checkDraft, createEnvironment, draftFromTemplate, EnvironmentDraft, TemplateInvalid } from "./templates.js";
 import { getProposal, getThread, linkThreadProject, resolveProposal } from "./threads.js";
 
 const Slug = z.string().regex(REPO_ID, "ids are lowercase words joined by dashes, e.g. kafka-diff");
 const NewRepo = z.object({ id: Slug, description: z.string().default(""), verifyPack: VerifyPack }).strict();
-const ExistingRepo = z.object({ id: Slug, existing: z.string().min(1) }).strict();
+const ExistingRepo = z.object({ id: Slug, existing: z.string().min(1), forge: z.enum(["gh", "glab"]).optional(), land: z.literal("push").optional() }).strict();
 type ExistingRepo = z.output<typeof ExistingRepo>;
 const FromTemplate = z
   .object({
@@ -48,6 +49,7 @@ export const ProposalBody = z
             repos: z.array(z.string()).min(1),
             environment: z.string().nullable().default(null),
             merge: z.enum(MERGE_POLICIES).default("human"),
+            land: z.enum(LAND_ROUTES).optional(),
             minTier: z.enum(PASS_TIERS).default("unit-verified"),
             after: z.array(z.string()).default([]),
             phaseGate: z.boolean().default(false),
@@ -110,6 +112,59 @@ function environmentDrafts(db: Db, boot: Bootstrap, p: ProposalBody): Environmen
   return drafts;
 }
 
+// How each repo a proposal names would land: registered ones as set up, existing ones as proposed, new ones (local) by push.
+function proposedRoutes(db: Db, p: ProposalBody): Map<string, { route: LandRoute; problem: string | null; describe: string }> {
+  const out = new Map<string, { route: LandRoute; problem: string | null; describe: string }>();
+  for (const r of p.repos) {
+    if (!isExisting(r)) {
+      out.set(r.id, { route: "push", problem: null, describe: "by pushing to main (a new local repo)" });
+      continue;
+    }
+    try {
+      const chosen = chooseRoute(db, resolveSource(r.existing), r);
+      out.set(r.id, {
+        route: chosen.forge === "none" ? "push" : "pr",
+        problem: null,
+        describe:
+          chosen.forge === "gh" ? "through pull requests (gh)" : chosen.forge === "glab" ? "through merge requests (glab)" : "by pushing to its default branch",
+      });
+    } catch (e) {
+      if (!(e instanceof RouteNeeded)) throw e;
+      throw new ProposalInvalid(`repo ${r.id}: ${e.message}. Ask the developer, then set "forge" or "land" on the repo`);
+    }
+  }
+  for (const row of db.prepare("SELECT id FROM repos").all() as { id: RepoId }[]) {
+    const repo = getRepo(db, row.id);
+    const problem =
+      repo.forge === "none" && isRemote(repo.url) && !repo.pushConfirmed
+        ? `repo ${repo.id} has no confirmed landing route (no forge, so it would push to ${repo.defaultBranch}); ask the developer to run \`yagura repo set ${repo.id} --forge gh|glab\` or \`--land push\``
+        : null;
+    out.set(repo.id, { route: routeOf(repo), problem, describe: describeRoute(repo) });
+  }
+  return out;
+}
+
+// How each proposed project would land, for the proposal card: shown before Go, flagged when it would not land as agreed.
+export function proposalRoutes(db: Db, body: unknown): Record<string, { text: string; ok: boolean }> {
+  const parsed = ProposalBody.safeParse(body);
+  if (!parsed.success) return {};
+  let routes: ReturnType<typeof proposedRoutes>;
+  try {
+    routes = proposedRoutes(db, parsed.data);
+  } catch (e) {
+    if (!(e instanceof ProposalInvalid)) throw e;
+    return Object.fromEntries(parsed.data.projects.map((p) => [p.id, { text: e.message, ok: false }]));
+  }
+  return Object.fromEntries(
+    parsed.data.projects.map((p) => {
+      const each = p.repos.map((r) => ({ repo: r, route: routes.get(r) }));
+      const ok = each.every(({ route }) => route && !route.problem && (!p.land || p.land === route.route));
+      const text = each.map(({ repo, route }) => (each.length > 1 ? `${repo} ` : "") + (route ? `lands ${route.describe}` : "unknown repo")).join("; ");
+      return [p.id, { text, ok }];
+    }),
+  );
+}
+
 export function validateProposal(db: Db, boot: Bootstrap, threadId: number, p: ProposalBody): void {
   const newEnvs = environmentDrafts(db, boot, p).map((d) => d.id);
   const repoExists = (id: string) => !!db.prepare("SELECT 1 FROM repos WHERE id = ?").get(id);
@@ -127,11 +182,22 @@ export function validateProposal(db: Db, boot: Bootstrap, threadId: number, p: P
     }
     newRepos.add(r.id);
   }
+  const routes = proposedRoutes(db, p);
   const earlier = new Set<string>();
   for (const proj of p.projects) {
     if (projectExists(proj.id) || earlier.has(proj.id)) throw new ProposalInvalid(`project ${proj.id} already exists`);
     for (const r of proj.repos)
       if (!repoExists(r) && !newRepos.has(r)) throw new ProposalInvalid(`${proj.id}: repo ${r} is neither registered nor created by this proposal`);
+    for (const r of proj.repos) {
+      const route = routes.get(r)!;
+      if (route.problem) throw new ProposalInvalid(`${proj.id}: ${route.problem}`);
+      if (proj.land === "pr" && route.route === "push")
+        throw new ProposalInvalid(
+          `${proj.id}: land "pr", but repo ${r} lands ${route.describe} (it has no forge); tell the developer, who can give it a forge or agree to push`,
+        );
+      if (proj.land === "push" && route.route === "pr")
+        throw new ProposalInvalid(`${proj.id}: land "push", but repo ${r} lands ${route.describe}; drop land or ask the developer`);
+    }
     for (const a of proj.after)
       if (!projectExists(a) && !earlier.has(a))
         throw new ProposalInvalid(`${proj.id}: after ${a}, which is neither an existing project nor listed earlier in this proposal`);
@@ -210,7 +276,8 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
       const out: ApplyProposalResult = { repos: [], environments: created, projects: [], units: {} };
       for (const r of body.repos) {
         const seen = existing.get(r.id);
-        if (seen) addRepo(db, { id: r.id, url: seen.url, defaultBranch: seen.defaultBranch, packStatus: packStatusOf(seen.pack) });
+        if (seen && isExisting(r))
+          addRepo(db, { id: r.id, url: seen.url, defaultBranch: seen.defaultBranch, ...chooseRoute(db, seen.url, r), packStatus: packStatusOf(seen.pack) });
         else addRepo(db, { id: r.id, url: bares.get(r.id)!, defaultBranch: "main", packStatus: "unproven" });
         out.repos.push(r.id);
       }
@@ -231,6 +298,7 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
           after: p.after as ProjectId[],
           phaseGate: p.phaseGate,
           mergePolicy: p.merge,
+          land: p.land ?? null,
           environmentId: env as EnvironmentId,
         });
         linkThreadProject(db, proposal.threadId, project.id);
@@ -270,7 +338,7 @@ export function describeProposal(body: ProposalBody): string {
   for (const r of body.repos)
     lines.push(
       isExisting(r)
-        ? `- existing repo ${r.id}: ${r.existing}`
+        ? `- existing repo ${r.id}: ${r.existing}${r.forge ? ` (forge ${r.forge})` : r.land ? " (pushes to its default branch)" : ""}`
         : `- new repo ${r.id}${r.description ? `: ${r.description}` : ""} (checks: ${r.verifyPack.checks.map((c) => c.name).join(", ")})`,
     );
   for (const e of body.environments) {
@@ -286,6 +354,7 @@ export function describeProposal(body: ProposalBody): string {
     const facts = [
       `repos ${p.repos.join(", ")}`,
       `merge ${p.merge}`,
+      p.land === "pr" ? "lands through pull/merge requests" : p.land === "push" ? "pushes to the default branch" : "",
       `min ${p.minTier}`,
       p.after.length ? `after ${p.after.join(", ")}` : "",
       p.phaseGate ? "phase gate" : "",

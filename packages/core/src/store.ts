@@ -80,12 +80,13 @@ export function transitionUnit(db: Db, unitId: UnitId, to: UnitState, data: Reco
   })();
 }
 
-export function addRepo(db: Db, r: { id: string; url: string; defaultBranch: string; forge?: Forge; packStatus?: PackStatus }): Repo {
-  db.prepare("INSERT INTO repos (id, url, default_branch, forge, pack_status, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+export function addRepo(db: Db, r: { id: string; url: string; defaultBranch: string; forge?: Forge; pushConfirmed?: boolean; packStatus?: PackStatus }): Repo {
+  db.prepare("INSERT INTO repos (id, url, default_branch, forge, push_confirmed, pack_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     r.id,
     r.url,
     r.defaultBranch,
     r.forge ?? "none",
+    r.pushConfirmed ? 1 : 0,
     r.packStatus ?? "missing",
     now(),
   );
@@ -100,6 +101,7 @@ export function getRepo(db: Db, id: RepoId): Repo {
     url: r.url as string,
     defaultBranch: r.default_branch as string,
     forge: r.forge as Forge,
+    pushConfirmed: r.push_confirmed === 1,
     verifyPackPath: r.verify_pack_path as string,
     packStatus: r.pack_status as Repo["packStatus"],
     packProvenSha: (r.pack_proven_sha as Repo["packProvenSha"]) ?? null,
@@ -120,6 +122,7 @@ export function addProject(
     after?: ProjectId[];
     phaseGate?: boolean;
     mergePolicy?: Project["mergePolicy"];
+    land?: Project["land"];
     environmentId?: EnvironmentId | null;
   },
 ): Project {
@@ -127,8 +130,8 @@ export function addProject(
     for (const dep of p.after ?? []) getProject(db, dep);
     if (p.environmentId) getEnvironment(db, p.environmentId);
     db.prepare(
-      `INSERT INTO projects (id, name, goal, predicate, min_tier, state, refs_json, after_json, phase_gate, merge_policy, environment_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO projects (id, name, goal, predicate, min_tier, state, refs_json, after_json, phase_gate, merge_policy, land, environment_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       p.id,
       p.name,
@@ -140,6 +143,7 @@ export function addProject(
       JSON.stringify(p.after ?? []),
       p.phaseGate ? 1 : 0,
       p.mergePolicy ?? "human",
+      p.land ?? null,
       p.environmentId ?? null,
       now(),
     );
@@ -161,6 +165,7 @@ export function getProject(db: Db, id: ProjectId): Project {
     environmentId: (r.environment_id as Project["environmentId"]) ?? null,
     state: r.state as Project["state"],
     mergePolicy: r.merge_policy as Project["mergePolicy"],
+    land: (r.land as Project["land"] | null) ?? null,
     andonReason: (r.andon_reason as string | null) ?? null,
     refs: JSON.parse((r.refs_json as string | undefined) ?? "[]"),
     after: JSON.parse((r.after_json as string | undefined) ?? "[]"),
@@ -427,9 +432,9 @@ export function setRepoUrl(db: Db, repoId: RepoId, url: string): void {
   db.prepare("UPDATE repos SET url = ? WHERE id = ?").run(url, repoId);
 }
 
-export function setRepoForge(db: Db, repoId: RepoId, forge: Forge): void {
-  db.prepare("UPDATE repos SET forge = ? WHERE id = ?").run(forge, repoId);
-  recordEvent(db, "repo.forge", {}, { repo: repoId, forge });
+export function setRepoForge(db: Db, repoId: RepoId, forge: Forge, pushConfirmed = false): void {
+  db.prepare("UPDATE repos SET forge = ?, push_confirmed = ? WHERE id = ?").run(forge, forge === "none" && pushConfirmed ? 1 : 0, repoId);
+  recordEvent(db, "repo.forge", {}, { repo: repoId, forge, pushConfirmed: forge === "none" && pushConfirmed });
 }
 
 export function addUnitNote(db: Db, unitId: UnitId, note: string): void {

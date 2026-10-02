@@ -325,6 +325,13 @@ CREATE TABLE steers (
 CREATE INDEX steers_attempt ON steers (attempt_id);
 `,
   },
+  {
+    version: 23,
+    sql: `
+ALTER TABLE repos ADD COLUMN push_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (push_confirmed IN (0, 1));
+ALTER TABLE projects ADD COLUMN land TEXT CHECK (land IN ('pr', 'push'));
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

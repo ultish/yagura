@@ -21,6 +21,7 @@ function AddRepo({ onAdded }: { onAdded: () => void }) {
   const [added, setAdded] = useState<RepoView | null>(null);
   const [id, setId] = useState("");
   const [suggested, setSuggested] = useState("");
+  const [route, setRoute] = useState("");
   const action = useAction();
 
   useEffect(() => {
@@ -39,7 +40,8 @@ function AddRepo({ onAdded }: { onAdded: () => void }) {
         e.preventDefault();
         setAdded(null);
         void action.run(async () => {
-          setAdded(await api<RepoView>("/api/repos", { body: { source, id: id.trim() || undefined } }));
+          const chosen = route === "push" ? { land: "push" } : route ? { forge: route } : {};
+          setAdded(await api<RepoView>("/api/repos", { body: { source, id: id.trim() || undefined, ...chosen } }));
           onAdded();
           setSource("");
           setId("");
@@ -70,13 +72,23 @@ function AddRepo({ onAdded }: { onAdded: () => void }) {
           placeholder={suggested ? `id: ${suggested}` : "id"}
           style={{ ...field, width: 180, fontSize: 13 }}
         />
+        <label htmlFor="repo-route" className="sr-only">
+          How it lands
+        </label>
+        <select id="repo-route" value={route} onChange={(e) => setRoute(e.target.value)} style={{ ...field, fontSize: 13 }}>
+          <option value="">lands: from the URL</option>
+          <option value="gh">lands through pull requests (gh)</option>
+          <option value="glab">lands through merge requests (glab)</option>
+          <option value="push">lands by pushing to the default branch</option>
+        </select>
         <button className="btn lamp" type="submit" disabled={action.busy || !source.trim()}>
           {action.busy ? "Reading…" : "Add repo"}
         </button>
       </div>
       <div className="muted" style={{ fontSize: 13 }}>
-        yagura clones it into its own mirror and reads its default branch and verify pack. Agents work in worktrees of that mirror; verified work is pushed back
-        to this URL.
+        yagura clones it into its own mirror and reads its default branch and verify pack. Agents work in worktrees of that mirror. Verified work lands through
+        pull requests on github.com, through merge requests on the GitLab hosts in forge.glab_hosts, and by a push to the default branch only when you choose
+        that.
       </div>
       {action.error && (
         <div className="s-bell" style={{ fontSize: 13 }}>
@@ -86,7 +98,8 @@ function AddRepo({ onAdded }: { onAdded: () => void }) {
       {added && (
         <div className="s-pine" style={{ fontSize: 13.5, display: "flex", flexDirection: "column", gap: 4 }}>
           <span>
-            Added {added.repo.id} ({added.repo.defaultBranch} at {sha(added.trunk)}). <Link to="/talk">Talk to the watch</Link> to start a project in it.
+            Added {added.repo.id} ({added.repo.defaultBranch} at {sha(added.trunk)}); it {added.route.text}. <Link to="/talk">Talk to the watch</Link> to start
+            a project in it.
           </span>
           {added.notes?.map((n) => (
             <span key={n} className="s-bell">
@@ -145,6 +158,10 @@ export function Repos() {
                       <span>
                         {v.repo.defaultBranch}
                         {v.trunk ? ` at ${sha(v.trunk)}` : ""}
+                      </span>
+                      <span className={v.route.confirmed ? undefined : "s-bell"}>
+                        {v.route.text}
+                        {v.route.confirmed ? "" : `: choose with yagura repo set ${v.repo.id} --forge gh|glab or --land push`}
                       </span>
                       <span>{v.landedCount} landed</span>
                       <Link to={`/r/${v.repo.id}`}>Browse the code</Link>

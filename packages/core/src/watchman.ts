@@ -3,7 +3,7 @@ import { assertThreadFree, beginTurn, currentSession, endSession, endTurn, getTu
 import { z } from "zod";
 import { runAgentSession, write, type RunContext, type SessionRecorder } from "./agent.js";
 import { resolveSetting } from "./config.js";
-import { PASS_TIERS, type Environment, type EnvironmentId, type ProjectId } from "./domain.js";
+import { PASS_TIERS, type Environment, type EnvironmentId, type ProjectId, type RepoId } from "./domain.js";
 import { listValues } from "./envvalues.js";
 import { PROVIDERS_IMPL } from "./leases.js";
 import { PRESETS } from "./presets.js";
@@ -25,7 +25,8 @@ import {
 } from "./proposal.js";
 import { editSpec, readSpec, relevantSections, renderSpec, writeSpec, type Spec } from "./spec.js";
 import { generateStatus } from "./status.js";
-import { getEnvironment, getProject, recordEvent, type Db } from "./store.js";
+import { getEnvironment, getProject, getRepo, recordEvent, type Db } from "./store.js";
+import { describeRoute } from "./route.js";
 import {
   addDecision,
   addMessage,
@@ -231,7 +232,7 @@ Reply to the developer in plain prose. Then end your final message with exactly 
     "summary": "what applying this starts and why",
     "repos": [
       { "id": "kafka-diff", "description": "one line", "verifyPack": { "provider": "local-process", "checks": [{ "name": "unit", "command": "python3 -m unittest -v", "tier": "unit-verified" }] } },
-      { "id": "billing", "existing": "git@gitlab.internal:team/billing.git" }
+      { "id": "billing", "existing": "git@gitlab.internal:team/billing.git", "forge": "glab" }
     ],
     "environments": [
       { "id": "vm", "provider": "kube-namespace", "providerConfig": { "context": "rancher-desktop" }, "capacity": 1, "notes": "dependencies run in the cluster",
@@ -240,7 +241,7 @@ Reply to the developer in plain prose. Then end your final message with exactly 
     ],
     "projects": [{
       "id": "kafka-diff", "goal": "…", "predicate": "checkable done condition", "repos": ["kafka-diff"],
-      "environment": null, "merge": "auto", "minTier": "unit-verified", "after": [], "phaseGate": false,
+      "environment": null, "merge": "auto", "land": "pr", "minTier": "unit-verified", "after": [], "phaseGate": false,
       "spec": "# kafka-diff\\n\\n## Scope\\n…", "units": [],
       "skills": { "scaffold": ["setup-gradle"], "work": [], "pack": [], "verify": [] }, "references": ["billing"]
     }],
@@ -252,7 +253,7 @@ Reply to the developer in plain prose. Then end your final message with exactly 
 }
 
 function catalog(db: Db, boot: RunContext["boot"]): string {
-  const repos = db.prepare("SELECT id, url, default_branch FROM repos ORDER BY id").all() as { id: string; url: string; default_branch: string }[];
+  const repos = (db.prepare("SELECT id FROM repos ORDER BY id").all() as { id: RepoId }[]).map((r) => getRepo(db, r.id));
   const envs = (db.prepare("SELECT id FROM environments ORDER BY id").all() as { id: EnvironmentId }[]).map((e) => getEnvironment(db, e.id));
   const projects = db.prepare("SELECT id, state FROM projects ORDER BY created_at").all() as { id: string; state: string }[];
   const envLine = (e: Environment) => {
@@ -274,7 +275,8 @@ function catalog(db: Db, boot: RunContext["boot"]): string {
       : [],
   );
   return [
-    `- registered repos (use them by id in a project's repos; never list them again in the proposal's repos): ${repos.map((r) => `${r.id} (${r.url}, ${r.default_branch})`).join("; ") || "(none)"}`,
+    `- registered repos (use them by id in a project's repos; never list them again in the proposal's repos): ${repos.map((r) => `${r.id} (${r.url}, ${r.defaultBranch}, lands ${describeRoute(r)})`).join("; ") || "(none)"}`,
+    `- landing: set a project's "land" to "pr" when the developer wants pull or merge requests and "push" when they agree to commits straight on the default branch; yagura rejects a project whose land does not match its repo's route, and a remote repo with no confirmed route. An existing repo you register needs "forge" ("gh" or "glab") or "land": "push" unless its host is github.com or a known GitLab host; ask if unsure`,
     `- environments: ${envs.map(envLine).join("; ") || `(none; a project with environment null gets a new local-process "local")`}`,
     `- environment presets: ${PRESETS.map((p) => `${p.id} (${p.values.map((v) => v.name).join(", ")})`).join("; ")}`,
     `- environment templates: ${templates.join("; ") || "(none)"}`,

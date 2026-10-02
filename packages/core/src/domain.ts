@@ -180,11 +180,16 @@ export interface Environment {
   createdAt: IsoTime;
 }
 
+export const LAND_ROUTES = ["pr", "push"] as const;
+export type LandRoute = (typeof LAND_ROUTES)[number];
+
 export interface Repo {
   id: RepoId;
   url: string;
   defaultBranch: string;
   forge: Forge;
+  // A remote repo without a forge lands by pushing to trunk only when someone chose that (§23).
+  pushConfirmed: boolean;
   verifyPackPath: string;
   packStatus: PackStatus;
   packProvenSha: Sha | null;
@@ -200,6 +205,7 @@ export interface Project {
   environmentId: EnvironmentId | null;
   state: ProjectState;
   mergePolicy: MergePolicy;
+  land: LandRoute | null;
   andonReason: string | null;
   refs: string[];
   after: ProjectId[];

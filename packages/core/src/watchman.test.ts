@@ -16,7 +16,7 @@ import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
-import { applyProposal } from "./proposal.js";
+import { applyProposal, proposalRoutes } from "./proposal.js";
 import { editSpec, parseSpec, relevantSections, renderSpec } from "./spec.js";
 import { addProject, addRepo, getEnvironment, getProject, getRepo, listGates, listUnits, openStore, type Db } from "./store.js";
 import { createThread, getProposal, getThread, linkThreadProject, listDecisions, listMessages, listProposals, listQuestions } from "./threads.js";
@@ -132,6 +132,34 @@ describe("watchman turns", () => {
     expect(stored.message.body).toBe("b");
     expect(readFileSync(layout(boot).spec("linked" as ProjectId), "utf8")).toBe("# linked\n\n## Scope\n\nall of it\n");
     expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'project.spec_changed'").get()).toEqual({ n: 1 });
+  });
+
+  it("checks a proposed project's landing route against its repo, and shows the route for the card", () => {
+    const t = createThread(db, { title: "t" });
+    addRepo(db, { id: "local", url: "/tmp/local.git", defaultBranch: "main", pushConfirmed: true });
+    addRepo(db, { id: "hub", url: "https://github.com/o/hub.git", defaultBranch: "main", forge: "gh" });
+    addRepo(db, { id: "loose", url: "https://git.example.com/o/loose.git", defaultBranch: "main" });
+    const propose = (proposal: unknown) => () => storeTurn(ctx, t.id, { body: "b", records: TurnRecords.parse({ proposal }), turnLog: null });
+    const project = (id: string, repos: string[], land?: string) => ({ id, goal: "g", predicate: "p", repos, ...(land ? { land } : {}) });
+    expect(propose({ summary: "s", projects: [project("route-a", ["local"], "pr")] })).toThrow(
+      /route-a: land "pr", but repo local lands by pushing to main \(it has no forge\)/,
+    );
+    expect(propose({ summary: "s", projects: [project("route-b", ["hub"], "push")] })).toThrow(
+      /route-b: land "push", but repo hub lands through pull requests \(gh\)/,
+    );
+    expect(propose({ summary: "s", projects: [project("route-c", ["loose"])] })).toThrow(/route-c: repo loose has no confirmed landing route/);
+    expect(propose({ summary: "s", repos: [{ id: "ext", existing: "git@git.example.com:o/ext.git" }], projects: [] })).toThrow(
+      /repo ext: yagura cannot tell how git@git.example.com:o\/ext.git lands/,
+    );
+    const { proposal } = storeTurn(ctx, t.id, {
+      body: "b",
+      records: TurnRecords.parse({ proposal: { summary: "s", projects: [project("route-d", ["hub"], "pr"), project("route-e", ["local"])] } }),
+      turnLog: null,
+    });
+    expect(proposalRoutes(db, proposal!.body)).toEqual({
+      "route-d": { text: "lands through pull requests (gh)", ok: true },
+      "route-e": { text: "lands by pushing to main", ok: true },
+    });
   });
 
   it("retries once with the rejection reason, and stores only the corrected turn", async () => {

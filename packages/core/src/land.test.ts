@@ -111,6 +111,28 @@ async function advanceTrunk(file: string, content: string) {
 
 const originMain = () => git(["rev-parse", "main"], { cwd: origin });
 
+describe("landing route", () => {
+  it("blocks with a question instead of pushing to a remote trunk nobody chose to push to", async () => {
+    const work = await verifiedUnit();
+    const before = await originMain();
+    db.prepare("UPDATE repos SET url = 'https://git.example.com/team/testbed.git', push_confirmed = 0 WHERE id = 'testbed'").run();
+    const result = await landUnit(ctx, work.id);
+    expect(result.unit.state).toBe("blocked");
+    expect(result.reason).toMatch(
+      /^how should testbed land\? It has no forge, so yagura would push straight to main\. Choose with `yagura repo set testbed --forge gh\|glab` or `--land push`/,
+    );
+    expect(await originMain()).toBe(before);
+  });
+
+  it("refuses to push for a project that was agreed to land through pull requests", async () => {
+    const work = await verifiedUnit();
+    db.prepare("UPDATE projects SET land = 'pr' WHERE id = ?").run(project);
+    const result = await landUnit(ctx, work.id);
+    expect(result.unit.state).toBe("blocked");
+    expect(result.reason).toMatch(/^p was agreed to land through pull or merge requests, but testbed has no forge/);
+  });
+});
+
 describe("landUnit (forge none)", () => {
   it("lands the unit as one squashed commit on trunk, with an audit trail in its trailers", async () => {
     const work = await verifiedUnit();

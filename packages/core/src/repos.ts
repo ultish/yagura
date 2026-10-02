@@ -2,10 +2,11 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type { Bootstrap } from "./config.js";
-import type { PackStatus, Repo, RepoId, Sha } from "./domain.js";
+import type { Forge, PackStatus, Repo, RepoId, Sha } from "./domain.js";
 import { ensureMirror, git, readFileAt } from "./git.js";
 import { parsePack, type PackLoad } from "./pack.js";
 import { layout } from "./paths.js";
+import { chooseRoute } from "./route.js";
 import { addRepo, recordEvent, type Db } from "./store.js";
 
 export const REPO_ID = /^[a-z][a-z0-9-]{1,39}$/;
@@ -110,11 +111,12 @@ export function checkRepoFree(db: Db, id: string, url: string): void {
 
 export async function registerRepo(
   ctx: { db: Db; boot: Bootstrap },
-  input: { source: string; id?: string },
+  input: { source: string; id?: string; forge?: Forge; land?: "push" },
 ): Promise<{ repo: Repo; inspection: RepoInspection }> {
   const id = input.id?.trim() || suggestRepoId(input.source);
   checkRepoFree(ctx.db, id, resolveSource(input.source));
+  const route = chooseRoute(ctx.db, resolveSource(input.source), input);
   const inspection = await inspectRepo(input.source, layout(ctx.boot).mirror(id as RepoId));
-  const repo = addRepo(ctx.db, { id, url: inspection.url, defaultBranch: inspection.defaultBranch, packStatus: packStatusOf(inspection.pack) });
+  const repo = addRepo(ctx.db, { id, url: inspection.url, defaultBranch: inspection.defaultBranch, ...route, packStatus: packStatusOf(inspection.pack) });
   return { repo, inspection };
 }

@@ -107,6 +107,7 @@ export const SETTINGS = {
   "forge.merge_method": z.enum(["rebase", "squash", "merge"]).default("rebase").describe("How yagura merges a pull request"),
   "forge.gh_bin": z.string().default("gh").describe("The gh CLI yagura runs for GitHub"),
   "forge.glab_bin": z.string().default("glab").describe("The glab CLI yagura runs for GitLab"),
+  "forge.glab_hosts": z.array(z.string().min(1)).default([]).describe("GitLab hosts: a repo registered from one of them lands through merge requests"),
   "forge.poll_seconds": z.number().int().positive().default(30).describe("How often an open pull request is checked"),
 } satisfies Record<string, z.ZodTypeAny>;
 
@@ -164,6 +165,7 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "forge.merge_method": R,
   "forge.gh_bin": [],
   "forge.glab_bin": [],
+  "forge.glab_hosts": [],
   "forge.poll_seconds": [],
 };
 export type SettingValue<K extends SettingKey> = z.output<(typeof SETTINGS)[K]>;

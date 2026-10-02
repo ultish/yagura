@@ -810,13 +810,13 @@ Steering is offered only for an adapter that implements `message(text)` (claude 
 
 - The watchman still runs one `claude -p --resume` per message (§21); a long-lived watchman on the same stdin mechanism waits on whether the per-message start is slow in real use.
 
-## 23. The landing route is chosen, never defaulted (decided 2026-10-02, user; not built)
+## 23. The landing route is chosen, never defaulted (decided and built 2026-10-02, user)
 
 The third real run landed two projects by pushing squashed commits to the sandbox's `main` although the developer asked for one PR per change: the repo had been registered without `--forge gh`, `none` was the silent default, and nothing showed the route before Go. A repo's landing route must be a deliberate choice that everyone can see, and the server should refuse what yagura must never do.
 
 ### Server side: protect trunk
 
-The only hard guarantee is the forge's own rule. On GitHub, a branch protection rule on trunk that requires a pull request; on GitLab, a protected branch with "Allowed to push: No one" and merges through merge requests. A misconfigured yagura then fails loudly (the push is refused, the unit blocks with git's error) instead of landing quietly. yagura documents this in the repo setup and `yagura doctor` warns when a repo with a forge has an unprotected trunk (read through `gh api` / `glab api`; a failed read is a warning, not an error).
+The only hard guarantee is the forge's own rule. On GitHub, a branch protection rule on trunk that requires a pull request; on GitLab, a protected branch with "Allowed to push: No one" and merges through merge requests. A misconfigured yagura then fails loudly (the push is refused, the unit blocks with git's error) instead of landing quietly. This is the developer's to set on their forge; yagura does not check it (there is no `yagura doctor` since decision 8, and the developer chose not to protect the sandbox's `main`).
 
 ### yagura side
 
@@ -825,9 +825,17 @@ The only hard guarantee is the forge's own rule. On GitHub, a branch protection 
 - **Everyone sees the route.** The Repos page shows it per repo ("through PRs (gh)", "through merge requests (glab)", "pushes to main"); the watchman's catalog lists it per registered repo; the proposal card shows it beside each project.
 - **A request is checked against the route.** A proposal project carries `land: "pr" | "push"` (the watchman sets it from the conversation; omitted means the repo's route). `validateProposal` rejects `land: "pr"` on a repo that pushes, and `land: "push"` on a repo with a forge, with a reason the watchman relays ("sbx has no forge, so it would push to main; register it with --forge gh or agree to push"). The project stores the chosen route; landing refuses to take any other.
 
+### As built (2026-10-02)
+
+- `route.ts`: `chooseRoute` (github.com → `gh`; a host in `forge.glab_hosts`, global, → `glab`; a local path or `file://` → push without asking; `--land push` → push, confirmed; `forge none` on a remote, or an unknown remote host, → `RouteNeeded`), `describeRoute` ("through pull requests (gh)", "through merge requests (glab)", "by pushing to main", with ", not confirmed" for an unconfirmed remote), and `routeProblem`, which `landUnit` checks before squashing: an unconfirmed remote push repo, a project with `land: "pr"` on a repo without a forge, or `land: "push"` on a repo with one, blocks the unit with the question and the command to answer it.
+- Migration 23: `repos.push_confirmed`, `projects.land` (`pr`, `push`, or null to follow the repo). Existing remote repos with forge `none` are unconfirmed until `yagura repo set <id> --land push` or a forge is set.
+- CLI: `yagura repo add <url> [--forge gh|glab | --land push]` prints the route; `yagura repo set <id> --forge gh|glab | --land push`; `--forge none` is refused with a pointer to `--land push`. API: `POST /api/repos` takes `forge` and `land` and answers `400 { needsRoute: true }`. Repos page: a "lands:" choice in the add form and the route on every repo, in vermilion with the command when not confirmed.
+- Watchman: the catalog lists each registered repo's route and how to use `land`; the proposal schema has `forge`/`land` on an existing repo and `land` on a project; `validateProposal` rejects a mismatch, an unconfirmed registered repo, and an existing repo whose route cannot be worked out, each with a reason the watchman relays; the `yagura-watchman` skill says to name the route in the reply. The proposal card shows each project's route (`proposalRoutes`), in vermilion when it would not land as agreed.
+- Checked: in the third run's home the Repos page and the applied proposal card both show `sbx` as "lands by pushing to main, not confirmed"; from the CLI, the sandbox's github.com URL registers as "lands through pull requests (gh)" and an unknown host is refused with the three choices.
+
 ### Proof
 
-Tests: `repo add` infers `gh` for a github.com URL and `glab` for a listed host, refuses an unknown remote host without a choice, and accepts a bare path; a proposal with `land: "pr"` on a pushing repo is rejected with that reason; landing blocks on an unconfirmed remote `none` repo; the proposal card and Repos page show the route (browser). On the sandbox (with the developer's yes): turn on branch protection requiring a PR, and show that a forced direct push is refused and blocks the unit with git's error.
+Tests: `repo add` infers `gh` for a github.com URL and `glab` for a listed host, refuses an unknown remote host without a choice, and accepts a bare path; a proposal with `land: "pr"` on a pushing repo is rejected with that reason; landing blocks on an unconfirmed remote `none` repo; the proposal card and Repos page show the route (browser). (Branch protection on the sandbox was declined by the developer, so no refused-push proof.)
 
 ## 24. Code review before landing (decided 2026-10-02, user; not built)
 
