@@ -209,8 +209,8 @@ function AgentsTab({ story }: { story: UnitStory }) {
         </tbody>
       </table>
       <p className="muted hub-small">
-        Every session that worked on U{story.unit.seq}: the planner run that planned it, its own attempts, and the verifiers, review triage, and rebases that
-        targeted it. Dimmed rows did not count.
+        Every session that worked on U{story.unit.seq}: the planner run that planned it, its own attempts, and the verifiers, reviewers, review triage, and
+        rebases that targeted it. Dimmed rows did not count.
       </p>
     </div>
   );

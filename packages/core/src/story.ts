@@ -8,8 +8,8 @@ import { parseHandoff } from "./handoff.js";
 import { liveVerdict } from "./land.js";
 import { listPackEdits } from "./packedits.js";
 import { layout } from "./paths.js";
-import { getProject, getUnit, listAttempts, listUnits, type Db } from "./store.js";
-import { listThreadRows } from "./triage.js";
+import { getGate, getProject, getUnit, listAttempts, listUnits, type Db } from "./store.js";
+import { isReviewThread, listThreadRows } from "./triage.js";
 
 // A unit's page reads as one story: who did what, what each chose, and what yagura checked about it. Agents' lines are
 // judgment unless a check sits beside them; a check is something yagura proved from its own records.
@@ -245,7 +245,8 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
   }
 
   const threads = listThreadRows(db, unit.id);
-  for (const r of threads)
+  // yagura's own reviewer's findings are told in the reviewer's entry; only people's threads stand alone.
+  for (const r of threads.filter((t) => !isReviewThread(t.threadId)))
     entries.push({
       at: r.createdAt,
       actor: "person",
@@ -280,13 +281,21 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
           return line(`${ref}:finding:${i}`, "claimed", `[${f.severity}] ${f.path}${f.line ? `:${f.line}` : ""} — ${f.text} → ${fate}`);
         })
       : [line(`${ref}:finding:0`, "claimed", "No findings.")];
-    const blocking = findings.filter((f) => f.severity !== "nit").length;
+    const raised = findings.filter((f) => f.severity !== "nit");
+    const open = raised.filter((f) => {
+      const t = threads.find((x) => x.threadId === `review:U${r.seq}:F${f.n}`);
+      return !t?.decision || (t.decision === "asked" && t.gateId !== null && getGate(db, t.gateId).state === "open");
+    }).length;
     entries.push({
       at: last.startedAt ?? r.createdAt,
       actor: "reviewer",
       who: /again/.test(r.goal) ? "Reviewer (the fixes)" : "Reviewer",
       attempt: attemptOf(r, last),
-      status: blocking ? { text: `${blocking} to settle`, tone: "amber" } : { text: "nothing to settle", tone: "pine" },
+      status: open
+        ? { text: `${open} to settle`, tone: "amber" }
+        : raised.length
+          ? { text: `${raised.length} settled`, tone: "pine" }
+          : { text: "nothing to settle", tone: "pine" },
       body: null,
       lines,
       folded: null,
@@ -310,7 +319,9 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
                 `${ref}:thread:${i}`,
                 "claimed",
                 `${r.decision}: ${r.reason}`,
-                r.decision === "asked" ? [] : [{ ok: !!r.repliedAt, text: r.repliedAt ? "reply posted on the thread" : "reply pending" }],
+                r.decision === "asked" || isReviewThread(r.threadId)
+                  ? []
+                  : [{ ok: !!r.repliedAt, text: r.repliedAt ? "reply posted on the thread" : "reply pending" }],
               ),
             )
         : [line(`${ref}:claimed:0`, "claimed", "Rebased onto the moved trunk.")];
@@ -489,9 +500,11 @@ function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, ha
         ? String(failedAfter.data.reason)
         : verdict
           ? String(verdict.data.reason)
-          : u.type === "plan"
-            ? planSummary(db, u)
-            : (bullets(h?.whatIDid ?? "")[0] ?? (a.failureMode ? `failed: ${a.failureMode}` : null));
+          : u.type === "review"
+            ? reviewSummary(events, u)
+            : u.type === "plan"
+              ? planSummary(db, u)
+              : (bullets(h?.whatIDid ?? "")[0] ?? (a.failureMode ? `failed: ${a.failureMode}` : null));
     rows.push({
       attemptId: a.id,
       role: ROLE[u.type] ?? u.type,
@@ -511,6 +524,15 @@ function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, ha
   if (planUnit) for (const a of listAttempts(db, planUnit.id).slice(-1)) add(planUnit, a, true);
   for (const u of [unit, ...related]) for (const a of listAttempts(db, u.id)) add(u, a, false);
   return rows.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
+}
+
+function reviewSummary(events: Ev[], review: Unit): string | null {
+  const done = events.find((e) => e.unit_id === review.id && e.type === "review.done");
+  if (!done) return null;
+  const findings = done.data.findings as { severity: string; path: string; text: string }[];
+  if (!findings.length) return "no findings";
+  const first = findings[0]!;
+  return `${findings.length} finding${findings.length === 1 ? "" : "s"}: [${first.severity}] ${first.path} — ${first.text}${findings.length > 1 ? " …" : ""}`;
 }
 
 function planSummary(db: Db, plan: Unit): string | null {
