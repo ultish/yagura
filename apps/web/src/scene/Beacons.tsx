@@ -137,9 +137,24 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
             <path d={`M${xs[0]} ${y} L${landed ? 1166 : xs[lastReached]} ${y}`} style={{ stroke: "var(--seg-lit)" }} strokeWidth="2.5" />
             {ember > 0 && <path d={`M${xs[ember - 1]} ${y} L${xs[ember]} ${y}`} style={{ stroke: "var(--seg-ember)" }} strokeWidth="2.5" />}
             {!landed && <path d={`M${xs[Math.max(lastReached, ember)]} ${y} L${xs[3]} ${y}`} style={{ stroke: "var(--seg-dark)" }} strokeWidth="2.5" />}
-            {st.map((s) => (
-              <Beacon key={s.name} x={XS[s.name]} y={y} stage={s} />
-            ))}
+            {st.map((s) => {
+              const go = s.href;
+              return (
+                <g
+                  key={s.name}
+                  role={go ? "link" : undefined}
+                  aria-label={go ? `U${u.seq} ${s.name}: open` : undefined}
+                  tabIndex={go ? 0 : undefined}
+                  style={go ? { cursor: "pointer" } : undefined}
+                  onClick={go ? () => navigate(go) : undefined}
+                  onKeyDown={go ? (e) => e.key === "Enter" && navigate(go) : undefined}
+                >
+                  <title>{go ? (s.name === "work" || s.name === "verify" ? `Open the ${s.name} agent run` : `Open U${u.seq}`) : `${s.name}: no run yet`}</title>
+                  <circle cx={XS[s.name]} cy={y} r="20" fill="transparent" />
+                  <Beacon x={XS[s.name]} y={y} stage={s} />
+                </g>
+              );
+            })}
           </g>
         );
       })}

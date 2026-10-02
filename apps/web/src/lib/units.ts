@@ -21,6 +21,7 @@ export interface Stage {
   name: StageName;
   light: Light;
   label: string | null;
+  href: string | null;
 }
 
 export type Tone = "bell" | "lamp" | "info" | "pine" | "muted";
@@ -52,33 +53,45 @@ export function stages(d: ProjectDetail, u: UnitView, now: number): Stage[] {
   const past = (s: string[]) => s.includes(u.state);
 
   const workLight: Stage = work
-    ? { name: "work", light: "flame", label: `worker · ${elapsed(work, now)}` }
+    ? { name: "work", light: "flame", label: `worker · ${elapsed(work, now)}`, href: null }
     : past(["handed_off", "verifying", "verified", "landing", "landed", "done"]) || blockedAtVerify || blockedAtLand
-      ? { name: "work", light: "lit", label: null }
+      ? { name: "work", light: "lit", label: null, href: null }
       : u.state === "blocked"
-        ? { name: "work", light: "ember", label: "blocked" }
+        ? { name: "work", light: "ember", label: "blocked", href: null }
         : waitingReason(d, u)
-          ? { name: "work", light: "wait", label: null }
-          : { name: "work", light: "off", label: null };
+          ? { name: "work", light: "wait", label: null, href: null }
+          : { name: "work", light: "off", label: null, href: null };
   const verifyLight: Stage = verifying
-    ? { name: "verify", light: "flame", label: `U${verifier!.seq} · ${elapsed(verifying, now)}` }
+    ? { name: "verify", light: "flame", label: `U${verifier!.seq} · ${elapsed(verifying, now)}`, href: null }
     : past(["verified", "landing", "landed", "done"]) || blockedAtLand
-      ? { name: "verify", light: "lit", label: null }
+      ? { name: "verify", light: "lit", label: null, href: null }
       : blockedAtVerify
-        ? { name: "verify", light: "ember", label: "blocked" }
+        ? { name: "verify", light: "ember", label: "blocked", href: null }
         : u.state === "verifying" || u.state === "handed_off"
-          ? { name: "verify", light: "wait", label: "queued" }
-          : { name: "verify", light: "off", label: null };
+          ? { name: "verify", light: "wait", label: "queued", href: null }
+          : { name: "verify", light: "off", label: null, href: null };
   const landLight: Stage = past(["landed", "done"])
-    ? { name: "land", light: "lit", label: null }
+    ? { name: "land", light: "lit", label: null, href: null }
     : u.state === "landing"
-      ? { name: "land", light: "flame", label: "landing" }
+      ? { name: "land", light: "flame", label: "landing", href: null }
       : blockedAtLand
-        ? { name: "land", light: "ember", label: "blocked" }
+        ? { name: "land", light: "ember", label: "blocked", href: null }
         : u.state === "verified" && gate
-          ? { name: "land", light: "bell", label: "land?" }
-          : { name: "land", light: "off", label: null };
-  return [{ name: "plan", light: "lit", label: null }, workLight, verifyLight, landLight];
+          ? { name: "land", light: "bell", label: "land?", href: null }
+          : { name: "land", light: "off", label: null, href: null };
+  const lastRun = (attempts: Attempt[]) => running(attempts) ?? attempts.at(-1) ?? null;
+  const verifierRun = verifiersOf(d, u)
+    .map((v) => lastRun(v.attempts))
+    .filter((a): a is Attempt => a !== null)
+    .sort((a, b) => b.id - a.id)[0];
+  const unitHref = `/p/${d.project.id}/u/${u.seq}`;
+  const workRun = lastRun(u.attempts);
+  return [
+    { name: "plan", light: "lit", label: null, href: unitHref },
+    { ...workLight, href: workRun ? `/a/${workRun.id}` : null },
+    { ...verifyLight, href: verifierRun ? `/a/${verifierRun.id}` : null },
+    { ...landLight, href: landLight.light === "off" ? null : unitHref },
+  ];
 }
 
 export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: string; tone: Tone } {

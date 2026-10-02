@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
 import { diffLines } from "./diff";
-import { clip, clock, duration, modelName } from "./format";
+import { clip, clock, duration, modelName, when } from "./format";
 import { ifUnanswered } from "./gates";
 import { groupHits, highlight } from "./search";
 import { mentionHref, mentionQuery } from "./mention";
@@ -69,7 +69,8 @@ const unit = (over: Partial<UnitView>): UnitView =>
     ...over,
   }) as UnitView;
 const attempt = (over: object) => ({ id: 9, unitId: 1, n: 1, state: "handed_off", startedAt: "2026-09-27T00:00:00Z", endedAt: null, ...over }) as never;
-const detail = (units: UnitView[], over: Partial<ProjectDetail> = {}): ProjectDetail => ({ units, gates: [], waiting: [], deps: [], ...over }) as ProjectDetail;
+const detail = (units: UnitView[], over: Partial<ProjectDetail> = {}): ProjectDetail =>
+  ({ project: { id: "p" }, units, gates: [], waiting: [], deps: [], ...over }) as ProjectDetail;
 const NOW = Date.parse("2026-09-27T00:12:00Z");
 
 describe("search", () => {
@@ -142,6 +143,18 @@ describe("unit stages and status", () => {
     expect(stages(detail([atWork]), atWork, NOW).map((s) => s.light)).toEqual(["lit", "ember", "off", "off"]);
     expect(stages(detail([atLand]), atLand, NOW).map((s) => s.light)).toEqual(["lit", "lit", "lit", "ember"]);
     expect(statusLine(detail([atWork]), atWork, NOW)).toEqual({ text: "Blocked. used 2 of 2 attempts", tone: "bell" });
+  });
+
+  it("links the work and verify beacons to their agent runs, and the others to the unit", () => {
+    const u = unit({
+      state: "verified",
+      attempts: [attempt({ id: 4, n: 1 }), attempt({ id: 7, n: 2 })],
+      verdict: { id: 1, tier: "unit-verified", headSha: "x" },
+    });
+    const v = unit({ id: 2 as never, seq: 5, type: "verify", targetUnitId: 1 as never, state: "done", attempts: [attempt({ id: 8 })] });
+    const fresh = unit({ state: "ready" });
+    expect(stages(detail([u, v]), u, NOW).map((s) => s.href)).toEqual(["/p/p/u/1", "/a/7", "/a/8", null]);
+    expect(stages(detail([fresh]), fresh, NOW).map((s) => s.href)).toEqual(["/p/p/u/1", null, null, null]);
   });
 
   it("shows a waiting unit with a dotted beacon and its reason", () => {
@@ -277,5 +290,15 @@ describe("mentions and formatting", () => {
       "planner",
     ]);
     expect(["work", "pack", "verify", "plan"].map((type) => isBuild({ type }))).toEqual([true, true, false, false]);
+  });
+});
+
+describe("when", () => {
+  const at = (h: number, m: number, s: number, day = 2) => new Date(2026, 9, day, h, m, s).toISOString();
+  it("always shows the date, and the end's date only when it is another day", () => {
+    expect(when(at(12, 7, 22), at(12, 8, 35))).toBe("2 Oct 12:07:22 → 12:08:35");
+    expect(when(at(23, 58, 0), at(0, 2, 0, 3), false)).toBe("2 Oct 23:58 → 3 Oct 00:02");
+    expect(when(at(12, 7, 22), null)).toBe("2 Oct 12:07:22");
+    expect(when(null, null)).toBe("");
   });
 });

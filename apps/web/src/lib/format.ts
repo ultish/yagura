@@ -20,6 +20,20 @@ export function clock(iso: string | null | undefined): string {
   return sameDay ? hm : `${md} ${hm}`;
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// When something ran, with the date always: "2 Oct 12:07:22 → 12:08:35", the end's date shown only when it differs from the start's.
+export function when(start: string | null | undefined, end: string | null | undefined, seconds = true): string {
+  if (!start) return "";
+  const time = (d: Date) => d.toTimeString().slice(0, seconds ? 8 : 5);
+  const day = (d: Date) => `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+  const s = new Date(start);
+  const from = `${day(s)} ${time(s)}`;
+  if (!end) return from;
+  const e = new Date(end);
+  return `${from} → ${e.toDateString() === s.toDateString() ? "" : `${day(e)} `}${time(e)}`;
+}
+
 export function clip(text: string, max: number): string {
   if (text.length <= max) return text;
   const cut = text.slice(0, max);

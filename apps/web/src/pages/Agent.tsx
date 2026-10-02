@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, streamUrl, useApi, useNow, type Attempt, type AttemptDetail, type EvidenceRun, type LogLine, type ProjectDetail, type Steer } from "../api";
 import { slotLine } from "./environment-values";
 import { roleOf } from "../lib/units";
-import { clock, duration, modelName, tokens } from "../lib/format";
+import { clock, duration, modelName, tokens, when } from "../lib/format";
 import { Inline, Markdown } from "../lib/markdown";
 import { buildTimeline, type Step } from "../lib/timeline";
 import { Link } from "../ui/Link";
@@ -438,6 +438,12 @@ export function Agent({ attemptId }: { attemptId: number }) {
             <b>{byYagura ? "run by yagura, no agent" : modelName(a.model ?? timeline.model)}</b>
             {a.pluginVersions.pstack ? ` · pstack ${a.pluginVersions.pstack}` : ""}
           </span>
+          {a.startedAt && (
+            <span title="When this agent was working">
+              <b>{when(a.startedAt, a.endedAt)}</b>
+              {!a.endedAt && " · running"}
+            </span>
+          )}
           <span>
             try {a.n} of {u.maxAttempts}
           </span>
