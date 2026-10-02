@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  addDecision,
   addGate,
+  addMessage,
+  createThread,
   addProject,
   addRepo,
   addUnit,
@@ -327,6 +330,31 @@ describe("daemon API", () => {
     while (!text.includes("gate.opened")) text += new TextDecoder().decode((await reader.read()).value);
     await reader.cancel();
     expect(text).toMatch(/event: yagura\ndata: .*"type":"project.created"/);
+  });
+});
+
+describe("find API", () => {
+  it("finds units, decisions, and messages by words, a unit by its commit, and caps hits per kind for the drop-down", async () => {
+    const thread = createThread(db, { title: "orders talk" });
+    addMessage(db, { threadId: thread.id, role: "human", body: "please make the discount rounding exact" });
+    addDecision(db, { threadId: thread.id, text: "Discounts round half up to the cent" });
+    const find = async (q: string, per = 0) =>
+      (await (await get(`/api/find?q=${encodeURIComponent(q)}&per=${per}`)).json()) as {
+        total: number;
+        counts: Record<string, number>;
+        hits: { kind: string; ref: string; href: string; text: string }[];
+      };
+    const r = await find("discount round");
+    expect(r.counts).toEqual({ decision: 1, message: 1 });
+    expect(r.hits.map((h) => [h.kind, h.href])).toEqual([
+      ["decision", `/talk/${thread.id}`],
+      ["message", `/talk/${thread.id}`],
+    ]);
+    expect((await find("discount", 1)).hits.length).toBe(2);
+    expect((await find("")).total).toBe(0);
+    expect((await find("100%_off")).total).toBe(0);
+    expect((await find("Implement create")).hits).toEqual([expect.objectContaining({ kind: "unit", ref: "orders/U1", href: "/p/orders/u/1" })]);
+    expect((await find("gitlab#7")).hits.map((h) => h.ref)).toEqual(["orders/U1", "orders"]);
   });
 });
 

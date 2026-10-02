@@ -52,3 +52,4 @@ export * from "./packedits.js";
 export * from "./disagreements.js";
 export * from "./story.js";
 export * from "./browse.js";
+export * from "./find.js";

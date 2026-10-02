@@ -3,6 +3,7 @@ import type { LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
 import { diffLines } from "./diff";
 import { clip, clock, duration, modelName } from "./format";
 import { ifUnanswered } from "./gates";
+import { groupHits, highlight } from "./search";
 import { mentionHref, mentionQuery } from "./mention";
 import { layoutScene, subLabel } from "./scene";
 import { buildTimeline } from "./timeline";
@@ -70,6 +71,30 @@ const unit = (over: Partial<UnitView>): UnitView =>
 const attempt = (over: object) => ({ id: 9, unitId: 1, n: 1, state: "handed_off", startedAt: "2026-09-27T00:00:00Z", endedAt: null, ...over }) as never;
 const detail = (units: UnitView[], over: Partial<ProjectDetail> = {}): ProjectDetail => ({ units, gates: [], waiting: [], deps: [], ...over }) as ProjectDetail;
 const NOW = Date.parse("2026-09-27T00:12:00Z");
+
+describe("search", () => {
+  it("highlights every word of the query, in any case", () => {
+    expect(highlight("Discounts round half up", "round discount")).toEqual([
+      { text: "Discount", match: true },
+      { text: "s ", match: false },
+      { text: "round", match: true },
+      { text: " half up", match: false },
+    ]);
+    expect(highlight("costs 100% (a+b)", "(a+b)")).toEqual([
+      { text: "costs 100% ", match: false },
+      { text: "(a+b)", match: true },
+    ]);
+  });
+
+  it("groups hits by kind in a fixed order, with each kind's full count", () => {
+    const hit = (kind: string, ref: string) => ({ kind, ref, href: "", title: "", meta: "", text: "" });
+    const groups = groupHits({ query: "x", total: 5, counts: { message: 3, unit: 2 }, hits: [hit("message", "m1"), hit("unit", "u1"), hit("unit", "u2")] });
+    expect(groups.map((g) => [g.label, g.count, g.hits.map((h) => h.ref)])).toEqual([
+      ["Units", 2, ["u1", "u2"]],
+      ["Conversations", 3, ["m1"]],
+    ]);
+  });
+});
 
 describe("steering in the timeline", () => {
   it("shows the developer's messages but not yagura's own prompt, which the harness echoes first", () => {

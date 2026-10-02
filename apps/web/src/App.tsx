@@ -13,10 +13,12 @@ import { Environments } from "./pages/Environments";
 import { Gates } from "./pages/Gates";
 import { Repos } from "./pages/Repos";
 import { Settings } from "./pages/Settings";
+import { Search } from "./pages/Search";
 import { Talk } from "./pages/Talk";
 import markDark from "./assets/mark-dark.png";
 import markLight from "./assets/mark-light.png";
 import { Link } from "./ui/Link";
+import { SearchBox } from "./ui/SearchBox";
 
 type Theme = "night" | "day";
 
@@ -68,7 +70,8 @@ function Header() {
           </Link>
         ))}
       </nav>
-      <div className="mono" style={{ marginLeft: "auto", fontSize: 12, color: health.error ? "var(--bell-text)" : "var(--muted)" }}>
+      <SearchBox />
+      <div className="mono" style={{ fontSize: 12, color: health.error ? "var(--bell-text)" : "var(--muted)" }}>
         {health.error ? "daemon unreachable" : `${location.host}`}
       </div>
       <button
@@ -94,6 +97,7 @@ function Routes() {
   if (path === "/repos") return <Repos />;
   if (path === "/environments") return <Environments />;
   if (path === "/settings") return <Settings />;
+  if (path === "/search") return <Search />;
   if ((m = /^\/talk(?:\/(\d+))?\/?$/.exec(path))) return <Talk threadId={m[1] ? Number(m[1]) : null} />;
   if ((m = /^\/a\/(\d+)\/?$/.exec(path))) return <Agent key={m[1]} attemptId={Number(m[1])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)\/(\d+)\/?$/.exec(path))) return <UnitAgent projectId={m[1]!} seq={Number(m[2])} n={Number(m[3])} />;

@@ -54,6 +54,8 @@ import {
   listSteers,
   SteerRefused,
   RouteNeeded,
+  find,
+  excerpt,
   proposalRoutes,
   traceUnit,
   type ArtifactId,
@@ -470,6 +472,19 @@ export function createApp(opts: ServerOptions): Hono {
     const b = (await c.req.json()) as { scope: SettingScope; id?: string; key: string; value: unknown };
     setSetting(db, b.scope, b.id ?? "", b.key, b.value);
     return c.json({ ok: true });
+  });
+
+  app.get("/api/find", (c) => {
+    const q = c.req.query("q") ?? "";
+    const per = Number(c.req.query("per") ?? 0);
+    const r = find(db, q);
+    const shown = new Map<string, number>();
+    const hits = r.hits.filter((h) => {
+      const n = (shown.get(h.kind) ?? 0) + 1;
+      shown.set(h.kind, n);
+      return !per || n <= per;
+    });
+    return c.json({ ...r, hits: hits.map((h) => ({ ...h, title: excerpt(h.title, q, 200), text: excerpt(h.text, q, 200) })) });
   });
 
   app.get("/api/search", (c) => {

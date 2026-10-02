@@ -880,3 +880,11 @@ Tests with the fake agent: a review with one blocking finding becomes a triage t
 ### Order
 
 Build §23 first (it is small and stops the harm), then §24.
+
+### As built (header search, 2026-10-02)
+
+The developer chose, from a clickable prototype on real run data (https://claude.ai/artifact/Fmgm89ZWDRWoKCBG5Nj69b): a search box in the header on every page; typing shows results in a drop-down under the box; clicking a result opens its page; "all results" opens a results page. The drop-down closes when the box loses focus or on Escape; `/` focuses the box from anywhere.
+
+- `find.ts` (`GET /api/find?q=&per=`): every word must appear, any case, `%` and `_` taken literally. A commit (via `findUnitsByCommit`), an issue key (via `findByRef`, projects and units), or `U3` / `project/U3` names its units first; then unit goals (build units), projects, decisions, questions (with answers), review threads (people's and the reviewer's), conversation messages, handoffs (the `search` table's bodies), and repos, up to 200 each. `per` caps hits per kind for the drop-down while `counts` stay whole; each hit's text is an excerpt around the first match.
+- Web: `ui/SearchBox.tsx` in the header (three per kind, arrow keys, Enter opens the selected result or the results page), `pages/Search.tsx` at `/search?q=` (a summary line, kind filters always visible, a ledger with location links and highlighted matches), `lib/search.ts` (grouping and highlighting, unit-tested).
+- Not yet: a conversation result opens its thread at the end rather than at that message.
