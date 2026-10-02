@@ -39,6 +39,7 @@ import {
   transitionUnit,
   updateAttempt,
   type Db,
+  jobLabel,
 } from "./store.js";
 import { landMessage } from "./audit.js";
 
@@ -152,7 +153,7 @@ async function squashOntoTrunk(l: Landing): Promise<Squash> {
 function triageOrBlock(l: Landing, number: number, fresh: Parameters<typeof queueTriage>[3]): LandResult {
   const triage = queueTriage(l.db, l.unit, prRef(l.repo.forge, number), fresh);
   if (!triage) return block(l, `${prRef(l.repo.forge, number)} has new review threads after ${MAX_TRIAGE_WAVES} triage waves; it needs you`);
-  const reason = `${fresh.length} review thread(s) on ${prRef(l.repo.forge, number)}; triaging in U${triage.seq}`;
+  const reason = `${fresh.length} review thread(s) on ${prRef(l.repo.forge, number)}; a review triage is queued`;
   if (l.unit.state === "landing") transitionUnit(l.db, l.unit.id, "blocked", { reason, reviewUnit: triage.seq });
   return { unit: getUnit(l.db, l.unit.id), outcome: "triaging", landedSha: null, reason };
 }
@@ -160,7 +161,7 @@ function triageOrBlock(l: Landing, number: number, fresh: Parameters<typeof queu
 function rebaseOrBlock(l: Landing, trunk: Sha, conflict: string): LandResult {
   const rebase = queueRebase(l.db, l.unit, trunk, conflict);
   if (!rebase) return block(l, `${conflict}; ${MAX_REBASES} rebases did not land it`);
-  const reason = `${conflict}; rebasing in U${rebase.seq}`;
+  const reason = `${conflict}; a rebase is queued`;
   transitionUnit(l.db, l.unit.id, "blocked", { reason, rebaseUnit: rebase.seq });
   return { unit: getUnit(l.db, l.unit.id), outcome: "rebasing", landedSha: null, reason };
 }

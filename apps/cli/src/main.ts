@@ -97,6 +97,8 @@ import {
   type ProjectId,
   type RepoId,
   type SettingScope,
+  isBuild,
+  jobLabel,
 } from "@yagura/core";
 
 const USAGE = `yagura — agent orchestration
@@ -459,7 +461,7 @@ async function main() {
               `${a.pluginVersions.pstack ? ` · pstack ${a.pluginVersions.pstack}` : ""} · skills ${a.skills.join(", ") || "none"} · ${a.branch ?? ""}`,
           );
         for (const v of t.verifications) {
-          console.log(`  verified by U${v.unit.seq} [${v.unit.state}]`);
+          console.log(`  verified by ${jobLabel(db, v.unit as never)} [${v.unit.state}]`);
           for (const r of v.runs)
             console.log(`    run:${r.id} ${r.label}@${r.at} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}${r.tampered ? " TAMPERED" : ""}`);
         }
@@ -654,8 +656,30 @@ async function main() {
         console.log(
           `${project.id} [${project.state}] ${project.goal}\n  predicate: ${project.predicate} · min tier: ${project.minTier} · agent cost $${total.toFixed(2)}`,
         );
-        for (const u of listUnits(db, project.id))
-          console.log(`  U${u.seq}  ${u.state.padEnd(10)} ${u.type.padEnd(6)} ${`$${(costs.get(u.id) ?? 0).toFixed(2)}`.padStart(6)}  ${u.goal}`);
+        const units = listUnits(db, project.id);
+        for (const u of units.filter(isBuild)) {
+          const own = units.filter((j) => j.targetUnitId === u.id).reduce((sum, j) => sum + (costs.get(j.id) ?? 0), costs.get(u.id) ?? 0);
+          console.log(`  U${u.seq}  ${u.state.padEnd(10)} ${u.type.padEnd(6)} ${`$${own.toFixed(2)}`.padStart(6)}  ${u.goal}`);
+        }
+        const agents = db
+          .prepare(
+            `SELECT a.agent_no, a.state, a.cost_usd, a.started_at, u.type, u.seq, t.seq AS target FROM attempts a JOIN units u ON u.id = a.unit_id LEFT JOIN units t ON t.id = u.target_unit_id
+             WHERE u.project_id = ? ORDER BY a.agent_no`,
+          )
+          .all(project.id) as {
+          agent_no: number;
+          state: string;
+          cost_usd: number;
+          started_at: string | null;
+          type: string;
+          seq: number;
+          target: number | null;
+        }[];
+        console.log("  agents (cost above includes the agents that worked on each unit):");
+        for (const a of agents)
+          console.log(
+            `  A${a.agent_no}  ${a.state.padEnd(10)} ${(a.type === "plan" ? "planner" : a.type).padEnd(13)} ${`$${a.cost_usd.toFixed(2)}`.padStart(6)}  ${a.type === "plan" ? "plan" : `for U${a.target ?? a.seq}`}  ${a.started_at ?? ""}`,
+          );
         return;
       }
       const u = getUnitBySeq(db, project.id, Number(seq));

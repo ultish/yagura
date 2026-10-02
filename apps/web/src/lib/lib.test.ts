@@ -68,7 +68,8 @@ const unit = (over: Partial<UnitView>): UnitView =>
     blockedReason: null,
     ...over,
   }) as UnitView;
-const attempt = (over: object) => ({ id: 9, unitId: 1, n: 1, state: "handed_off", startedAt: "2026-09-27T00:00:00Z", endedAt: null, ...over }) as never;
+const attempt = (over: object) =>
+  ({ id: 9, unitId: 1, n: 1, agentNo: 9, state: "handed_off", startedAt: "2026-09-27T00:00:00Z", endedAt: null, ...over }) as never;
 const detail = (units: UnitView[], over: Partial<ProjectDetail> = {}): ProjectDetail =>
   ({ project: { id: "p" }, units, gates: [], waiting: [], deps: [], ...over }) as ProjectDetail;
 const NOW = Date.parse("2026-09-27T00:12:00Z");
@@ -130,10 +131,10 @@ describe("unit stages and status", () => {
 
   it("rings the land bell when a verified unit waits on a gate, and groups it with the bell", () => {
     const u = unit({ state: "verified", verdict: { id: 1, tier: "unit-verified", headSha: "x" } });
-    const v = unit({ id: 2 as never, seq: 2, type: "verify", targetUnitId: 1 as never, state: "done" });
+    const v = unit({ id: 2 as never, seq: 2, type: "verify", targetUnitId: 1 as never, state: "done", attempts: [attempt({ id: 20, agentNo: 4 })] });
     const d = detail([u, v], { gates: [{ id: 3, unitId: 1, state: "open", kind: "land", options: ["land", "hold"] }] as never });
     expect(stages(d, u, NOW).map((s) => s.light)).toEqual(["lit", "lit", "lit", "bell"]);
-    expect(statusLine(d, u, NOW).text).toBe("Verified by U2 at unit-verified. Ready to land on r.");
+    expect(statusLine(d, u, NOW).text).toBe("Verified by A4 at unit-verified. Ready to land on r.");
     expect(groupOf(d, u)).toBe("bell");
   });
 

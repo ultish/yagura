@@ -8,7 +8,7 @@ import { parseHandoff } from "./handoff.js";
 import { liveVerdict } from "./land.js";
 import { listPackEdits } from "./packedits.js";
 import { layout } from "./paths.js";
-import { getGate, getProject, getUnit, listAttempts, listUnits, type Db } from "./store.js";
+import { getGate, getProject, getUnit, listAttempts, listUnits, type Db, jobLabel } from "./store.js";
 import { isReviewThread, listThreadRows } from "./triage.js";
 import { findingFates } from "./review.js";
 
@@ -132,13 +132,14 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
   }
 
   // The verification that judged a head, by the head it judged.
-  const verifyFor = new Map<string, { seq: number; outcome: string; check: string; tier: string | null; reason: string }>();
+  const verifyFor = new Map<string, { seq: number; agent: string; outcome: string; check: string; tier: string | null; reason: string }>();
   for (const v of related.filter((u) => u.type === "verify")) {
     const out = events.find((e) => e.type === "verify.outcome" && e.unit_id === unit.id && e.data.verifyUnit === v.seq);
     const head = listAttempts(db, v.id).at(-1)?.headSha;
     if (out && head)
       verifyFor.set(head, {
         seq: v.seq,
+        agent: jobLabel(db, v),
         outcome: String(out.data.outcome),
         check: String(out.data.check ?? "agreed"),
         tier: (out.data.tier as string | null) ?? null,
@@ -163,7 +164,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     const checks: StoryCheck[] = rejected
       ? [{ ok: false, text: `rejected: ${describeRejection(rejected.data)}` }]
       : verified
-        ? [{ ok: verified.outcome === "verified", text: `${verified.outcome === "verified" ? "verified" : verified.outcome} by U${verified.seq}` }]
+        ? [{ ok: verified.outcome === "verified", text: `${verified.outcome === "verified" ? "verified" : verified.outcome} by ${verified.agent}` }]
         : [];
     entries.push({
       at: a.startedAt ?? a.endedAt ?? unit.createdAt,
@@ -187,7 +188,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
           entries.push({
             at: a.startedAt ?? v.createdAt,
             actor: "yagura",
-            who: `yagura · proof U${v.seq}`,
+            who: `yagura · proof ${jobLabel(db, v)}`,
             attempt: null,
             status: { text: String(out.data.outcome), tone: out.data.outcome === "verified" ? "pine" : "bell" },
             body: null,

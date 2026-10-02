@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, navigate, useApi, useNow, type ProjectDetail, type UnitView } from "../api";
 import { modelName, sha, spend, tokens } from "../lib/format";
-import { type Group, groupOf, isBuild, latestAttempt, openGateFor, statusLine, verifiersOf } from "../lib/units";
+import { type Group, groupOf, isBuild, jobName, latestAttempt, openGateFor, statusLine, verifiersOf } from "../lib/units";
 import { Inline } from "../lib/markdown";
 import { Beacons } from "../scene/Beacons";
 import { Link } from "../ui/Link";
@@ -21,7 +21,7 @@ function Runs({ d, u }: { d: ProjectDetail; u: UnitView }) {
   if (!v || !u.verdict) return null;
   return (
     <span className="run ok">
-      verified {u.verdict.tier} by U{v.seq}
+      verified {u.verdict.tier} by {jobName(v)}
     </span>
   );
 }

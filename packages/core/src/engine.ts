@@ -148,12 +148,12 @@ export class Engine {
       const review = reviewStatus(this.db, u);
       if (review.state === "needed") {
         const r = queueReview(this.db, u, review.since);
-        this.log(`  U${r.seq}: ${r.goal}`);
+        this.log(`  review of U${u.seq} queued`);
         continue;
       }
       if (review.state === "answered") {
-        const t = queueTriage(this.db, u, `U${u.seq}'s review`, review.fresh);
-        if (t) this.log(`  U${t.seq}: ${t.goal}`);
+        const t = queueTriage(this.db, u, `the review of U${u.seq}`, review.fresh);
+        if (t) this.log(`  triage of the review of U${u.seq} queued`);
         continue;
       }
       if (review.state !== "settled") continue;
@@ -283,7 +283,9 @@ export class Engine {
               : u.type === "review"
                 ? () => runReviewUnit(this.ctx, u.id)
                 : () => runWorkUnit(this.ctx, u.id);
-      this.start(`unit:${u.id}`, `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}`, run, (e) => this.recoverCrashed(u.id, e));
+      this.start(`unit:${u.id}`, isBuild(u) ? `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}` : `${u.type}: ${u.goal.slice(0, 80)}`, run, (e) =>
+        this.recoverCrashed(u.id, e),
+      );
     }
   }
 

@@ -27,6 +27,7 @@ import {
   transitionUnit,
   updateAttempt,
   type Db,
+  jobLabel,
 } from "./store.js";
 
 export const MAX_TRIAGE_WAVES = 3;
@@ -178,7 +179,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const reviewer = listUnits(db, target.projectId)
     .filter((u) => u.type === "review" && u.targetUnitId === target.id)
     .at(-1);
-  const ref = mr ? prRef(mr.forge, mr.number) : reviewer ? `U${reviewer.seq}'s review` : `U${target.seq}'s review`;
+  const ref = mr ? prRef(mr.forge, mr.number) : `the review of U${target.seq}`;
   const project = getProject(db, unit.projectId);
   const repo = getRepo(db, unit.repoId);
   const sctx = { projectId: project.id, repoId: repo.id };
@@ -321,12 +322,12 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
       // The fixes are the target's to verify, on a head yagura records for it at no cost to the target's tries.
       const onTarget = createAttempt(db, target.id, REBASE_HARNESS, null);
       updateAttempt(db, onTarget.id, { state: "handed_off", baseSha: work.baseSha, headSha: head, branch, startedAt: now(), endedAt: now() });
-      const reason = `review fixes from U${unit.seq} on ${ref}`;
+      const reason = `review fixes from ${jobLabel(db, unit)} on ${ref}`;
       db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, verdict.id);
       transitionUnit(db, target.id, "verifying", { reason, reviewUnit: unit.seq });
       addVerifyUnit(db, getUnit(db, target.id));
     } else if (!asked.length && getUnit(db, target.id).state !== "verified")
-      transitionUnit(db, target.id, "verified", { reason: `review threads answered by U${unit.seq}; nothing to change`, reviewUnit: unit.seq });
+      transitionUnit(db, target.id, "verified", { reason: `review threads answered by ${jobLabel(db, unit)}; nothing to change`, reviewUnit: unit.seq });
   })();
   recordEvent(db, "triage.done", refs, { target: target.seq, head, changed, asked });
   const forge = mr ? forgeFor(db, repo) : null;

@@ -138,7 +138,7 @@ describe("Engine", () => {
       await run();
       expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
       expect(units("review-triage")).toEqual([]);
-      expect(units("work")[0]!.notes.some((n) => /^Reviewer nit \(U\d+\) app\/a\/p-U\d+\.txt:1: a shorter name would read better$/.test(n))).toBe(true);
+      expect(units("work")[0]!.notes.some((n) => /^Reviewer nit \(A\d+\) app\/a\/p-U\d+\.txt:1: a shorter name would read better$/.test(n))).toBe(true);
     }, 60_000);
 
     it("asks the developer before a security finding is dismissed, then fixes it as answered", async () => {
@@ -148,7 +148,7 @@ describe("Engine", () => {
       const asks = () => listGates(db, project, "open").filter((g) => g.kind === "review");
       expect(asks().length).toBeGreaterThan(0);
       expect(asks()[0]!.question).toMatch(
-        /^On U\d+'s review, yagura reviewer wrote: "\[blocking\] the secret token is written to the log"\. This touches security/,
+        /^On the review of U\d+, yagura reviewer wrote: "\[blocking\] the secret token is written to the log"\. This touches security/,
       );
       expect(units("work").some((u) => u.state === "landed")).toBe(false);
       for (let i = 0; i < 5 && asks().length; i++) {
@@ -419,7 +419,7 @@ describe("Engine", () => {
     expect(story.entries.map((e) => e.actor)).toEqual(["planner", "worker", "verifier", "reviewer", "yagura"]);
     expect(story.entries[3]).toMatchObject({ who: "Reviewer", status: { text: "nothing to settle", tone: "pine" }, lines: [{ text: "No findings." }] });
     const [, worker, verifier, , landed] = story.entries;
-    expect(worker!.lines[0]).toMatchObject({ kind: "claimed", checks: [{ ok: true, text: expect.stringMatching(/^verified by U\d+$/) }] });
+    expect(worker!.lines[0]).toMatchObject({ kind: "claimed", checks: [{ ok: true, text: expect.stringMatching(/^verified by A\d+$/) }] });
     expect(verifier!.lines[0]!.checks[0]).toMatchObject({ ok: true, text: expect.stringMatching(/^scenario run:\d+ passes on head and fails on trunk/) });
     expect(landed!.lines[0]!.checks).toEqual([{ ok: true, text: "the merged patch is the one verified, so the verdict carries" }]);
 

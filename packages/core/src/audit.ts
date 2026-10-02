@@ -54,7 +54,7 @@ export function landMessage(
     `Yagura-Unit: U${p.unit.seq}`,
     `Yagura-Attempt: A${p.work.agentNo} (U${p.unit.seq}, ${[p.work.model ?? p.work.harness, pstack ? `pstack ${pstack}` : null].filter(Boolean).join(", ")})`,
     ...(p.work.branch ? [`Yagura-Branch: ${p.work.branch}`] : []),
-    `Yagura-Verdict: ${p.verdict.tier} by U${verifyUnit.seq}${runs.length ? ` (${runs.map((r) => `run:${r}`).join(", ")})` : ""}`,
+    `Yagura-Verdict: ${p.verdict.tier} by A${verifyAttempt.agentNo}${runs.length ? ` (${runs.map((r) => `run:${r}`).join(", ")})` : ""}`,
     ...(link ? [`Yagura-Link: ${link}`] : []),
     ...refs.map((r) => `Refs: ${r}`),
   ];

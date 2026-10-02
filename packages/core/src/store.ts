@@ -322,6 +322,12 @@ function toAttempt(r: Record<string, unknown>): Attempt {
   };
 }
 
+// Verify, review, triage, rebase, and plan rows are agent jobs, not slices of work: they are named by their agent, "A13", once one has started.
+export function jobLabel(db: Db, unit: Pick<Unit, "id" | "type">): string {
+  const a = db.prepare("SELECT agent_no FROM attempts WHERE unit_id = ? ORDER BY id DESC LIMIT 1").get(unit.id) as { agent_no: number } | undefined;
+  return a ? `A${a.agent_no}` : `its ${unit.type === "review-triage" ? "triage" : unit.type} (not started)`;
+}
+
 export function createAttempt(db: Db, unitId: UnitId, harness: string, model: string | null): Attempt {
   const id = db.transaction(() => {
     const n = (db.prepare("SELECT COALESCE(MAX(n), 0) + 1 AS next FROM attempts WHERE unit_id = ?").get(unitId) as { next: number }).next;

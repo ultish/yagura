@@ -27,6 +27,7 @@ import {
   transitionUnit,
   updateAttempt,
   type Db,
+  jobLabel,
 } from "./store.js";
 import { listDecisions, threadsForProject } from "./threads.js";
 import { freshThreads, isReviewThread, listThreadRows, queueTriage } from "./triage.js";
@@ -83,8 +84,8 @@ export function reviewStatus(db: Db, target: Unit): ReviewStatus {
   const reviews = reviewsOf(db, target);
   const last = reviews.at(-1);
   if (!last) return { state: "needed", since: null, reason: "not reviewed yet" };
-  if (last.state === "blocked") return { state: "waiting", reason: `the review U${last.seq} is blocked` };
-  if (!TERMINAL_STATES.has(last.state)) return { state: "pending", reason: `U${last.seq} is reviewing it` };
+  if (last.state === "blocked") return { state: "waiting", reason: `the review of U${target.seq} is blocked` };
+  if (!TERMINAL_STATES.has(last.state)) return { state: "pending", reason: `the review of U${target.seq} is under way` };
   const rows = listThreadRows(db, target.id).filter((r) => isReviewThread(r.threadId));
   const triage = listUnits(db, target.projectId).filter((u) => u.type === "review-triage" && u.targetUnitId === target.id && !TERMINAL_STATES.has(u.state));
   if (triage.some((u) => u.state === "blocked")) return { state: "waiting", reason: `the triage of its review is blocked` };
@@ -102,7 +103,7 @@ export function reviewStatus(db: Db, target: Unit): ReviewStatus {
   const seen = reviewedHead(db, last);
   const rounds = resolveSetting(db, "review.max_rounds", { projectId: target.projectId, repoId: target.repoId }).value;
   if (seen && seen !== head && reviews.length <= rounds) return { state: "needed", since: seen, reason: "the change was fixed after review" };
-  return { state: "settled", reason: `reviewed by U${last.seq}` };
+  return { state: "settled", reason: `reviewed by ${jobLabel(db, last)}` };
 }
 
 const isBuildTarget = (u: Unit) => u.type === "work" || u.type === "pack";
@@ -141,7 +142,7 @@ export async function postReviewComments(db: Db, forge: ForgeAdapter, target: Un
     const key = `${target.projectId}/U${r.seq}/review`;
     const fates = findingFates(db, r);
     if (!fates || posted.has(key)) continue;
-    const title = `yagura's code review (U${r.seq}${/again/.test(r.goal) ? ", the fixes" : ""})`;
+    const title = `yagura's code review${/again/.test(r.goal) ? " of the fixes" : ""}`;
     const body = fates.length
       ? `${title}:\n\n${fates.map((f) => `- [${f.severity}] \`${f.path}${f.line ? `:${f.line}` : ""}\` ${f.text}\n  → ${f.fate}`).join("\n")}`
       : `${title}: nothing to raise.`;
@@ -308,7 +309,7 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const findings = parsed!.findings;
   const raised = findings.filter((f) => f.severity !== "nit");
   for (const f of findings.filter((x) => x.severity === "nit"))
-    addUnitNote(db, target.id, `Reviewer nit (U${unit.seq}) ${f.path}${f.line ? `:${f.line}` : ""}: ${f.text}`);
+    addUnitNote(db, target.id, `Reviewer nit (${jobLabel(db, unit)}) ${f.path}${f.line ? `:${f.line}` : ""}: ${f.text}`);
   db.transaction(() => {
     transitionUnit(db, unit.id, "handed_off", { findings: findings.length });
     transitionUnit(db, unit.id, "done", { blocking: raised.filter((f) => f.severity === "blocking").length, should: raised.length });
@@ -330,8 +331,8 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
       },
       directive: null,
     }));
-    const triage = queueTriage(db, getUnit(db, target.id), `U${unit.seq}'s review`, fresh);
-    if (!triage) transitionUnit(db, target.id, "blocked", { reason: `U${unit.seq}'s review raised findings after the last triage wave; it needs you` });
+    const triage = queueTriage(db, getUnit(db, target.id), `the review of U${target.seq}`, fresh);
+    if (!triage) transitionUnit(db, target.id, "blocked", { reason: `the review of U${target.seq} raised findings after the last triage wave; it needs you` });
   }
   return getAttempt(db, attempt.id);
 }

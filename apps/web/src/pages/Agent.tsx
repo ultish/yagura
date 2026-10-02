@@ -635,7 +635,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
                 {u.type === "verify"
                   ? "runs this verifier captured"
                   : lastVerification
-                    ? `captured by the verifier, U${lastVerification.unit.seq} (${lastVerification.unit.state})`
+                    ? `captured by the verifier (${lastVerification.unit.state})`
                     : "filled in by the verifier after hand-off"}
                 {u.verdict ? ` · verdict ${u.verdict.tier}` : ""}
               </div>
@@ -650,7 +650,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
             </div>
           )}
           <div>
-            <h2 className="h2">History of U{u.seq}</h2>
+            <h2 className="h2">Agents on U{d.target?.seq ?? u.seq}</h2>
             <div className="mono" style={{ fontSize: 12.5, lineHeight: 1.9, marginTop: 6 }}>
               {u.attempts.map((x) => (
                 <div key={x.id}>

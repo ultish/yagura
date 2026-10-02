@@ -11,7 +11,20 @@ import { liveVerdict } from "./land.js";
 import { layout, unitRef } from "./paths.js";
 import { addVerifyUnit } from "./runner.js";
 import { assessScope } from "./scope.js";
-import { addUnit, createAttempt, getAttempt, getProject, getRepo, getUnit, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
+import {
+  addUnit,
+  createAttempt,
+  getAttempt,
+  getProject,
+  getRepo,
+  getUnit,
+  now,
+  recordEvent,
+  transitionUnit,
+  updateAttempt,
+  type Db,
+  jobLabel,
+} from "./store.js";
 
 export const MAX_REBASES = 2;
 
@@ -150,7 +163,7 @@ export async function runRebaseUnit(ctx: RunContext, unitId: UnitId): Promise<At
   }
 
   // The rebased head is the target's to verify: an attempt yagura records for it, which costs the target no try.
-  const reason = `rebased onto ${repo.defaultBranch} at ${trunk.slice(0, 10)} by U${unit.seq}; the rebased head needs verification`;
+  const reason = `rebased onto ${repo.defaultBranch} at ${trunk.slice(0, 10)} by ${jobLabel(db, unit)}; the rebased head needs verification`;
   db.transaction(() => {
     const onTarget = createAttempt(db, target.id, REBASE_HARNESS, null);
     updateAttempt(db, onTarget.id, { state: "handed_off", baseSha: trunk, headSha: head, branch, startedAt: now(), endedAt: now() });

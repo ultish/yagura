@@ -98,7 +98,7 @@ export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[]
   if (unitRef) {
     const units = db
       .prepare(
-        "SELECT id, seq, type, state, goal FROM units WHERE project_id = ? AND type IN ('work', 'verify') AND CAST(seq AS TEXT) LIKE ? ORDER BY seq DESC LIMIT ?",
+        "SELECT id, seq, type, state, goal FROM units WHERE project_id = ? AND type IN ('work', 'pack') AND CAST(seq AS TEXT) LIKE ? ORDER BY seq DESC LIMIT ?",
       )
       .all(unitRef[1], `${unitRef[2] ?? ""}%`, limit) as { id: number; seq: number; type: string; state: string; goal: string }[];
     for (const u of units) {

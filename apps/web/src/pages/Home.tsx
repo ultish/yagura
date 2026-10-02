@@ -95,7 +95,7 @@ function Lanterns({ now }: { now: number }) {
           <span className="shoji" style={{ width: 12, height: 16, borderRadius: 2, background: "var(--lamp)", flexShrink: 0 }} />
           <span style={{ flexGrow: 1, minWidth: 0 }}>
             <span style={{ display: "block", fontSize: 14.5 }}>
-              {a.unit.projectId} · {a.unit.type === "plan" ? "planner" : `U${a.unit.seq} ${role(a)}`}
+              {a.unit.projectId} · {a.unit.type === "plan" ? "planner" : `${role(a)} A${a.agentNo}`}
             </span>
             <span className="mono muted" style={{ display: "block", fontSize: 12 }}>
               {a.startedAt ? duration(now - Date.parse(a.startedAt)) : "starting"}

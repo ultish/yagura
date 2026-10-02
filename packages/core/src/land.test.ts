@@ -174,7 +174,7 @@ describe("landUnit (forge none)", () => {
     expect(message).toContain("Yagura-Project: p\nYagura-Unit: U1\n");
     expect(message).toMatch(/Yagura-Attempt: A1 \(U1, fake-model, pstack 0\.5\.0\)/);
     expect(message).toContain("Yagura-Branch: yg/p/u1-1");
-    expect(message).toMatch(/Yagura-Verdict: unit-verified by U2 \(run:\d+/);
+    expect(message).toMatch(/Yagura-Verdict: unit-verified by A\d+ \(run:\d+/);
     expect(message).toContain("Yagura-Link: http://devvm:7300/p/p/u/1");
     expect(message).toContain("Refs: gitlab#42");
   });
@@ -246,7 +246,7 @@ describe("landUnit (forge none)", () => {
     await advanceTrunk("app/orders.py", "x = 99\n");
     const trunk = await originMain();
     const result = await landUnit(ctx, work.id);
-    expect(result).toMatchObject({ outcome: "rebasing", reason: `conflicts with main at ${trunk.slice(0, 10)}; rebasing in U3` });
+    expect(result).toMatchObject({ outcome: "rebasing", reason: `conflicts with main at ${trunk.slice(0, 10)}; a rebase is queued` });
     expect(result.unit.state).toBe("blocked");
     const rebase = getUnitBySeq(db, project, 3);
     expect(rebase).toMatchObject({ type: "rebase", state: "ready", targetUnitId: work.id, writeScope: ["app/**"] });
@@ -369,7 +369,7 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(comments).toHaveLength(1);
     expect(comments[0]!.body).toMatch(
       new RegExp(
-        `^\\*\\*yagura\\*\\* · automated, posted with this account\\n\\nyagura's code review \\(U${review.seq}\\):\\n\\n- \\[nit\\] \`app/orders\\.py:1\` a clearer name would help\\n  → kept as a note`,
+        `^\\*\\*yagura\\*\\* · automated, posted with this account\\n\\nyagura's code review:\\n\\n- \\[nit\\] \`app/orders\\.py:1\` a clearer name would help\\n  → kept as a note`,
       ),
     );
   });
@@ -562,7 +562,7 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
       comments: [{ id: "IC_1", ...said("bob", "security: this logs the auth token") }],
     });
     const queued = await watchMergeRequest(ctx, work.id);
-    expect(queued).toMatchObject({ outcome: "triaging", reason: "3 review thread(s) on pull request #1; triaging in U3" });
+    expect(queued).toMatchObject({ outcome: "triaging", reason: "3 review thread(s) on pull request #1; a review triage is queued" });
     expect(queued!.unit.state).toBe("blocked");
 
     process.env.FAKE_MODE = "success";
@@ -594,7 +594,10 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "waiting", reason: "waiting for your answer on 1 review thread(s)" });
 
     answerGate(db, ask.id, "dismiss");
-    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "triaging", reason: "1 review thread(s) on pull request #1; triaging in U5" });
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({
+      outcome: "triaging",
+      reason: "1 review thread(s) on pull request #1; a review triage is queued",
+    });
     await runTriageUnit(ctx, getUnitBySeq(db, project, 5).id);
     expect(readFileSync(layout(ctx.boot).brief(project, 5, 1), "utf8")).toContain("The developer decided: dismiss. Do that.");
     expect(pr().comments.at(-1)!.body).toMatch(
@@ -747,7 +750,10 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
         { id: "dD", individual_note: true, notes: [{ ...note("ultish", "added 1 commit"), system: true }] },
       ];
     });
-    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "triaging", reason: "2 review thread(s) on merge request !1; triaging in U3" });
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({
+      outcome: "triaging",
+      reason: "2 review thread(s) on merge request !1; a review triage is queued",
+    });
     process.env.FAKE_MODE = "success";
     process.env.FAKE_GLAB_REPLY_FAIL = "after";
     try {

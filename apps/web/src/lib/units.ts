@@ -31,6 +31,12 @@ const running = (attempts: Attempt[]) => attempts.find((a) => a.state === "runni
 const handedOff = (u: UnitView) => u.attempts.some((a) => a.state === "handed_off");
 const elapsed = (a: Attempt, now: number) => (a.startedAt ? duration(now - Date.parse(a.startedAt)) : "");
 
+// A verify, review, triage, or rebase row is an agent job, not a slice of work: it is named by its agent once one has started.
+export const jobName = (u: UnitView): string => {
+  const a = u.attempts.at(-1);
+  return a ? `A${a.agentNo}` : `its ${u.type === "review-triage" ? "triage" : u.type}`;
+};
+
 export function verifiersOf(d: ProjectDetail, u: UnitView): UnitView[] {
   return d.units.filter((v) => v.type === "verify" && v.targetUnitId === u.id);
 }
@@ -62,7 +68,7 @@ export function stages(d: ProjectDetail, u: UnitView, now: number): Stage[] {
           ? { name: "work", light: "wait", label: null, href: null }
           : { name: "work", light: "off", label: null, href: null };
   const verifyLight: Stage = verifying
-    ? { name: "verify", light: "flame", label: `U${verifier!.seq} · ${elapsed(verifying, now)}`, href: null }
+    ? { name: "verify", light: "flame", label: `${jobName(verifier!)} · ${elapsed(verifying, now)}`, href: null }
     : past(["verified", "landing", "landed", "done"]) || blockedAtLand
       ? { name: "verify", light: "lit", label: null, href: null }
       : blockedAtVerify
@@ -111,9 +117,7 @@ export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: 
       return { text: "Handed off; verification is queued.", tone: "info" };
     case "verifying": {
       const v = verifier && running(verifier.attempts);
-      return v
-        ? { text: `U${verifier!.seq} is verifying (${elapsed(v, now)}).`, tone: "lamp" }
-        : { text: `Verification queued${verifier ? ` (U${verifier.seq})` : ""}.`, tone: "info" };
+      return v ? { text: `${jobName(verifier!)} is verifying (${elapsed(v, now)}).`, tone: "lamp" } : { text: "Verification queued.", tone: "info" };
     }
     case "verified": {
       const review = d.units
@@ -121,13 +125,16 @@ export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: 
         .at(-1);
       if (review)
         return review.state === "blocked"
-          ? { text: `Verified; its ${review.type === "review" ? "review" : "review triage"} U${review.seq} is blocked.`, tone: "bell" }
+          ? { text: `Verified; its ${review.type === "review" ? "code review" : "review triage"} is blocked.`, tone: "bell" }
           : {
-              text: `Verified; ${review.type === "review" ? "code review" : "triage of the review findings"} in U${review.seq} before it lands.`,
+              text: `Verified; ${review.type === "review" ? "code review" : "triage of the review findings"} before it lands.`,
               tone: "lamp",
             };
       return openGateFor(d, u)
-        ? { text: `Verified${verifier ? ` by U${verifier.seq}` : ""} at ${u.verdict?.tier ?? "?"}. Ready to land on ${repo}.`, tone: "bell" }
+        ? {
+            text: `Verified${verifier?.attempts.length ? ` by ${jobName(verifier)}` : ""} at ${u.verdict?.tier ?? "?"}. Ready to land on ${repo}.`,
+            tone: "bell",
+          }
         : { text: `Verified at ${u.verdict?.tier ?? "?"}. Landing next.`, tone: "info" };
     }
     case "landing":
