@@ -12,6 +12,7 @@ export * from "./verify.js";
 export * from "./verdict.js";
 export * from "./evidence.js";
 export * from "./evidence-cli.js";
+export * from "./agentcli.js";
 export * from "./leases.js";
 export * from "./pack.js";
 export * from "./land.js";

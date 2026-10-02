@@ -43,6 +43,13 @@ export function loadBootstrap(env: NodeJS.ProcessEnv = process.env): Bootstrap {
   };
 }
 
+const WATCHMAN_TOOLS = [
+  "Skill",
+  ...["show", "logs", "trace", "gates", "settings", "git", "thread", "env values", "env presets", "env notes", "template list", "project skills"].map(
+    (c) => `Bash(yagura ${c}:*)`,
+  ),
+];
+
 export const SETTINGS = {
   max_parallel_agents: z.number().int().positive().default(4).describe("Most agents running at once, across every project"),
   max_parallel_per_harness: z.number().int().positive().default(4).describe("Most agents running at once on one harness (claude, …)"),
@@ -69,6 +76,14 @@ export const SETTINGS = {
     .min(10000)
     .default(150000)
     .describe("Start a new watchman session once a turn's context passes this many tokens"),
+  "harness.claude.watchman_permission_mode": z
+    .string()
+    .default("dontAsk")
+    .describe("Permission mode for the watchman: dontAsk refuses every tool call watchman.allowed_tools does not name"),
+  "watchman.allowed_tools": z
+    .array(z.string().min(1))
+    .default(WATCHMAN_TOOLS)
+    .describe("Tools the watchman may use beyond reading its thread's and linked projects' files; the CLI refuses agents' writes regardless"),
   "timebox.work_seconds": z.number().int().positive().default(1800).describe("How long a worker may run before it is stopped"),
   "skills.scaffold": z.array(z.string().min(1)).default([]).describe("Skills a scaffold unit (a new project's skeleton) must load"),
   "skills.work": z.array(z.string().min(1)).default([]).describe("Skills every worker must load"),
@@ -159,6 +174,8 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "timebox.watchman_seconds": [],
   "watchman.context_tokens": [],
   "watchman.session_roll_tokens": [],
+  "harness.claude.watchman_permission_mode": [],
+  "watchman.allowed_tools": [],
   "timebox.work_seconds": PR,
   "work.resume_on_rejection": PR,
   "skills.scaffold": PRE,

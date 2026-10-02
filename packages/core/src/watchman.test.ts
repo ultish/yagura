@@ -13,7 +13,7 @@ import { saveTemplate } from "./templates.js";
 import { Engine } from "./engine.js";
 import { write } from "./agent.js";
 import { commitAll, git } from "./git.js";
-import type { HarnessAdapter } from "./harness/adapter.js";
+import type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { applyProposal, proposalRoutes } from "./proposal.js";
@@ -107,6 +107,26 @@ describe("watchman turns", () => {
     db = openStore(layout(boot).db);
     ctx = { db, boot, adapters: { claude: fake }, cli: [process.execPath, "--import", tsx, fixtures("evidence-shim.ts")] };
     process.env.FAKE_MODE = "engine";
+  });
+
+  it("runs the watchman read-only: dontAsk, the allow-list, writes denied, and only its linked projects' directories", async () => {
+    const runs: HarnessRun[] = [];
+    ctx.adapters = { claude: { ...fake, command: (run) => (runs.push(run), fake.command(run)) } };
+    addRepo(db, { id: "proto" as RepoId, url: "/nowhere", defaultBranch: "main" });
+    addProject(db, { id: "a" as ProjectId, name: "a", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["proto" as RepoId] });
+    addProject(db, { id: "b" as ProjectId, name: "b", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["proto" as RepoId] });
+    const t = createThread(db, { title: "t" });
+    linkThreadProject(db, t.id, "a" as ProjectId);
+    await runWatchmanTurn(ctx, t.id, "hello");
+
+    expect(runs[0]).toMatchObject({
+      permissionMode: "dontAsk",
+      addDirs: [join(boot.home, "projects", "a")],
+      disallowedTools: ["Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch"],
+    });
+    expect(runs[0]!.allowedTools).toContain("Bash(yagura git:*)");
+    expect(runs[0]!.allowedTools!.filter((t) => !t.startsWith("Bash(yagura "))).toEqual(["Skill"]);
+    expect(runs[0]!.prompt).toContain(`\`${join(boot.home, "projects")}/<project>/\` for each project in this thread`);
   });
 
   it("stores nothing when any record is invalid", () => {

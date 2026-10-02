@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { assertThreadFree, beginTurn, currentSession, endSession, endTurn, getTurn, markSeen, turnRecorder } from "./turns.js";
 import { z } from "zod";
 import { runAgentSession, write, type RunContext, type SessionRecorder } from "./agent.js";
@@ -170,6 +171,7 @@ export interface WatchmanBrief {
   catalog: string;
   standing: string;
   mentioned: string;
+  projectsDir: string;
   context: AssembledContext;
   message: { id: number; body: string };
 }
@@ -207,6 +209,9 @@ ${sections.spec || "(no spec yet)"}${dropped.specSections ? `\n(${dropped.specSe
 
 ## WHAT YAGURA HAS
 ${b.catalog}
+
+## LOOKING THINGS UP
+You can read, never change. Read, Grep, and Glob work in this thread's directory and in \`${b.projectsDir}/<project>/\` for each project in this thread (spec.md, briefs/, handoffs/, logs/). For anything else run \`yagura show <project> [unit#]\`, \`yagura logs\`, \`yagura trace <sha|issue>\`, \`yagura gates\`, \`yagura settings\`, \`yagura thread list|show|search|mentions\`, \`yagura env values|presets|notes\`, \`yagura template list\`, \`yagura project skills\`, or \`yagura git <repo> log|show|ls-tree|diff|grep|blame\` (trunk is \`origin/<default branch>\`). Every other tool and command is refused; look a fact up before you guess it or ask the developer for it.
 
 ## CONVERSATION (most recent, oldest first)
 ${dropped.messages ? `(${dropped.messages} older message(s) omitted; search them with \`yagura thread search --thread ${b.thread.id} "<words>"\`)\n\n` : ""}${sections.history}
@@ -404,6 +409,7 @@ export function buildWatchmanBrief(ctx: { db: Db; boot: RunContext["boot"] }, th
     catalog: "",
     standing: "",
     mentioned: "",
+    projectsDir: "",
     context: EMPTY_CONTEXT,
     message: { id: 0, body: "" },
   });
@@ -418,6 +424,7 @@ export function buildWatchmanBrief(ctx: { db: Db; boot: RunContext["boot"] }, th
       catalog: state.catalog,
       standing: state.standing,
       mentioned,
+      projectsDir: join(ctx.boot.home, "projects"),
       context,
       message: { id: message.id, body: message.body },
     }),
@@ -580,6 +587,9 @@ export function storeTurn(
   return stored;
 }
 
+// Denied outright so an allow rule in the developer's own settings cannot hand them to the watchman.
+export const WATCHMAN_DENIED_TOOLS = ["Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch"];
+
 export interface TurnResult {
   human: ThreadMessage;
   reply: ThreadMessage | null;
@@ -650,6 +660,9 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
   const turnId = beginTurn(db, threadId, human.id, logPath);
   const cwd = paths.thread(threadId);
   mkdirSync(cwd, { recursive: true });
+  // With nothing granted beyond these, dontAsk confines reads to the thread's directory and its linked projects' specs, handoffs, and logs.
+  const linked = getThread(db, threadId).projects.map((p) => paths.project(p as ProjectId));
+  for (const d of linked) mkdirSync(d, { recursive: true });
   recordEvent(
     db,
     "watchman.turn",
@@ -679,11 +692,13 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
         prompt,
         bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
         model: setting("role.watchman.model"),
-        permissionMode: setting("harness.claude.permission_mode"),
+        permissionMode: setting("harness.claude.watchman_permission_mode"),
         pluginDirs: [boot.skillsDir],
-        addDirs: [],
+        addDirs: linked,
         extraArgs: setting("harness.claude.extra_args"),
         resume,
+        allowedTools: setting("watchman.allowed_tools"),
+        disallowedTools: WATCHMAN_DENIED_TOOLS,
       },
       cwd,
       env: {},

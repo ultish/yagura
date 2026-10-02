@@ -11,6 +11,7 @@ export function layout(boot: Bootstrap) {
   const project = (p: ProjectId) => join(boot.home, "projects", p);
   return {
     db: join(boot.home, "yagura.db"),
+    project,
     mirror: (r: RepoId) => join(boot.home, "cache", "repos", `${r}.git`),
     worktree: (r: RepoId, p: ProjectId, seq: number, n: number) => join(boot.home, "worktrees", r, `${p}-${attemptRef(seq, n)}`),
     standingOrders: (p: ProjectId) => join(project(p), "standing-orders.md"),

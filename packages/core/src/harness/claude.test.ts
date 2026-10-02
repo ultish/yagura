@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import type { HarnessEvent } from "../domain.js";
 import { claudeAdapter, parseClaudeLine } from "./claude.js";
 
 const lines = readFileSync(new URL("./fixtures/claude-basic.jsonl", import.meta.url), "utf8").split("\n");
@@ -57,6 +58,18 @@ describe("claude command", () => {
     });
     expect(claudeAdapter.command({ ...run, model: "opus" }).argv.slice(-2)).toEqual(["--model", "opus"]);
   });
+
+  it("passes allowed and denied tools as one list each", () => {
+    const run = { prompt: "p", bin: null, model: null, permissionMode: "dontAsk", pluginDirs: [], addDirs: ["/h/projects/a"], extraArgs: [] };
+    expect(claudeAdapter.command({ ...run, allowedTools: ["Skill", "Bash(yagura show:*)"], disallowedTools: ["Write", "Edit"] }).argv.slice(10)).toEqual([
+      "--add-dir",
+      "/h/projects/a",
+      "--allowed-tools",
+      "Skill,Bash(yagura show:*)",
+      "--disallowed-tools",
+      "Write,Edit",
+    ]);
+  });
 });
 
 describe("claude resume (real transcripts)", () => {
@@ -101,5 +114,50 @@ describe("claude steering (real transcript)", () => {
             : `final: ${e.text}`,
       );
     expect(order).toEqual(["you: Run these three comm", "call: sleep 4 && echo one", "you: Change of plan: stop", "call: echo PINEAPPLE", "final: Done."]);
+  });
+});
+
+describe("the watchman's tools (real transcripts, Haiku, dontAsk with yagura's allow-list)", () => {
+  const read = (f: string) =>
+    readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8")
+      .split("\n")
+      .flatMap(parseClaudeLine);
+  const calls = (events: HarnessEvent[]) => {
+    const results = new Map(events.flatMap((e) => (e.kind === "tool_result" ? [[e.id, e]] : [])));
+    return events.flatMap((e) => {
+      if (e.kind !== "tool_call") return [];
+      const input = e.input as { command?: string; file_path?: string; skill?: string };
+      const result = results.get(e.id)!;
+      const outcome = !result.isError
+        ? "ran"
+        : /don't ask mode/.test(result.output)
+          ? "denied"
+          : /No such tool available/.test(result.output)
+            ? "no such tool"
+            : "failed";
+      return [`${e.name} ${input.command ?? input.file_path ?? input.skill}: ${outcome}`];
+    });
+  };
+
+  it("runs the allow-listed yagura reads and refuses everything else", () => {
+    expect(calls(read("claude-watchman-tools.jsonl"))).toEqual([
+      "Skill yagura:yagura-watchman: ran",
+      'Bash find /home/dev/scratch/demo.git -name "README*" -type f: denied',
+      "Read /home/dev/scratch: denied",
+      "Bash yagura git demo show README.md 2>&1: failed",
+      "Bash yagura git demo ls-tree -r HEAD | grep -i readme: ran",
+      "Bash yagura git demo show HEAD:README.md: ran",
+      "Bash yagura set max_parallel_agents 9: denied",
+      "Bash cat /etc/hosts: denied",
+      'Bash echo "test" > notes.txt: denied',
+      "Write /home/dev/scratch/yh6/threads/1/notes.txt: no such tool",
+    ]);
+  });
+
+  it("resumes the same session on the next message", () => {
+    const first = read("claude-watchman-tools.jsonl").find((e) => e.kind === "session");
+    const events = read("claude-watchman-resume.jsonl");
+    expect(events.filter((e) => e.kind === "session").map((e) => e.kind === "session" && e.sessionId)).toEqual([first?.kind === "session" && first.sessionId]);
+    expect(calls(events)).toEqual(["Bash yagura git demo log -1 --pretty=format:%s: ran"]);
   });
 });

@@ -39,6 +39,8 @@ import {
   registerRepo,
   addUnitNote,
   evidenceCli,
+  agentRefusal,
+  gitRead,
   landUnit,
   listEvidenceRuns,
   PROVIDERS,
@@ -136,6 +138,7 @@ const USAGE = `yagura — agent orchestration
   yagura land <project> <unit#>          land a verified unit onto its repo's default branch
   yagura evidence run --at base|head --label <name> -- <command>   (inside a verify session)
   yagura show <project> [unit#]
+  yagura git <repo> log|show|ls-tree|diff|grep|blame [args]   read a registered repo's mirror (trunk is origin/<default branch>)
   yagura logs <project> <unit#> [--attempt <n>]
   yagura settings [--project <id>] [--repo <id>]
   yagura settings export > settings.yaml     every explicitly set value, by layer
@@ -144,6 +147,11 @@ const USAGE = `yagura — agent orchestration
   yagura unset <key> [--scope global|environment|repo|project] [--id <scope id>]   back to the next layer's value`;
 
 const [command, ...rest] = process.argv.slice(2);
+const refusal = agentRefusal(process.argv.slice(2), process.env);
+if (refusal) {
+  process.stderr.write(refusal);
+  process.exit(2);
+}
 if (command === "evidence") {
   const result = await evidenceCli(rest);
   process.stdout.write(result.output);
@@ -668,6 +676,12 @@ async function main() {
         void_reason: string | null;
       }[])
         console.log(`  verdict ${v.id}: ${v.tier} @ ${v.head_sha.slice(0, 10)}${v.voided_at ? ` (void: ${v.void_reason})` : " (live)"}`);
+      return;
+    }
+    case "git": {
+      const result = await gitRead(db, boot, rest);
+      process.stdout.write(result.output);
+      process.exitCode = result.code;
       return;
     }
     case "logs": {

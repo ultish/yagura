@@ -9,6 +9,8 @@ export interface HarnessRun {
   addDirs: string[];
   extraArgs: string[];
   resume?: string;
+  allowedTools?: string[];
+  disallowedTools?: string[];
 }
 
 export interface HarnessAdapter {

@@ -91,6 +91,8 @@ export const claudeAdapter: HarnessAdapter = {
       run.permissionMode,
       ...run.pluginDirs.flatMap((d) => ["--plugin-dir", d]),
       ...run.addDirs.flatMap((d) => ["--add-dir", d]),
+      ...(run.allowedTools?.length ? ["--allowed-tools", run.allowedTools.join(",")] : []),
+      ...(run.disallowedTools?.length ? ["--disallowed-tools", run.disallowedTools.join(",")] : []),
       ...(run.model ? ["--model", run.model] : []),
       ...(run.resume ? ["--resume", run.resume] : []),
       ...run.extraArgs,
