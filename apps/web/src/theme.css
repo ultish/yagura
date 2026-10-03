@@ -1434,7 +1434,7 @@ b .role-icon,
 
 .goal-link {
   cursor: pointer;
-  color: var(--amber-text);
+  color: var(--amber);
   text-underline-offset: 3px;
 }
 .goal-link:hover {
@@ -1446,7 +1446,7 @@ b .role-icon,
   outline-offset: 2px;
 }
 .beacon-label text {
-  fill: var(--amber-text) !important;
+  fill: var(--amber) !important;
   text-underline-offset: 4px;
 }
 .beacon-label:hover text,
