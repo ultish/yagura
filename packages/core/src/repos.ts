@@ -120,3 +120,53 @@ export async function registerRepo(
   const repo = addRepo(ctx.db, { id, url: inspection.url, defaultBranch: inspection.defaultBranch, ...route, packStatus: packStatusOf(inspection.pack) });
   return { repo, inspection };
 }
+
+async function packTree(mirror: string, ref: string, path: string): Promise<string | null> {
+  try {
+    return (await git(["rev-parse", `${ref}:${path}`], { cwd: mirror })).trim();
+  } catch {
+    return null;
+  }
+}
+
+// A proven pack whose files changed on trunk since it was proven is stale until a verification passes it again.
+export async function notePackStale(db: Db, repo: Repo, mirror: string): Promise<PackStatus> {
+  if (repo.packStatus !== "proven" || !repo.packProvenSha) return repo.packStatus;
+  const [then, now_] = await Promise.all([
+    packTree(mirror, repo.packProvenSha, repo.verifyPackPath),
+    packTree(mirror, `origin/${repo.defaultBranch}`, repo.verifyPackPath),
+  ]);
+  if (!then || !now_ || then === now_) return "proven";
+  db.prepare("UPDATE repos SET pack_status = 'stale' WHERE id = ?").run(repo.id);
+  recordEvent(
+    db,
+    "repo.pack_status",
+    {},
+    { repo: repo.id, from: "proven", to: "stale", reason: `the pack changed on ${repo.defaultBranch} since ${repo.packProvenSha.slice(0, 10)}` },
+  );
+  return "stale";
+}
+
+// Every verification runs the trunk pack's doctor, deploy, and checks on trunk; when all of them pass, with the pack as
+// trunk has it (the verifier changed nothing), that is a proof of the pack.
+export function proveTrunkPack(
+  db: Db,
+  repoId: RepoId,
+  trunkSha: string,
+  runs: { label: string; at: string; exitCode: number | null; timedOut: boolean }[],
+  checks: { name: string }[],
+): boolean {
+  const status = (db.prepare("SELECT pack_status FROM repos WHERE id = ?").get(repoId) as { pack_status: PackStatus }).pack_status;
+  if (status !== "unproven" && status !== "stale") return false;
+  const onTrunk = runs.filter((r) => r.at === "base");
+  const ok = (r: { exitCode: number | null; timedOut: boolean }) => r.exitCode === 0 && !r.timedOut;
+  const lifecycle = onTrunk.filter((r) => r.label === "pack:doctor" || r.label === "pack:deploy");
+  const everyCheck = checks.every((c) => {
+    const run = onTrunk.filter((r) => r.label === `check:${c.name}`).at(-1);
+    return run && ok(run);
+  });
+  if (!checks.length || !everyCheck || !lifecycle.every(ok)) return false;
+  db.prepare("UPDATE repos SET pack_status = 'proven', pack_proven_sha = ? WHERE id = ?").run(trunkSha, repoId);
+  recordEvent(db, "repo.pack_status", {}, { repo: repoId, from: status, to: "proven", sha: trunkSha, by: "verification" });
+  return true;
+}

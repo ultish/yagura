@@ -10,7 +10,8 @@ import { REBASE_HARNESS, spendsAttempt, type EnvironmentId, type ProjectId, type
 import { setSetting } from "./config.js";
 import { listEvidenceRuns } from "./evidence.js";
 import { reapKept } from "./leases.js";
-import { commitAll, git } from "./git.js";
+import { commitAll, ensureMirror, git } from "./git.js";
+import { notePackStale } from "./repos.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
@@ -22,6 +23,7 @@ import {
   addRepo,
   addUnit,
   createAttempt,
+  getRepo,
   getUnit,
   getUnitBySeq,
   listAttempts,
@@ -106,6 +108,21 @@ describe("runVerifyUnit", () => {
     expect(verdict.patch_id).toMatch(/^[0-9a-f]{40}$/);
     expect(db.prepare("SELECT state FROM leases").all()).toEqual([{ state: "released" }]);
     expect(result.attempt.missingSkills).toEqual([]);
+  });
+
+  it("proves an existing pack when a verification passes all of it on trunk, and marks it stale when it changes after", async () => {
+    await workThenVerify("verify-pass");
+    const trunk = (await git(["rev-parse", "HEAD"], { cwd: origin })).trim();
+    expect(getRepo(db, "testbed" as RepoId)).toMatchObject({ packStatus: "proven", packProvenSha: trunk });
+    writeFileSync(
+      join(origin, ".agents/verify/verify.json"),
+      JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "test -f app/orders.py && true", tier: "unit-verified" }] }),
+    );
+    await commitAll(origin, "change the pack", { name: "t", email: "t@t" });
+    const mirror = layout(ctx.boot).mirror("testbed" as RepoId);
+    await ensureMirror(origin, mirror);
+    expect(await notePackStale(db, getRepo(db, "testbed" as RepoId), mirror)).toBe("stale");
+    expect(getRepo(db, "testbed" as RepoId).packStatus).toBe("stale");
   });
 
   it("discards a verdict whose scenario also passes on trunk, without blaming the work", async () => {

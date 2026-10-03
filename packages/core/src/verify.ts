@@ -18,14 +18,14 @@ import {
 } from "./domain.js";
 import { baseWorktree, listEvidenceRuns, PACK_LABEL, packForAttempt, runEvidence, teardownDeployed } from "./evidence.js";
 import { environmentNotes, listValues } from "./envvalues.js";
-import { addDetachedWorktree, diffText, ensureMirror, patchId } from "./git.js";
+import { addDetachedWorktree, diffText, ensureMirror, patchId, resolveRef } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { loadPack, type VerifyPack } from "./pack.js";
 import { commitPackEdit, discardWorkspace, openPackWorkspace, stagePackChanges } from "./packedits.js";
 import { pauseEnvironment } from "./envpause.js";
 import { verifierNotes } from "./disagreements.js";
 import { acquireLease, keepable, keepLease, releaseLease } from "./leases.js";
-import { syncPackStatus } from "./repos.js";
+import { notePackStale, proveTrunkPack, syncPackStatus } from "./repos.js";
 import { requiredProjectSkills } from "./skills.js";
 import { depShas, mountSources, sourceEnv } from "./sources.js";
 import { addVerifyUnit } from "./runner.js";
@@ -174,7 +174,9 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
   };
 
   const pack = await packForAttempt(db, boot, attempt.id);
+  const trunkSha = proof ? null : await resolveRef(mirror, `origin/${repo.defaultBranch}`);
   if (!proof) syncPackStatus(db, repo.id, pack);
+  if (!proof && pack.ok) await notePackStale(db, getRepo(db, repo.id), mirror);
   if (!pack.ok) {
     updateAttempt(db, attempt.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
     const decision: VerdictDecision = {
@@ -387,6 +389,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       minTier: project.minTier,
     });
     const decision: VerdictDecision = settled.problem ? { ...verdict, outcome: "invalid", tier: null, reason: settled.problem } : verdict;
+    if (!settled.checks && !settled.problem && trunkSha) proveTrunkPack(db, repo.id, trunkSha, listEvidenceRuns(db, attempt.id), pack.pack.checks);
     await endSlot(decision.outcome);
     updateAttempt(db, attempt.id, {
       state: handoff ? "handed_off" : "failed",
