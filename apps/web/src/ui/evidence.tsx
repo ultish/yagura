@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { streamUrl, useApi, type EvidenceRun } from "../api";
 import { followTheme, languageOf, monaco } from "../lib/monaco";
 import { duration, sha } from "../lib/format";
+import { Link } from "./Link";
 
 interface ArtifactInfo {
   id: number;
@@ -175,14 +176,25 @@ function FileDiff({ file, sideBySide }: { file: DiffFile; sideBySide: boolean })
   return <div ref={host} className="diff-monaco" style={{ height: Math.min(Math.max(lines * 19 + 40, 160), 640) }} />;
 }
 
-export function DiffView({ attemptId }: { attemptId: number }) {
-  const { data, error } = useApi<{ base: string | null; head: string | null; files: DiffFile[] | null; omitted: number }>(
-    `/api/attempts/${attemptId}/diff-files`,
-  );
+export interface DiffData {
+  base: string | null;
+  head: string | null;
+  files: DiffFile[] | null;
+  omitted: number;
+}
+
+// The files of a change with Monaco's diff of the selected one; `stats` and `editorLink` add the counts and a way into the repo editor.
+export function DiffPanel({
+  data,
+  stats,
+  editorLink,
+}: {
+  data: DiffData;
+  stats?: Record<string, { added: number; removed: number }>;
+  editorLink?: (path: string) => string;
+}) {
   const [at, setAt] = useState(0);
   const [sideBySide, setSideBySide] = useState(false);
-  if (error) return <div className="s-bell">{error}</div>;
-  if (!data) return <div className="muted">Loading the diff…</div>;
   if (data.files === null) return <div className="empty">No diff: this attempt has no committed head yet, or its commits are gone from the mirror.</div>;
   if (!data.files.length) return <div className="empty">The head is the same as trunk; nothing changed.</div>;
   const file = data.files[Math.min(at, data.files.length - 1)]!;
@@ -205,17 +217,19 @@ export function DiffView({ attemptId }: { attemptId: number }) {
       </div>
       <div className="diff-files" role="list">
         {data.files.map((f, i) => (
-          <button
-            key={f.path}
-            type="button"
-            role="listitem"
-            className={`diff-file ${f.status}${f === file ? " on" : ""}`}
-            onClick={() => setAt(i)}
-            aria-current={f === file}
-          >
-            <span className="diff-mark">{STATUS_MARK[f.status]}</span>
-            {f.path}
-          </button>
+          <div key={f.path} role="listitem" className={`diff-file ${f.status}${f === file ? " on" : ""}`}>
+            <button type="button" className="diff-name" onClick={() => setAt(i)} aria-current={f === file}>
+              <span className="diff-mark">{STATUS_MARK[f.status]}</span>
+              {f.path}
+            </button>
+            {stats?.[f.path] && (
+              <>
+                <span className="s-pine">+{stats[f.path]!.added}</span>
+                <span className="s-bell">−{stats[f.path]!.removed}</span>
+              </>
+            )}
+            {editorLink && f.status !== "deleted" && <Link to={editorLink(f.path)}>open in editor →</Link>}
+          </div>
         ))}
       </div>
       {file.binary ? (
@@ -227,4 +241,11 @@ export function DiffView({ attemptId }: { attemptId: number }) {
       )}
     </div>
   );
+}
+
+export function DiffView({ attemptId }: { attemptId: number }) {
+  const { data, error } = useApi<DiffData>(`/api/attempts/${attemptId}/diff-files`);
+  if (error) return <div className="s-bell">{error}</div>;
+  if (!data) return <div className="muted">Loading the diff…</div>;
+  return <DiffPanel data={data} />;
 }

@@ -5,7 +5,7 @@ import {
   PRESETS,
   isBuild,
   diffRange,
-  git,
+  diffFilesBetween,
   getAttempt,
   type AttemptId,
   gateDeadline,
@@ -327,50 +327,10 @@ export async function attemptDiff(db: Db, boot: Bootstrap, attemptId: AttemptId)
   return { base: attempt.baseSha, head: attempt.headSha, text: text?.slice(0, MAX_DIFF) ?? null, truncated: (text?.length ?? 0) > MAX_DIFF };
 }
 
-const MAX_DIFF_FILES = 200;
-const MAX_DIFF_FILE_BYTES = 1024 * 1024;
-
-export interface DiffFile {
-  path: string;
-  status: "added" | "modified" | "deleted";
-  old: string;
-  new: string;
-  binary: boolean;
-  tooLarge: boolean;
-}
-
 // Both sides of every changed file, for an editor that draws the diff itself.
 export async function attemptDiffFiles(db: Db, boot: Bootstrap, attemptId: AttemptId) {
   const attempt = getAttempt(db, attemptId);
   const unit = getUnit(db, attempt.unitId);
   if (!unit.repoId || !attempt.baseSha || !attempt.headSha) return { base: attempt.baseSha, head: attempt.headSha, files: null, omitted: 0 };
-  const mirror = layout(boot).mirror(unit.repoId);
-  const listed = await git(["diff", "--name-status", "--no-renames", "-z", attempt.baseSha, attempt.headSha], { gitDir: mirror }).catch(() => null);
-  if (listed === null) return { base: attempt.baseSha, head: attempt.headSha, files: null, omitted: 0 };
-  const parts = listed.split("\0").filter(Boolean);
-  const changes: { code: string; path: string }[] = [];
-  for (let i = 0; i + 1 < parts.length; i += 2) changes.push({ code: parts[i]!, path: parts[i + 1]! });
-  const side = async (sha: string, path: string) => {
-    const size = Number(await git(["cat-file", "-s", `${sha}:${path}`], { gitDir: mirror }).catch(() => "-1"));
-    if (size < 0) return { text: "", binary: false, tooLarge: false };
-    if (size > MAX_DIFF_FILE_BYTES) return { text: "", binary: false, tooLarge: true };
-    const text = await git(["show", `${sha}:${path}`], { gitDir: mirror });
-    return text.includes("\0") ? { text: "", binary: true, tooLarge: false } : { text, binary: false, tooLarge: false };
-  };
-  const files: DiffFile[] = [];
-  for (const c of changes.slice(0, MAX_DIFF_FILES)) {
-    const [o, n] = await Promise.all([
-      c.code === "A" ? { text: "", binary: false, tooLarge: false } : side(attempt.baseSha, c.path),
-      c.code === "D" ? { text: "", binary: false, tooLarge: false } : side(attempt.headSha, c.path),
-    ]);
-    files.push({
-      path: c.path,
-      status: c.code === "A" ? "added" : c.code === "D" ? "deleted" : "modified",
-      old: o.text,
-      new: n.text,
-      binary: o.binary || n.binary,
-      tooLarge: o.tooLarge || n.tooLarge,
-    });
-  }
-  return { base: attempt.baseSha, head: attempt.headSha, files, omitted: Math.max(0, changes.length - MAX_DIFF_FILES) };
+  return diffFilesBetween(layout(boot).mirror(unit.repoId), attempt.baseSha, attempt.headSha);
 }

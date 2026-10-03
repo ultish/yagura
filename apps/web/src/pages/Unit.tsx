@@ -3,6 +3,7 @@ import { api, useApi, useQuery, type StoryEntry, type StoryLine, type UnitCode, 
 import { clip, clock, duration, modelName, when } from "../lib/format";
 import { Inline } from "../lib/markdown";
 import { RoleIcon } from "../ui/RoleIcon";
+import { DiffPanel, type DiffData } from "../ui/evidence";
 import { Link } from "../ui/Link";
 import { RunningDot } from "../ui/Running";
 import { useAction } from "../ui/rows";
@@ -225,6 +226,8 @@ function AgentsTab({ story }: { story: UnitStory }) {
 function CodeTab({ story }: { story: UnitStory }) {
   const u = story.unit;
   const { data, error } = useApi<{ code: UnitCode | null }>(u.repoId ? `/api/projects/${story.projectId}/units/${u.seq}/code` : null);
+  const shown = data?.code ?? null;
+  const diff = useApi<DiffData>(shown ? `/api/repos/${u.repoId}/diff-files?base=${shown.base}&head=${shown.commit.sha}` : null);
   if (!u.repoId) return <div className="muted">U{u.seq} does not change a repo.</div>;
   if (error) return <div className="s-bell">{error}</div>;
   if (!data) return <div className="muted">Loading…</div>;
@@ -240,15 +243,6 @@ function CodeTab({ story }: { story: UnitStory }) {
           after U{u.seq} lands.
         </div>
       )}
-      <div className="hub-files">
-        {code.files.map((f) => (
-          <div key={f} className="hub-file mono">
-            {code.source === "landed" ? <Link to={editor(`file=${encodeURIComponent(f)}&`)}>{f}</Link> : <span>{f}</span>}
-            <span className="s-pine">+{code.stats[f]?.added ?? 0}</span>
-            <span className="s-bell">−{code.stats[f]?.removed ?? 0}</span>
-          </div>
-        ))}
-      </div>
       {code.source === "landed" && (
         <div className="hub-actions">
           <Link className="btn sm lamp" to={editor("")}>
@@ -259,20 +253,12 @@ function CodeTab({ story }: { story: UnitStory }) {
           </span>
         </div>
       )}
-      <div className="repo-diff mono hub-diff">
-        {code.diff
-          .split("\n")
-          .filter((l) => !l.startsWith("index ") && !l.startsWith("+++ ") && !l.startsWith("--- "))
-          .map((l, i) => {
-            const cls = l.startsWith("diff --git") ? "file" : l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : "";
-            return (
-              <div key={i} className={`repo-diff-row ${cls}`}>
-                {cls === "file" ? l.replace(/^diff --git a\/(\S+).*/, "$1") : l || " "}
-              </div>
-            );
-          })}
-        {code.truncated && <div className="muted repo-pad">The rest of this change is too large to show.</div>}
-      </div>
+      {diff.error && <div className="s-bell">{diff.error}</div>}
+      {!diff.data && !diff.error && <div className="muted">Loading the diff…</div>}
+      {diff.data && (
+        <DiffPanel data={diff.data} stats={code.stats} editorLink={code.source === "landed" ? (f) => editor(`file=${encodeURIComponent(f)}&`) : undefined} />
+      )}
+      {code.truncated && <div className="muted repo-pad">The rest of this change is too large to show.</div>}
     </div>
   );
 }

@@ -6,14 +6,15 @@ import type { Sha } from "./domain.js";
 
 const run = promisify(execFile);
 
-export async function git(args: string[], opts: { cwd?: string; gitDir?: string } = {}): Promise<string> {
+// Output is trimmed of trailing whitespace unless `raw` is set; file contents must keep their final newline.
+export async function git(args: string[], opts: { cwd?: string; gitDir?: string; raw?: boolean } = {}): Promise<string> {
   const full = opts.gitDir ? ["--git-dir", opts.gitDir, ...args] : args;
   const { stdout } = await run("git", full, {
     cwd: opts.cwd,
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     maxBuffer: 64 * 1024 * 1024,
   });
-  return stdout.trimEnd();
+  return opts.raw ? stdout : stdout.trimEnd();
 }
 
 // Files tools generate as they run. Agents commit whatever is untracked in a repo without its own .gitignore, and

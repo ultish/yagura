@@ -1346,18 +1346,12 @@ b .role-icon,
 }
 .diff-file {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: baseline;
-  text-align: left;
-  background: none;
-  border: 0;
   border-left: 2px solid transparent;
-  padding: 4px 10px;
-  color: var(--soft);
-  font: inherit;
+  padding-right: 10px;
   font-family: "JetBrains Mono", monospace;
   font-size: 12.5px;
-  cursor: pointer;
 }
 .diff-file:hover {
   background: var(--panel);
@@ -1365,6 +1359,20 @@ b .role-icon,
 .diff-file.on {
   background: var(--panel);
   border-left-color: var(--amber);
+}
+.diff-name {
+  flex: 1;
+  display: flex;
+  gap: 10px;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 4px 10px;
+  color: var(--soft);
+  font: inherit;
+  cursor: pointer;
+}
+.diff-file.on .diff-name {
   color: var(--text);
 }
 .diff-mark {

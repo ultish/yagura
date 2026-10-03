@@ -132,3 +132,50 @@ export async function unitCode(db: Db, boot: Bootstrap, unit: Unit): Promise<(Ch
   const [commit] = await readCommits(db, mirror, ["--no-walk", work.headSha!]);
   return { commit: commit!, base: work.baseSha!, ...(await diffOf(mirror, work.baseSha!, work.headSha!)), source: "branch", branch: work.branch };
 }
+
+const MAX_DIFF_FILES = 200;
+const MAX_DIFF_FILE_BYTES = 1024 * 1024;
+
+export interface DiffFile {
+  path: string;
+  status: "added" | "modified" | "deleted";
+  old: string;
+  new: string;
+  binary: boolean;
+  tooLarge: boolean;
+}
+
+// Both sides of every file changed between two commits, for an editor that draws the diff itself.
+export async function diffFilesBetween(gitDir: string, base: string, head: string) {
+  const listed = await git(["diff", "--name-status", "--no-renames", "-z", base, head], { gitDir }).catch(() => null);
+  if (listed === null) return { base, head, files: null, omitted: 0 };
+  const parts = listed.split("\0").filter(Boolean);
+  const changes: { code: string; path: string }[] = [];
+  for (let i = 0; i + 1 < parts.length; i += 2) changes.push({ code: parts[i]!, path: parts[i + 1]! });
+  const none = { text: "", binary: false, tooLarge: false };
+  const side = async (sha: string, path: string) => {
+    const size = Number(await git(["cat-file", "-s", `${sha}:${path}`], { gitDir }).catch(() => "-1"));
+    if (size < 0) return none;
+    if (size > MAX_DIFF_FILE_BYTES) return { ...none, tooLarge: true };
+    const text = await git(["show", `${sha}:${path}`], { gitDir, raw: true });
+    return text.includes("\0") ? { ...none, binary: true } : { ...none, text };
+  };
+  const files: DiffFile[] = [];
+  for (const c of changes.slice(0, MAX_DIFF_FILES)) {
+    const [o, n] = await Promise.all([c.code === "A" ? none : side(base, c.path), c.code === "D" ? none : side(head, c.path)]);
+    files.push({
+      path: c.path,
+      status: c.code === "A" ? "added" : c.code === "D" ? "deleted" : "modified",
+      old: o.text,
+      new: n.text,
+      binary: o.binary || n.binary,
+      tooLarge: o.tooLarge || n.tooLarge,
+    });
+  }
+  return { base, head, files, omitted: Math.max(0, changes.length - MAX_DIFF_FILES) };
+}
+
+export async function repoDiffFiles(db: Db, boot: Bootstrap, repoId: RepoId, base: string, head: string) {
+  const { mirror } = await mirrorOf(db, boot, repoId);
+  return diffFilesBetween(mirror, base, head);
+}

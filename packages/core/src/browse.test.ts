@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { repoChange, repoFile, repoHistory, repoTree, unitCode } from "./browse.js";
+import { repoChange, repoDiffFiles, repoFile, repoHistory, repoTree, unitCode } from "./browse.js";
 import type { Bootstrap } from "./config.js";
 import type { ProjectId, RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
@@ -83,6 +83,19 @@ describe("browsing a repo's trunk", () => {
     expect(change.commit).toMatchObject({ projectId: "p", seq: 1 });
     expect((await repoChange(db, boot, repo, shas.init)).files).toEqual(["app/main.py", "logo.png"]);
     await expect(repoChange(db, boot, repo, "not-a-sha")).rejects.toThrow("not-a-sha is not a commit");
+  });
+
+  it("gives both sides of every changed file for a diff editor, marking added files and skipping binary ones' text", async () => {
+    await repoTree(db, boot, repo);
+    const landed = await repoDiffFiles(db, boot, repo, shas.trailered, shas.landed);
+    expect(landed.files).toEqual([
+      { path: "README.md", status: "added", old: "", new: "hi\n", binary: false, tooLarge: false },
+      { path: "app/main.py", status: "modified", old: "a = 1\nb = 3\n", new: "a = 1\nb = 3\nc = 4\n", binary: false, tooLarge: false },
+    ]);
+    const first = await repoDiffFiles(db, boot, repo, shas.init, shas.trailered);
+    expect(first.files!.map((f) => f.path)).toEqual(["app/main.py"]);
+    const fromEmpty = await repoDiffFiles(db, boot, repo, "4b825dc642cb6eb9a060e54bf8d69288fbee4904", shas.init);
+    expect(fromEmpty.files!.find((f) => f.path === "logo.png")).toMatchObject({ status: "added", binary: true, new: "" });
   });
 
   it("shows a unit's code: what landed, or its branch before it lands", async () => {

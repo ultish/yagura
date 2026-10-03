@@ -128,6 +128,7 @@ import {
   repoChange,
   unitCode,
   landWait,
+  repoDiffFiles,
 } from "@yagura/core";
 import {
   attemptDetail,
@@ -379,6 +380,11 @@ export function createApp(opts: ServerOptions): Hono {
     return c.json({ run: getEvidenceRun(db, id), artifacts: runArtifacts(db, boot, id) });
   });
   app.get("/api/attempts/:id/diff", async (c) => c.json(await attemptDiff(db, boot, Number(c.req.param("id")) as AttemptId)));
+  app.get("/api/repos/:id/diff-files", async (c) => {
+    const [base, head] = [c.req.query("base") ?? "", c.req.query("head") ?? ""];
+    if (!/^[0-9a-f]{40}$/.test(base) || !/^[0-9a-f]{40}$/.test(head)) return c.json({ error: "base and head must be full commit ids" }, 400);
+    return c.json(await repoDiffFiles(db, boot, c.req.param("id") as RepoId, base, head));
+  });
   app.get("/api/attempts/:id/diff-files", async (c) => c.json(await attemptDiffFiles(db, boot, Number(c.req.param("id")) as AttemptId)));
 
   app.get("/api/gates", (c) => c.json(listGates(db, null, (c.req.query("state") as never) ?? undefined)));
