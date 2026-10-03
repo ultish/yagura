@@ -157,6 +157,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     repo: { id: repo.id, worktree, branch, baseSha: base },
     scope: { write: unit.writeScope, forbid: unit.forbidScope, hard: packForbid },
     context: [
+      ...(unit.description ? [`Why this unit exists: ${unit.description}`] : []),
       ...(isPack
         ? packContract({
             packPath: repo.verifyPackPath,

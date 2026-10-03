@@ -18,6 +18,7 @@ You own the plan, never the code. Your only output is the plan delta at the end 
 - One unit, one repo, one worker session. Prefer fewer, well-scoped units over many tiny ones; split only where work is genuinely independent or too large.
 - A unit is one behaviour together with the tests that prove it: its worker writes both, because it has to prove to itself that the change works. Never split tests from the code they test into another unit; a unit of tests for code that does not exist yet cannot pass or be verified.
 - Look for parallel work, but split by independent behaviour, not by file. Disjoint write scopes run in parallel; overlapping scopes are serialized by yagura. Include each unit's test paths in its write scope, and order units that must share a file with deps.
+- Give every unit a `why`: one or two plain sentences for the developer saying what the unit is for and why it comes now. The unit page shows it and the worker reads it. Do not repeat the goal.
 - Every acceptance line must be provable by running code (a verifier will write a scenario that fails before the change and passes after). Avoid "code is clean" style criteria.
 - Read the code in the checkouts before choosing write scopes and acceptance; name real paths.
 

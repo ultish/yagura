@@ -195,6 +195,7 @@ export interface NewUnit {
   repoId: RepoId | null;
   targetUnitId?: UnitId | null;
   goal: string;
+  description?: string | null;
   writeScope: string[];
   forbidScope?: string[];
   acceptance: string[];
@@ -240,6 +241,7 @@ export function addUnit(db: Db, u: NewUnit): Unit {
       );
     const unitId = Number(result.lastInsertRowid) as UnitId;
     if (u.scaffold) db.prepare("UPDATE units SET scaffold = 1 WHERE id = ?").run(unitId);
+    if (u.description) db.prepare("UPDATE units SET description = ? WHERE id = ?").run(u.description, unitId);
     recordEvent(db, "unit.created", { projectId: u.projectId, unitId }, { seq, type: u.type });
     return unitId;
   })();
@@ -256,6 +258,7 @@ function toUnit(r: Record<string, unknown>): Unit {
     repoId: (r.repo_id as RepoId | null) ?? null,
     targetUnitId: (r.target_unit_id as UnitId | null) ?? null,
     goal: r.goal as string,
+    description: (r.description as string | null) ?? null,
     writeScope: JSON.parse(r.write_scope_json as string),
     forbidScope: JSON.parse(r.forbid_scope_json as string),
     acceptance: JSON.parse(r.acceptance_json as string),

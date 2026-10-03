@@ -448,8 +448,11 @@ describe("Engine", () => {
     const fix = listUnits(db, project).find((u) => u.id === planned!.followUpUnitId)!;
     expect(planned).toMatchObject({ id: d.id, state: "planned" });
     expect(fix).toMatchObject({ goal: `write fix-d${d.id}`, state: "landed" });
+    expect(fix.description).toBe(
+      `On U${a.seq} you disagreed with "${worker!.lines[0]!.text}". You said: "the file should be named after the unit". This unit follows that up.`,
+    );
     expect(getProject(db, project).state).toBe("closed");
-    expect(unitStory(db, ctx.boot, a).entries.at(-1)).toMatchObject({ who: "You disagreed", status: { text: `follow-up U${fix.seq}` } });
+    expect(unitStory(db, ctx.boot, a).entries.at(-1)).toMatchObject({ who: "You disagreed", status: { text: `following up with unit U${fix.seq}` } });
   }, 60_000);
 
   it("blocks a unit that crashes before it starts instead of starting it again every tick", async () => {

@@ -459,7 +459,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       actor: "person",
       who: "You disagreed",
       attempt: null,
-      status: { text: d.state === "planned" && d.followUpUnitId ? `follow-up U${getUnit(db, d.followUpUnitId).seq}` : d.state, tone: "bell" },
+      status: { text: d.state === "planned" && d.followUpUnitId ? `following up with unit U${getUnit(db, d.followUpUnitId).seq}` : d.state, tone: "bell" },
       body: `About ${d.about}: ${d.reason}`,
       lines: [],
       folded: null,

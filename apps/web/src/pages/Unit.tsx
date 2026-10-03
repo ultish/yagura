@@ -322,6 +322,15 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
       <h1 className="serif story-title">
         <Inline text={u.goal} />
       </h1>
+      {u.description && (
+        <div className="story-why">
+          {u.description.split("\n\n").map((para, i) => (
+            <p key={i}>
+              <Inline text={para} />
+            </p>
+          ))}
+        </div>
+      )}
       <div className="facts">
         <span className={`chip story-${u.state === "landed" ? "pine" : u.state === "blocked" ? "bell" : "amber"}`}>
           {u.state === "landed" && u.landedSha ? `landed ${u.landedSha.slice(0, 7)}` : u.state}

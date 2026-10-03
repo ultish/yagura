@@ -467,6 +467,7 @@ CREATE TABLE publications (
 `,
   },
   { version: 33, sql: "ALTER TABLE projects ADD COLUMN release_policy TEXT NOT NULL DEFAULT 'ci' CHECK (release_policy IN ('ci', 'auto', 'human'));" },
+  { version: 34, sql: "ALTER TABLE units ADD COLUMN description TEXT;" },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

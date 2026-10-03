@@ -251,6 +251,8 @@ export interface Unit {
   repoId: RepoId | null;
   targetUnitId: UnitId | null;
   goal: string;
+  // Why the unit exists, in words for the developer; null on units made before this was kept.
+  description: string | null;
   writeScope: string[];
   forbidScope: string[];
   acceptance: string[];

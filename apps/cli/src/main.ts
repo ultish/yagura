@@ -120,7 +120,7 @@ const USAGE = `yagura — agent orchestration
   yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified] [--issue <ref>...]
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--release ci|auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
-                  [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>] [--needs <seq>[:source]...]
+                  [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>] [--description <text>] [--needs <seq>[:source]...]
   yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab land through pull/merge requests (forge.repo, forge.merge_method)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]
@@ -373,6 +373,7 @@ async function main() {
         note: { type: "string" },
         issue: { type: "string", multiple: true },
         needs: { type: "string", multiple: true },
+        description: { type: "string" },
       });
       const projectId = positionals[1] as ProjectId | undefined;
       if ((positionals[0] === "reject" || positionals[0] === "requeue") && projectId && positionals[2]) {
@@ -396,6 +397,7 @@ async function main() {
         type: "work",
         repoId: values.repo as RepoId,
         goal: fields.goal,
+        description: (values.description as string | undefined) ?? null,
         writeScope: fields.scope.write,
         forbidScope: fields.scope.forbid,
         acceptance: fields.acceptance,

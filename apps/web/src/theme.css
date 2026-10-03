@@ -1448,3 +1448,14 @@ b .role-icon,
   color: var(--muted);
   white-space: nowrap;
 }
+
+.story-why {
+  max-width: 70ch;
+  margin: 2px 0 10px;
+  color: var(--soft);
+  font-size: 14.5px;
+  line-height: 1.5;
+}
+.story-why p {
+  margin: 0 0 6px;
+}

@@ -45,6 +45,7 @@ export const PlanUnit = z
     key: z.string().regex(/^[a-z][a-z0-9-]*$/, "keys are lowercase words, e.g. discount-create"),
     repo: z.string(),
     goal: z.string().min(1),
+    why: z.string().min(1).optional(),
     write: z.array(z.string().min(1)).min(1),
     forbid: z.array(z.string()).default([]),
     accept: z.array(z.string().min(1)).min(1),
@@ -180,11 +181,16 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
       const sctx = { projectId, repoId: a.repo as RepoId };
       const timebox = resolveSetting(db, "timebox.work_seconds", sctx).value;
       const maxAttempts = resolveSetting(db, "max_attempts", sctx).value;
+      const disagreed = a.disagreement === undefined ? undefined : listDisagreements(db, { projectId }).find((x) => x.id === a.disagreement);
+      const because = disagreed
+        ? `On U${getUnit(db, disagreed.unitId).seq} you disagreed with "${disagreed.about}". You said: "${disagreed.reason}". This unit follows that up.`
+        : null;
       const unit = addUnit(db, {
         projectId,
         type: "work",
         repoId: a.repo as RepoId,
         goal: a.goal,
+        description: [a.why, because].filter(Boolean).join("\n\n") || null,
         writeScope: withoutPack(a.key, a.repo, a.write),
         forbidScope: a.forbid,
         acceptance: a.accept,

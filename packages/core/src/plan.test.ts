@@ -74,6 +74,17 @@ describe("scopesOverlap", () => {
 });
 
 describe("applyDelta", () => {
+  it("keeps the planner's reason for a unit as its description", () => {
+    applyDelta(
+      db,
+      project,
+      delta({ add: [unit("a", ["a/**"], { why: "The checkout page needs a total before payment can be wired." }), unit("b", ["b/**"])] }),
+      null,
+    );
+    expect(getUnitBySeq(db, project, 1).description).toBe("The checkout page needs a total before payment can be wired.");
+    expect(getUnitBySeq(db, project, 2).description).toBeNull();
+  });
+
   it("creates ready units, resolves deps by key and by U-number, and serializes overlapping scopes", () => {
     const first = applyDelta(db, project, delta({ add: [unit("store", ["app/store/**"])] }), null);
     expect(first.added.map((u) => [u.seq, u.state, u.playbook])).toEqual([[1, "ready", "feature"]]);

@@ -270,6 +270,7 @@ ${p.status}
 - Only plan what the state calls for. Do not re-add work that is running, verifying, landed, or queued.
 - Each unit is one worker session in one repo: small enough for about ${Math.round(p.timeboxMinutes)} minutes of focused work, complete enough to verify on its own.
 - \`write\` lists the paths you expect the unit to change (globs): an estimate, not a wall. A worker that needs more says why in its handoff and the reviewer judges it; only the verify pack is off limits. Leave out each repo's verify pack (\`.agents/verify\` unless the repo says otherwise): the verifiers keep it working, and a worker cannot change it. When the pack should check something new, say so in the unit's \`context\`; its verifier will extend the pack. A unit is a behaviour with its own tests, so put the test paths in its scope too. Units whose write scopes overlap in the same repo run one after another; give independent behaviours disjoint scopes so they can run in parallel, and never split tests into a unit of their own.
+- \`why\` is one or two plain sentences telling the developer what the unit is for and why it exists now; the unit page shows it and the worker reads it. Give every unit one.
 - \`accept\` lines are checkable statements a verifier can prove by running code, one behaviour each.
 - \`verify\` is the command a worker runs to check itself (for example the repo's test command).
 - \`deps\` names units that must land first: a key from this delta or an existing unit such as "U3".
@@ -295,6 +296,7 @@ End your final message with exactly one fenced json block holding the delta:
       "key": "discount-on-create",
       "repo": "${p.repos[0]?.id ?? "repo-id"}",
       "goal": "one sentence a stranger could execute",
+      "why": "what this is for and why it comes now, in plain words",
       "write": ["app/**", "tests/**"],
       "accept": ["checkable statement", "another"],
       "verify": "python3 -m unittest discover -s tests -v",
