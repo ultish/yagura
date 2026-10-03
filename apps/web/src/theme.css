@@ -1459,3 +1459,13 @@ b .role-icon,
 .story-why p {
   margin: 0 0 6px;
 }
+
+.item .item-why {
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

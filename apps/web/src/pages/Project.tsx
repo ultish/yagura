@@ -63,6 +63,7 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
           </Link>
         ) : null
       }
+      why={u.description ? <Inline text={u.description.split("\n\n")[0]!} /> : null}
       status={<Inline text={status.text} />}
       tone={status.tone}
       facts={facts}

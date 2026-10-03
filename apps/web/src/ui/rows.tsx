@@ -52,6 +52,7 @@ export function Row({
   goal,
   to,
   tag,
+  why,
   status,
   tone,
   facts,
@@ -62,6 +63,7 @@ export function Row({
   goal: ReactNode;
   to?: string;
   tag?: ReactNode;
+  why?: ReactNode;
   status?: ReactNode;
   tone?: string;
   facts?: ReactNode;
@@ -76,6 +78,7 @@ export function Row({
           {to ? <GoalLink to={to}>{goal}</GoalLink> : goal}
           {tag}
         </div>
+        {why && <div className="item-why">{why}</div>}
         {status && <div className={`status s-${tone ?? "muted"}`}>{status}</div>}
         {facts && <div className="facts">{facts}</div>}
         {extra}
