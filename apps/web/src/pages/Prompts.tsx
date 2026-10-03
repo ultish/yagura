@@ -16,7 +16,7 @@ interface RolePrompt {
   lastAttemptId: number | null;
 }
 interface PromptsView {
-  projectId: string;
+  projectId: string | null;
   allNotes: string | null;
   roles: RolePrompt[];
 }
@@ -29,6 +29,7 @@ const LABEL: Record<string, string> = {
   "review-triage": "Review triage",
   rebase: "Rebase",
   pack: "Pack writer",
+  watchman: "Watchman",
 };
 const SOURCE: Record<Source, { text: string; color: string }> = {
   default: { text: "yagura default", color: "var(--muted)" },
@@ -153,8 +154,9 @@ function NotesBox({ label, value, save, rows = 3 }: { label: string; value: stri
   );
 }
 
-export function Prompts({ projectId }: { projectId: string }) {
-  const view = useApi<PromptsView>(`/api/prompts?project=${projectId}`);
+// With a project: its overrides and notes. Without one: the global guidance every project uses unless it sets its own, the watchman's included.
+export function Prompts({ projectId }: { projectId: string | null }) {
+  const view = useApi<PromptsView>(projectId ? `/api/prompts?project=${projectId}` : "/api/prompts");
   const [role, setRole] = useState("planner");
   const [draft, setDraft] = useState("");
   const action = useAction();
@@ -178,24 +180,34 @@ export function Prompts({ projectId }: { projectId: string }) {
   return (
     <main style={{ padding: "22px 36px 48px", display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="mono muted" style={{ fontSize: 12.5 }}>
-        <Link to={`/p/${projectId}`}>{projectId}</Link> / prompts
+        {projectId ? (
+          <>
+            <Link to={`/p/${projectId}`}>{projectId}</Link> / prompts · <Link to="/prompts">global guidance →</Link>
+          </>
+        ) : (
+          "every project / prompts"
+        )}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}>
         <h1 className="serif" style={{ margin: 0, fontSize: 26, fontWeight: 600 }}>
           Prompts
         </h1>
         <span className="muted" style={{ fontSize: 13 }}>
-          Edits apply to each role's next agent. Every run records the version it got.
+          {projectId
+            ? "Edits apply to each role's next agent. Every run records the version it got."
+            : "The guidance every project uses unless it sets its own. Notes are set per project."}
         </span>
       </div>
-      <div className="panel" style={{ padding: "12px 16px", border: "1px solid var(--line)", borderRadius: 6 }}>
-        <NotesBox
-          label="Notes for every role"
-          value={view.data.allNotes}
-          rows={2}
-          save={(text) => put({ scope: "project", role: "all", kind: "notes", text })}
-        />
-      </div>
+      {projectId && (
+        <div className="panel" style={{ padding: "12px 16px", border: "1px solid var(--line)", borderRadius: 6 }}>
+          <NotesBox
+            label="Notes for every role"
+            value={view.data.allNotes}
+            rows={2}
+            save={(text) => put({ scope: "project", role: "all", kind: "notes", text })}
+          />
+        </div>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "230px minmax(0, 1fr)", border: "1px solid var(--line)", borderRadius: 6 }}>
         <nav aria-label="Roles" style={{ borderRight: "1px solid var(--line)", padding: 10, display: "flex", flexDirection: "column", gap: 2 }}>
           {view.data.roles.map((x) => (
@@ -232,14 +244,16 @@ export function Prompts({ projectId }: { projectId: string }) {
               version {r.sha}
             </span>
             <span style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="btn sm"
-                disabled={action.busy || !dirty}
-                onClick={() => action.run(() => put({ scope: "project", role, kind: "guidance", text: draft }))}
-              >
-                Save for this project
-              </button>
+              {projectId && (
+                <button
+                  type="button"
+                  className="btn sm"
+                  disabled={action.busy || !dirty}
+                  onClick={() => action.run(() => put({ scope: "project", role, kind: "guidance", text: draft }))}
+                >
+                  Save for this project
+                </button>
+              )}
               <button
                 type="button"
                 className="btn sm"
@@ -284,13 +298,25 @@ export function Prompts({ projectId }: { projectId: string }) {
               <Diff before={r.default} after={draft} />
             </div>
           </details>
-          <NotesBox
-            key={role}
-            label={`Notes for ${(LABEL[role] ?? role).toLowerCase()}s`}
-            value={r.notes}
-            save={(text) => put({ scope: "project", role, kind: "notes", text })}
-          />
-          <Contract key={`c-${role}`} attemptId={r.lastAttemptId} role={role} />
+          {projectId && (
+            <NotesBox
+              key={role}
+              label={`Notes for ${(LABEL[role] ?? role).toLowerCase()}s`}
+              value={r.notes}
+              save={(text) => put({ scope: "project", role, kind: "notes", text })}
+            />
+          )}
+          {projectId ? (
+            <Contract key={`c-${role}`} attemptId={r.lastAttemptId} role={role} />
+          ) : (
+            <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+              <h2 className="h2">Contract</h2>
+              <span className="mono muted" style={{ fontSize: 11.5 }}>
+                read-only ·{" "}
+                {role === "watchman" ? "each conversation turn's brief is in its log" : "a project's prompts page shows the brief its last agent got"}
+              </span>
+            </div>
+          )}
         </section>
       </div>
     </main>

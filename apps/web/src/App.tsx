@@ -42,7 +42,7 @@ const NAV = [
   { to: "/gates", label: "Gates", match: (p: string) => p === "/gates" },
   { to: "/repos", label: "Repos", match: (p: string) => p === "/repos" || p.startsWith("/r/") },
   { to: "/environments", label: "Environments", match: (p: string) => p === "/environments" },
-  { to: "/settings", label: "Settings", match: (p: string) => p === "/settings" },
+  { to: "/settings", label: "Settings", match: (p: string) => p === "/settings" || p === "/prompts" },
 ];
 
 function Header() {
@@ -101,6 +101,7 @@ function Routes() {
   if (path === "/search") return <Search />;
   if ((m = /^\/talk(?:\/(\d+))?\/?$/.exec(path))) return <Talk threadId={m[1] ? Number(m[1]) : null} />;
   if ((m = /^\/a\/(\d+)\/?$/.exec(path))) return <Agent key={m[1]} attemptId={Number(m[1])} />;
+  if (path === "/prompts") return <Prompts key={path} projectId={null} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/prompts\/?$/.exec(path))) return <Prompts key={path} projectId={m[1]!} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/a\/(\d+)\/?$/.exec(path))) return <AgentByNo key={path} projectId={m[1]!} agentNo={Number(m[2])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)\/(\d+)\/?$/.exec(path))) return <UnitAgent projectId={m[1]!} seq={Number(m[2])} n={Number(m[3])} />;

@@ -80,6 +80,9 @@ export function Settings() {
       <div className="muted" style={{ fontSize: 14, marginTop: -12 }}>
         These are the global values. Some can be overridden on a project, repo, or environment page; the narrowest layer wins.
       </div>
+      <div style={{ fontSize: 14, marginTop: -12 }}>
+        <Link to="/prompts">Prompts: the guidance each agent role follows, the watchman's included →</Link>
+      </div>
       <Transfer onImported={reload} />
       {error && <div className="s-bell">{error}</div>}
       {caps && caps["project.max_in_flight"].length > 0 && (
