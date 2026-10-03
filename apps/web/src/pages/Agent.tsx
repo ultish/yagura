@@ -530,7 +530,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
       </section>
       <div style={{ display: "flex", flexWrap: "wrap", background: "var(--bg2)", minHeight: "70vh" }}>
         <section aria-labelledby="log" style={{ flex: "1 1 600px", minWidth: 0, padding: "10px 36px 48px" }}>
-          <div role="tablist" aria-label="What to show" style={{ display: "flex", gap: 22, alignItems: "baseline", padding: "6px 0 8px" }}>
+          <div className="hub-tabs" role="tablist" aria-label="What to show">
             {tabs.map((t) => (
               <button
                 key={t.key}
@@ -538,9 +538,8 @@ export function Agent({ attemptId }: { attemptId: number }) {
                 role="tab"
                 id={t.key === "log" ? "log" : undefined}
                 aria-selected={view === t.key}
+                className={view === t.key ? "on" : ""}
                 onClick={() => setView(t.key)}
-                className="h2"
-                style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: view === t.key ? "var(--text)" : "var(--muted)" }}
               >
                 {t.label}
               </button>

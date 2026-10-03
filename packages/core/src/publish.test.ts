@@ -15,7 +15,7 @@ import { parseClaudeLine } from "./harness/claude.js";
 import { landUnit, liveVerdict } from "./land.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
-import { cleanUpTestBuilds, listPublications, moveConsumer, publishJobs, qualifiedVersion, upstreamArtifact, watchRelease } from "./publish.js";
+import { landWait, cleanUpTestBuilds, listPublications, moveConsumer, publishJobs, qualifiedVersion, upstreamArtifact, watchRelease } from "./publish.js";
 import { runWorkUnit } from "./runner.js";
 import { readiness } from "./schedule.js";
 import { staleSource } from "./sources.js";
@@ -149,9 +149,14 @@ describe("published artifacts", () => {
     expect((await landUnit(ctx, lib.id)).outcome).toBe("landed");
     await runJobs();
     expect(upstreamArtifact(db, getUnit(db, lib.id), "app" as RepoId)).toEqual({ wait: "waits for lib 1.5.0 from U1's landing to be released" });
+    expect(landWait(db, getUnit(db, app.id))).toEqual({
+      reason: "waits for lib 1.5.0 from U1's landing to be released: CI publishes it, then yagura moves this change onto it and lands it",
+      stuck: false,
+    });
 
     mkdirSync(join(nexus, "1.5.0"));
     await watchRelease(ctx, lib.id);
+    expect(landWait(db, getUnit(db, app.id))).toBeNull();
     expect(upstreamArtifact(db, getUnit(db, lib.id), "app" as RepoId)).toEqual({ version: "1.5.0" });
     const stale = staleSource(db, getUnit(db, app.id))!;
     expect(await moveConsumer(ctx, app.id, stale)).toBe("repinned");

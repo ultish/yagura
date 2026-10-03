@@ -336,6 +336,20 @@ export function publishJobs(db: Db, projectId: ProjectId): PublishJob[] {
   return jobs;
 }
 
+// What a verified consumer is waiting for before it can land, in words: its sources landing, then CI releasing them.
+// `stuck` means no amount of waiting helps (the release will not come), so the unit blocks.
+export function landWait(db: Db, unit: Unit): { reason: string; stuck: boolean } | null {
+  const ups = sourceDeps(db, unit);
+  const open = ups.find((up) => up.state !== "landed" && up.state !== "done");
+  if (open) return { reason: `waits for U${open.seq}${open.repoId ? ` in ${open.repoId}` : ""} to land (now ${open.state})`, stuck: false };
+  for (const up of ups) {
+    const a = upstreamArtifact(db, up, unit.repoId);
+    if (a && "stuck" in a) return { reason: a.stuck, stuck: true };
+    if (a && "wait" in a) return { reason: `${a.wait}: CI publishes it, then yagura moves this change onto it and lands it`, stuck: false };
+  }
+  return null;
+}
+
 // Test versions of the consumer's sources that its verified head still names, with the version each should become.
 async function stalePins(ctx: { db: Db; boot: Bootstrap }, unit: Unit, head: Sha): Promise<{ from: string; to: string; source: Unit }[]> {
   const { db } = ctx;

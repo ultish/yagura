@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { streamUrl, useApi, type EvidenceRun } from "../api";
-import { diffLines, type DiffLineKind } from "../lib/diff";
+import { followTheme, languageOf, monaco } from "../lib/monaco";
 import { duration, sha } from "../lib/format";
 
 interface ArtifactInfo {
@@ -123,38 +123,108 @@ export function RunView({ runId }: { runId: number }) {
   );
 }
 
-const DIFF_COLOR: Record<DiffLineKind, string> = {
-  file: "var(--text)",
-  hunk: "var(--amber)",
-  add: "var(--pine)",
-  del: "var(--faint)",
-  meta: "var(--muted)",
-  context: "var(--soft)",
-};
-const MAX_LINES = 5000;
+interface DiffFile {
+  path: string;
+  status: "added" | "modified" | "deleted";
+  old: string;
+  new: string;
+  binary: boolean;
+  tooLarge: boolean;
+}
+const STATUS_MARK = { added: "A", modified: "M", deleted: "D" } as const;
+
+// The same editor as the repo browser, in diff mode: both sides of the file, changes marked, unchanged stretches folded.
+function FileDiff({ file, sideBySide }: { file: DiffFile; sideBySide: boolean }) {
+  const host = useRef<HTMLDivElement>(null);
+  const editor = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
+  useEffect(() => {
+    if (!host.current) return;
+    followTheme();
+    editor.current = monaco.editor.createDiffEditor(host.current, {
+      readOnly: true,
+      originalEditable: false,
+      domReadOnly: true,
+      renderSideBySide: sideBySide,
+      automaticLayout: true,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      renderOverviewRuler: false,
+      hideUnchangedRegions: { enabled: true, contextLineCount: 4 },
+      fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+      fontSize: 12.5,
+      contextmenu: false,
+    });
+    return () => {
+      const m = editor.current?.getModel();
+      editor.current?.dispose();
+      m?.original.dispose();
+      m?.modified.dispose();
+    };
+  }, []);
+  useEffect(() => editor.current?.updateOptions({ renderSideBySide: sideBySide }), [sideBySide]);
+  useEffect(() => {
+    const ed = editor.current;
+    if (!ed) return;
+    const before = ed.getModel();
+    const language = languageOf(file.path);
+    ed.setModel({ original: monaco.editor.createModel(file.old, language), modified: monaco.editor.createModel(file.new, language) });
+    before?.original.dispose();
+    before?.modified.dispose();
+  }, [file]);
+  const lines = file.old.split("\n").length + file.new.split("\n").length;
+  return <div ref={host} className="diff-monaco" style={{ height: Math.min(Math.max(lines * 19 + 40, 160), 640) }} />;
+}
 
 export function DiffView({ attemptId }: { attemptId: number }) {
-  const { data, error } = useApi<{ base: string | null; head: string | null; text: string | null; truncated: boolean }>(`/api/attempts/${attemptId}/diff`);
+  const { data, error } = useApi<{ base: string | null; head: string | null; files: DiffFile[] | null; omitted: number }>(
+    `/api/attempts/${attemptId}/diff-files`,
+  );
+  const [at, setAt] = useState(0);
+  const [sideBySide, setSideBySide] = useState(false);
   if (error) return <div className="s-bell">{error}</div>;
   if (!data) return <div className="muted">Loading the diff…</div>;
-  if (data.text === null) return <div className="empty">No diff: this attempt has no committed head yet, or its commits are gone from the mirror.</div>;
-  if (!data.text) return <div className="empty">The head is the same as trunk; nothing changed.</div>;
-  const lines = diffLines(data.text);
+  if (data.files === null) return <div className="empty">No diff: this attempt has no committed head yet, or its commits are gone from the mirror.</div>;
+  if (!data.files.length) return <div className="empty">The head is the same as trunk; nothing changed.</div>;
+  const file = data.files[Math.min(at, data.files.length - 1)]!;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <div className="facts">
         <span>
           trunk {sha(data.base)} → head {sha(data.head)}
         </span>
-        {(data.truncated || lines.length > MAX_LINES) && <span className="s-lamp">showing the first {Math.min(lines.length, MAX_LINES)} lines</span>}
+        <span>{data.files.length} files</span>
+        {data.omitted > 0 && <span className="s-lamp">{data.omitted} more files not shown</span>}
+        <span className="diff-mode" role="group" aria-label="Layout">
+          <button type="button" className={!sideBySide ? "on" : ""} aria-pressed={!sideBySide} onClick={() => setSideBySide(false)}>
+            Inline
+          </button>
+          <button type="button" className={sideBySide ? "on" : ""} aria-pressed={sideBySide} onClick={() => setSideBySide(true)}>
+            Side by side
+          </button>
+        </span>
       </div>
-      <pre className="mono" style={{ ...pre, maxHeight: "none", fontSize: 12.5 }}>
-        {lines.slice(0, MAX_LINES).map((l, i) => (
-          <div key={i} style={{ color: DIFF_COLOR[l.kind], fontWeight: l.kind === "file" ? 700 : 400, marginTop: l.kind === "file" && i ? 14 : 0 }}>
-            {l.text || " "}
-          </div>
+      <div className="diff-files" role="list">
+        {data.files.map((f, i) => (
+          <button
+            key={f.path}
+            type="button"
+            role="listitem"
+            className={`diff-file ${f.status}${f === file ? " on" : ""}`}
+            onClick={() => setAt(i)}
+            aria-current={f === file}
+          >
+            <span className="diff-mark">{STATUS_MARK[f.status]}</span>
+            {f.path}
+          </button>
         ))}
-      </pre>
+      </div>
+      {file.binary ? (
+        <div className="empty">{file.path} is a binary file.</div>
+      ) : file.tooLarge ? (
+        <div className="empty">{file.path} is over 1 MB, too large to show here.</div>
+      ) : (
+        <FileDiff file={file} sideBySide={sideBySide} />
+      )}
     </div>
   );
 }

@@ -1003,16 +1003,32 @@ textarea {
   border-bottom: 1px solid var(--line2);
   margin: 14px 0 16px;
 }
-.hub-tabs a {
+.hub-tabs a,
+.hub-tabs button {
   color: var(--muted);
   text-decoration: none;
+  border: 0;
   border-bottom: 2px solid transparent;
+  background: none;
+  font: inherit;
   padding: 8px 14px;
   font-size: 14px;
+  cursor: pointer;
 }
-.hub-tabs a.on {
+.hub-tabs a:hover,
+.hub-tabs button:hover {
+  color: var(--text);
+  background: var(--panel);
+  border-bottom-color: var(--btnline);
+}
+.hub-tabs a.on,
+.hub-tabs button.on {
   color: var(--text);
   border-bottom-color: var(--amber);
+}
+.hub-tabs .mono {
+  align-self: center;
+  margin-left: 14px;
 }
 .hub-n {
   font-family: "JetBrains Mono", monospace;
@@ -1302,22 +1318,86 @@ textarea {
   }
 }
 
-.role-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
 .role-icon {
+  display: inline-block;
   flex: none;
   color: var(--muted);
+  margin-right: 0.35em;
+  vertical-align: -0.2em;
 }
-a:hover > .role-icon,
 a:hover .role-icon,
 b .role-icon,
 .story-who .role-icon {
   color: inherit;
 }
-.story-who .role-icon {
-  margin-right: 6px;
-  vertical-align: -2px;
+
+.diff-monaco {
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.diff-files {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  max-height: 180px;
+  overflow: auto;
+}
+.diff-file {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  padding: 4px 10px;
+  color: var(--soft);
+  font: inherit;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.diff-file:hover {
+  background: var(--panel);
+}
+.diff-file.on {
+  background: var(--panel);
+  border-left-color: var(--amber);
+  color: var(--text);
+}
+.diff-mark {
+  width: 1.2em;
+  color: var(--amber-text);
+}
+.diff-file.added .diff-mark {
+  color: var(--pine);
+}
+.diff-file.deleted .diff-mark {
+  color: var(--bell-text);
+}
+.diff-mode {
+  display: inline-flex;
+  margin-left: auto;
+}
+.diff-mode button {
+  background: none;
+  border: 1px solid var(--btnline);
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 10px;
+  cursor: pointer;
+}
+.diff-mode button + button {
+  border-left: 0;
+}
+.diff-mode button:hover {
+  color: var(--text);
+}
+.diff-mode button.on {
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: inset 0 -2px 0 var(--amber);
 }

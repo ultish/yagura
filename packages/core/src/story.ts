@@ -6,6 +6,7 @@ import { spendsAttempt, type Attempt, type Handoff, type IsoTime, type Unit, typ
 import { getMergeRequest } from "./forge.js";
 import { parseHandoff } from "./handoff.js";
 import { liveVerdict } from "./land.js";
+import { landWait } from "./publish.js";
 import { listPackEdits } from "./packedits.js";
 import { layout } from "./paths.js";
 import { getGate, getProject, getUnit, listAttempts, listUnits, type Db, jobLabel } from "./store.js";
@@ -408,6 +409,19 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       folded: null,
     });
   }
+
+  const stillWaiting = unit.state === "verified" ? landWait(db, unit) : null;
+  if (stillWaiting)
+    entries.push({
+      at: new Date().toISOString() as IsoTime,
+      actor: "yagura",
+      who: "Waiting",
+      attempt: null,
+      status: { text: stillWaiting.stuck ? "will not come" : "waiting", tone: stillWaiting.stuck ? "bell" : "amber" },
+      body: stillWaiting.reason,
+      lines: [],
+      folded: null,
+    });
 
   const landed = events.find((e) => e.type === "unit.landed" && e.unit_id === unit.id);
   const verdict = liveVerdict(db, unit.id);

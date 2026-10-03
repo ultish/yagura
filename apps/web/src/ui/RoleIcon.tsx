@@ -37,7 +37,7 @@ const ICONS: Record<string, LucideIcon> = {
   yagura: Cog,
 };
 
-export function RoleIcon({ role, size = 14 }: { role: string; size?: number }) {
+export function RoleIcon({ role, size = "1.15em" }: { role: string; size?: number | string }) {
   const Icon = ICONS[role.toLowerCase().trim()];
   return Icon ? <Icon className="role-icon" size={size} strokeWidth={1.75} aria-hidden="true" /> : null;
 }

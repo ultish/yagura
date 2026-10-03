@@ -82,9 +82,11 @@ export function stages(d: ProjectDetail, u: UnitView, now: number): Stage[] {
       ? { name: "land", light: "flame", label: "landing", href: null }
       : blockedAtLand
         ? { name: "land", light: "ember", label: "blocked", href: null }
-        : u.state === "verified" && gate
-          ? { name: "land", light: "bell", label: "land?", href: null }
-          : { name: "land", light: "off", label: null, href: null };
+        : u.state === "verified" && waitingReason(d, u)
+          ? { name: "land", light: "wait", label: "waits", href: null }
+          : u.state === "verified" && gate
+            ? { name: "land", light: "bell", label: "land?", href: null }
+            : { name: "land", light: "off", label: null, href: null };
   const lastRun = (attempts: Attempt[]) => running(attempts) ?? attempts.at(-1) ?? null;
   const verifierRun = verifiersOf(d, u)
     .map((v) => lastRun(v.attempts))
@@ -130,6 +132,8 @@ export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: 
               text: `Verified; ${review.type === "review" ? "code review" : "triage of the review findings"} before it lands.`,
               tone: "lamp",
             };
+      const wait = waitingReason(d, u);
+      if (wait) return { text: `Verified; ${wait}.`, tone: "muted" };
       return openGateFor(d, u)
         ? {
             text: `Verified${verifier?.attempts.length ? ` by ${jobName(verifier)}` : ""} at ${u.verdict?.tier ?? "?"}. Ready to land on ${repo}.`,

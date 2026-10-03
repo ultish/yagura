@@ -11,7 +11,7 @@ import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runRebaseUnit } from "./rebase.js";
 import { sourceDeps, staleSource } from "./sources.js";
-import { moveConsumer, publishJobs, repinIfStale, upstreamArtifact } from "./publish.js";
+import { landWait, moveConsumer, publishJobs, repinIfStale } from "./publish.js";
 import { queueTriage, runTriageUnit } from "./triage.js";
 import { queueReview, reviewStatus, runReviewUnit } from "./review.js";
 import { checkRetroWatch, scanReverts, watchingFor } from "./retro.js";
@@ -146,18 +146,15 @@ export class Engine {
       const key = `land:${u.repoId}`;
       if (u.state === "verified" && this.inflight.has(key)) continue;
       // A consumer lands after what it builds against, and only on a verdict proven against that source as it is now.
-      if (sourceDeps(this.db, u).some((d) => d.state !== "landed" && d.state !== "done")) continue;
       // A published upstream lands, then CI releases it; the consumer moves to the release before it lands (§14).
-      const pending = sourceDeps(this.db, u)
-        .map((up) => upstreamArtifact(this.db, up, u.repoId))
-        .find((a) => a && !("version" in a));
-      if (pending && "stuck" in pending) {
-        transitionUnit(this.db, u.id, "blocked", { reason: pending.stuck });
-        this.log(`  U${u.seq} blocked: ${pending.stuck}`);
+      const wait = landWait(this.db, u);
+      if (wait?.stuck) {
+        transitionUnit(this.db, u.id, "blocked", { reason: wait.reason });
+        this.log(`  U${u.seq} blocked: ${wait.reason}`);
         continue;
       }
-      if (pending && "wait" in pending) {
-        this.sayOnce(u, pending.wait);
+      if (wait) {
+        this.sayOnce(u, wait.reason);
         continue;
       }
       const stale = staleSource(this.db, u);
@@ -558,7 +555,8 @@ export class Engine {
 
   // A verified unit the engine would act on now: queue its review or triage, or land it.
   private wouldMove(p: Project, u: Unit): boolean {
-    if (sourceDeps(this.db, u).some((up) => up.state === "landed" && "wait" in (upstreamArtifact(this.db, up, u.repoId) ?? {}))) return false;
+    const wait = landWait(this.db, u);
+    if (wait) return wait.stuck;
     const review = reviewStatus(this.db, u).state;
     if (review === "needed" || review === "answered") return true;
     return review === "settled" && (p.mergePolicy === "auto" || landApproved(this.db, p.id, u));

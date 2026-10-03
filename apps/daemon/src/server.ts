@@ -127,8 +127,21 @@ import {
   repoHistory,
   repoChange,
   unitCode,
+  landWait,
 } from "@yagura/core";
-import { attemptDetail, attemptDiff, bell, capCounts, environmentDetail, environmentView, projectSummary, repoView, resolvedGates, unitView } from "./views.js";
+import {
+  attemptDetail,
+  attemptDiff,
+  attemptDiffFiles,
+  bell,
+  capCounts,
+  environmentDetail,
+  environmentView,
+  projectSummary,
+  repoView,
+  resolvedGates,
+  unitView,
+} from "./views.js";
 
 export interface ServerOptions {
   db: Db;
@@ -222,7 +235,13 @@ export function createApp(opts: ServerOptions): Hono {
       threads: threadsForProject(db, id),
       deps: listDeps(db, id),
       gates: listGates(db, id),
-      waiting: r.waiting.map((w) => ({ unitId: w.unit.id, reason: w.reason })),
+      waiting: [
+        ...r.waiting.map((w) => ({ unitId: w.unit.id, reason: w.reason })),
+        ...listUnits(db, id).flatMap((u) => {
+          const w = u.state === "verified" ? landWait(db, u) : null;
+          return w ? [{ unitId: u.id, reason: w.reason }] : [];
+        }),
+      ],
       skills: projectSkillChecks(db, boot, id),
     });
   });
@@ -360,6 +379,7 @@ export function createApp(opts: ServerOptions): Hono {
     return c.json({ run: getEvidenceRun(db, id), artifacts: runArtifacts(db, boot, id) });
   });
   app.get("/api/attempts/:id/diff", async (c) => c.json(await attemptDiff(db, boot, Number(c.req.param("id")) as AttemptId)));
+  app.get("/api/attempts/:id/diff-files", async (c) => c.json(await attemptDiffFiles(db, boot, Number(c.req.param("id")) as AttemptId)));
 
   app.get("/api/gates", (c) => c.json(listGates(db, null, (c.req.query("state") as never) ?? undefined)));
   app.post("/api/gates/:id/answer", async (c) => {
