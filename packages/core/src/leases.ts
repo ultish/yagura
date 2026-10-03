@@ -206,3 +206,21 @@ export async function reapLeases(db: Db, boot: Bootstrap): Promise<number> {
   }
   return stale.length;
 }
+
+// A provider's settings (a kube context, a namespace pool) may change once nothing holds a slot made under the old ones.
+export function setProviderConfig(db: Db, id: EnvironmentId, config: Record<string, unknown>): Environment {
+  const env = getEnvironment(db, id);
+  const impl = PROVIDERS_IMPL[env.provider];
+  if (!impl) throw new Error(`provider ${env.provider} is not available`);
+  const problem = impl.validateConfig(config, env.capacity);
+  if (problem) throw new Error(problem);
+  const busy = (
+    db.prepare("SELECT COUNT(*) AS n FROM leases WHERE environment_id = ? AND (state IN ('active', 'queued') OR kept_until IS NOT NULL)").get(id) as {
+      n: number;
+    }
+  ).n;
+  if (busy) throw new Error(`environment ${id} has ${busy} slot(s) in use, queued, or kept; change its provider settings once they are free`);
+  db.prepare("UPDATE environments SET provider_config_json = ? WHERE id = ?").run(JSON.stringify(config), id);
+  recordEvent(db, "environment.updated", {}, { environment: id, from: { providerConfig: env.providerConfig }, to: { providerConfig: config } });
+  return getEnvironment(db, id);
+}

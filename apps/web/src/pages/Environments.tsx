@@ -150,13 +150,32 @@ function EditEnvironment({ v, onDone }: { v: EnvironmentView; onDone: () => void
   const [confirming, setConfirming] = useState(false);
   const [name, setName] = useState(v.environment.name);
   const [capacity, setCapacity] = useState(String(v.environment.capacity));
+  const kube = v.environment.provider === "kube-namespace";
+  const cfg = v.environment.providerConfig as { context?: string; mode?: string; pool?: string[]; baseUrl?: string };
+  const [context, setContext] = useState(cfg.context ?? "");
+  const [pool, setPool] = useState((cfg.pool ?? []).join(", "));
+  const [baseUrl, setBaseUrl] = useState(cfg.baseUrl ?? "");
   const action = useAction();
+  const providerConfig = () => {
+    const names = pool
+      .split(",")
+      .map((n) => n.trim())
+      .filter(Boolean);
+    const next: Record<string, unknown> = { ...cfg, mode: names.length ? "pool" : "create", pool: names };
+    if (context.trim()) next.context = context.trim();
+    else delete next.context;
+    if (baseUrl.trim()) next.baseUrl = baseUrl.trim();
+    else delete next.baseUrl;
+    return next;
+  };
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         void action.run(async () => {
-          await api(`/api/environments/${v.environment.id}`, { body: { name, capacity: Number(capacity) } });
+          await api(`/api/environments/${v.environment.id}`, {
+            body: { name, capacity: Number(capacity), ...(kube ? { providerConfig: providerConfig() } : {}) },
+          });
           onDone();
         });
       }}
@@ -184,6 +203,34 @@ function EditEnvironment({ v, onDone }: { v: EnvironmentView; onDone: () => void
         onChange={(e) => setCapacity(e.target.value)}
         style={{ ...field, width: 70 }}
       />
+      {kube && (
+        <span style={{ display: "flex", gap: 8, flexWrap: "wrap", width: "100%" }}>
+          <input
+            aria-label="kube context"
+            className="mono"
+            value={context}
+            onChange={(e) => setContext(e.target.value)}
+            placeholder="kube context (default: current)"
+            style={{ ...field, width: 220 }}
+          />
+          <input
+            aria-label="namespace pool"
+            className="mono"
+            value={pool}
+            onChange={(e) => setPool(e.target.value)}
+            placeholder="namespace pool, comma separated (empty: create per slot)"
+            style={{ ...field, flexGrow: 1, minWidth: 240 }}
+          />
+          <input
+            aria-label="base URL"
+            className="mono"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder="base URL, e.g. http://{namespace}.apps"
+            style={{ ...field, width: 260 }}
+          />
+        </span>
+      )}
       <button className="btn sm lamp" type="submit" disabled={action.busy}>
         Save
       </button>

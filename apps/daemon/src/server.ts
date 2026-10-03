@@ -4,6 +4,7 @@ import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
   addUnitNote,
+  setProviderConfig,
   getSpec,
   recordEvent,
   writeSpec,
@@ -420,11 +421,17 @@ export function createApp(opts: ServerOptions): Hono {
     return c.json({ ...result, view: environmentView(db, result.environmentId) }, 201);
   });
   app.post("/api/environments/:id", async (c) => {
-    const b = (await c.req.json()) as { name?: string; capacity?: number };
+    const b = (await c.req.json()) as { name?: string; capacity?: number; providerConfig?: Record<string, unknown> };
     const env = getEnvironment(db, c.req.param("id") as EnvironmentId);
-    const problem = b.capacity === undefined ? null : PROVIDERS_IMPL[env.provider]?.validateConfig(env.providerConfig, b.capacity);
+    const problem = b.capacity === undefined ? null : PROVIDERS_IMPL[env.provider]?.validateConfig(b.providerConfig ?? env.providerConfig, b.capacity);
     if (problem) return c.json({ error: problem }, 400);
-    updateEnvironment(db, c.req.param("id") as EnvironmentId, b);
+    if (b.providerConfig && JSON.stringify(b.providerConfig) !== JSON.stringify(env.providerConfig))
+      try {
+        setProviderConfig(db, env.id, b.providerConfig);
+      } catch (e) {
+        return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+      }
+    updateEnvironment(db, c.req.param("id") as EnvironmentId, { name: b.name, capacity: b.capacity });
     return c.json(environmentView(db, c.req.param("id") as EnvironmentId));
   });
   app.get("/api/repos", async (c) => {

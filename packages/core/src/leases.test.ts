@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
-import { acquireLease, activeLease, reapLeases, releaseLease } from "./leases.js";
+import { acquireLease, activeLease, reapLeases, releaseLease, setProviderConfig } from "./leases.js";
 import { loadPack, missingSkills } from "./pack.js";
 import { addEnvironment, addProject, addRepo, addUnit, createAttempt, openStore, updateAttempt, type Db } from "./store.js";
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -101,5 +101,20 @@ describe("verify pack", () => {
     expect(missingSkills("pack", [])).toEqual(["yagura:yagura-pack"]);
     expect(missingSkills("rebase", [])).toEqual(["yagura:yagura-rebase"]);
     expect(missingSkills("ci-fix", [])).toEqual([]);
+  });
+});
+
+describe("editing an environment's provider settings", () => {
+  it("saves a valid change, refuses an invalid one, and refuses any while a slot is in use", async () => {
+    const kube = addEnvironment(db, { id: "kube", name: "kube", provider: "kube-namespace", capacity: 1, providerConfig: { context: "old" } });
+    expect(setProviderConfig(db, kube.id, { context: "rancher-desktop", mode: "pool", pool: ["ns-a"] }).providerConfig).toEqual({
+      context: "rancher-desktop",
+      mode: "pool",
+      pool: ["ns-a"],
+    });
+    expect(() => setProviderConfig(db, kube.id, { mode: "pool", pool: [] })).toThrow(/pool mode needs at least one namespace/);
+    const a = attempt();
+    await acquireLease(db, boot, env, a.id);
+    expect(() => setProviderConfig(db, env, {})).toThrow(/has 1 slot\(s\) in use, queued, or kept/);
   });
 });

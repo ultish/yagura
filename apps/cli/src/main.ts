@@ -100,6 +100,7 @@ import {
   isBuild,
   jobLabel,
   PROMPT_ROLES,
+  setProviderConfig,
   getSpec,
   recordEvent,
   writeSpec,
@@ -119,7 +120,7 @@ const USAGE = `yagura — agent orchestration
   yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab land through pull/merge requests (forge.repo, forge.merge_method)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]
-  yagura env set <id> [--capacity <n>] [--name <text>]
+  yagura env set <id> [--capacity <n>] [--name <text>] [--context <kube context>] [--pool <ns,ns> | --pool ""] [--base-url <url>]
   yagura env rm <id>                                refused while a project that is not closed uses it
   yagura env values <id>
   yagura env value set <id> <NAME> <value> [--note <text>]
@@ -576,6 +577,24 @@ async function main() {
         return;
       }
       if (sub === "set" && id) {
+        if (values.context !== undefined || values.pool !== undefined || values["base-url"] !== undefined) {
+          const before = getEnvironment(db, id as EnvironmentId).providerConfig;
+          const pool =
+            values.pool === undefined
+              ? undefined
+              : values.pool
+                  .split(",")
+                  .map((n) => n.trim())
+                  .filter(Boolean);
+          const next: Record<string, unknown> = {
+            ...before,
+            ...(values.context !== undefined ? { context: values.context || undefined } : {}),
+            ...(pool !== undefined ? (pool.length ? { mode: "pool", pool } : { mode: "create", pool: [] }) : {}),
+            ...(values["base-url"] !== undefined ? { baseUrl: values["base-url"] || undefined } : {}),
+          };
+          for (const k of Object.keys(next)) if (next[k] === undefined) delete next[k];
+          setProviderConfig(db, id as EnvironmentId, next);
+        }
         const e = updateEnvironment(db, id as EnvironmentId, {
           name: values.name,
           capacity: values.capacity === undefined ? undefined : Number(values.capacity),
