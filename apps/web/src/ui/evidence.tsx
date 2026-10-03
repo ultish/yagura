@@ -230,10 +230,14 @@ export function DiffPanel({
                 <span className="s-bell">−{stats[f.path]!.removed}</span>
               </>
             )}
-            {editorLink && f.status !== "deleted" && <Link to={editorLink(f.path)}>open in editor →</Link>}
+            {editorLink && f.status !== "deleted" && (
+              <Link to={editorLink(f.path)} title="Open the whole file, each line tagged with the unit that wrote it">
+                open whole file →
+              </Link>
+            )}
             {onOpen && f.status !== "deleted" && (
               <button type="button" className="diff-open" onClick={() => onOpen(f.path)}>
-                open in editor →
+                open whole file →
               </button>
             )}
           </div>

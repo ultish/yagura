@@ -362,7 +362,10 @@ export default function Repo({ id }: { id: string }) {
   }, [tree]);
   const current = tabs.find((t) => tabKey(t) === active) ?? null;
   const filePath = current?.kind === "file" ? current.path : lastFile;
-  const { data: changeCommit } = useApi<{ commit: CommitUnit }>(current?.kind === "change" ? `/api/repos/${id}/change/${current.sha}` : null);
+  // Arriving from a unit's change, the side panel is about that change until a line is picked.
+  const arrivedAt = query.get("change");
+  const railSha = current?.kind === "change" ? current.sha : arrivedAt;
+  const { data: changeCommit } = useApi<{ commit: CommitUnit }>(railSha ? `/api/repos/${id}/change/${railSha}` : null);
   if (error)
     return (
       <main style={{ padding: 36 }} className="s-bell">
@@ -375,7 +378,8 @@ export default function Repo({ id }: { id: string }) {
         Loading {id}…
       </main>
     );
-  const railCommit = current?.kind === "change" ? (changeCommit?.commit ?? null) : picked;
+  const showingChange = current?.kind === "change" || (picked === null && arrivedAt !== null);
+  const railCommit = current?.kind === "change" ? (changeCommit?.commit ?? null) : (picked ?? changeCommit?.commit ?? null);
   return (
     <main className="repo">
       <div className="repo-bar">
@@ -453,11 +457,7 @@ export default function Repo({ id }: { id: string }) {
           {current?.kind === "change" && <ChangeView repoId={id} sha={current.sha} projectOf={projectOf} onOpen={(path) => open({ kind: "file", path })} />}
           {!current && <div className="muted repo-pad">Open a file from the explorer, or a change from the history.</div>}
         </section>
-        <Rail
-          commit={railCommit}
-          mode={current?.kind === "change" ? "change" : "line"}
-          onShowChange={(c) => open({ kind: "change", sha: c.sha, label: projectOf(c) })}
-        />
+        <Rail commit={railCommit} mode={showingChange ? "change" : "line"} onShowChange={(c) => open({ kind: "change", sha: c.sha, label: projectOf(c) })} />
       </div>
     </main>
   );
