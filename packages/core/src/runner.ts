@@ -20,6 +20,7 @@ import { chooseResume, rejectionFindings, renderResumePrompt } from "./resume.js
 import { requiredProjectSkills, skillMethod } from "./skills.js";
 import { mountSources, sourceEnv } from "./sources.js";
 import { upstreamArtifact } from "./publish.js";
+import { managerForcesFresh } from "./manager.js";
 import { environmentNotes, listValues, valueMap } from "./envvalues.js";
 import { LEASE_VARS } from "./leases.js";
 import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
@@ -128,7 +129,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   const mirror = paths.mirror(repo.id);
   await ensureMirror(repo.url, mirror);
   const choice = chooseResume(listAttempts(db, unit.id), {
-    enabled: setting("work.resume_on_rejection"),
+    enabled: setting("work.resume_on_rejection") && !managerForcesFresh(db, unit),
     canResume: adapter.canResume,
     maxContext: setting("work.resume_max_context"),
   });

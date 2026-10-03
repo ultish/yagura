@@ -71,6 +71,8 @@ beforeEach(async () => {
   addProject(db, { id: project, name: "P", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["testbed" as RepoId] });
   addEnvironment(db, { id: "local", name: "local", provider: "local-process", capacity: 1 });
   setProjectEnvironment(db, project, "local" as EnvironmentId);
+  // These tests are about the fixed rules; the manager has its own (manager.test.ts).
+  setSetting(db, "global", "", "manager.enabled", false);
 });
 
 async function workThenVerify(verifierMode: string): Promise<{ target: Unit; verify: Unit; result: Awaited<ReturnType<typeof runVerifyUnit>> }> {

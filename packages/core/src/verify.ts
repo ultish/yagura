@@ -27,6 +27,7 @@ import { verifierNotes } from "./disagreements.js";
 import { acquireLease, keepable, keepLease, releaseLease } from "./leases.js";
 import { notePackStale, proveTrunkPack, syncPackStatus } from "./repos.js";
 import { requiredProjectSkills } from "./skills.js";
+import { managerOn } from "./manager.js";
 import { depShas, mountSources, sourceEnv, sourceVersions } from "./sources.js";
 import { addVerifyUnit } from "./runner.js";
 import { layout } from "./paths.js";
@@ -107,6 +108,8 @@ function applyOutcome(db: Db, target: Unit, work: Attempt, decision: VerdictDeci
       updateAttempt(db, work.id, { rejection: "code-fault" });
       addUnitNote(db, target.id, `Verifier U${verifySeq} rejected the previous attempt: ${decision.reason}. Read its findings in handoffs/u${verifySeq}.*.md.`);
       transitionUnit(db, target.id, "rejected", { reason: decision.reason });
+      // With a manager on, the rejection stays for the engine to hand to it; otherwise the fixed rules retry or block at once.
+      if (managerOn(db, target)) return;
       const used = listAttempts(db, target.id).filter(spendsAttempt).length;
       transitionUnit(db, target.id, used < target.maxAttempts ? "ready" : "blocked", { attemptsUsed: used });
       return;

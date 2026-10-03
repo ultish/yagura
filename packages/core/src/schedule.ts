@@ -23,7 +23,11 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
   const environmentId = getProject(db, projectId).environmentId;
   const pause = pausedBy(db, environmentId);
   for (const u of units) {
-    if (u.state !== "ready" || (!isBuild(u) && u.type !== "verify" && u.type !== "rebase" && u.type !== "review-triage" && u.type !== "review")) continue;
+    if (
+      u.state !== "ready" ||
+      (!isBuild(u) && u.type !== "verify" && u.type !== "rebase" && u.type !== "review-triage" && u.type !== "review" && u.type !== "manager")
+    )
+      continue;
     if (u.type === "verify") {
       const target = u.targetUnitId ? byId.get(u.targetUnitId) : undefined;
       const pack = units.find((p) => p.type === "pack" && p.repoId === u.repoId && !TERMINAL_STATES.has(p.state) && !fromEdits.has(p.id));

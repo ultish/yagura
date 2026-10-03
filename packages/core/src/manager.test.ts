@@ -1,0 +1,318 @@
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { RunContext } from "./agent.js";
+import { setSetting, type Bootstrap } from "./config.js";
+import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
+import { Engine } from "./engine.js";
+import { commitAll, git } from "./git.js";
+import type { HarnessAdapter } from "./harness/adapter.js";
+import { parseClaudeLine } from "./harness/claude.js";
+import { applyAskAnswer, listManagerDecisions, managerForcesFresh, managerNeed, parseDecision, queueManager, runManagerUnit } from "./manager.js";
+import { layout } from "./paths.js";
+import { applyDelta, PlanDelta } from "./plan.js";
+import { runWorkUnit } from "./runner.js";
+import {
+  addEnvironment,
+  addProject,
+  addRepo,
+  answerGate,
+  getUnit,
+  getUnitBySeq,
+  listAttempts,
+  listGates,
+  listUnits,
+  openStore,
+  setMergePolicy,
+  setProjectEnvironment,
+  transitionUnit,
+  type Db,
+} from "./store.js";
+
+const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
+const fake: HarnessAdapter = {
+  id: "claude",
+  canResume: true,
+  command: (run) => ({ argv: [process.execPath, fixtures("fake-agent.mjs"), ...(run.resume ? ["--resume", run.resume] : [])], stdin: run.prompt }),
+  parse: parseClaudeLine,
+};
+const tsx = pathToFileURL(join(dirname(createRequire(import.meta.url).resolve("tsx/package.json")), "dist/loader.mjs")).href;
+const project = "p" as ProjectId;
+let db: Db;
+let ctx: RunContext;
+
+beforeEach(async () => {
+  const root = mkdtempSync(join(tmpdir(), "yagura-manager-"));
+  const seed = join(root, "seed");
+  mkdirSync(join(seed, ".agents/verify"), { recursive: true });
+  writeFileSync(join(seed, "README.md"), "seed\n");
+  writeFileSync(
+    join(seed, ".agents/verify/verify.json"),
+    JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "test -f README.md", tier: "unit-verified" }] }),
+  );
+  await git(["init", "--quiet", "-b", "main"], { cwd: seed });
+  await commitAll(seed, "init", { name: "t", email: "t@t" });
+  const origin = join(root, "origin.git");
+  await git(["clone", "--quiet", "--bare", seed, origin]);
+  const boot: Bootstrap = { home: join(root, "home"), packsDir: "", skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
+  db = openStore(layout(boot).db);
+  ctx = { db, boot, adapters: { claude: fake }, cli: [process.execPath, "--import", tsx, fixtures("evidence-shim.ts")] };
+  addRepo(db, { id: "testbed", url: origin, defaultBranch: "main" });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["testbed" as RepoId] });
+  addEnvironment(db, { id: "local", name: "local", provider: "local-process", capacity: 2 });
+  setProjectEnvironment(db, project, "local" as EnvironmentId);
+  setMergePolicy(db, project, "auto");
+  process.env.FAKE_MODE = "engine";
+});
+
+afterEach(() => {
+  for (const k of ["FAKE_MANAGER", "FAKE_VERIFY_NEEDS_FIX", "FAKE_RESUME"]) delete process.env[k];
+});
+
+const unitDelta = (key: string, extra: Record<string, unknown> = {}) => ({
+  key,
+  repo: "testbed",
+  goal: `write ${key}`,
+  write: [`app/${key}/**`],
+  accept: [`${key} exists`],
+  verify: "true",
+  ...extra,
+});
+
+// A unit whose worker has run once and whose verification then rejected it for a code fault.
+async function rejectedUnit(key = "a", extra: Record<string, unknown> = {}) {
+  applyDelta(db, project, PlanDelta.parse({ add: [unitDelta(key, extra)] }), null);
+  const unit = listUnits(db, project).find((u) => u.goal === `write ${key}`)!;
+  await runWorkUnit(ctx, unit.id);
+  db.prepare("UPDATE attempts SET rejection = 'code-fault' WHERE unit_id = ?").run(unit.id);
+  transitionUnit(db, unit.id, "rejected", { reason: "verification failed: the scenario fails on head" });
+  return getUnit(db, unit.id);
+}
+
+const wake = async (unitId: number) => {
+  const target = getUnit(db, unitId as never);
+  const need = managerNeed(db, target);
+  expect(need?.kind).toBe("wake");
+  const m = queueManager(db, target, (need as { wake: string }).wake);
+  await runManagerUnit(ctx, m.id);
+  return m;
+};
+
+describe("parseDecision", () => {
+  it("reads the action, reason, note, and question from the Decision section", () => {
+    expect(
+      parseDecision("## Status\nsuccess\n\n## Decision\naction: `fresh`\nreason: the old session\n  went the wrong way\nnote: mind the empty case\n"),
+    ).toEqual({
+      ok: true,
+      action: "fresh",
+      reason: "the old session went the wrong way",
+      note: "mind the empty case",
+      question: null,
+    });
+    expect(parseDecision("## Decision\naction: ask\nreason: unclear\nquestion: Which one?\n")).toMatchObject({
+      ok: true,
+      action: "ask",
+      question: "Which one?",
+    });
+  });
+
+  it("refuses an answer it cannot act on", () => {
+    expect(parseDecision("I am not sure.")).toEqual({ ok: false, problem: "the answer has no ## Decision section" });
+    expect(parseDecision("## Decision\naction: delete\nreason: x\n")).toMatchObject({ ok: false });
+    expect(parseDecision("## Decision\naction: stop\n")).toEqual({ ok: false, problem: "the decision has no reason" });
+  });
+});
+
+describe("a manager deciding about a rejected unit", () => {
+  it("starts a fresh builder with its note when it chooses fresh, and the runner does not resume the old session", async () => {
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "fresh";
+    await wake(u.id);
+    const after = getUnit(db, u.id);
+    expect(after.state).toBe("ready");
+    expect(after.notes).toEqual(["The manager says: write it with care"]);
+    expect(listManagerDecisions(db, u.id)).toMatchObject([{ action: "fresh", reason: "the fake manager chose fresh", note: "write it with care", tries: 1 }]);
+    expect(managerForcesFresh(db, after)).toBe(true);
+    await runWorkUnit(ctx, u.id);
+    expect(listAttempts(db, u.id).map((a) => a.resumesAttemptId)).toEqual([null, null]);
+  }, 60_000);
+
+  it("resumes the builder's own session when it chooses resume and the rules allow it", async () => {
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "resume";
+    await wake(u.id);
+    expect(getUnit(db, u.id).state).toBe("ready");
+    expect(managerForcesFresh(db, getUnit(db, u.id))).toBe(false);
+    await runWorkUnit(ctx, u.id);
+    const [first, second] = listAttempts(db, u.id);
+    expect(second!.resumesAttemptId).toBe(first!.id);
+  }, 60_000);
+
+  it("leaves resume to the fixed rules when the session cannot be resumed", async () => {
+    const u = await rejectedUnit();
+    db.prepare("UPDATE attempts SET session_id = NULL WHERE unit_id = ?").run(u.id);
+    process.env.FAKE_MANAGER = "resume";
+    await wake(u.id);
+    expect(getUnit(db, u.id).state).toBe("rejected");
+    expect(listManagerDecisions(db, u.id)).toMatchObject([{ action: "fallback", reason: expect.stringContaining("resume was not possible") }]);
+    expect(managerNeed(db, getUnit(db, u.id))).toBeNull();
+  }, 60_000);
+
+  it("blocks the unit when it stops, and when it sends it to the planner, saying so", async () => {
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "stop";
+    await wake(u.id);
+    expect(getUnit(db, u.id).state).toBe("blocked");
+    const v = await rejectedUnit("b");
+    process.env.FAKE_MANAGER = "planner";
+    await wake(v.id);
+    expect(getUnit(db, v.id).state).toBe("blocked");
+    const reasons = db
+      .prepare(
+        "SELECT json_extract(data_json, '$.reason') AS r FROM events WHERE type = 'unit.state' AND json_extract(data_json, '$.to') = 'blocked' ORDER BY id",
+      )
+      .all() as {
+      r: string;
+    }[];
+    expect(reasons.map((x) => x.r)).toEqual([
+      "the manager stopped it: the fake manager chose stop",
+      "the manager sent it to the planner: the fake manager chose planner",
+    ]);
+  }, 60_000);
+
+  it("asks the developer, waits for the answer, and acts on it", async () => {
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "ask";
+    await wake(u.id);
+    const [gate] = listGates(db, project, "open");
+    expect(gate).toMatchObject({ kind: "manager", question: "U1: Should it try again?", options: ["retry", "stop"], defaultOption: "stop" });
+    expect(managerNeed(db, getUnit(db, u.id))).toEqual({ kind: "waiting" });
+    answerGate(db, gate!.id, "retry");
+    const need = managerNeed(db, getUnit(db, u.id));
+    expect(need).toEqual({ kind: "answered", answer: "retry" });
+    applyAskAnswer(db, getUnit(db, u.id), "retry");
+    expect(getUnit(db, u.id)).toMatchObject({ state: "ready", notes: ["The developer said to try again."] });
+  }, 60_000);
+
+  it("splits a unit nothing depends on into the units it adds, and refuses to split one that others depend on", async () => {
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "split";
+    await wake(u.id);
+    expect(getUnit(db, u.id).state).toBe("abandoned");
+    const added = listUnits(db, project).filter((x) => x.type === "work" && x.id !== u.id);
+    expect(added.map((x) => [x.goal, x.state])).toEqual([
+      ["half a", "ready"],
+      ["half b", "ready"],
+    ]);
+
+    const v = await rejectedUnit("b");
+    applyDelta(db, project, PlanDelta.parse({ add: [unitDelta("c", { deps: [{ on: `U${v.seq}`, kind: "needs-landed" }] })] }), null);
+    await wake(v.id);
+    expect(getUnit(db, v.id).state).toBe("rejected");
+    expect(listManagerDecisions(db, v.id)).toMatchObject([{ action: "fallback", reason: expect.stringContaining("cannot be split") }]);
+  }, 90_000);
+
+  it("falls back to the fixed rules when the manager gives no usable decision, without asking again for the same state", async () => {
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "garbage";
+    await wake(u.id);
+    expect(listManagerDecisions(db, u.id)).toMatchObject([{ action: "fallback", reason: "the answer has no ## Decision section" }]);
+    expect(managerNeed(db, getUnit(db, u.id))).toBeNull();
+  }, 60_000);
+
+  it("resumes its own session on a later decision and is told only what changed; a lost session starts again", async () => {
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "fresh";
+    const first = await wake(u.id);
+    await runWorkUnit(ctx, u.id);
+    db.prepare("UPDATE attempts SET rejection = 'code-fault' WHERE unit_id = ?").run(u.id);
+    transitionUnit(db, u.id, "rejected", { reason: "verification failed again" });
+    const second = await wake(u.id);
+    const a1 = listAttempts(db, first.id)[0]!;
+    const a2 = listAttempts(db, second.id)[0]!;
+    expect(a2.resumesAttemptId).toBe(a1.id);
+    const brief1 = readFileSync(layout(ctx.boot).brief(project, first.seq, 1), "utf8");
+    const brief2 = readFileSync(layout(ctx.boot).brief(project, second.seq, 1), "utf8");
+    expect(brief1).toContain("## THE RECORD");
+    expect(brief2).toContain("## WHAT HAPPENED SINCE YOUR LAST DECISION");
+    expect(brief2).toContain("## YOUR EARLIER DECISIONS ON THIS UNIT\n- fresh: the fake manager chose fresh (note: write it with care)");
+    expect(brief2).not.toContain("A1 worker");
+    expect(brief2).toContain("A3 worker");
+
+    await runWorkUnit(ctx, u.id);
+    db.prepare("UPDATE attempts SET rejection = 'code-fault' WHERE unit_id = ?").run(u.id);
+    transitionUnit(db, u.id, "rejected", { reason: "and again" });
+    process.env.FAKE_RESUME = "missing";
+    const third = await wake(u.id);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'manager.session_lost'").get()).toEqual({ n: 1 });
+    expect(listManagerDecisions(db, u.id).map((d) => d.action)).toEqual(["fresh", "fresh", "fresh"]);
+    expect(readFileSync(layout(ctx.boot).brief(project, third.seq, 1), "utf8")).toContain("## THE RECORD");
+  }, 120_000);
+
+  it("stops asking after its decisions are spent, and blocks the unit for the developer", async () => {
+    setSetting(db, "global", "", "manager.max_decisions_per_unit", 1);
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "fresh";
+    await wake(u.id);
+    await runWorkUnit(ctx, u.id);
+    db.prepare("UPDATE attempts SET rejection = 'code-fault' WHERE unit_id = ?").run(u.id);
+    transitionUnit(db, u.id, "rejected", { reason: "again" });
+    expect(managerNeed(db, getUnit(db, u.id))).toEqual({ kind: "cap", cap: 1 });
+  }, 90_000);
+
+  it("is not asked when it is switched off for the project", async () => {
+    setSetting(db, "project", project, "manager.enabled", false);
+    const u = await rejectedUnit();
+    expect(managerNeed(db, u)).toBeNull();
+  }, 60_000);
+});
+
+describe("the engine with a manager", () => {
+  const run = async () => {
+    const log: string[] = [];
+    await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();
+    return log;
+  };
+
+  it("sends a rejected unit to its manager, applies the decision, and lands the work", async () => {
+    process.env.FAKE_VERIFY_NEEDS_FIX = "1";
+    process.env.FAKE_MANAGER = "resume";
+    const log = await run();
+    const work = listUnits(db, project).filter((u) => u.type === "work");
+    expect(work.map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+    expect(listUnits(db, project).filter((u) => u.type === "manager").length).toBe(3);
+    expect(work.flatMap((u) => listManagerDecisions(db, u.id)).map((d) => d.action)).toEqual(["resume", "resume", "resume"]);
+    expect(log.some((l) => l.includes("goes to its manager"))).toBe(true);
+    for (const u of work) expect(listAttempts(db, u.id).filter((a) => a.resumesAttemptId).length).toBe(1);
+  }, 120_000);
+
+  it("leaves a rejection to the fixed rules when the manager is off", async () => {
+    setSetting(db, "global", "", "manager.enabled", false);
+    process.env.FAKE_VERIFY_NEEDS_FIX = "1";
+    await run();
+    expect(listUnits(db, project).filter((u) => u.type === "manager").length).toBe(0);
+    expect(
+      listUnits(db, project)
+        .filter((u) => u.type === "work")
+        .map((u) => u.state),
+    ).toEqual(["landed", "landed", "landed"]);
+  }, 120_000);
+
+  it("falls back to the fixed rules when the manager never gives a usable answer", async () => {
+    process.env.FAKE_VERIFY_NEEDS_FIX = "1";
+    process.env.FAKE_MANAGER = "garbage";
+    await run();
+    expect(
+      listUnits(db, project)
+        .filter((u) => u.type === "work")
+        .map((u) => u.state),
+    ).toEqual(["landed", "landed", "landed"]);
+    const work = listUnits(db, project).filter((u) => u.type === "work");
+    expect(work.flatMap((u) => listManagerDecisions(db, u.id)).every((d) => d.action === "fallback")).toBe(true);
+  }, 120_000);
+});
+
+void getUnitBySeq;

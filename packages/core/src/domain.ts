@@ -33,7 +33,7 @@ export type MergePolicy = (typeof MERGE_POLICIES)[number];
 export const RELEASE_POLICIES = ["ci", "auto", "human"] as const;
 export type ReleasePolicy = (typeof RELEASE_POLICIES)[number];
 
-export const UNIT_TYPES = ["plan", "work", "verify", "measure", "pack", "rebase", "ci-fix", "review-triage", "review", "land", "release"] as const;
+export const UNIT_TYPES = ["plan", "work", "verify", "measure", "pack", "rebase", "ci-fix", "review-triage", "review", "manager", "land", "release"] as const;
 export type UnitType = (typeof UNIT_TYPES)[number];
 
 // Units that change a repo and land: an agent writes them on a branch, they are verified, and they land on trunk.
@@ -41,7 +41,7 @@ export const BUILD_TYPES: ReadonlySet<UnitType> = new Set(["work", "pack"]);
 export const isBuild = (u: { type: UnitType }) => BUILD_TYPES.has(u.type);
 export const BUILD_TYPES_SQL = `(${[...BUILD_TYPES].map((t) => `'${t}'`).join(", ")})`;
 
-export const ROLES = ["planner", "worker", "verifier", "pack", "rebase", "ci-fix", "review-triage", "reviewer", "watchman"] as const;
+export const ROLES = ["planner", "worker", "verifier", "pack", "rebase", "ci-fix", "review-triage", "reviewer", "manager", "watchman"] as const;
 export type Role = (typeof ROLES)[number];
 
 export const ROLE_OF: Record<UnitType, Role | null> = {
@@ -54,6 +54,7 @@ export const ROLE_OF: Record<UnitType, Role | null> = {
   "ci-fix": "ci-fix",
   "review-triage": "review-triage",
   review: "reviewer",
+  manager: "manager",
   land: null,
   release: null,
 };
@@ -125,6 +126,11 @@ export const PUBLICATION_KINDS = ["test", "release"] as const;
 export type PublicationKind = (typeof PUBLICATION_KINDS)[number];
 export const PUBLICATION_STATES = ["publishing", "published", "failed", "waiting", "unchanged", "removed", "left"] as const;
 export type PublicationState = (typeof PUBLICATION_STATES)[number];
+
+// What a manager may decide about a unit that failed or was rejected (§26). `fallback` records that the fixed rules decided
+// because the manager gave no usable decision.
+export const MANAGER_ACTIONS = ["resume", "fresh", "split", "planner", "ask", "stop", "fallback"] as const;
+export type ManagerAction = (typeof MANAGER_ACTIONS)[number];
 
 export const DEP_KINDS = ["needs-source", "needs-landed", "scope-overlap"] as const;
 export type DepKind = (typeof DEP_KINDS)[number];

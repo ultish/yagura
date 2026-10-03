@@ -19,6 +19,7 @@ export function layout(boot: Bootstrap) {
     thread: (t: number) => join(boot.home, "threads", String(t)),
     turnLog: (t: number, messageId: number) => join(boot.home, "threads", String(t), "turns", `${messageId}.jsonl`),
     turnBrief: (t: number, messageId: number) => join(boot.home, "threads", String(t), "turns", `${messageId}.brief.md`),
+    managerDir: (p: ProjectId, seq: number) => join(project(p), "managers", unitRef(seq)),
     newRepo: (r: string) => join(boot.home, "repos", `${r}.git`),
     brief: (p: ProjectId, seq: number, n: number) => join(project(p), "briefs", `${attemptRef(seq, n)}.md`),
     handoff: (p: ProjectId, seq: number, n: number) => join(project(p), "handoffs", `${attemptRef(seq, n)}.md`),

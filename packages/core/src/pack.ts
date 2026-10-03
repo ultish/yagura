@@ -56,6 +56,7 @@ export const REQUIRED_SKILLS: Partial<Record<Role, readonly string[]>> = {
   rebase: ["yagura:yagura-rebase"],
   "review-triage": ["yagura:yagura-review-triage"],
   reviewer: ["yagura:yagura-reviewer"],
+  manager: ["yagura:yagura-manager"],
   watchman: ["yagura:yagura-watchman"],
 };
 

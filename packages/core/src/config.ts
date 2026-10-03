@@ -64,6 +64,13 @@ export const SETTINGS = {
   "role.verifier.model": z.string().nullable().default(null).describe("Model for verifiers (empty: the harness default)"),
   "role.reviewer.harness": z.string().default("claude").describe("Harness that runs code reviewers"),
   "role.reviewer.model": z.string().nullable().default(null).describe("Model for code reviewers (empty: the harness default)"),
+  "role.manager.harness": z.string().default("claude").describe("Harness that runs unit managers"),
+  "role.manager.model": z.string().nullable().default(null).describe("Model for unit managers (empty: the harness default)"),
+  "manager.enabled": z
+    .boolean()
+    .default(true)
+    .describe("A manager agent decides what happens to a unit after a rejection or failure, instead of the fixed rules"),
+  "manager.max_decisions_per_unit": z.number().int().min(1).default(4).describe("Decisions a unit's manager may make before the unit blocks for the developer"),
   "role.planner.harness": z.string().default("claude").describe("Harness that runs planners"),
   "role.planner.model": z.string().nullable().default(null).describe("Model for planners (empty: the harness default)"),
   "role.watchman.harness": z.string().default("claude").describe("Harness that runs the watchman"),
@@ -171,6 +178,10 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "role.worker.model": PR,
   "role.verifier.harness": PRE,
   "role.verifier.model": PRE,
+  "role.manager.harness": PR,
+  "role.manager.model": PR,
+  "manager.enabled": PR,
+  "manager.max_decisions_per_unit": PR,
   "role.reviewer.harness": PR,
   "role.reviewer.model": PR,
   "role.planner.harness": P,

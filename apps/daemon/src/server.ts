@@ -627,6 +627,7 @@ export function createApp(opts: ServerOptions): Hono {
     "review-triage": "review-triage",
     rebase: "rebase",
     pack: "pack",
+    manager: "manager",
     watchman: "",
   };
   const promptsView = (projectId: string | null) => ({

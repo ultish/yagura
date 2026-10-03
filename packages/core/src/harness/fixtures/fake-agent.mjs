@@ -58,11 +58,13 @@ async function main() {
       planner: ["yagura:yagura-planner"],
       verifier: ["yagura:yagura-verifier"],
       watchman: ["yagura:yagura-watchman"],
+      manager: ["yagura:yagura-manager"],
     }[process.env.YAGURA_ROLE] ?? [];
   skills.push(...(process.env.FAKE_SKILLS ?? "").split(",").filter(Boolean));
   if (mode !== "noskills")
     for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
+  if (process.env.YAGURA_ROLE === "manager") return manager();
   if (process.env.YAGURA_ROLE === "rebase") return rebase();
   if (process.env.YAGURA_ROLE === "review-triage") return triage();
   if (process.env.YAGURA_ROLE === "reviewer") return reviewer();
@@ -108,6 +110,7 @@ function resumed(sessionId) {
   }
   emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
+  if (process.env.YAGURA_ROLE === "manager") return manager();
   if (process.env.YAGURA_ROLE === "review-triage") {
     const before = readFileSync(join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`), "utf8");
     return finish(`${before}\n## Outside scope\n- outside/extra.txt: the fix needs a test that proves it\n`);
@@ -126,6 +129,34 @@ function resumed(sessionId) {
     terminal_reason: "completed",
     total_cost_usd: 0.01,
   });
+}
+
+// FAKE_MANAGER: the action to decide (default fresh); FAKE_MANAGER=garbage answers without a usable decision.
+function manager() {
+  const action = process.env.FAKE_MANAGER ?? "fresh";
+  if (action === "garbage") return finish("## Status\nsuccess\n\nI am not sure what to do.\n");
+  const repo = /^- U\d+ \(([\w-]+)\):/m.exec(brief)?.[1] ?? "repo";
+  const lines = [`action: ${action}`, `reason: the fake manager chose ${action}`];
+  if (action === "fresh" || action === "resume") lines.push("note: write it with care");
+  if (action === "ask") lines.push("question: Should it try again?");
+  const delta =
+    action === "split"
+      ? "\n```json\n" +
+        JSON.stringify({
+          add: ["a", "b"].map((k) => ({
+            key: `split-${k}`,
+            repo,
+            goal: `half ${k}`,
+            write: [`app/split-${k}/**`],
+            accept: [`half ${k} exists`],
+            verify: "true",
+            playbook: "feature",
+          })),
+          summary: "split in two",
+        }) +
+        "\n```\n"
+      : "";
+  finish(`## Status\nsuccess\n\n## Decision\n${lines.join("\n")}\n${delta}`);
 }
 
 // Fixes threads that say "please fix" (or that the developer said to fix), and dismisses the rest.

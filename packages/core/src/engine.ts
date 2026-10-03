@@ -10,6 +10,7 @@ import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runRebaseUnit } from "./rebase.js";
+import { applyAskAnswer, managerNeed, queueManager, runManagerUnit, settleManagerUnit } from "./manager.js";
 import { sourceDeps, staleSource } from "./sources.js";
 import { landWait, moveConsumer, publishJobs, repinIfStale } from "./publish.js";
 import { queueTriage, runTriageUnit } from "./triage.js";
@@ -55,7 +56,7 @@ export interface EngineOptions {
 export const LANDING_CUTOFF = 0.7;
 const COST_WARNING = 0.8;
 const PLAN_TRIGGERS = ["landed", "blocked", "abandoned", "done"];
-const YAGURA_GATES = ["report", "land", "environment", "review", "release"];
+const YAGURA_GATES = ["report", "land", "environment", "review", "release", "manager"];
 
 function suggestsFollowUps(db: Db, boot: RunContext["boot"], unitId: UnitId): boolean {
   const unit = getUnit(db, unitId);
@@ -132,7 +133,30 @@ export class Engine {
       if (this.inflight.has(`unit:${u.id}`)) continue;
       if (u.type === "verify" && u.state === "failed")
         transitionUnit(this.db, u.id, "abandoned", { reason: "verifier attempt failed; outcome applied to its target" });
+      if (u.type === "manager" && (u.state === "failed" || u.state === "blocked")) {
+        settleManagerUnit(this.db, u);
+        this.log(`  U${u.seq}: the manager session failed; the fixed rules decide`);
+      }
       if (!isBuild(u) || (u.state !== "failed" && u.state !== "rejected")) continue;
+      // A manager decides what happens next when one is on for the project; its absence, failure, or spent decisions leave it to the fixed rules.
+      const need = managerNeed(this.db, u);
+      if (need?.kind === "waiting") continue;
+      if (need?.kind === "wake") {
+        const m = queueManager(this.db, u, need.wake);
+        this.log(`  U${u.seq} goes to its manager (${need.wake})`);
+        void m;
+        continue;
+      }
+      if (need?.kind === "cap") {
+        transitionUnit(this.db, u.id, "blocked", { reason: `its manager has used ${need.cap} decisions on it; it needs you` });
+        this.log(`  U${u.seq} blocked: its manager has used ${need.cap} decisions`);
+        continue;
+      }
+      if (need?.kind === "answered") {
+        applyAskAnswer(this.db, u, need.answer);
+        this.log(`  U${u.seq}: ${need.answer === "retry" ? "retries as you said" : "blocked as you said"}`);
+        continue;
+      }
       const policy = failurePolicy(u, listAttempts(this.db, u.id));
       transitionUnit(this.db, u.id, policy.action === "retry" ? "ready" : "blocked", { reason: policy.reason });
       this.log(`  U${u.seq} ${policy.action === "retry" ? "retries" : "blocked"}: ${policy.reason}`);
@@ -325,7 +349,13 @@ export class Engine {
       const sctx = { projectId: project.id, repoId: u.repoId, environmentId: u.type === "verify" ? project.environmentId : null };
       const harness = resolveSetting(
         this.db,
-        u.type === "verify" ? "role.verifier.harness" : u.type === "review" ? "role.reviewer.harness" : "role.worker.harness",
+        u.type === "verify"
+          ? "role.verifier.harness"
+          : u.type === "review"
+            ? "role.reviewer.harness"
+            : u.type === "manager"
+              ? "role.manager.harness"
+              : "role.worker.harness",
         sctx,
       ).value;
       if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return;
@@ -340,11 +370,13 @@ export class Engine {
           ? () => runVerifyUnit(this.ctx, u.id)
           : u.type === "rebase"
             ? () => runRebaseUnit(this.ctx, u.id)
-            : u.type === "review-triage"
-              ? () => runTriageUnit(this.ctx, u.id)
-              : u.type === "review"
-                ? () => runReviewUnit(this.ctx, u.id)
-                : () => runWorkUnit(this.ctx, u.id);
+            : u.type === "manager"
+              ? () => runManagerUnit(this.ctx, u.id)
+              : u.type === "review-triage"
+                ? () => runTriageUnit(this.ctx, u.id)
+                : u.type === "review"
+                  ? () => runReviewUnit(this.ctx, u.id)
+                  : () => runWorkUnit(this.ctx, u.id);
       this.start(`unit:${u.id}`, isBuild(u) ? `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}` : `${u.type}: ${u.goal.slice(0, 80)}`, run, (e) =>
         this.recoverCrashed(u.id, e),
       );

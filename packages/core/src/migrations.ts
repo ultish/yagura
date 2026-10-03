@@ -27,6 +27,25 @@ function addReviewUnitType(db: BetterSqlite3.Database): void {
   for (const i of indexes) db.exec(i);
 }
 
+function addManagerUnitType(db: BetterSqlite3.Database): void {
+  const { sql } = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'units'").get() as { sql: string };
+  if (sql.includes("'manager',")) return;
+  const next = sql
+    .replace("'review', 'land'", "'review', 'manager', 'land'")
+    .replace("'review-triage', 'review') OR", "'review-triage', 'review', 'manager') OR")
+    .replace(/^CREATE TABLE units\b/, "CREATE TABLE units_next");
+  if (!next.includes("'manager', 'land'") || !next.includes("'review', 'manager') OR"))
+    throw new Error("migration 35: the units table is not in the expected shape");
+  const indexes = (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'units' AND sql IS NOT NULL").all() as { sql: string }[]).map(
+    (r) => r.sql,
+  );
+  db.exec(next);
+  db.exec("INSERT INTO units_next SELECT * FROM units");
+  db.exec("DROP TABLE units");
+  db.exec("ALTER TABLE units_next RENAME TO units");
+  for (const i of indexes) db.exec(i);
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 2,
@@ -468,6 +487,26 @@ CREATE TABLE publications (
   },
   { version: 33, sql: "ALTER TABLE projects ADD COLUMN release_policy TEXT NOT NULL DEFAULT 'ci' CHECK (release_policy IN ('ci', 'auto', 'human'));" },
   { version: 34, sql: "ALTER TABLE units ADD COLUMN description TEXT;" },
+  { version: 35, rebuild: addManagerUnitType },
+  {
+    version: 36,
+    sql: `
+CREATE TABLE manager_decisions (
+  id INTEGER PRIMARY KEY,
+  unit_id INTEGER NOT NULL REFERENCES units (id),
+  manager_unit_id INTEGER NOT NULL REFERENCES units (id),
+  attempt_id INTEGER REFERENCES attempts (id),
+  wake TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('resume', 'fresh', 'split', 'planner', 'ask', 'stop', 'fallback')),
+  reason TEXT NOT NULL,
+  note TEXT,
+  tries INTEGER NOT NULL,
+  gate_id INTEGER REFERENCES gates (id),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX manager_decisions_unit ON manager_decisions (unit_id);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;
