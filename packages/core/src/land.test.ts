@@ -20,7 +20,7 @@ import { runRebaseUnit } from "./rebase.js";
 import { listThreadRows, parseDecisions, runTriageUnit } from "./triage.js";
 import { runWorkUnit } from "./runner.js";
 import { queueReview, runReviewUnit } from "./review.js";
-import { checkRetroWatch, getRetroWatch, startRetroWatch } from "./retro.js";
+import { checkRetroWatch, getRetroWatch, scanReverts, startRetroWatch } from "./retro.js";
 import { failurePolicy } from "./schedule.js";
 import {
   addEnvironment,
@@ -148,6 +148,23 @@ describe("retro watch without a forge", () => {
     expect(said).toMatch(/^U1 was reverted: [0-9a-f]{10} reverted it on main: Revert "Implement apply_discount/);
     expect(getRetroWatch(db, work.id)!.state).toBe("reverted");
     expect(getUnit(db, work.id).notes.at(-1)).toMatch(/^Reverted on trunk after landing: /);
+  });
+
+  it("still notices a revert pushed long after the watch ended, once", async () => {
+    const work = await verifiedUnit();
+    const landed = (await landUnit(ctx, work.id)).landedSha!;
+    expect(await scanReverts(ctx, "testbed")).toEqual([]);
+    db.prepare("UPDATE retro_watches SET until = ?").run(new Date(Date.now() - 1000).toISOString());
+    await checkRetroWatch(ctx, getRetroWatch(db, work.id)!);
+    expect(getRetroWatch(db, work.id)!.state).toBe("expired");
+    const clone = join(root, "late-reverter");
+    await git(["clone", "--quiet", origin, clone]);
+    await git(["-c", "user.name=t", "-c", "user.email=t@t", "revert", "--no-edit", landed], { cwd: clone });
+    await git(["push", "--quiet", "origin", "HEAD:main"], { cwd: clone });
+    expect(await scanReverts(ctx, "testbed")).toEqual([expect.stringMatching(/^p\/U1 was reverted: [0-9a-f]{10} reverted it on main: Revert/)]);
+    expect(getRetroWatch(db, work.id)!.state).toBe("reverted");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'retro.reverted'").get()).toEqual({ n: 1 });
+    expect(await scanReverts(ctx, "testbed")).toEqual([]);
   });
 
   it("expires quietly when there is no forge CI and nobody reverted it", async () => {

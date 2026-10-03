@@ -420,6 +420,7 @@ CREATE TABLE project_specs (
 );
 `,
   },
+  { version: 29, sql: "ALTER TABLE repos ADD COLUMN revert_scan_sha TEXT;" },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

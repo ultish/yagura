@@ -149,3 +149,39 @@ function queueTrunkFix(db: Db, broke: Unit, sha: Sha, failing: { name: string; l
   );
   return getUnit(db, unit.id);
 }
+
+// The watch above sees a revert only while it lasts. This scan reads every commit trunk gained since the last scan, so a
+// revert of any landed unit is noticed however long after it landed. The first scan of a repo only sets where to start.
+export async function scanReverts(ctx: { db: Db; boot: Bootstrap }, repoId: string): Promise<string[]> {
+  const { db, boot } = ctx;
+  const repo = getRepo(db, repoId as never);
+  const mirror = layout(boot).mirror(repo.id);
+  await ensureMirror(repo.url, mirror);
+  const trunk = (await git(["rev-parse", `origin/${repo.defaultBranch}`], { gitDir: mirror })).trim();
+  const from = (db.prepare("SELECT revert_scan_sha FROM repos WHERE id = ?").get(repo.id) as { revert_scan_sha: string | null }).revert_scan_sha;
+  const said: string[] = [];
+  if (from && from !== trunk) {
+    const log = await git(["log", "--format=%H%x1f%s%x1f%b%x1e", `${from}..${trunk}`], { gitDir: mirror }).catch(() => "");
+    for (const entry of log.split("\x1e")) {
+      const [commit, subject, body] = entry.trim().split("\x1f");
+      if (!commit) continue;
+      for (const [, reverted] of (body ?? "").matchAll(/This reverts commit ([0-9a-f]{7,40})/g)) {
+        const unit = db.prepare("SELECT id FROM units WHERE repo_id = ? AND landed_sha LIKE ? AND state IN ('landed', 'done')").get(repo.id, `${reverted}%`) as
+          { id: UnitId } | undefined;
+        if (!unit || getRetroWatch(db, unit.id)?.state === "reverted") continue;
+        const u = getUnit(db, unit.id);
+        const detail = `${commit.slice(0, 10)} reverted it on ${repo.defaultBranch}: ${subject ?? ""}`;
+        db.prepare(
+          `INSERT INTO retro_watches (unit_id, sha, until, created_at, state) VALUES (?, ?, ?, ?, 'watching')
+           ON CONFLICT (unit_id) DO NOTHING`,
+        ).run(u.id, u.landedSha, now(), now());
+        settle(db, u, "reverted", detail);
+        addUnitNote(db, u.id, `Reverted on trunk after landing: ${detail}`);
+        tell(db, u, `**${u.projectId}/U${u.seq} was reverted on ${repo.defaultBranch}** (${detail}). The planner will see it on its next drain.`);
+        said.push(`${u.projectId}/U${u.seq} was reverted: ${detail}`);
+      }
+    }
+  }
+  if (from !== trunk) db.prepare("UPDATE repos SET revert_scan_sha = ? WHERE id = ?").run(trunk, repo.id);
+  return said;
+}

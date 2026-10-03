@@ -412,7 +412,10 @@ describe("watchman turns", () => {
         .split("\n")
         .map((l) => JSON.parse(l) as { sessionId: string; resumed: boolean; prompt: string });
     const sessions = () =>
-      db.prepare("SELECT harness_session_id AS id, ended_reason AS reason FROM thread_sessions ORDER BY id").all() as { id: string; reason: string | null }[];
+      db.prepare("SELECT harness_session_id AS id, ended_reason AS reason FROM thread_sessions ORDER BY thread_sessions.id").all() as {
+        id: string;
+        reason: string | null;
+      }[];
 
     beforeEach(() => {
       seenLog = join(mkdtempSync(join(tmpdir(), "yagura-seen-")), "prompts.jsonl");

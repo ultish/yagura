@@ -13,7 +13,7 @@ import { runRebaseUnit } from "./rebase.js";
 import { reverifyAgainstSources, sourceDeps, staleSource } from "./sources.js";
 import { queueTriage, runTriageUnit } from "./triage.js";
 import { queueReview, reviewStatus, runReviewUnit } from "./review.js";
-import { checkRetroWatch, watchingFor } from "./retro.js";
+import { checkRetroWatch, scanReverts, watchingFor } from "./retro.js";
 import { addVerifyUnit, runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
@@ -47,6 +47,7 @@ export interface EngineOptions {
   projectId?: ProjectId;
   tickMs?: number;
   sweepMs?: number;
+  revertScanMs?: number;
   log?: (line: string) => void;
 }
 
@@ -77,6 +78,7 @@ function suggestsFollowUps(db: Db, boot: RunContext["boot"], unitId: UnitId): bo
 export class Engine {
   private readonly inflight = new Map<string, Promise<void>>();
   private lastSweep = 0;
+  private lastRevertScan = 0;
   private readonly landingSaid = new Map<UnitId, string>();
   private readonly cutoffSaid = new Set<ProjectId>();
   private readonly costSaid = new Set<ProjectId>();
@@ -97,10 +99,13 @@ export class Engine {
     return this.inflight.size;
   }
 
-  private start(key: string, label: string, work: () => Promise<unknown>, onError: (e: unknown) => void): void {
-    this.log(`▶ ${label}`);
+  // A quiet start (routine polling: retro watches, revert scans) logs only what it finds and its errors.
+  private start(key: string, label: string, work: () => Promise<unknown>, onError: (e: unknown) => void, quiet = false): void {
+    if (!quiet) this.log(`▶ ${label}`);
     const p = work()
-      .then(() => this.log(`■ ${label}`))
+      .then(() => {
+        if (!quiet) this.log(`■ ${label}`);
+      })
       .catch((e: unknown) => {
         this.log(`✗ ${label}: ${e instanceof Error ? e.message : String(e)}`);
         onError(e);
@@ -393,6 +398,19 @@ export class Engine {
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
     for (const project of this.scope()) this.retro(project);
+    if (Date.now() - this.lastRevertScan > (this.opts.revertScanMs ?? REVERT_SCAN_MS)) {
+      this.lastRevertScan = Date.now();
+      const repos = this.db.prepare("SELECT DISTINCT repo_id AS id FROM units WHERE landed_sha IS NOT NULL").all() as { id: string }[];
+      for (const { id } of repos)
+        if (!this.inflight.has(`reverts:${id}`))
+          this.start(
+            `reverts:${id}`,
+            `revert scan ${id}`,
+            () => scanReverts(this.ctx, id).then((said) => said.forEach((s) => this.log(`  ${s}`))),
+            () => undefined,
+            true,
+          );
+    }
     for (const project of this.scope().filter((p) => p.state === "active")) {
       const missing = projectSkillChecks(this.db, this.ctx.boot, project.id).filter((c) => !c.installed);
       if (missing.length) {
@@ -474,6 +492,7 @@ export class Engine {
         `retro watch ${project.id} ${w.sha.slice(0, 10)}`,
         () => checkRetroWatch(this.ctx, w).then((said) => said && this.log(`  ${said}`)),
         () => undefined,
+        true,
       );
     }
   }
@@ -531,6 +550,7 @@ export class Engine {
 }
 
 const SWEEP_MS = 60_000;
+const REVERT_SCAN_MS = 5 * 60_000;
 
 function landApproved(db: Db, projectId: ProjectId, u: Unit): boolean {
   const gate = listGates(db, projectId)

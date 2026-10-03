@@ -39,7 +39,7 @@ The one list of open work; the sections below are history. Each line says where 
 
 **Later testing (the developer's bucket, 2026-10-03; not now):** a trunk CI failure on GitHub (the sandbox needs an Actions workflow, which changes the developer's repo); the yagura label on a real GitHub PR (seen on GitLab); the in-session "explain this path" request on a real agent (fake agent only so far); the session-limit (429) handling; the RHEL9 VM, when yagura is ready. A real blocking and should review finding went through triage on 2026-10-02/03.
 
-**Smaller gaps.** A conversation search result opens its thread at the end, not at the message (§17). Reverts after the retro window are not noticed (§15). Under `merge: auto` the PR opens only after review settles, so findings arrive as a comment (§24). No shared git repo of environment templates (§12). Skill capture from example repos (§11).
+**Smaller gaps.** A conversation search result opens its thread at the end, not at the message (§17). Under `merge: auto` the PR opens only after review settles, so findings arrive as a comment (§24). No shared git repo of environment templates (§12). Skill capture from example repos (§11).
 
 **Deferred by the developer** until yagura has run as designed (2026-09-29): a per-unit lead agent choosing what to do after a rejection, an `investigate` unit type, routing a twice-rejected unit to the planner. Open: one-way sibling notices (`yagura note --siblings`), only if real runs show parallel units drifting.
 
