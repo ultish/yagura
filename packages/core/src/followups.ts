@@ -57,6 +57,18 @@ export function followUps(role: PromptRole): FollowUp[] {
       ];
     case "review-triage":
       return [{ when: "Its fix changed a path outside SCOPE without a reason: asked in the same session, once", text: renderScopeAsk(["<path>"]) }, steer];
+    case "manager":
+      return [
+        {
+          when: "Every decision after the first on a unit: the same session resumes with only what changed",
+          text: "# yagura manager brief\n\nYou are the manager of <project>/U<n>. This session continues your earlier decisions about it: below is what changed since your last one.\n\n## WHY YOU WERE WOKEN\n<what happened to the unit>\n\n## THE UNIT NOW\n<its state, tries, and your earlier decisions>\n\n## WHAT HAPPENED SINCE YOUR LAST DECISION\n<each agent run since, with its handoff, verdicts, and notes>",
+        },
+        {
+          when: "The session cannot be resumed: the whole record again, in a new session",
+          text: "<the same brief with ## THE RECORD in place of the changes: everything yagura knows about the unit>",
+        },
+        steer,
+      ];
     case "watchman":
       return [
         {

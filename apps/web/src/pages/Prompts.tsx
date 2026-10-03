@@ -30,6 +30,7 @@ const LABEL: Record<string, string> = {
   "review-triage": "Review triage",
   rebase: "Rebase",
   pack: "Pack writer",
+  manager: "Manager",
   watchman: "Watchman",
 };
 const SOURCE: Record<Source, { text: string; color: string }> = {
