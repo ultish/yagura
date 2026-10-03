@@ -1,6 +1,7 @@
 import {
   Binoculars,
   Cog,
+  UserCog,
   Eye,
   Hammer,
   GitMerge,
@@ -26,6 +27,7 @@ const ICONS: Record<string, LucideIcon> = {
   review: Eye,
   "review triage": MessageSquareReply,
   "review-triage": MessageSquareReply,
+  manager: UserCog,
   rebase: GitMerge,
   "pack writer": Package,
   pack: Package,

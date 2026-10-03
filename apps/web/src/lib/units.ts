@@ -11,6 +11,7 @@ const ROLES: Record<string, string> = {
   pack: "pack writer",
   review: "reviewer",
   "review-triage": "review triage",
+  manager: "manager",
 };
 export const roleOf = (unitType: string, harness?: string) =>
   harness === "yagura-proof" ? "pack proof" : harness === "yagura-rebase" ? "rebase" : harness === "yagura-repin" ? "re-pin" : (ROLES[unitType] ?? unitType);
@@ -149,8 +150,13 @@ export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: 
     case "blocked":
       return { text: `Blocked. ${u.blockedReason ?? "No reason recorded."}`, tone: "bell" };
     case "rejected":
-    case "failed":
+    case "failed": {
+      const manager = d.units.find((x) => x.type === "manager" && x.targetUnitId === u.id && !["done", "abandoned"].includes(x.state));
+      if (manager) return { text: `Attempt ${u.state}; its manager is deciding what happens next.`, tone: "lamp" };
+      const ask = openGateFor(d, u);
+      if (ask) return { text: `Attempt ${u.state}; the manager asks you: ${ask.question}`, tone: "bell" };
       return { text: `Attempt ${u.state}; yagura is deciding whether to retry.`, tone: "muted" };
+    }
     case "abandoned":
       return { text: "Cancelled.", tone: "muted" };
   }

@@ -2,7 +2,7 @@ import { listSteers } from "./steer.js";
 import { existsSync, readFileSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
 import { listDisagreements, type Disagreement } from "./disagreements.js";
-import { spendsAttempt, type Attempt, type Handoff, type IsoTime, type Unit, type UnitId } from "./domain.js";
+import { spendsAttempt, type ManagerAction, type Attempt, type Handoff, type IsoTime, type Unit, type UnitId } from "./domain.js";
 import { getMergeRequest } from "./forge.js";
 import { parseHandoff } from "./handoff.js";
 import { liveVerdict } from "./land.js";
@@ -12,6 +12,7 @@ import { layout } from "./paths.js";
 import { getGate, getProject, getUnit, listAttempts, listGates, listUnits, type Db, jobLabel, type Gate } from "./store.js";
 import { isReviewThread, listThreadRows } from "./triage.js";
 import { findingFates } from "./review.js";
+import { listManagerDecisions, managerOn } from "./manager.js";
 
 // A unit's page reads as one story: who did what, what each chose, and what yagura checked about it. Agents' lines are
 // judgment unless a check sits beside them; a check is something yagura proved from its own records.
@@ -27,7 +28,7 @@ export interface StoryLine {
   checks: StoryCheck[];
   disagreements: Disagreement[];
 }
-export type Actor = "planner" | "worker" | "verifier" | "reviewer" | "review-triage" | "rebase" | "pack" | "person" | "yagura";
+export type Actor = "planner" | "worker" | "verifier" | "reviewer" | "review-triage" | "rebase" | "pack" | "manager" | "person" | "yagura";
 export interface StoryEntry {
   at: IsoTime;
   actor: Actor;
@@ -37,6 +38,19 @@ export interface StoryEntry {
   body: string | null;
   lines: StoryLine[];
   folded: { summary: string; items: string[] } | null;
+}
+export interface ManagerTurn {
+  decisionId: number;
+  attemptId: number | null;
+  agentNo: number | null;
+  at: IsoTime;
+  wake: string;
+  action: ManagerAction;
+  actionText: string;
+  reason: string;
+  note: string | null;
+  costUsd: number;
+  resumed: boolean;
 }
 export interface UnitStory {
   unit: Unit;
@@ -50,6 +64,9 @@ export interface UnitStory {
   agents: StoryAgent[];
   // Questions waiting for the developer about this unit: land it, publish its release.
   gates: Gate[];
+  // The manager's wakes, oldest first: why it was woken, what it decided, and what it cost.
+  manager: ManagerTurn[];
+  managerOn: boolean;
 }
 // Every session that worked on a unit: the planner run that planned it (shared with the units it planned alongside),
 // its own attempts, and the verifiers, triage, and rebases that targeted it.
@@ -297,6 +314,23 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     });
   }
 
+  // The manager's decisions: what it chose and why, which the developer can disagree with like any other claim.
+  const decisions = listManagerDecisions(db, unit.id);
+  for (const d of decisions) {
+    const m = related.find((x) => x.id === d.managerUnitId);
+    const a = d.attemptId ? listAttempts(db, d.managerUnitId).find((x) => x.id === d.attemptId) : undefined;
+    entries.push({
+      at: (a?.endedAt ?? d.createdAt) as IsoTime,
+      actor: "manager",
+      who: "Manager",
+      attempt: m && a ? attemptOf(m, a) : null,
+      status: { text: MANAGER_ACTION_TEXT[d.action], tone: d.action === "fallback" ? "muted" : "amber" },
+      body: d.action === "fallback" ? `${d.reason}; the fixed rules decided.` : d.note ? `Note for the next worker: ${d.note}` : null,
+      lines: d.action === "fallback" ? [] : [line(`m${d.id}`, "chose", `${MANAGER_ACTION_TEXT[d.action]}: ${d.reason}`)],
+      folded: null,
+    });
+  }
+
   for (const t of related.filter((u) => u.type === "review-triage" || u.type === "rebase")) {
     const attempts = listAttempts(db, t.id);
     const done = attempts.filter((a) => a.state === "handed_off" && events.some((e) => e.unit_id === t.id && e.type === "unit.state" && e.data.to === "done"));
@@ -476,6 +510,23 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     costUsd: allAttempts.reduce((s, a) => s + a.costUsd, 0),
     agents: agentsOf(db, unit, related, planUnit, handoffOf, events),
     gates: listGates(db, project.id, "open").filter((g) => g.unitId === unit.id),
+    managerOn: managerOn(db, unit),
+    manager: decisions.map((d) => {
+      const a = d.attemptId ? listAttempts(db, d.managerUnitId).find((x) => x.id === d.attemptId) : undefined;
+      return {
+        decisionId: d.id,
+        attemptId: a?.id ?? null,
+        agentNo: a?.agentNo ?? null,
+        at: (a?.startedAt ?? d.createdAt) as IsoTime,
+        wake: d.wake,
+        action: d.action,
+        actionText: MANAGER_ACTION_TEXT[d.action],
+        reason: d.reason,
+        note: d.note,
+        costUsd: a?.costUsd ?? 0,
+        resumed: !!a?.resumesAttemptId,
+      };
+    }),
     started: entries[0]?.at ?? null,
     ended: landed?.ts ?? null,
     entries,
@@ -505,7 +556,18 @@ function failReason(events: Ev[], unit: Unit, a: Attempt): string {
   return after ? String(after.data.reason ?? after.data.error ?? after.type) : a.state;
 }
 
+export const MANAGER_ACTION_TEXT: Record<ManagerAction, string> = {
+  resume: "resumed the builder",
+  fresh: "started a fresh builder",
+  split: "split the unit",
+  planner: "sent it to the planner",
+  ask: "asked you",
+  stop: "stopped it",
+  fallback: "no decision",
+};
+
 const ROLE: Partial<Record<string, string>> = {
+  manager: "Manager",
   plan: "Planner",
   work: "Worker",
   pack: "Pack writer",
@@ -549,11 +611,13 @@ function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, ha
         ? String(failedAfter.data.reason)
         : verdict
           ? String(verdict.data.reason)
-          : u.type === "review"
-            ? reviewSummary(events, u)
-            : u.type === "plan"
-              ? planSummary(db, u)
-              : (bullets(h?.whatIDid ?? "")[0] ?? (a.failureMode ? `failed: ${a.failureMode}` : null));
+          : u.type === "manager"
+            ? (listManagerDecisions(db, unit.id).find((d) => d.managerUnitId === u.id)?.reason ?? null)
+            : u.type === "review"
+              ? reviewSummary(events, u)
+              : u.type === "plan"
+                ? planSummary(db, u)
+                : (bullets(h?.whatIDid ?? "")[0] ?? (a.failureMode ? `failed: ${a.failureMode}` : null));
     rows.push({
       attemptId: a.id,
       role: ROLE[u.type] ?? u.type,

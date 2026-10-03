@@ -235,12 +235,63 @@ function CodeTab({ story }: { story: UnitStory }) {
   );
 }
 
-type HubTab = "story" | "agents" | "code";
+function ManagerTab({ story }: { story: UnitStory }) {
+  if (!story.managerOn && !story.manager.length)
+    return (
+      <div className="muted">
+        The manager is off for this project (the setting manager.enabled), so the fixed rules decide what happens after a rejection or failure.
+      </div>
+    );
+  if (!story.manager.length)
+    return (
+      <div className="muted">
+        No decisions yet. U{story.unit.seq}'s manager is woken only when its worker is rejected, fails, or runs out of tries; a unit that goes smoothly never
+        needs it.
+      </div>
+    );
+  return (
+    <div className="mgr">
+      <p className="muted">
+        Each time the manager is woken it is told what changed since its last decision and answers with one action. Open its run to read exactly what it was
+        told.
+      </p>
+      {story.manager.map((t) => (
+        <section key={t.decisionId} className="mgr-turn">
+          <div className="mgr-head mono">
+            {t.agentNo !== null ? `A${t.agentNo}` : "no run"} · {clock(t.at)} · {t.resumed ? "same session, told what changed" : "first wake"} · $
+            {t.costUsd.toFixed(2)}
+            {t.attemptId !== null && (
+              <>
+                {" · "}
+                <Link to={`/a/${t.attemptId}`}>open its run, brief, and log →</Link>
+              </>
+            )}
+          </div>
+          <div>
+            <b>Woken because</b> <Inline text={t.wake} />
+          </div>
+          <div>
+            <b>{t.actionText}</b>
+            {": "}
+            <Inline text={t.reason} />
+          </div>
+          {t.note && (
+            <div className="muted">
+              Note for the next worker: <Inline text={t.note} />
+            </div>
+          )}
+        </section>
+      ))}
+    </div>
+  );
+}
+
+type HubTab = "story" | "agents" | "code" | "manager";
 
 export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
   const { data: story, error, reload } = useApi<UnitStory>(`/api/projects/${projectId}/units/${seq}/story`);
   const query = useQuery();
-  const tab: HubTab = query.get("tab") === "agents" ? "agents" : query.get("tab") === "code" ? "code" : "story";
+  const tab: HubTab = query.get("tab") === "agents" ? "agents" : query.get("tab") === "code" ? "code" : query.get("tab") === "manager" ? "manager" : "story";
   if (error)
     return (
       <main style={{ padding: 36 }} className="s-bell">
@@ -299,6 +350,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             ["story", "Story", null],
             ["agents", "Agents", story.agents.length],
             ["code", "Code", u.repoId ? "" : null],
+            ...(u.type === "work" ? ([["manager", "Manager", story.manager.length]] as const) : []),
           ] as const
         ).map(([k, label, n]) => (
           <Link
@@ -331,6 +383,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
       )}
       {tab === "agents" && <AgentsTab story={story} />}
       {tab === "code" && <CodeTab story={story} />}
+      {tab === "manager" && <ManagerTab story={story} />}
     </main>
   );
 }
