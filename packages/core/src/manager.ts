@@ -4,6 +4,7 @@ import { attemptRecorder, runAgentSession, write, type RunContext } from "./agen
 import { resolveSetting } from "./config.js";
 import { MANAGER_ACTIONS, TERMINAL_STATES, spendsAttempt, type Attempt, type AttemptId, type ManagerAction, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
+import { queueInvestigation } from "./investigate.js";
 import { extractDelta, applyDelta, PlanRejected, scopesOverlap } from "./plan.js";
 import { layout } from "./paths.js";
 import { promptPlugin, standingFor } from "./prompts.js";
@@ -92,12 +93,27 @@ export function managerNeed(db: Db, target: Unit): ManagerNeed | null {
   const ds = failureDecisions(listManagerDecisions(db, target.id));
   const last = ds.at(-1);
   const tries = triesOf(db, target);
+  const cap = resolveSetting(db, "manager.max_decisions_per_unit", { projectId: target.projectId, repoId: target.repoId }).value;
+  if (last?.action === "investigate" && last.tries === tries) {
+    // The manager asked to find something out: it waits for the investigator, then is woken once with what it found.
+    const inv = listUnits(db, target.projectId)
+      .filter((u) => u.type === "investigate" && u.targetUnitId === target.id && u.id > last.managerUnitId)
+      .at(-1);
+    if (inv && !TERMINAL_STATES.has(inv.state) && inv.state !== "failed" && inv.state !== "blocked") return { kind: "waiting" };
+    if (inv && !managerUnits(db, target).some((m) => m.id > inv.id)) {
+      if (spent(ds) > cap) return { kind: "cap", cap };
+      return {
+        kind: "wake",
+        wake: `The investigation U${inv.seq} you asked for ${inv.state === "done" ? "has finished" : "failed"}: ${inv.context[0] ?? inv.goal}`,
+      };
+    }
+    return null;
+  }
   if (last && last.tries === tries) {
     if (last.action !== "ask" || !last.gateId) return null;
     const gate = getGate(db, last.gateId);
     return gate.state === "open" ? { kind: "waiting" } : { kind: "answered", answer: gate.answer };
   }
-  const cap = resolveSetting(db, "manager.max_decisions_per_unit", { projectId: target.projectId, repoId: target.repoId }).value;
   if (spent(ds) >= cap) return { kind: "cap", cap };
   const why = db
     .prepare(
@@ -236,6 +252,7 @@ const ROLE_OF_UNIT: Record<string, string> = {
   review: "reviewer",
   "review-triage": "review triage",
   rebase: "rebase",
+  investigate: "investigator",
 };
 
 function excerpt(text: string, max: number): string {
@@ -329,6 +346,7 @@ ${
 - \`resume\`: the same worker session continues with the findings and your note. Only when resume is available above.
 - \`fresh\`: a new worker starts from trunk with your note. Use it when the old session went down a wrong path.
 - \`split\`: replace this unit with smaller ones. Add a \`\`\`json plan delta with only "add" (the new units); this unit is cancelled. Not possible when other units depend on it.
+- \`investigate\`: start an investigator, a worker that reads and runs things in a copy of the code, changes nothing, and reports findings. You are woken again with what it found, and decide then. Give \`question:\`, what it should find out. Use it when you cannot tell why the unit keeps failing.
 - \`planner\`: block the unit and hand it to the planner, with your reason. Use it when the plan is the problem.
 - \`ask\`: ask the developer; give a \`question:\`. They answer retry or stop.
 - \`stop\`: block the unit for the developer.`
@@ -344,7 +362,7 @@ success
 action: <one of the menu>
 reason: <one or two sentences the developer will read>
 note: <optional: what the next worker should do differently; for relay, what the other units should know>
-question: <only for ask>
+question: <only for ask and investigate>
 to: <only for relay: the U numbers>
 ${standing ? `\n## STANDING ORDERS\n${standing}\n` : ""}
 ## METHOD
@@ -388,6 +406,11 @@ function applyDecision(
     }
     case "ignore":
       return { problem: null, gateId: null };
+    case "investigate": {
+      if (!d.question) return { problem: "an investigation needs a question", gateId: null };
+      queueInvestigation(db, target, d.question);
+      return { problem: null, gateId: null };
+    }
     case "relay": {
       if (!d.note) return { problem: "a relay needs a note", gateId: null };
       const live = new Map(liveSiblings(db, target).map((u) => [u.seq, u]));
@@ -489,7 +512,13 @@ export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<A
     const prompt = managerBrief(db, ctx, unit, target, previous, Boolean(resume));
     write(paths.brief(project.id, unit.seq, attempt.n), prompt);
     let started = false;
-    const base = attemptRecorder(db, { attempt, unit, projectId: project.id, role: "manager", inheritedSkills: resume ? previous?.skills : undefined });
+    const base = attemptRecorder(db, {
+      attempt,
+      unit,
+      projectId: project.id,
+      role: "manager",
+      inheritedSkills: resume ? earlier.flatMap((a) => a.skills) : undefined,
+    });
     const result = await runAgentSession(ctx, {
       recorder: {
         ...base,

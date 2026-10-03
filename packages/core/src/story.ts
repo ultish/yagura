@@ -568,6 +568,7 @@ export const MANAGER_ACTION_TEXT: Record<ManagerAction, string> = {
   planner: "sent it to the planner",
   ask: "asked you",
   stop: "stopped it",
+  investigate: "asked for an investigation",
   relay: "passed a note on",
   ignore: "left a note alone",
   fallback: "no decision",
@@ -582,6 +583,7 @@ const ROLE: Partial<Record<string, string>> = {
   "review-triage": "Review triage",
   review: "Reviewer",
   rebase: "Rebase",
+  investigate: "Investigator",
 };
 
 function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, handoffOf: (u: Unit, a: Attempt) => Handoff | null, events: Ev[]): StoryAgent[] {

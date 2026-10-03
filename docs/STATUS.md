@@ -4,7 +4,7 @@ Updated 2026-10-03 (handoff for a cleared session, end of session 26ff87bb). Eve
 
 **Resume here (handoff, 2026-10-03, end of session 26ff87bb):**
 
-- **State.** `main` is clean and pushed (last code commit `f2dddcd`, then this handoff); `pnpm -r test` passes (core 300, web 27, daemon 20; one run once showed a failure line that could not be reproduced in five reruns) and `pnpm -r typecheck` is clean. Database at migration 36. A demo daemon is still running on :7300, on code from before the manager (restarting it migrates its database from 33 to 36; tested on a copy), with Reposilite in docker (`yg-reposilite`, :8088), started by `scripts/demo-publish.sh up`; `scripts/demo-publish.sh down` stops both. The demo project `demo` is closed (U1, U2, U10 landed); U10 carries a hand-written description (it predates the field).
+- **State.** `main` is clean and pushed (last code commit `f2dddcd`, then this handoff); `pnpm -r test` passes (core 300, web 27, daemon 20; one run once showed a failure line that could not be reproduced in five reruns) and `pnpm -r typecheck` is clean. Database at migration 38. A demo daemon is still running on :7300, on code from before the manager (restarting it migrates its database from 33 to 36; tested on a copy), with Reposilite in docker (`yg-reposilite`, :8088), started by `scripts/demo-publish.sh up`; `scripts/demo-publish.sh down` stops both. The demo project `demo` is closed (U1, U2, U10 landed); U10 carries a hand-written description (it predates the field).
 - **Built this session (2026-10-03, phase 6 and dashboard polish).**
   - Phase 6, published artifacts (DESIGN §14 "Published artifacts", `publish.ts`): a pack's `publish` block (`version`, `command`, `suffix`, `available`, `unpublish`); yagura publishes a verified head under `<version>-yg-<project>-u<n>-<sha7>` for consumers to pin, waits for the real release of a landed upstream, moves the consumer's pin itself (a `yagura-repin` attempt, then verification), checks the code for a superseded test version before landing (`repinIfStale`), and cleans up. A project's `release` policy (`ci` default, `auto`, `human`; `--release` on `project new|set`, in watchman proposals; migration 33) decides who publishes the release; `human` raises a `release` gate. `landWait` says what a verified unit waits for (project page, story, engine log). `yagura unit add --needs <seq>[:source]`. Proven with real Gradle against Reposilite; `scripts/demo-publish.sh up|release|status|down` replays it (fake agents; `RELEASE=ci|auto|human`).
   - A project is a goal that can span repos (library and consumer are normally one project; the planner's dependency edge orders them). Links between separate projects were discussed and parked.
@@ -45,9 +45,9 @@ Three lists: features still to build, tests and proofs still to run, and what th
 
 ### Features left to build
 
-Small, all inside the manager (DESIGN §26 "As built"). Done 2026-10-04: waking on two invalid verifications, the sibling list in the manager's brief, and a worker's note waking its manager to relay it to sibling units (`relay`/`ignore`, migration 37).
+Manager gaps (DESIGN §26 "As built"), all done 2026-10-04: waking on two invalid verifications, the sibling list in the manager's brief, a worker's note waking its manager to relay it to sibling units (`relay`/`ignore`, migration 37), and the `investigate` action (unit type `investigate`, migration 38). Also fixed: a manager's third consecutive resumed wake was refused for "skipped required skills" (each resume inherited only the last attempt's skills).
 
-1. **`investigate` action.** The manager can ask for a unit that only writes findings, whose result comes back to it. Needs a unit that writes a findings file and no code.
+Nothing small is left in the manager. Done 2026-10-04: the `investigate` action (a unit type that writes only findings, which come back to the manager).
 
 Possible, only if the developer wants them:
 

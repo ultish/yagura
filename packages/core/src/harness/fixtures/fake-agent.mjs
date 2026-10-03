@@ -65,6 +65,12 @@ async function main() {
     for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
   if (process.env.YAGURA_ROLE === "manager") return manager();
+  if (brief.startsWith("# yagura investigation brief"))
+    return finish(
+      process.env.FAKE_INVESTIGATE === "garbage"
+        ? "## Status\nsuccess\n\nNothing to report.\n"
+        : "## Status\nsuccess\n\n## Findings\n- the failing test depends on the clock: it passes before noon\n\n## Notes, concerns, deviations\n- none\n",
+    );
   if (process.env.YAGURA_ROLE === "rebase") return rebase();
   if (process.env.YAGURA_ROLE === "review-triage") return triage();
   if (process.env.YAGURA_ROLE === "reviewer") return reviewer();
@@ -145,6 +151,7 @@ function manager() {
   }
   if (action === "fresh" || action === "resume") lines.push("note: write it with care");
   if (action === "ask") lines.push("question: Should it try again?");
+  if (action === "investigate") lines.push("question: Why does the scenario fail on head?");
   const delta =
     action === "split"
       ? "\n```json\n" +

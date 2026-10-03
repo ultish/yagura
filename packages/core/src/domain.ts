@@ -33,7 +33,21 @@ export type MergePolicy = (typeof MERGE_POLICIES)[number];
 export const RELEASE_POLICIES = ["ci", "auto", "human"] as const;
 export type ReleasePolicy = (typeof RELEASE_POLICIES)[number];
 
-export const UNIT_TYPES = ["plan", "work", "verify", "measure", "pack", "rebase", "ci-fix", "review-triage", "review", "manager", "land", "release"] as const;
+export const UNIT_TYPES = [
+  "plan",
+  "work",
+  "verify",
+  "measure",
+  "pack",
+  "rebase",
+  "ci-fix",
+  "review-triage",
+  "review",
+  "manager",
+  "investigate",
+  "land",
+  "release",
+] as const;
 export type UnitType = (typeof UNIT_TYPES)[number];
 
 // Units that change a repo and land: an agent writes them on a branch, they are verified, and they land on trunk.
@@ -55,6 +69,7 @@ export const ROLE_OF: Record<UnitType, Role | null> = {
   "review-triage": "review-triage",
   review: "reviewer",
   manager: "manager",
+  investigate: "worker",
   land: null,
   release: null,
 };
@@ -129,7 +144,7 @@ export type PublicationState = (typeof PUBLICATION_STATES)[number];
 
 // What a manager may decide (§26): about a unit that failed or was rejected, or (`relay`, `ignore`) about a note a worker left for it.
 // `fallback` records that the fixed rules decided because the manager gave no usable decision.
-export const MANAGER_ACTIONS = ["resume", "fresh", "split", "planner", "ask", "stop", "relay", "ignore", "fallback"] as const;
+export const MANAGER_ACTIONS = ["resume", "fresh", "split", "planner", "ask", "stop", "investigate", "relay", "ignore", "fallback"] as const;
 export type ManagerAction = (typeof MANAGER_ACTIONS)[number];
 
 export const DEP_KINDS = ["needs-source", "needs-landed", "scope-overlap"] as const;

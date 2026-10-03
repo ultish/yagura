@@ -12,6 +12,7 @@ const ROLES: Record<string, string> = {
   review: "reviewer",
   "review-triage": "review triage",
   manager: "manager",
+  investigate: "investigator",
 };
 export const roleOf = (unitType: string, harness?: string) =>
   harness === "yagura-proof" ? "pack proof" : harness === "yagura-rebase" ? "rebase" : harness === "yagura-repin" ? "re-pin" : (ROLES[unitType] ?? unitType);

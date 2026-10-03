@@ -46,6 +46,38 @@ function addManagerUnitType(db: BetterSqlite3.Database): void {
   for (const i of indexes) db.exec(i);
 }
 
+function addInvestigateUnitType(db: BetterSqlite3.Database): void {
+  const { sql } = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'units'").get() as { sql: string };
+  if (!sql.includes("'investigate',")) {
+    const next = sql
+      .replace("'manager', 'land'", "'manager', 'investigate', 'land'")
+      .replace("'review', 'manager') OR", "'review', 'manager', 'investigate') OR")
+      .replace(/^CREATE TABLE units\b/, "CREATE TABLE units_next");
+    if (!next.includes("'investigate', 'land'") || !next.includes("'manager', 'investigate') OR"))
+      throw new Error("migration 38: the units table is not in the expected shape");
+    const indexes = (
+      db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'units' AND sql IS NOT NULL").all() as { sql: string }[]
+    ).map((r) => r.sql);
+    db.exec(next);
+    db.exec("INSERT INTO units_next SELECT * FROM units");
+    db.exec("DROP TABLE units");
+    db.exec("ALTER TABLE units_next RENAME TO units");
+    for (const i of indexes) db.exec(i);
+  }
+  const decisions = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'manager_decisions'").get() as { sql: string };
+  if (!decisions.sql.includes("'investigate'")) {
+    db.exec(
+      decisions.sql
+        .replace("'stop', 'relay'", "'stop', 'investigate', 'relay'")
+        .replace(/^CREATE TABLE "?manager_decisions"?/, "CREATE TABLE manager_decisions_next"),
+    );
+    db.exec("INSERT INTO manager_decisions_next SELECT * FROM manager_decisions");
+    db.exec("DROP TABLE manager_decisions");
+    db.exec("ALTER TABLE manager_decisions_next RENAME TO manager_decisions");
+    db.exec("CREATE INDEX manager_decisions_unit ON manager_decisions (unit_id)");
+  }
+}
+
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 2,
@@ -529,6 +561,7 @@ ALTER TABLE manager_decisions_new RENAME TO manager_decisions;
 CREATE INDEX manager_decisions_unit ON manager_decisions (unit_id);
 `,
   },
+  { version: 38, rebuild: addInvestigateUnitType },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

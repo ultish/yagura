@@ -10,6 +10,7 @@ import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runRebaseUnit } from "./rebase.js";
+import { runInvestigateUnit } from "./investigate.js";
 import { applyAskAnswer, managerNeed, queueManager, runManagerUnit, settleManagerUnit, wakeOnNote } from "./manager.js";
 import { sourceDeps, staleSource } from "./sources.js";
 import { landWait, moveConsumer, publishJobs, repinIfStale } from "./publish.js";
@@ -133,6 +134,10 @@ export class Engine {
       if (this.inflight.has(`unit:${u.id}`)) continue;
       if (u.type === "verify" && u.state === "failed")
         transitionUnit(this.db, u.id, "abandoned", { reason: "verifier attempt failed; outcome applied to its target" });
+      if (u.type === "investigate" && (u.state === "failed" || u.state === "blocked")) {
+        transitionUnit(this.db, u.id, "abandoned", { reason: "the investigation failed; its manager is told" });
+        this.log(`  U${u.seq}: the investigation failed; its manager decides what next`);
+      }
       if (u.type === "manager" && (u.state === "failed" || u.state === "blocked")) {
         settleManagerUnit(this.db, u);
         this.log(`  U${u.seq}: the manager session failed; the fixed rules decide`);
@@ -380,7 +385,9 @@ export class Engine {
                 ? () => runTriageUnit(this.ctx, u.id)
                 : u.type === "review"
                   ? () => runReviewUnit(this.ctx, u.id)
-                  : () => runWorkUnit(this.ctx, u.id);
+                  : u.type === "investigate"
+                    ? () => runInvestigateUnit(this.ctx, u.id)
+                    : () => runWorkUnit(this.ctx, u.id);
       this.start(`unit:${u.id}`, isBuild(u) ? `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}` : `${u.type}: ${u.goal.slice(0, 80)}`, run, (e) =>
         this.recoverCrashed(u.id, e),
       );

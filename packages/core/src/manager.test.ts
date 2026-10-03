@@ -12,6 +12,7 @@ import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { applyAskAnswer, listManagerDecisions, managerForcesFresh, managerNeed, parseDecision, queueManager, runManagerUnit, wakeOnNote } from "./manager.js";
+import { runInvestigateUnit } from "./investigate.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
 import { runWorkUnit } from "./runner.js";
@@ -282,6 +283,48 @@ describe("a manager deciding about a rejected unit", () => {
   }, 60_000);
 });
 
+describe("a manager that asks for an investigation", () => {
+  it("waits for the investigator, then is woken once with its findings and decides again", async () => {
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "investigate";
+    await wake(u.id);
+    const inv = listUnits(db, project).find((x) => x.type === "investigate")!;
+    expect(inv).toMatchObject({ state: "ready", targetUnitId: u.id, goal: "Investigate for U1: Why does the scenario fail on head?" });
+    expect(getUnit(db, u.id).state).toBe("rejected");
+    expect(managerNeed(db, getUnit(db, u.id))).toEqual({ kind: "waiting" });
+
+    const attempt = await runInvestigateUnit(ctx, inv.id);
+    expect(getUnit(db, inv.id).state).toBe("done");
+    expect(readFileSync(layout(ctx.boot).handoff(project, inv.seq, attempt!.n), "utf8")).toContain("depends on the clock");
+    const need = managerNeed(db, getUnit(db, u.id));
+    expect(need).toMatchObject({
+      kind: "wake",
+      wake: expect.stringMatching(/^The investigation U\d+ you asked for has finished: Why does the scenario fail on head\?$/),
+    });
+
+    process.env.FAKE_MANAGER = "fresh";
+    const m2 = queueManager(db, getUnit(db, u.id), (need as { wake: string }).wake);
+    await runManagerUnit(ctx, m2.id);
+    const brief = readFileSync(layout(ctx.boot).brief(project, m2.seq, 1), "utf8");
+    expect(brief).toContain("investigator");
+    expect(brief).toContain("the failing test depends on the clock");
+    expect(listManagerDecisions(db, u.id).map((d) => d.action)).toEqual(["investigate", "fresh"]);
+    expect(getUnit(db, u.id).state).toBe("ready");
+  }, 90_000);
+
+  it("is woken with the failure when the investigator reports nothing, and the investigator changed nothing", async () => {
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "investigate";
+    await wake(u.id);
+    const inv = listUnits(db, project).find((x) => x.type === "investigate")!;
+    process.env.FAKE_INVESTIGATE = "garbage";
+    await runInvestigateUnit(ctx, inv.id);
+    delete process.env.FAKE_INVESTIGATE;
+    expect(getUnit(db, inv.id).state).toBe("failed");
+    expect(managerNeed(db, getUnit(db, u.id))).toMatchObject({ kind: "wake", wake: expect.stringContaining("failed") });
+  }, 90_000);
+});
+
 describe("a manager told of a worker's note", () => {
   // Two units in one repo: U1 has handed off with a note, U2 is still to be built.
   async function handedOffWithNote(note = "I moved the shared helper") {
@@ -360,6 +403,19 @@ describe("the engine with a manager", () => {
     expect(log.some((l) => l.includes("goes to its manager"))).toBe(true);
     for (const u of work) expect(listAttempts(db, u.id).filter((a) => a.resumesAttemptId).length).toBe(1);
   }, 120_000);
+
+  it("runs the investigations its manager asks for, and blocks the unit once its decisions are spent", async () => {
+    process.env.FAKE_VERIFY_NEEDS_FIX = "1";
+    process.env.FAKE_MANAGER = "investigate";
+    setSetting(db, "project", project, "manager.max_decisions_per_unit", 2);
+    const log = await run();
+    const work = listUnits(db, project).filter((u) => u.type === "work");
+    expect(work.some((u) => u.state === "blocked")).toBe(true);
+    const investigations = listUnits(db, project).filter((u) => u.type === "investigate");
+    expect(investigations.length).toBeGreaterThanOrEqual(2);
+    expect(investigations.every((u) => u.state === "done")).toBe(true);
+    expect(log.some((l) => l.includes("its manager has used"))).toBe(true);
+  }, 180_000);
 
   it("leaves a rejection to the fixed rules when the manager is off", async () => {
     setSetting(db, "global", "", "manager.enabled", false);

@@ -438,7 +438,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
   const lastVerification = d.verifications.at(-1);
   const tabs: { key: "log" | "diff" | "run"; label: string }[] = [
     { key: "log", label: "Log" },
-    ...(u.type !== "plan" && u.type !== "manager" ? [{ key: "diff" as const, label: "Diff" }] : []),
+    ...(u.type !== "plan" && u.type !== "manager" && u.type !== "investigate" ? [{ key: "diff" as const, label: "Diff" }] : []),
     ...(picked !== null ? [{ key: "run" as const, label: `Evidence r${picked}` }] : []),
   ];
   const briefGoal = d.brief ? /## GOAL\n([\s\S]*?)\n##/.exec(d.brief)?.[1]?.trim() : null;

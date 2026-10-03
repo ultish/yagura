@@ -25,7 +25,13 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
   for (const u of units) {
     if (
       u.state !== "ready" ||
-      (!isBuild(u) && u.type !== "verify" && u.type !== "rebase" && u.type !== "review-triage" && u.type !== "review" && u.type !== "manager")
+      (!isBuild(u) &&
+        u.type !== "verify" &&
+        u.type !== "rebase" &&
+        u.type !== "review-triage" &&
+        u.type !== "review" &&
+        u.type !== "manager" &&
+        u.type !== "investigate")
     )
       continue;
     if (u.type === "verify") {
