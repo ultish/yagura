@@ -4,17 +4,18 @@ import { resolveSetting } from "./config.js";
 import { TERMINAL_STATES, isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
 import { markMergeChecked, openMergeRequests, prNoun, prRef } from "./forge.js";
 import { parseHandoff } from "./handoff.js";
-import { landUnit, watchMergeRequest, type LandResult } from "./land.js";
+import { landUnit, liveVerdict, watchMergeRequest, type LandResult } from "./land.js";
 import { layout } from "./paths.js";
 import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runRebaseUnit } from "./rebase.js";
-import { reverifyAgainstSources, sourceDeps, staleSource } from "./sources.js";
+import { sourceDeps, staleSource } from "./sources.js";
+import { moveConsumer, publishJobs, repinIfStale, upstreamArtifact } from "./publish.js";
 import { queueTriage, runTriageUnit } from "./triage.js";
 import { queueReview, reviewStatus, runReviewUnit } from "./review.js";
 import { checkRetroWatch, scanReverts, watchingFor } from "./retro.js";
-import { addVerifyUnit, runWorkUnit } from "./runner.js";
+import { runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
 import { resumeVerifications } from "./envpause.js";
@@ -81,6 +82,7 @@ export class Engine {
   private lastRevertScan = 0;
   private readonly landingSaid = new Map<UnitId, string>();
   private readonly cutoffSaid = new Set<ProjectId>();
+  private readonly pinsChecked = new Map<UnitId, string>();
   private readonly costSaid = new Set<ProjectId>();
   private readonly log: (line: string) => void;
 
@@ -145,10 +147,43 @@ export class Engine {
       if (u.state === "verified" && this.inflight.has(key)) continue;
       // A consumer lands after what it builds against, and only on a verdict proven against that source as it is now.
       if (sourceDeps(this.db, u).some((d) => d.state !== "landed" && d.state !== "done")) continue;
+      // A published upstream lands, then CI releases it; the consumer moves to the release before it lands (§14).
+      const pending = sourceDeps(this.db, u)
+        .map((up) => upstreamArtifact(this.db, up, u.repoId))
+        .find((a) => a && !("version" in a));
+      if (pending && "stuck" in pending) {
+        transitionUnit(this.db, u.id, "blocked", { reason: pending.stuck });
+        this.log(`  U${u.seq} blocked: ${pending.stuck}`);
+        continue;
+      }
+      if (pending && "wait" in pending) {
+        this.sayOnce(u, pending.wait);
+        continue;
+      }
       const stale = staleSource(this.db, u);
       if (stale) {
-        reverifyAgainstSources(this.db, u, stale, (x) => addVerifyUnit(this.db, x));
-        this.log(`  U${u.seq} re-verifies: ${stale}`);
+        if (!this.inflight.has(key))
+          this.start(
+            key,
+            `move U${u.seq} onto its sources as they are now`,
+            () => moveConsumer(this.ctx, u.id, stale).then((r) => this.log(`  U${u.seq} ${r === "repinned" ? "re-pinned and " : ""}re-verifies: ${stale}`)),
+            () => undefined,
+          );
+        continue;
+      }
+      const head = liveVerdict(this.db, u.id)?.head_sha;
+      if (head && this.pinsChecked.get(u.id) !== head && sourceDeps(this.db, u).some((up) => up.repoId !== u.repoId && getRepo(this.db, up.repoId!).publish)) {
+        if (!this.inflight.has(key))
+          this.start(
+            key,
+            `check U${u.seq}'s pinned versions`,
+            () =>
+              repinIfStale(this.ctx, u.id).then((r) => {
+                if (r === "clean") this.pinsChecked.set(u.id, head);
+                else this.log(`  U${u.seq} re-pinned and re-verifies: its change still named a superseded test version`);
+              }),
+            () => undefined,
+          );
         continue;
       }
       const onForge = getRepo(this.db, u.repoId!).forge !== "none";
@@ -217,11 +252,26 @@ export class Engine {
 
   // A pull request is polled every few seconds; say what it is waiting for only when that changes.
   private logLanding(u: Unit, r: LandResult | null): void {
-    if (!r) return;
-    const line = `${r.outcome}: ${r.reason}`;
+    if (r) this.sayOnce(u, `${r.outcome}: ${r.reason}`);
+  }
+
+  private sayOnce(u: Unit, line: string): void {
     if (this.landingSaid.get(u.id) === line) return;
     this.landingSaid.set(u.id, line);
     this.log(`  U${u.seq} ${line}`);
+  }
+
+  // Test builds, release watches, and clean-up run for every project, a closed one included, until nothing is left to do.
+  private publishing(project: Project): void {
+    for (const job of publishJobs(this.db, project.id))
+      if (!this.inflight.has(job.key))
+        this.start(
+          job.key,
+          job.label,
+          () => job.run(this.ctx),
+          () => undefined,
+          job.key.startsWith("release:"),
+        );
   }
 
   // The share of the project's wall-clock budget used since it became active, or null without a budget.
@@ -405,6 +455,7 @@ export class Engine {
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
     for (const project of this.scope()) this.retro(project);
+    for (const project of this.scope()) this.publishing(project);
     if (Date.now() - this.lastRevertScan > (this.opts.revertScanMs ?? REVERT_SCAN_MS)) {
       this.lastRevertScan = Date.now();
       const repos = this.db.prepare("SELECT DISTINCT repo_id AS id FROM units WHERE landed_sha IS NOT NULL").all() as { id: string }[];
@@ -478,6 +529,7 @@ export class Engine {
     if (this.inflight.size) return false;
     const projects = this.scope();
     if (projects.some((p) => this.activationDue(p)) || this.dueReports(projects).length) return false;
+    if (projects.some((p) => publishJobs(this.db, p.id).length)) return false;
     return projects.every((p) => {
       if (p.state !== "active") return true;
       if (p.andonReason) return true;
@@ -506,6 +558,7 @@ export class Engine {
 
   // A verified unit the engine would act on now: queue its review or triage, or land it.
   private wouldMove(p: Project, u: Unit): boolean {
+    if (sourceDeps(this.db, u).some((up) => up.state === "landed" && "wait" in (upstreamArtifact(this.db, up, u.repoId) ?? {}))) return false;
     const review = reviewStatus(this.db, u).state;
     if (review === "needed" || review === "answered") return true;
     return review === "settled" && (p.mergePolicy === "auto" || landApproved(this.db, p.id, u));

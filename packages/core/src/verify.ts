@@ -27,7 +27,7 @@ import { verifierNotes } from "./disagreements.js";
 import { acquireLease, keepable, keepLease, releaseLease } from "./leases.js";
 import { notePackStale, proveTrunkPack, syncPackStatus } from "./repos.js";
 import { requiredProjectSkills } from "./skills.js";
-import { depShas, mountSources, sourceEnv } from "./sources.js";
+import { depShas, mountSources, sourceEnv, sourceVersions } from "./sources.js";
 import { addVerifyUnit } from "./runner.js";
 import { layout } from "./paths.js";
 import {
@@ -197,8 +197,8 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
         const id = Number(
           db
             .prepare(
-              `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, trunk_outcome, head_outcome, dep_shas_json, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO verdicts (unit_id, attempt_id, tier, repo_id, head_sha, patch_id, trunk_outcome, head_outcome, dep_shas_json, artifact_versions_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .run(
               target.id,
@@ -210,6 +210,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
               decision.trunkOutcome,
               decision.headOutcome,
               JSON.stringify(depShas(sources)),
+              JSON.stringify(sourceVersions(sources)),
               now(),
             ).lastInsertRowid,
         ) as VerdictId;

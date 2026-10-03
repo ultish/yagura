@@ -425,7 +425,9 @@ export function Agent({ attemptId }: { attemptId: number }) {
       ? "yagura ran this proof itself, with no agent: the pack's doctor, deploy, checks, and teardown on the pack's own head. Its runs are in the grid."
       : a.harness === "yagura-rebase"
         ? "yagura rebased the verified head onto the moved trunk; the patch changed, so this head is verified again. No agent ran."
-        : null;
+        : a.harness === "yagura-repin"
+          ? "yagura moved this change's pinned test versions of its sources to their current versions (the upstream landed and was released, or was published again); the new head is verified again. No agent ran."
+          : null;
   const status = statusOf(d, now, timeline.lastActivity);
   const start = a.startedAt ? Date.parse(a.startedAt) : timeline.startedAt;
   const elapsed = a.startedAt ? (a.endedAt ? Date.parse(a.endedAt) : now) - Date.parse(a.startedAt) : 0;

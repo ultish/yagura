@@ -443,6 +443,29 @@ CREATE TABLE review_posts (
 );
 `,
   },
+  {
+    version: 32,
+    sql: `
+ALTER TABLE repos ADD COLUMN publish_json TEXT;
+CREATE TABLE publications (
+  id INTEGER PRIMARY KEY,
+  unit_id INTEGER NOT NULL REFERENCES units (id),
+  repo_id TEXT NOT NULL REFERENCES repos (id),
+  kind TEXT NOT NULL CHECK (kind IN ('test', 'release')),
+  sha TEXT NOT NULL,
+  version TEXT,
+  state TEXT NOT NULL CHECK (state IN ('publishing', 'published', 'failed', 'waiting', 'unchanged', 'removed', 'left')),
+  reason TEXT,
+  base_version TEXT,
+  base_released INTEGER NOT NULL DEFAULT 0,
+  log_path TEXT,
+  checked_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (unit_id, kind, sha)
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

@@ -51,6 +51,7 @@ export const packStatusOf = (pack: PackLoad): PackStatus => (pack.ok ? "unproven
 
 // Trunk's pack as last read: a proof is kept while a pack still parses, and lost when it no longer does.
 export function syncPackStatus(db: Db, repoId: RepoId, pack: PackLoad): PackStatus {
+  db.prepare("UPDATE repos SET publish_json = ? WHERE id = ?").run(pack.ok && pack.pack.publish ? JSON.stringify(pack.pack.publish) : null, repoId);
   const current = (db.prepare("SELECT pack_status FROM repos WHERE id = ?").get(repoId) as { pack_status: PackStatus }).pack_status;
   const next: PackStatus = !pack.ok ? "missing" : current === "missing" ? "unproven" : current;
   if (next !== current) {

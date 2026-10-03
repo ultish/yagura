@@ -386,6 +386,29 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       folded: null,
     });
 
+  const PUBLISHING: Record<string, { who: string; status: (d: Record<string, unknown>) => { text: string; tone: "pine" | "amber" | "bell" | "muted" } }> = {
+    "publish.test": { who: "Test build", status: (d) => ({ text: `published ${String(d.version)}`, tone: "pine" }) },
+    "publish.failed": { who: "Test build", status: () => ({ text: "publishing failed", tone: "bell" }) },
+    "publish.released": { who: "Release", status: (d) => ({ text: `CI released ${String(d.version)}`, tone: "pine" }) },
+    "publish.release_failed": { who: "Release", status: (d) => ({ text: `no release of ${String(d.version ?? d.repo)}`, tone: "bell" }) },
+    "publish.cleaned": { who: "Test builds", status: (d) => ({ text: `${Number(d.removed)} removed`, tone: "muted" }) },
+    "consumer.repinned": { who: "Re-pinned", status: () => ({ text: "moved to its sources' current versions", tone: "amber" }) },
+  };
+  for (const e of events.filter((x) => x.unit_id === unit.id && x.type in PUBLISHING)) {
+    const p = PUBLISHING[e.type]!;
+    const moved = e.type === "consumer.repinned" ? (e.data.moved as { repo: string; from: string; to: string }[]) : null;
+    entries.push({
+      at: e.ts,
+      actor: "yagura",
+      who: p.who,
+      attempt: null,
+      status: p.status(e.data),
+      body: moved ? moved.map((m) => `${m.repo}: ${m.from} → ${m.to}`).join("; ") : e.data.reason ? String(e.data.reason) : null,
+      lines: [],
+      folded: null,
+    });
+  }
+
   const landed = events.find((e) => e.type === "unit.landed" && e.unit_id === unit.id);
   const verdict = liveVerdict(db, unit.id);
   if (landed) {

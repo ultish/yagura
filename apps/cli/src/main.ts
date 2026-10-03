@@ -55,6 +55,7 @@ import {
   type EnvironmentId,
   type Provider,
   type RunContext,
+  addDep,
   addUnit,
   claudeAdapter,
   effectiveSettings,
@@ -118,7 +119,7 @@ const USAGE = `yagura — agent orchestration
   yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified] [--issue <ref>...]
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
-                  [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>]
+                  [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>] [--needs <seq>[:source]...]
   yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab land through pull/merge requests (forge.repo, forge.merge_method)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]
@@ -360,6 +361,7 @@ async function main() {
         timebox: { type: "string" },
         note: { type: "string" },
         issue: { type: "string", multiple: true },
+        needs: { type: "string", multiple: true },
       });
       const projectId = positionals[1] as ProjectId | undefined;
       if ((positionals[0] === "reject" || positionals[0] === "requeue") && projectId && positionals[2]) {
@@ -393,6 +395,10 @@ async function main() {
         timeboxSeconds: values.timebox ? Number(values.timebox) : resolveSetting(db, "timebox.work_seconds", { projectId }).value,
         maxAttempts: resolveSetting(db, "max_attempts", { projectId }).value,
       });
+      for (const n of many(values.needs)) {
+        const [seq, kind] = n.replace(/^U/i, "").split(":");
+        addDep(db, { unitId: u.id, dependsOn: getUnitBySeq(db, projectId!, Number(seq)).id, kind: kind === "source" ? "needs-source" : "needs-landed" });
+      }
       const missing = missingBriefFields(fields);
       if (missing.length) {
         console.log(`U${u.seq} created as draft; brief is missing ${missing.join(", ")}`);

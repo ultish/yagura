@@ -19,6 +19,7 @@ import {
 import { chooseResume, rejectionFindings, renderResumePrompt } from "./resume.js";
 import { requiredProjectSkills, skillMethod } from "./skills.js";
 import { mountSources, sourceEnv } from "./sources.js";
+import { upstreamArtifact } from "./publish.js";
 import { environmentNotes, listValues, valueMap } from "./envvalues.js";
 import { LEASE_VARS } from "./leases.js";
 import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
@@ -35,6 +36,7 @@ import {
   getRepo,
   getUnit,
   listAttempts,
+  listDeps,
   now,
   recordEvent,
   transitionUnit,
@@ -94,6 +96,16 @@ export function scopeNote(attempt: number, paths: string[], hard: boolean): stri
   return hard
     ? `Attempt ${attempt} wrote ${paths.join(", ")}, which yagura never allows (the verify pack). Leave it alone.`
     : `Attempt ${attempt} changed ${paths.join(", ")} outside SCOPE without saying why. If the path is not needed, revert it and commit; if it is, list it under "## Outside scope" in your handoff with the reason the work needs it.`;
+}
+
+function releasedUpstreams(db: Db, unit: Unit): string[] {
+  return listDeps(db, unit.projectId)
+    .filter((d) => d.unitId === unit.id && d.kind === "needs-landed")
+    .flatMap((d) => {
+      const up = getUnit(db, d.dependsOn);
+      const a = upstreamArtifact(db, up, unit.repoId);
+      return a && "version" in a ? [`U${up.seq} landed in ${up.repoId} and is released as ${a.version}; depend on exactly that version.`] : [];
+    });
 }
 
 export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt> {
@@ -156,10 +168,11 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         : []),
       ...(isPack ? unit.context.slice(1) : unit.context),
       ...unit.notes.map((n) => `Note from an earlier attempt: ${n}`),
+      ...releasedUpstreams(db, unit),
       ...(environmentNotes(db, project.environmentId) ? [`About this environment: ${environmentNotes(db, project.environmentId)}`] : []),
     ],
     readonly: [
-      ...sources.map((s) => ({ repoId: s.repoId, path: s.path, sha: s.sha })),
+      ...sources.map((s) => ({ repoId: s.repoId, path: s.path, sha: s.sha, version: s.version })),
       ...references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
     ],
     acceptance: unit.acceptance,

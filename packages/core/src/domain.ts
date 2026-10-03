@@ -78,7 +78,7 @@ export const UNIT_TRANSITIONS: Record<UnitState, readonly UnitState[]> = {
   running: ["handed_off", "failed", "ready", "abandoned"],
   handed_off: ["verifying", "done", "rejected", "blocked", "abandoned"],
   verifying: ["verified", "rejected", "blocked", "done", "abandoned"],
-  verified: ["landing", "verifying", "abandoned"],
+  verified: ["landing", "verifying", "blocked", "abandoned"],
   landing: ["landed", "verifying", "blocked", "abandoned"],
   rejected: ["ready", "blocked", "abandoned"],
   failed: ["ready", "blocked", "abandoned"],
@@ -108,9 +108,20 @@ export class IllegalTransition extends Error {
 export const REBASE_HARNESS = "yagura-rebase";
 export const PROOF_HARNESS = "yagura-proof";
 export const PACK_EDIT_HARNESS = "yagura-pack-edit";
+export const REPIN_HARNESS = "yagura-repin";
 // A resume that never started a session (unknown or expired session id) falls back to a fresh attempt at no extra try.
 export const spendsAttempt = (a: { state: string; harness: string; resumesAttemptId?: AttemptId | null; sessionId?: string | null }) =>
-  a.state !== "stopped" && a.harness !== REBASE_HARNESS && a.harness !== PACK_EDIT_HARNESS && !(a.resumesAttemptId && !a.sessionId);
+  a.state !== "stopped" &&
+  a.harness !== REBASE_HARNESS &&
+  a.harness !== PACK_EDIT_HARNESS &&
+  a.harness !== REPIN_HARNESS &&
+  !(a.resumesAttemptId && !a.sessionId);
+
+// A test build of a verified head for its consumers, or the real version CI publishes once it lands (§14).
+export const PUBLICATION_KINDS = ["test", "release"] as const;
+export type PublicationKind = (typeof PUBLICATION_KINDS)[number];
+export const PUBLICATION_STATES = ["publishing", "published", "failed", "waiting", "unchanged", "removed", "left"] as const;
+export type PublicationState = (typeof PUBLICATION_STATES)[number];
 
 export const DEP_KINDS = ["needs-source", "needs-landed", "scope-overlap"] as const;
 export type DepKind = (typeof DEP_KINDS)[number];
@@ -196,7 +207,17 @@ export interface Repo {
   verifyPackPath: string;
   packStatus: PackStatus;
   packProvenSha: Sha | null;
+  // Trunk pack's publish block as of the last time yagura read it.
+  publish: PackPublish | null;
   createdAt: IsoTime;
+}
+
+export interface PackPublish {
+  version: string;
+  command: string;
+  suffix: string;
+  available: string;
+  unpublish?: string;
 }
 
 export interface Project {
@@ -282,7 +303,7 @@ export interface Attempt {
   costUsd: number;
   sessionId: string | null;
   resumesAttemptId: AttemptId | null;
-  sources: { unit: string; repoId: RepoId; sha: Sha; path: string }[];
+  sources: { unit: string; repoId: RepoId; sha: Sha; path: string; version?: string }[];
   rejection: Rejection | null;
   skills: string[];
   missingSkills: string[];
@@ -311,7 +332,7 @@ export interface RenderedBrief {
   repo: { id: RepoId; worktree: string; branch: string; baseSha: Sha };
   scope: { write: string[]; forbid: string[]; hard?: string[] };
   context: string[];
-  readonly: { repoId: RepoId; path: string; sha: Sha }[];
+  readonly: { repoId: RepoId; path: string; sha: Sha; version?: string }[];
   acceptance: string[];
   verify: string;
   env: Record<string, string>;

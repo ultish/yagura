@@ -60,7 +60,7 @@ function walk(dir: string): string[] {
   });
 }
 
-function runShell(
+export function runShell(
   command: string,
   cwd: string,
   env: NodeJS.ProcessEnv,

@@ -260,6 +260,8 @@ async function engine(role) {
       }
     }
     mkdirSync(base, { recursive: true });
+    const pins = Object.entries(process.env).filter(([k]) => k.startsWith("YAGURA_VERSION_"));
+    if (pins.length) writeFileSync(`${base}/deps.txt`, pins.map(([k, v]) => `${k.slice("YAGURA_VERSION_".length).toLowerCase()}=${v}\n`).join(""));
     writeFileSync(`${base}/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`, steered ? `work, steered: ${steered}\n` : "work\n");
     const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
     g("add", "-A");

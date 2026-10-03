@@ -20,6 +20,16 @@ export const VerifyPack = z.object({
     .min(1),
   features: z.array(z.object({ name: z.string(), doc: z.string() })).default([]),
   protected: z.array(z.string()).default([]),
+  publish: z
+    .object({
+      version: z.string().min(1),
+      command: z.string().min(1),
+      suffix: z.string().default(""),
+      available: z.string().min(1),
+      unpublish: z.string().min(1).optional(),
+    })
+    .strict()
+    .optional(),
 });
 export type VerifyPack = z.output<typeof VerifyPack>;
 

@@ -4,6 +4,7 @@ import type { Bootstrap } from "./config.js";
 import type { RepoId, Sha, Unit } from "./domain.js";
 import { addDetachedWorktree, ensureMirror } from "./git.js";
 import { layout } from "./paths.js";
+import { upstreamArtifact } from "./publish.js";
 import { getRepo, getUnit, listDeps, now, recordEvent, transitionUnit, type Db } from "./store.js";
 
 export interface Source {
@@ -11,12 +12,14 @@ export interface Source {
   repoId: RepoId;
   sha: Sha;
   path: string;
+  // The test build or release of the source, when its repo publishes one (§14).
+  version?: string;
 }
 
 const PASSING = "('deployed-verified', 'live-local-verified', 'e2e-verified', 'unit-verified', 'build-only')";
 
 // What a needs-source dependency is built against: the upstream's landed commit, or else its verified head.
-function sourceSha(db: Db, upstream: Unit): Sha | null {
+export function sourceSha(db: Db, upstream: Unit): Sha | null {
   if (upstream.landedSha) return upstream.landedSha;
   const v = db
     .prepare(`SELECT head_sha FROM verdicts WHERE unit_id = ? AND voided_at IS NULL AND tier IN ${PASSING} ORDER BY id DESC LIMIT 1`)
@@ -44,13 +47,21 @@ export async function mountSources(ctx: { db: Db; boot: Bootstrap }, unit: Unit,
       mkdirSync(dirname(path), { recursive: true });
       await addDetachedWorktree(mirror, path, sha);
     }
-    out.push({ unit: `U${up.seq}`, repoId: repo.id, sha, path });
+    const artifact = upstreamArtifact(ctx.db, up, unit.repoId);
+    out.push({ unit: `U${up.seq}`, repoId: repo.id, sha, path, ...(artifact && "version" in artifact ? { version: artifact.version } : {}) });
   }
   return out;
 }
 
+const envName = (repoId: string) => repoId.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+
 export const sourceEnv = (sources: Source[]): Record<string, string> =>
-  Object.fromEntries(sources.map((s) => [`YAGURA_SOURCE_${s.repoId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`, s.path]));
+  Object.fromEntries(
+    sources.flatMap((s) => [[`YAGURA_SOURCE_${envName(s.repoId)}`, s.path], ...(s.version ? [[`YAGURA_VERSION_${envName(s.repoId)}`, s.version]] : [])]),
+  );
+
+export const sourceVersions = (sources: Source[]): Record<string, string> =>
+  Object.fromEntries(sources.filter((s) => s.version).map((s) => [s.unit, s.version!]));
 
 export const depShas = (sources: Source[]): Record<string, Sha> => Object.fromEntries(sources.map((s) => [s.unit, s.sha]));
 

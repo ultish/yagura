@@ -1,6 +1,7 @@
 import { TERMINAL_STATES, isBuild, spendsAttempt, type Attempt, type FailureMode, type ProjectId, type Unit } from "./domain.js";
 import { editPackUnitIds } from "./packedits.js";
 import { pausedBy } from "./envpause.js";
+import { upstreamArtifact } from "./publish.js";
 import { getProject, listDeps, listUnits, type Db } from "./store.js";
 
 const SATISFIES_DEP = new Set(["landed", "done"]);
@@ -34,7 +35,19 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
     let reason: string | null = null;
     for (const d of deps.filter((x) => x.unitId === u.id)) {
       const on = byId.get(d.dependsOn)!;
-      if (d.kind === "scope-overlap" ? TERMINAL_STATES.has(on.state) : (d.kind === "needs-source" ? SATISFIES_SOURCE : SATISFIES_DEP).has(on.state)) continue;
+      const met = d.kind === "scope-overlap" ? TERMINAL_STATES.has(on.state) : (d.kind === "needs-source" ? SATISFIES_SOURCE : SATISFIES_DEP).has(on.state);
+      // A consumer in another repo builds on the upstream's published artifact once its repo publishes one (§14).
+      const artifact = met && d.kind !== "scope-overlap" ? upstreamArtifact(db, on, u.repoId) : null;
+      if (artifact && "stuck" in artifact) {
+        result.stuck.push({ unit: u, reason: artifact.stuck });
+        reason = null;
+        break;
+      }
+      if (artifact && "wait" in artifact) {
+        reason = artifact.wait;
+        break;
+      }
+      if (met) continue;
       if (d.kind !== "scope-overlap" && on.state === "abandoned") {
         result.stuck.push({ unit: u, reason: `depends on U${on.seq}, which was abandoned` });
         reason = null;

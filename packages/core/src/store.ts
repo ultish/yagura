@@ -115,6 +115,7 @@ export function getRepo(db: Db, id: RepoId): Repo {
     verifyPackPath: r.verify_pack_path as string,
     packStatus: r.pack_status as Repo["packStatus"],
     packProvenSha: (r.pack_proven_sha as Repo["packProvenSha"]) ?? null,
+    publish: r.publish_json ? (JSON.parse(r.publish_json as string) as Repo["publish"]) : null,
     createdAt: r.created_at as IsoTime,
   };
 }

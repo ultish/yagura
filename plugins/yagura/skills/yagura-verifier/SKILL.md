@@ -24,6 +24,7 @@ The verify pack is the repo's standing instructions for checking changes. You ha
 
 - When the pack is wrong (a doctor or deploy that fails on trunk, a command that cannot work, a deploy that no longer matches how the app runs), fix it there rather than giving up.
 - When the pack does not check what this change built (new tests it does not run, a new service it does not start), extend it, often by turning your scenario into a check.
+- When this repo publishes what other repos build on and the pack has no `publish` block, or its `publish` commands are wrong, fix that too (the pack contract is in `yagura-pack`).
 - For a pack that has drifted a long way, follow `pstack:maintain-verification-skill`, writing only inside your pack copy.
 - Edit files only; do not run git. yagura re-runs the doctor and every check on both sides with your copy when you finish, commits your edit on its own, and lands it after this unit.
 - Under `## Pack changes`, list each change and why. If you remove or loosen a check, say why; the developer reads this.

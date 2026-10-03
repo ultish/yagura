@@ -14,6 +14,7 @@ You write the verify pack that yagura uses to judge every later change to this r
 - `verify.json` follows the contract in CONTEXT exactly. Unknown fields or a wrong provider fail the proof.
 - `doctor` is read-only and fast. `deploy` builds and starts the checkout in the slot, using only the slot's variables for ports and directories, so two slots never collide. `teardown` removes only what `deploy` created and never kills by process name.
 - Each check proves one tier. Prefer the repo's own test command for `unit-verified`; add a check that drives the running app for a stronger tier only when `deploy` starts one.
+- If this repo publishes something other repos depend on (a library to Nexus with `gradle publish`, a package with `npm publish`, an image to a registry), add the `publish` block from CONTEXT. `command` must publish under `$YAGURA_VERSION` and nothing else (pass it as the version, e.g. `-Pversion=$YAGURA_VERSION`, or `npm version --no-git-tag-version "$YAGURA_VERSION" && npm publish --tag yg`, never to `latest`); `available` must fetch that exact version from the repository, not from a local cache. Use the environment's values for repository addresses; credentials come from the developer's own config.
 - A check must pass on the repo as it is today. yagura later runs the same checks on trunk and on each change, and a check that already fails on trunk blocks every verification.
 
 ## Prove it before you hand off

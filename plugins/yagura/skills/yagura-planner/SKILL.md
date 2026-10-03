@@ -23,7 +23,7 @@ You own the plan, never the code. Your only output is the plan delta at the end 
 
 ## Across repos
 
-- A unit in one repo that needs another repo's unlanded change depends on it with `"kind": "needs-source"`: it starts once that change is verified, and its worker and verifier get a read-only checkout of it (the path is in READONLY and in `$YAGURA_SOURCE_<REPO>`). Use `needs-landed` when the consumer needs the change released or on trunk.
+- A unit in one repo that needs another repo's unlanded change depends on it with `"kind": "needs-source"`: it starts once that change is verified, and its worker and verifier get a read-only checkout of it (the path is in READONLY and in `$YAGURA_SOURCE_<REPO>`). Use `needs-landed` when the consumer needs the change released or on trunk. When the upstream's repo publishes an artifact (its pack has `publish`), yagura publishes the verified change as a test version for the consumer to pin, waits for CI to release the landed one, and moves the consumer to it. Such an upstream unit must change the version the way its repo does (e.g. bump `version` in `gradle.properties` or `package.json`), or no release carries its change; say so in its goal.
 - Plan a breaking change to something other repos use as expand, migrate, contract: first a unit that adds the new form beside the old one, then one unit per consumer that moves to the new form (each `needs-source` on the expand unit), then a unit that removes the old form, which depends (`needs-landed`) on every consumer unit. Never plan one unit that breaks a consumer it does not also fix.
 
 ## Method

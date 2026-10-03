@@ -79,7 +79,7 @@ ${list(b.scope.hard ?? [])}
 ${list(b.context)}
 
 ## READONLY
-${list(b.readonly.map((r) => `${r.repoId} at ${r.path} @ ${r.sha}`))}
+${list(b.readonly.map((r) => `${r.repoId} at ${r.path} @ ${r.sha}${r.version ? `, published as ${r.version}: pin exactly this version wherever this repo depends on ${r.repoId}` : ""}`))}
 
 ## ACCEPTANCE
 ${list(b.acceptance)}
@@ -138,6 +138,7 @@ export function packContract(p: { packPath: string; provider: string; leaseVars:
     `${p.packPath}/verify.json: {"provider": "${p.provider}", "doctor"?: cmd, "deploy"?: cmd, "teardown"?: cmd, "checks": [{"name": "unit", "command": cmd, "tier": tier, "timeoutSeconds"?: n}], "features": [{"name", "doc"}], "protected": [globs]}. Check names are lowercase words joined by dashes.`,
     "Every command runs through sh -c with the repo checkout as its working directory and these variables: YAGURA_AT (base or head), YAGURA_SHA, YAGURA_EVIDENCE (a directory; files written there are kept as evidence), and the slot's variables: " +
       `${p.leaseVars.join(", ")}, plus the environment's values under ENV (use them by name rather than copying a value into a file). Read nothing else from the machine; put scripts under ${p.packPath}/bin/ and one feature doc per user-facing feature under ${p.packPath}/features/.`,
+    'When other repos build on what this repo publishes (a Gradle or npm package, a container image), add "publish": {"version": cmd printing the version the checkout would release, "command": cmd publishing the checkout as $YAGURA_VERSION, "suffix"?: "-SNAPSHOT" for Maven repositories, "available": cmd exiting 0 once $YAGURA_VERSION can be fetched, "unpublish"?: cmd removing $YAGURA_VERSION}. yagura runs these itself: it publishes verified changes under unique test versions for their consumers, and waits for CI to release landed ones.',
     "doctor checks read-only that the environment is worth driving. deploy builds and starts the checkout in the slot; teardown removes only what deploy created. Leave out deploy and teardown when the checks need nothing running.",
     `Tiers, strongest first: deployed-verified, live-local-verified, e2e-verified, unit-verified, build-only. A check's tier is what its passing proves. This project needs at least ${p.minTier}.`,
     "yagura proves the pack on your branch head, with no agent: doctor, deploy, every check, then teardown must all exit 0 against the repo as it is now. Run them yourself the same way before you hand off.",

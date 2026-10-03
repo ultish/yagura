@@ -13,7 +13,7 @@ const ROLES: Record<string, string> = {
   "review-triage": "review triage",
 };
 export const roleOf = (unitType: string, harness?: string) =>
-  harness === "yagura-proof" ? "pack proof" : harness === "yagura-rebase" ? "rebase" : (ROLES[unitType] ?? unitType);
+  harness === "yagura-proof" ? "pack proof" : harness === "yagura-rebase" ? "rebase" : harness === "yagura-repin" ? "re-pin" : (ROLES[unitType] ?? unitType);
 
 export type StageName = "plan" | "work" | "verify" | "land";
 export type Light = "lit" | "flame" | "bell" | "ember" | "wait" | "off";
