@@ -41,6 +41,7 @@ export function Projects() {
                   key={s.project.id}
                   seq={<Link to={`/p/${s.project.id}`}>{s.project.id}</Link>}
                   goal={<Inline text={s.project.goal} />}
+                  to={`/p/${s.project.id}`}
                   status={
                     s.project.andonReason
                       ? `Andon: ${s.project.andonReason}`

@@ -9,7 +9,7 @@ import { liveVerdict } from "./land.js";
 import { landWait } from "./publish.js";
 import { listPackEdits } from "./packedits.js";
 import { layout } from "./paths.js";
-import { getGate, getProject, getUnit, listAttempts, listUnits, type Db, jobLabel } from "./store.js";
+import { getGate, getProject, getUnit, listAttempts, listGates, listUnits, type Db, jobLabel, type Gate } from "./store.js";
 import { isReviewThread, listThreadRows } from "./triage.js";
 import { findingFates } from "./review.js";
 
@@ -48,6 +48,8 @@ export interface UnitStory {
   ended: IsoTime | null;
   entries: StoryEntry[];
   agents: StoryAgent[];
+  // Questions waiting for the developer about this unit: land it, publish its release.
+  gates: Gate[];
 }
 // Every session that worked on a unit: the planner run that planned it (shared with the units it planned alongside),
 // its own attempts, and the verifiers, triage, and rebases that targeted it.
@@ -473,6 +475,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     pr: mr ? { number: mr.number, url: mr.url } : null,
     costUsd: allAttempts.reduce((s, a) => s + a.costUsd, 0),
     agents: agentsOf(db, unit, related, planUnit, handoffOf, events),
+    gates: listGates(db, project.id, "open").filter((g) => g.unitId === unit.id),
     started: entries[0]?.at ?? null,
     ended: landed?.ts ?? null,
     entries,

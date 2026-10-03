@@ -25,6 +25,7 @@ export function Agents() {
         key={`w${t.id}`}
         seq={<Link to={`/talk/${t.threadId}`}>thread {t.threadId}</Link>}
         goal={t.threadTitle}
+        to={`/talk/${t.threadId}`}
         status={
           t.state === "running"
             ? `Watchman answering for ${took}.`
@@ -94,6 +95,7 @@ export function Agents() {
           </Link>
         }
         goal={<Inline text={a.target?.goal ?? a.unit.goal} />}
+        to={`/a/${a.id}`}
         status={
           <>
             {a.state === "running" && <RunningDot />}

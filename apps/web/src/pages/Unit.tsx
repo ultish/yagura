@@ -223,6 +223,36 @@ function AgentsTab({ story }: { story: UnitStory }) {
   );
 }
 
+function OpenGates({ gates, reload }: { gates: UnitStory["gates"]; reload: () => void }) {
+  const action = useAction();
+  if (!gates.length) return null;
+  return (
+    <>
+      {gates.map((g) => (
+        <div key={g.id} className="hub-ask" role="group" aria-label="Waiting for you">
+          <div>
+            <b>Waiting for you</b> · {g.question}
+          </div>
+          <div className="hub-ask-buttons">
+            {g.options.map((o, i) => (
+              <button
+                key={o}
+                className={`btn${i === 0 ? " bell" : ""}`}
+                type="button"
+                disabled={action.busy}
+                onClick={() => action.run(() => api(`/api/gates/${g.id}/answer`, { body: { answer: o } }).then(reload))}
+              >
+                {o === "land" ? "Land" : o === "hold" ? "Hold" : o === "publish" ? "Publish" : o}
+              </button>
+            ))}
+          </div>
+          {action.error && <div className="s-bell">{action.error}</div>}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function CodeTab({ story }: { story: UnitStory }) {
   const u = story.unit;
   const { data, error } = useApi<{ code: UnitCode | null }>(u.repoId ? `/api/projects/${story.projectId}/units/${u.seq}/code` : null);
@@ -311,6 +341,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
         )}
         {u.state === "running" && running?.attempt && <Link to={`/a/${running.attempt.id}`}>running now · watch it live</Link>}
       </div>
+      <OpenGates gates={story.gates} reload={reload} />
       <div className="hub-tabs" role="tablist">
         {(
           [

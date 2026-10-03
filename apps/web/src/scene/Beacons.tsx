@@ -125,6 +125,7 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
             <g
               role="link"
               tabIndex={0}
+              className="beacon-label"
               style={{ cursor: "pointer" }}
               onClick={() => navigate(`/p/${d.project.id}/u/${u.seq}`)}
               onKeyDown={(e) => e.key === "Enter" && navigate(`/p/${d.project.id}/u/${u.seq}`)}

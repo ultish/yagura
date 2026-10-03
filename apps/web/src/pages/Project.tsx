@@ -54,6 +54,7 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
     <Row
       seq={<Link to={`/p/${d.project.id}/u/${u.seq}`}>U{u.seq}</Link>}
       goal={<Inline text={u.goal} />}
+      to={`/p/${d.project.id}/u/${u.seq}`}
       status={<Inline text={status.text} />}
       tone={status.tone}
       facts={facts}

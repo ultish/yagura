@@ -1409,3 +1409,54 @@ b .role-icon,
   background: var(--panel);
   box-shadow: inset 0 -2px 0 var(--amber);
 }
+
+.hub-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border: 1px solid var(--bad-border);
+  border-left: 3px solid var(--bell);
+  border-radius: 4px;
+  background: var(--panel);
+}
+.hub-ask b {
+  color: var(--bell-text);
+  font-weight: 500;
+}
+.hub-ask-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.goal-link {
+  cursor: pointer;
+  text-decoration: underline dotted var(--amber);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+.goal-link:hover {
+  color: var(--amber-hover);
+  text-decoration-style: solid;
+}
+.goal-link:focus-visible {
+  outline: 1px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.beacon-label text {
+  text-decoration: underline dotted var(--amber);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+.beacon-label:hover text,
+.beacon-label:focus-visible text {
+  fill: var(--amber-hover) !important;
+  text-decoration-style: solid;
+}
+.beacon-label:focus-visible {
+  outline: none;
+}

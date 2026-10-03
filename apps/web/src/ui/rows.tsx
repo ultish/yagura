@@ -24,9 +24,33 @@ export function useAction(): { busy: boolean; error: string | null; run: (fn: ()
   };
 }
 
+// The goal text opens `to` too, so a row is clickable where it reads, not only at its small label. A goal can hold
+// its own links (mentions), so this is a link-role element and clicks that start on an inner link or button are left to it.
+function GoalLink({ to, children }: { to: string; children: ReactNode }) {
+  const go = (e: { target: EventTarget; button?: number; metaKey?: boolean; ctrlKey?: boolean }) => {
+    if ((e.target as HTMLElement).closest("a, button")) return;
+    if (e.button || e.metaKey || e.ctrlKey) return;
+    navigate(to);
+  };
+  return (
+    <span
+      className="goal-link"
+      role="link"
+      tabIndex={0}
+      onClick={go}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") go(e);
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function Row({
   seq,
   goal,
+  to,
   status,
   tone,
   facts,
@@ -35,6 +59,7 @@ export function Row({
 }: {
   seq: ReactNode;
   goal: ReactNode;
+  to?: string;
   status?: ReactNode;
   tone?: string;
   facts?: ReactNode;
@@ -45,7 +70,7 @@ export function Row({
     <div className="item">
       <span className="seq">{seq}</span>
       <div className="body">
-        <div className="goal">{goal}</div>
+        <div className="goal">{to ? <GoalLink to={to}>{goal}</GoalLink> : goal}</div>
         {status && <div className={`status s-${tone ?? "muted"}`}>{status}</div>}
         {facts && <div className="facts">{facts}</div>}
         {extra}
