@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RunContext } from "./agent.js";
 import type { Bootstrap } from "./config.js";
-import { spendsAttempt, type EnvironmentId, type ProjectId, type RepoId, type Unit } from "./domain.js";
+import { REBASE_HARNESS, spendsAttempt, type EnvironmentId, type ProjectId, type RepoId, type Unit } from "./domain.js";
 import { setSetting } from "./config.js";
 import { listEvidenceRuns } from "./evidence.js";
 import { reapKept } from "./leases.js";
@@ -21,6 +21,7 @@ import {
   addProject,
   addRepo,
   addUnit,
+  createAttempt,
   getUnit,
   getUnitBySeq,
   listAttempts,
@@ -121,6 +122,22 @@ describe("runVerifyUnit", () => {
     await runVerifyUnit(ctx, getUnitBySeq(db, project, 3).id);
     expect(getUnit(db, target.id).state).toBe("blocked");
     expect(listUnits(db, project).filter((u) => u.type === "verify" && u.state === "ready")).toEqual([]);
+  });
+
+  it("closes the work as done, not blocked, when trunk moved under it and already does what the verifier checks", async () => {
+    const { target } = await workThenVerify("verify-weak");
+    writeFileSync(join(origin, "README.md"), "another unit landed this\n");
+    await commitAll(origin, "another unit's change", { name: "t", email: "t@t" });
+    const moved = (await git(["rev-parse", "HEAD"], { cwd: origin })).trim();
+    const work = listAttempts(db, target.id)[0]!;
+    const rebased = createAttempt(db, target.id, REBASE_HARNESS, null);
+    updateAttempt(db, rebased.id, { state: "handed_off", baseSha: moved as never, headSha: work.headSha, branch: work.branch });
+    process.env.FAKE_MODE = "verify-weak";
+    await runVerifyUnit(ctx, getUnitBySeq(db, project, 3).id);
+    const after = getUnit(db, target.id);
+    expect(after.state).toBe("done");
+    expect(after.notes.at(-1)).toMatch(/^Closed without landing: already on [0-9a-f]{10}: trunk moved under it/);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'unit.already_on_trunk'").get()).toEqual({ n: 1 });
   });
 
   it("discards a verdict that cites runs yagura never recorded", async () => {

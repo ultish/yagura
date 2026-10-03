@@ -11,6 +11,8 @@ export interface VerdictDecision {
   trunkOutcome: string | null;
   headOutcome: string | null;
   citedRunIds: number[];
+  // Every cited scenario passes on trunk and on head: either a weak verifier, or trunk already has the behaviour.
+  passesOnTrunk?: boolean;
 }
 
 export interface VerdictInput {
@@ -140,7 +142,8 @@ export function decideVerdict(input: VerdictInput): VerdictDecision {
       : refactor
         ? "no cited scenario behaves the same on trunk and head"
         : "every cited scenario also passes on trunk, so it proves nothing about the change";
-    return decision("invalid", why, summaries);
+    const allPass = !refactor && pairs.length > 0 && pairs.every(({ head, base }) => passed(head) && passed(base));
+    return decision("invalid", why, { ...summaries, passesOnTrunk: allPass });
   }
   const scenario = proving[0]!;
   const scenarioSummary = {

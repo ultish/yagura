@@ -392,9 +392,10 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   const forge = forgeFor(db, repo);
   if (!forge) return null;
   const project = getProject(db, unit.projectId);
-  if (unit.state === "abandoned") {
-    await forge.close(mr.number, `yagura abandoned ${project.id}/U${unit.seq}, so this ${prNoun(repo.forge)} will not be merged.`);
-    setMergeState(db, unit.id, "closed", project.id, { number: mr.number, reason: "unit abandoned" });
+  if (unit.state === "abandoned" || unit.state === "done") {
+    const why = unit.state === "done" ? `its change is already on ${repo.defaultBranch}` : "yagura abandoned it";
+    await forge.close(mr.number, `${project.id}/U${unit.seq}: ${why}, so this ${prNoun(repo.forge)} will not be merged.`);
+    setMergeState(db, unit.id, "closed", project.id, { number: mr.number, reason: unit.state === "done" ? "already on trunk" : "unit abandoned" });
     return null;
   }
   const status = await forge.status(mr.number);

@@ -52,7 +52,7 @@ export interface EngineOptions {
 
 export const LANDING_CUTOFF = 0.7;
 const COST_WARNING = 0.8;
-const PLAN_TRIGGERS = ["landed", "blocked", "abandoned"];
+const PLAN_TRIGGERS = ["landed", "blocked", "abandoned", "done"];
 const YAGURA_GATES = ["report", "land", "environment", "review"];
 
 function suggestsFollowUps(db: Db, boot: RunContext["boot"], unitId: UnitId): boolean {
@@ -246,7 +246,10 @@ export class Engine {
       .all(project.id, since, ...PLAN_TRIGGERS, ...YAGURA_GATES) as { type: string; unit_id: UnitId | null; data_json: string; unit_type: string | null }[];
     const open = () => listUnits(this.db, project.id).some((u) => isBuild(u) && !TERMINAL_STATES.has(u.state) && u.state !== "blocked");
     return events.some((e) => {
-      if (e.type !== "unit.state" || (JSON.parse(e.data_json) as { to: string }).to !== "landed") return true;
+      const to = e.type === "unit.state" ? (JSON.parse(e.data_json) as { to: string }).to : null;
+      // Plan, verify, and review rows end in done every time; only a work unit closing without landing changes the plan.
+      if (to === "done") return e.unit_type === "work";
+      if (to !== "landed") return true;
       if (e.unit_type === "pack") return false;
       return !open() || suggestsFollowUps(this.db, this.ctx.boot, e.unit_id!);
     });

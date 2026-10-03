@@ -491,6 +491,10 @@ Only a code fault sends a unit back to work; environment and verifier problems n
 6. **Harness tamper check.** A `work` diff touching the verify pack or test files matching the pack's protected globs is flagged; since 2026-09-30 the worker's scope forbids the pack directory outright, and pack changes come from verifiers (§13 "Judgment, evidence, and the trail").
 7. **Keyed and voidable.** Verdict key = (repo, head SHA, dep SHAs, artifact versions). Any change voids it.
 
+### Already on trunk (2026-10-03)
+
+A scenario that passes on trunk proves nothing about a change, so such a verdict is discarded and retried. One case is different: the unit's trunk moved under it (it was rebased onto, or retried from, a later trunk than its work started from) and every scenario its verifier wrote passes on that trunk too. Then trunk already does what the unit was for, usually because another unit landed the same behaviour. The unit closes as `done` (not landed) with a note, `unit.already_on_trunk` is recorded, the planner gets a drain, and an open pull request for it is closed with the reason. A weak verifier on an unmoved trunk is still retried and then blocked.
+
 ## 14. Multi-repo projects and artifact versions
 
 - One unit writes exactly one repo. Related repos are mounted **read-only**, pinned to a SHA.

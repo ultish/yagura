@@ -78,6 +78,12 @@ function earlierVerifications(db: Db, target: Unit): string[] {
   );
 }
 
+// The work started from one trunk and is being verified on a later one (a rebase onto a moved trunk, or a retry from it).
+function trunkMovedUnder(db: Db, target: Unit, work: Attempt): boolean {
+  const first = listAttempts(db, target.id).find((a) => !a.harness.startsWith("yagura-") && a.baseSha);
+  return !!first && !!work.baseSha && first.baseSha !== work.baseSha;
+}
+
 function applyOutcome(db: Db, target: Unit, work: Attempt, decision: VerdictDecision, verifySeq: number): void {
   const maxRetries = resolveSetting(db, "verify.max_retries", { projectId: target.projectId }).value;
   recordEvent(
@@ -112,6 +118,13 @@ function applyOutcome(db: Db, target: Unit, work: Attempt, decision: VerdictDeci
       pauseEnvironment(db, target, decision.reason);
       return;
     case "invalid":
+      if (decision.passesOnTrunk && trunkMovedUnder(db, target, work)) {
+        const reason = `already on ${work.baseSha!.slice(0, 10)}: trunk moved under it, and every scenario its verifier wrote passes on trunk as well as on its head`;
+        addUnitNote(db, target.id, `Closed without landing: ${reason}. Its branch is left unmerged.`);
+        recordEvent(db, "unit.already_on_trunk", { projectId: target.projectId, unitId: target.id }, { base: work.baseSha, verifyUnit: verifySeq });
+        transitionUnit(db, target.id, "done", { reason });
+        return;
+      }
       if (failedVerifications(db, target) >= maxRetries)
         transitionUnit(db, target.id, "blocked", { reason: `verification did not reach a verdict ${maxRetries} times: ${decision.reason}` });
       else addVerifyUnit(db, target);
