@@ -5,7 +5,7 @@ import { plural, since } from "../lib/format";
 import { Link } from "../ui/Link";
 import { Row, useAction } from "../ui/rows";
 import { ScopedSettings } from "../ui/settings";
-import { EnvironmentValues, NewFromTemplate } from "./environment-values";
+import { EnvironmentValues, NewFromTemplate, Templates } from "./environment-values";
 
 const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "7px 10px", fontSize: 13 } as const;
 const PROVIDERS = ["local-process", "kube-namespace"];
@@ -317,6 +317,7 @@ export function Environments() {
         </div>
         <AddEnvironment onAdded={reload} />
         <NewFromTemplate onAdded={reload} />
+        <Templates />
       </section>
       {error && <div className="s-bell">{error}</div>}
       {data && (

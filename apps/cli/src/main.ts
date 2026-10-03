@@ -88,7 +88,9 @@ import {
   saveTemplate,
   setEnvironmentNotes,
   setValue,
-  templatesDir,
+  exportTemplate,
+  importTemplate,
+  deleteTemplate,
   type EnvValue,
   PROVIDERS_IMPL,
   transitionUnit,
@@ -131,6 +133,9 @@ const USAGE = `yagura — agent orchestration
   yagura template list
   yagura template save <env> <name> [--description <text>] [--ask <NAME>...]
   yagura template apply <name> --id <new env> [--name <text>] [--answer <NAME=value>...]
+  yagura template export <name>                     print a template as YAML, to share
+  yagura template import <file | ->                 add or replace a template from YAML
+  yagura template rm <name>
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...] [--reference <repo id>...]
   yagura project skills <id>                       checks the project's skills.* are installed where agents run
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
@@ -516,25 +521,36 @@ async function main() {
       });
       const [sub, first, second] = positionals;
       if (sub === "list" || !sub) {
-        const found = listTemplates(boot);
+        const found = listTemplates(db);
         if (!found.length) {
-          console.log(`no templates in ${templatesDir(boot)}`);
+          console.log("no templates yet: save one from an environment, or import a teammate's YAML");
           return;
         }
         for (const item of found) {
-          if (item.template) console.log(`${item.template.name}  ${item.template.description}  (${item.file})`);
-          else console.log(`${item.file}: ${item.error}`);
+          if (item.template) console.log(`${item.template.name}  ${item.template.description}`);
+          else console.log(`${item.name}: ${item.error}`);
         }
         return;
       }
+      if (sub === "export" && first) return void process.stdout.write(exportTemplate(db, first));
+      if (sub === "import" && first) {
+        const t = importTemplate(db, readFileSync(first === "-" ? 0 : first, "utf8"));
+        console.log(`imported template ${t.name}`);
+        return;
+      }
+      if (sub === "rm" && first) {
+        deleteTemplate(db, first);
+        console.log(`deleted template ${first}`);
+        return;
+      }
       if (sub === "save" && first && second) {
-        const saved = saveTemplate(db, boot, first as EnvironmentId, {
+        const saved = saveTemplate(db, first as EnvironmentId, {
           name: second,
           description: values.description,
           ask: many(values.ask),
         });
         const asks = saved.template.values.filter((v) => v.ask).map((v) => v.name);
-        console.log(`saved ${saved.template.name} to ${saved.path}${asks.length ? `; applying asks for ${asks.join(", ")}` : ""}`);
+        console.log(`saved template ${saved.template.name}${asks.length ? `; applying asks for ${asks.join(", ")}` : ""}`);
         return;
       }
       if (sub === "apply" && first && values.id) {

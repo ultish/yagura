@@ -421,6 +421,16 @@ CREATE TABLE project_specs (
 `,
   },
   { version: 29, sql: "ALTER TABLE repos ADD COLUMN revert_scan_sha TEXT;" },
+  {
+    version: 30,
+    sql: `
+CREATE TABLE env_templates (
+  name TEXT PRIMARY KEY,
+  body_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

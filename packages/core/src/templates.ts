@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
@@ -7,7 +7,7 @@ import { PROVIDERS, type EnvironmentId } from "./domain.js";
 import { checkValueName, listValues, setEnvironmentNotes, setValue } from "./envvalues.js";
 import { PROVIDERS_IMPL } from "./leases.js";
 import { applyPreset, PRESETS } from "./presets.js";
-import { addEnvironment, getEnvironment, recordEvent, type Db } from "./store.js";
+import { addEnvironment, getEnvironment, now, recordEvent, type Db } from "./store.js";
 
 const TEMPLATE_NAME = /^[a-z][a-z0-9-]{0,39}$/;
 export const ENVIRONMENT_ID = /^[a-z][a-z0-9-]{1,39}$/;
@@ -43,35 +43,31 @@ export type EnvTemplate = z.output<typeof EnvTemplate>;
 
 export class TemplateInvalid extends Error {}
 
-export const templatesDir = (boot: Bootstrap) => join(boot.home, "templates");
-
-export function listTemplates(boot: Bootstrap): { template: EnvTemplate | null; file: string; error: string | null }[] {
-  const dir = templatesDir(boot);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => /\.ya?ml$/.test(f))
-    .sort()
-    .map((file) => {
-      const parsed = EnvTemplate.safeParse(parseYaml(readFileSync(join(dir, file), "utf8")) ?? {});
-      return parsed.success
-        ? { template: parsed.data, file, error: null }
-        : { template: null, file, error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
-    });
+// Templates live in yagura's store and are shared as YAML: export one, and a teammate imports it.
+export function listTemplates(db: Db): { name: string; template: EnvTemplate | null; error: string | null }[] {
+  return (db.prepare("SELECT name, body_json FROM env_templates ORDER BY name").all() as { name: string; body_json: string }[]).map((r) => {
+    const parsed = EnvTemplate.safeParse(JSON.parse(r.body_json));
+    return parsed.success
+      ? { name: r.name, template: parsed.data, error: null }
+      : { name: r.name, template: null, error: parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") };
+  });
 }
 
-export function getTemplate(boot: Bootstrap, name: string): EnvTemplate {
-  const found = listTemplates(boot).find((t) => t.template?.name === name);
-  if (!found?.template) throw new TemplateInvalid(`no template named ${name} in ${templatesDir(boot)}`);
+export function getTemplate(db: Db, name: string): EnvTemplate {
+  const found = listTemplates(db).find((t) => t.name === name);
+  if (!found?.template) throw new TemplateInvalid(`no template named ${name}`);
   return found.template;
 }
 
-// Values marked ask are facts about one machine: the file keeps them as examples and applying asks for them.
-export function saveTemplate(
-  db: Db,
-  boot: Bootstrap,
-  environmentId: EnvironmentId,
-  input: { name: string; description?: string; ask?: string[] },
-): { template: EnvTemplate; path: string } {
+function storeTemplate(db: Db, template: EnvTemplate): void {
+  db.prepare(
+    `INSERT INTO env_templates (name, body_json, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT (name) DO UPDATE SET body_json = excluded.body_json, updated_at = excluded.updated_at`,
+  ).run(template.name, JSON.stringify(template), now());
+}
+
+// Values marked ask are facts about one machine: the template keeps them as examples and applying asks for them.
+export function saveTemplate(db: Db, environmentId: EnvironmentId, input: { name: string; description?: string; ask?: string[] }): { template: EnvTemplate } {
   if (!TEMPLATE_NAME.test(input.name)) throw new TemplateInvalid(`template names are lowercase words joined by dashes, e.g. spring-kube`);
   const env = getEnvironment(db, environmentId);
   const values = listValues(db, environmentId);
@@ -98,11 +94,53 @@ export function saveTemplate(
     ),
     values: values.map((v) => ({ name: v.name, value: v.value, note: v.note, ask: (input.ask ?? []).includes(v.name) })),
   });
-  mkdirSync(templatesDir(boot), { recursive: true });
-  const path = join(templatesDir(boot), `${input.name}.yaml`);
-  writeFileSync(path, stringifyYaml(template));
+  storeTemplate(db, template);
   recordEvent(db, "template.saved", {}, { template: input.name, from: environmentId, ask: input.ask ?? [] });
-  return { template, path };
+  return { template };
+}
+
+export function exportTemplate(db: Db, name: string): string {
+  return stringifyYaml(getTemplate(db, name));
+}
+
+export function importTemplate(db: Db, yaml: string): EnvTemplate {
+  let raw: unknown;
+  try {
+    raw = parseYaml(yaml);
+  } catch (e) {
+    throw new TemplateInvalid(`not YAML: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const parsed = EnvTemplate.safeParse(raw ?? {});
+  if (!parsed.success) throw new TemplateInvalid(parsed.error.issues.map((i) => `${i.path.join(".") || "template"}: ${i.message}`).join("; "));
+  storeTemplate(db, parsed.data);
+  recordEvent(db, "template.imported", {}, { template: parsed.data.name });
+  return parsed.data;
+}
+
+export function deleteTemplate(db: Db, name: string): void {
+  getTemplate(db, name);
+  db.prepare("DELETE FROM env_templates WHERE name = ?").run(name);
+  recordEvent(db, "template.deleted", {}, { template: name });
+}
+
+// Templates used to be YAML files under ~/.yagura/templates; the daemon imports each valid one and removes it, and
+// leaves a file it cannot read where it is, for the developer to fix.
+export function importTemplateFiles(db: Db, boot: Bootstrap): { moved: string[]; refused: string[] } {
+  const dir = join(boot.home, "templates");
+  const out = { moved: [] as string[], refused: [] as string[] };
+  if (!existsSync(dir)) return out;
+  for (const file of readdirSync(dir).filter((f) => /\.ya?ml$/.test(f))) {
+    const path = join(dir, file);
+    try {
+      const t = EnvTemplate.parse(parseYaml(readFileSync(path, "utf8")) ?? {});
+      if (!listTemplates(db).some((x) => x.name === t.name)) storeTemplate(db, t);
+      rmSync(path);
+      out.moved.push(path);
+    } catch (e) {
+      out.refused.push(`${path}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
+    }
+  }
+  return out;
 }
 
 // What every way of making an environment (form, template, watchman) comes down to.
@@ -123,11 +161,11 @@ export const EnvironmentDraft = z
 export type EnvironmentDraft = z.output<typeof EnvironmentDraft>;
 
 export function draftFromTemplate(
-  boot: Bootstrap,
+  db: Db,
   name: string,
   input: { id: string; name?: string; answers?: Record<string, string>; config?: Record<string, unknown> },
 ): EnvironmentDraft {
-  const t = getTemplate(boot, name);
+  const t = getTemplate(db, name);
   const answers = input.answers ?? {};
   const unanswered = t.values.filter((v) => v.ask && !answers[v.name]?.trim()).map((v) => v.name);
   if (unanswered.length) throw new TemplateInvalid(`template ${name} needs a value for ${unanswered.join(", ")}`);
@@ -189,7 +227,7 @@ export async function applyTemplate(
   name: string,
   input: { id: string; name?: string; answers?: Record<string, string>; config?: Record<string, unknown> },
 ): Promise<{ environmentId: EnvironmentId }> {
-  const id = createEnvironment(ctx.db, draftFromTemplate(ctx.boot, name, input), `template ${name}`);
+  const id = createEnvironment(ctx.db, draftFromTemplate(ctx.db, name, input), `template ${name}`);
   recordEvent(ctx.db, "template.applied", {}, { template: name, environment: id });
   return { environmentId: id };
 }

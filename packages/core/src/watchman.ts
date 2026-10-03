@@ -267,7 +267,7 @@ function catalog(db: Db, boot: RunContext["boot"]): string {
     const values = listValues(db, e.id).map((v) => v.name);
     return `${e.id} (${e.provider}, ${e.capacity} slots${values.length ? `, values ${values.join(" ")}` : ""})`;
   };
-  const templates = listTemplates(boot).flatMap((t) =>
+  const templates = listTemplates(db).flatMap((t) =>
     t.template
       ? [
           `${t.template.name}${

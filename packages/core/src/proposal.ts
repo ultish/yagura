@@ -90,15 +90,15 @@ function defaultEnvironment(db: Db, proposed: string[]): string {
   throw new ProposalInvalid(`several environments exist (${envs.join(", ")}); name one`);
 }
 
-function draftOf(boot: Bootstrap, e: ProposedEnvironment): EnvironmentDraft {
-  return "template" in e ? draftFromTemplate(boot, e.template, { id: e.id, name: e.name, answers: e.answers, config: e.providerConfig }) : e;
+function draftOf(db: Db, e: ProposedEnvironment): EnvironmentDraft {
+  return "template" in e ? draftFromTemplate(db, e.template, { id: e.id, name: e.name, answers: e.answers, config: e.providerConfig }) : e;
 }
 
 function environmentDrafts(db: Db, boot: Bootstrap, p: ProposalBody): EnvironmentDraft[] {
   const drafts: EnvironmentDraft[] = [];
   for (const e of p.environments) {
     try {
-      const d = draftOf(boot, e);
+      const d = draftOf(db, e);
       if (drafts.some((x) => x.id === d.id)) throw new ProposalInvalid(`environment ${d.id} is listed twice`);
       checkDraft(db, d);
       drafts.push(d);

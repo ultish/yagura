@@ -80,6 +80,18 @@ const post = (path: string, body: unknown) =>
   app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("daemon API", () => {
+  it("imports, lists, exports, and deletes environment templates, all in the store", async () => {
+    const post = (path: string, body: object) =>
+      app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await post("/api/templates/import", { yaml: "name: box\nprovider: local-process\ncapacity: 1\n" })).status).toBe(201);
+    expect((await post("/api/templates/import", { yaml: "name: Bad\n" })).status).toBe(400);
+    expect(((await (await get("/api/templates")).json()) as { name: string }[]).map((t) => t.name)).toEqual(["box"]);
+    const exported = await get("/api/templates/box/export");
+    expect(exported.headers.get("content-type")).toMatch(/^text\/yaml/);
+    expect(await exported.text()).toMatch(/^name: box\n/);
+    expect(await (await post("/api/templates/box/delete", {})).json()).toEqual([]);
+  });
+
   it("shows and saves a project's spec, which asks the planner to look again", async () => {
     expect(await (await get(`/api/projects/${project}/spec`)).json()).toEqual({ text: "", updatedBy: null, updatedAt: null });
     const saved = await app.request(`/api/projects/${project}/spec`, {

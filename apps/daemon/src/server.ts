@@ -4,6 +4,9 @@ import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
   addUnitNote,
+  deleteTemplate,
+  exportTemplate,
+  importTemplate,
   setProviderConfig,
   getSpec,
   recordEvent,
@@ -410,10 +413,24 @@ export function createApp(opts: ServerOptions): Hono {
     return c.json({ ok: true });
   });
   app.post("/api/leases/:id/delete-kept", async (c) => c.json({ deleted: await deleteKept(db, boot, Number(c.req.param("id")) as never) }));
-  app.get("/api/templates", (c) => c.json(listTemplates(boot)));
+  app.get("/api/templates", (c) => c.json(listTemplates(db)));
   app.post("/api/environments/:id/template", async (c) => {
     const b = (await c.req.json()) as { name: string; description?: string; ask?: string[] };
-    return c.json(saveTemplate(db, boot, c.req.param("id") as EnvironmentId, b), 201);
+    return c.json(saveTemplate(db, c.req.param("id") as EnvironmentId, b), 201);
+  });
+  app.get("/api/templates/:name/export", (c) => c.text(exportTemplate(db, c.req.param("name")), 200, { "content-type": "text/yaml; charset=utf-8" }));
+  app.post("/api/templates/import", async (c) => {
+    const b = (await c.req.json().catch(() => ({}))) as { yaml?: unknown };
+    if (typeof b.yaml !== "string" || !b.yaml.trim()) return c.json({ error: "paste a template's YAML" }, 400);
+    try {
+      return c.json(importTemplate(db, b.yaml), 201);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
+  });
+  app.post("/api/templates/:name/delete", (c) => {
+    deleteTemplate(db, c.req.param("name"));
+    return c.json(listTemplates(db));
   });
   app.post("/api/templates/:name/apply", async (c) => {
     const b = (await c.req.json()) as { id: string; name?: string; answers?: Record<string, string> };

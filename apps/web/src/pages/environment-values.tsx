@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, useApi, type EnvTemplateFile, type EnvValueView, type EnvironmentDetail, type KeptSlot } from "../api";
+import { api, apiText, useApi, type EnvTemplateFile, type EnvValueView, type EnvironmentDetail, type KeptSlot } from "../api";
 import { clock } from "../lib/format";
 import { Link } from "../ui/Link";
 import { useAction } from "../ui/rows";
@@ -191,7 +191,7 @@ function SaveTemplate({ envId, names }: { envId: string; names: string[] }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [ask, setAsk] = useState<string[]>([]);
-  const [path, setPath] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
   const action = useAction();
   const toggle = (valueName: string) => setAsk((cur) => (cur.includes(valueName) ? cur.filter((n) => n !== valueName) : [...cur, valueName]));
   return (
@@ -199,8 +199,8 @@ function SaveTemplate({ envId, names }: { envId: string; names: string[] }) {
       onSubmit={(e) => {
         e.preventDefault();
         void action.run(async () => {
-          const saved = await api<{ path: string }>(`/api/environments/${envId}/template`, { body: { name: name.trim(), description, ask } });
-          setPath(saved.path);
+          const r = await api<{ template: { name: string } }>(`/api/environments/${envId}/template`, { body: { name: name.trim(), description, ask } });
+          setSaved(r.template.name);
           setName("");
           setDescription("");
           setAsk([]);
@@ -246,7 +246,7 @@ function SaveTemplate({ envId, names }: { envId: string; names: string[] }) {
           Save template
         </button>
       </div>
-      {path && <div style={{ fontSize: 13 }}>Saved {path}</div>}
+      {saved && <div style={{ fontSize: 13 }}>Saved template {saved}. Share it with Export under Templates.</div>}
       {action.error && (
         <div className="s-bell" style={{ fontSize: 13 }}>
           {action.error}
@@ -405,5 +405,137 @@ export function NewFromTemplate({ onAdded }: { onAdded: () => void }) {
         </div>
       )}
     </form>
+  );
+}
+
+// Templates live in yagura's store; Export gives the YAML to send a teammate, who pastes it into Import.
+export function Templates() {
+  const { data, error, reload } = useApi<EnvTemplateFile[]>("/api/templates");
+  const [open, setOpen] = useState<{ name: string; yaml: string } | null>(null);
+  const [confirm, setConfirm] = useState<string | null>(null);
+  const [yaml, setYaml] = useState("");
+  const action = useAction();
+  if (error) return <div className="s-bell">{error}</div>;
+  if (!data) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <h2 className="h2">Templates</h2>
+      {data.length === 0 && (
+        <div className="muted" style={{ fontSize: 13 }}>
+          None yet. Save one from an environment's Values, or import a teammate's below.
+        </div>
+      )}
+      {data.map((item) => (
+        <div key={item.name} style={{ borderTop: "1px solid var(--line2)", padding: "8px 0", display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+            <span className="mono">{item.name}</span>
+            {item.template ? (
+              <span className="muted" style={{ fontSize: 13 }}>
+                {item.template.provider} · {item.template.capacity} slots
+                {item.template.values.some((v) => v.ask)
+                  ? ` · asks ${item.template.values
+                      .filter((v) => v.ask)
+                      .map((v) => v.name)
+                      .join(", ")}`
+                  : ""}
+                {item.template.description ? ` · ${item.template.description}` : ""}
+              </span>
+            ) : (
+              <span className="s-bell" style={{ fontSize: 13 }}>
+                {item.error}
+              </span>
+            )}
+            <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+              <button
+                className="btn sm"
+                type="button"
+                onClick={() =>
+                  void action.run(async () =>
+                    setOpen(
+                      open?.name === item.name ? null : { name: item.name, yaml: await apiText(`/api/templates/${encodeURIComponent(item.name)}/export`) },
+                    ),
+                  )
+                }
+              >
+                {open?.name === item.name ? "Hide YAML" : "Export"}
+              </button>
+              {confirm === item.name ? (
+                <>
+                  <button
+                    className="btn sm bell"
+                    type="button"
+                    onClick={() =>
+                      void action.run(
+                        async () => (await api(`/api/templates/${encodeURIComponent(item.name)}/delete`, { body: {} }), setConfirm(null), reload()),
+                      )
+                    }
+                  >
+                    Delete {item.name}
+                  </button>
+                  <button className="btn sm" type="button" onClick={() => setConfirm(null)}>
+                    Keep it
+                  </button>
+                </>
+              ) : (
+                <button className="btn sm" type="button" onClick={() => setConfirm(item.name)}>
+                  Delete
+                </button>
+              )}
+            </span>
+          </div>
+          {open?.name === item.name && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <textarea
+                readOnly
+                aria-label={`${item.name} as YAML`}
+                rows={Math.min(18, open.yaml.split("\n").length + 1)}
+                value={open.yaml}
+                className="mono"
+                style={{ ...field, fontSize: 12 }}
+              />
+              <div>
+                <button className="btn sm" type="button" onClick={() => void navigator.clipboard?.writeText(open.yaml).catch(() => undefined)}>
+                  Copy YAML
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void action.run(async () => {
+            await api("/api/templates/import", { body: { yaml } });
+            setYaml("");
+            reload();
+          });
+        }}
+        style={{ display: "flex", flexDirection: "column", gap: 6, borderTop: "1px solid var(--line2)", paddingTop: 8 }}
+      >
+        <label htmlFor="template-import" className="muted" style={{ fontSize: 13 }}>
+          Import a template: paste its YAML (a template with the same name is replaced)
+        </label>
+        <textarea
+          id="template-import"
+          rows={4}
+          value={yaml}
+          onChange={(e) => setYaml(e.target.value)}
+          className="mono"
+          style={{ ...field, fontSize: 12 }}
+          placeholder="name: spring-kube&#10;provider: kube-namespace&#10;…"
+        />
+        <div>
+          <button className="btn sm" type="submit" disabled={action.busy || !yaml.trim()}>
+            Import
+          </button>
+        </div>
+      </form>
+      {action.error && (
+        <div className="s-bell" style={{ fontSize: 13 }}>
+          {action.error}
+        </div>
+      )}
+    </div>
   );
 }

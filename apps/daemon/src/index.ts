@@ -3,7 +3,18 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
-import { acquireDaemonLock, claudeAdapter, Engine, layout, loadBootstrap, openStore, type Bootstrap, importSpecFiles, importStandingFiles } from "@yagura/core";
+import {
+  acquireDaemonLock,
+  claudeAdapter,
+  Engine,
+  layout,
+  loadBootstrap,
+  openStore,
+  type Bootstrap,
+  importSpecFiles,
+  importStandingFiles,
+  importTemplateFiles,
+} from "@yagura/core";
 import { createApp } from "./server.js";
 
 export { createApp } from "./server.js";
@@ -26,6 +37,9 @@ export async function startDaemon(cli: string[]): Promise<void> {
   const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
   for (const path of importStandingFiles(db, boot)) log(`moved ${path} into the store (Prompts page notes)`);
   for (const path of importSpecFiles(db, boot)) log(`moved ${path} into the store (the project's spec page)`);
+  const templates = importTemplateFiles(db, boot);
+  for (const path of templates.moved) log(`moved ${path} into the store (Environments page, Templates)`);
+  for (const why of templates.refused) log(`left ${why}`);
   const engine = new Engine({ db, boot, adapters: { claude: claudeAdapter }, cli }, { log });
   const webDir = fileURLToPath(new URL("../../web/dist", import.meta.url));
   const app = createApp({ db, boot, token, cli, webDir: existsSync(join(webDir, "index.html")) ? webDir : null });

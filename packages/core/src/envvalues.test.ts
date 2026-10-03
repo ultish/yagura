@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -7,7 +7,7 @@ import type { AttemptId, EnvironmentId, ProjectId, RepoId } from "./domain.js";
 import { deleteValue, listValues, setEnvironmentNotes, setValue, valueMap } from "./envvalues.js";
 import { acquireLease, releaseLease } from "./leases.js";
 import { addEnvironment, addProject, addRepo, addUnit, createAttempt, getEnvironment, openStore, type Db } from "./store.js";
-import { applyTemplate, saveTemplate, templatesDir } from "./templates.js";
+import { applyTemplate, deleteTemplate, exportTemplate, importTemplate, importTemplateFiles, listTemplates, saveTemplate } from "./templates.js";
 
 let db: Db;
 let boot: Bootstrap;
@@ -69,9 +69,10 @@ describe("environment templates", () => {
     setValue(db, dev, { name: "REGISTRY_PULL", value: "devbox:5000", note: "the cluster pulls here" });
     setEnvironmentNotes(db, dev, "deps run in the cluster");
     setSetting(db, "environment", "dev", "lease.keep", "failed");
-    const { path } = saveTemplate(db, boot, dev, { name: "spring-kube", description: "my dev box", ask: ["REGISTRY_PULL"] });
-    expect(path).toBe(join(templatesDir(boot), "spring-kube.yaml"));
-    expect(readFileSync(path, "utf8")).toContain("ask: true");
+    saveTemplate(db, dev, { name: "spring-kube", description: "my dev box", ask: ["REGISTRY_PULL"] });
+    const yaml = exportTemplate(db, "spring-kube");
+    expect(yaml).toContain("ask: true");
+    expect(listTemplates(db).map((t) => t.name)).toEqual(["spring-kube"]);
 
     await expect(applyTemplate({ db, boot }, "spring-kube", { id: "vm2" })).rejects.toThrow("template spring-kube needs a value for REGISTRY_PULL");
     const applied = await applyTemplate({ db, boot }, "spring-kube", { id: "vm2", answers: { REGISTRY_PULL: "vm2.internal:5000" } });
@@ -87,5 +88,23 @@ describe("environment templates", () => {
       "environment vm2 already exists",
     );
     await expect(applyTemplate({ db, boot }, "nope", { id: "vm3" })).rejects.toThrow(/no template named nope/);
+
+    deleteTemplate(db, "spring-kube");
+    expect(listTemplates(db)).toEqual([]);
+    expect(importTemplate(db, yaml).name).toBe("spring-kube");
+    expect(() => importTemplate(db, "name: Bad Name\nprovider: nope\n")).toThrow(/name: .*provider:/s);
+  });
+
+  it("moves old template files into the store, and leaves one it cannot read", () => {
+    const dir = join(boot.home, "templates");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "box.yaml"), "name: box\nprovider: local-process\ncapacity: 1\n");
+    writeFileSync(join(dir, "broken.yaml"), "name: broken\n");
+    const r = importTemplateFiles(db, boot);
+    expect(r.moved).toEqual([join(dir, "box.yaml")]);
+    expect(r.refused[0]).toMatch(/broken\.yaml/);
+    expect(listTemplates(db).map((t) => t.name)).toEqual(["box"]);
+    expect(existsSync(join(dir, "box.yaml"))).toBe(false);
+    expect(existsSync(join(dir, "broken.yaml"))).toBe(true);
   });
 });

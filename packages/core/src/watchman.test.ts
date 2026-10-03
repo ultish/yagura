@@ -371,7 +371,7 @@ describe("watchman turns", () => {
     const brief = buildWatchmanBrief(ctx, t.id, listMessages(db, t.id).at(-1)!).text;
     expect(brief).toContain("box (local-process, 1 slots, values FLAG_URL KAFKA_BOOTSTRAP_LOCAL KAFKA_BOOTSTRAP_CLUSTER)");
 
-    saveTemplate(db, boot, "box" as EnvironmentId, { name: "box-shape", ask: ["FLAG_URL"] });
+    saveTemplate(db, "box" as EnvironmentId, { name: "box-shape", ask: ["FLAG_URL"] });
     expect(buildWatchmanBrief(ctx, t.id, listMessages(db, t.id).at(-1)!).text).toContain("- environment templates: box-shape (asks FLAG_URL)");
     expect(propose({ summary: "s", environments: [{ id: "box2", template: "box-shape" }] })).toThrow(/needs a value for FLAG_URL/);
     expect(propose({ summary: "s", projects: [{ id: "p2", goal: "g", predicate: "p", repos: ["box-repo"] }], environments: [{ ...box, id: "xx" }] })).toThrow(

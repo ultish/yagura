@@ -128,7 +128,7 @@ export interface EnvTemplateFile {
     capacity: number;
     values: { name: string; value: string; note: string; ask: boolean }[];
   } | null;
-  file: string;
+  name: string;
   error: string | null;
 }
 
@@ -289,6 +289,13 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
   const json = (await res.json().catch(() => ({}))) as { error?: string };
   if (!res.ok) throw new ApiError(res.status, json.error ?? res.statusText);
   return json as T;
+}
+
+export async function apiText(path: string): Promise<string> {
+  const t = token();
+  const res = await fetch(path, { headers: t ? { authorization: `Bearer ${t}` } : {} });
+  if (!res.ok) throw new ApiError(res.status, res.statusText);
+  return res.text();
 }
 
 export function streamUrl(path: string): string {
