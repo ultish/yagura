@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
+import type { BellItem, LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
 import { lineDiff } from "./linediff";
 import { clip, clock, duration, modelName, when } from "./format";
+import { announce, faviconHref, newItems, tabTitle } from "./bellalert";
 import { ifUnanswered } from "./gates";
 import { groupHits, highlight } from "./search";
 import { mentionHref, mentionQuery } from "./mention";
@@ -309,5 +310,56 @@ describe("lineDiff", () => {
       { kind: "same", text: "c" },
       { kind: "add", text: "d" },
     ]);
+  });
+});
+
+describe("the bell outside the page", () => {
+  const gate: BellItem = {
+    kind: "gate",
+    id: "gate:2",
+    projectId: "demo",
+    unit: { seq: 2, goal: "write app" },
+    gate: { id: 2, kind: "land", question: "U2 is verified. Land it on app?", options: ["land", "hold"], defaultOption: "hold", deadline: null },
+    at: "2026-10-03T09:00:00Z",
+  };
+  const blocked: BellItem = {
+    kind: "blocked",
+    id: "blocked:3",
+    projectId: "demo",
+    unit: { seq: 3, goal: "write docs" },
+    reason: null,
+    attempts: 2,
+    maxAttempts: 2,
+    at: "x",
+  };
+  const proposal: BellItem = {
+    kind: "proposal",
+    id: "proposal:5",
+    threadId: 4,
+    threadTitle: "t",
+    proposalId: 5,
+    summary: "Two projects on lib and app",
+    at: "x",
+  };
+
+  it("puts the count in the tab title only while something needs you", () => {
+    expect([tabTitle(0), tabTitle(3)]).toEqual(["yagura", "(3) yagura"]);
+  });
+
+  it("finds only the items it has not shown before", () => {
+    expect(newItems(new Set(["gate:2"]), [gate, blocked]).map((i) => i.id)).toEqual(["blocked:3"]);
+    expect(newItems(new Set(), [])).toEqual([]);
+  });
+
+  it("says what each kind of item needs and where clicking it goes", () => {
+    expect(announce(gate)).toEqual({ title: "yagura · needs your answer", body: "U2 write app: U2 is verified. Land it on app?", href: "/p/demo/u/2" });
+    expect(announce(blocked)).toEqual({ title: "yagura · blocked", body: "U3 write docs: no reason recorded", href: "/p/demo/u/3" });
+    expect(announce(proposal)).toEqual({ title: "yagura · proposal ready", body: "Two projects on lib and app", href: "/talk/4" });
+    expect(announce({ ...gate, unit: null }).href).toBe("/gates");
+  });
+
+  it("adds a vermilion lamp to the icon only when ringing", () => {
+    expect(faviconHref(true)).toContain("%23e5553a");
+    expect(faviconHref(false)).not.toContain("%23e5553a");
   });
 });

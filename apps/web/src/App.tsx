@@ -20,6 +20,7 @@ import { Talk } from "./pages/Talk";
 import markDark from "./assets/mark-dark.png";
 import markLight from "./assets/mark-light.png";
 import { Link } from "./ui/Link";
+import { BellAlert } from "./ui/BellAlert";
 import { SearchBox } from "./ui/SearchBox";
 
 type Theme = "night" | "day";
@@ -76,6 +77,7 @@ function Header() {
       <div className="mono" style={{ fontSize: 12, color: health.error ? "var(--bell-text)" : "var(--muted)" }}>
         {health.error ? "daemon unreachable" : `${location.host}`}
       </div>
+      <BellAlert />
       <button
         type="button"
         onClick={toggle}
