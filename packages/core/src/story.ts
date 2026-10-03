@@ -325,7 +325,12 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       who: "Manager",
       attempt: m && a ? attemptOf(m, a) : null,
       status: { text: MANAGER_ACTION_TEXT[d.action], tone: d.action === "fallback" ? "muted" : "amber" },
-      body: d.action === "fallback" ? `${d.reason}; the fixed rules decided.` : d.note ? `Note for the next worker: ${d.note}` : null,
+      body:
+        d.action === "fallback"
+          ? `${d.reason}; the fixed rules decided.`
+          : d.note
+            ? `${d.action === "relay" ? "Note passed on" : "Note for the next worker"}: ${d.note}`
+            : null,
       lines: d.action === "fallback" ? [] : [line(`m${d.id}`, "chose", `${MANAGER_ACTION_TEXT[d.action]}: ${d.reason}`)],
       folded: null,
     });
@@ -563,6 +568,8 @@ export const MANAGER_ACTION_TEXT: Record<ManagerAction, string> = {
   planner: "sent it to the planner",
   ask: "asked you",
   stop: "stopped it",
+  relay: "passed a note on",
+  ignore: "left a note alone",
   fallback: "no decision",
 };
 

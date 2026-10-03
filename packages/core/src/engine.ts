@@ -10,7 +10,7 @@ import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { runRebaseUnit } from "./rebase.js";
-import { applyAskAnswer, managerNeed, queueManager, runManagerUnit, settleManagerUnit } from "./manager.js";
+import { applyAskAnswer, managerNeed, queueManager, runManagerUnit, settleManagerUnit, wakeOnNote } from "./manager.js";
 import { sourceDeps, staleSource } from "./sources.js";
 import { landWait, moveConsumer, publishJobs, repinIfStale } from "./publish.js";
 import { queueTriage, runTriageUnit } from "./triage.js";
@@ -136,6 +136,10 @@ export class Engine {
       if (u.type === "manager" && (u.state === "failed" || u.state === "blocked")) {
         settleManagerUnit(this.db, u);
         this.log(`  U${u.seq}: the manager session failed; the fixed rules decide`);
+      }
+      if (u.type === "work" && !this.inflight.has(`unit:${u.id}`)) {
+        const m = wakeOnNote(this.db, this.ctx.boot, u);
+        if (m) this.log(`  U${u.seq} left a note; its manager decides who needs it`);
       }
       if (!isBuild(u) || (u.state !== "failed" && u.state !== "rejected")) continue;
       // A manager decides what happens next when one is on for the project; its absence, failure, or spent decisions leave it to the fixed rules.

@@ -45,10 +45,9 @@ Three lists: features still to build, tests and proofs still to run, and what th
 
 ### Features left to build
 
-Small, all inside the manager (DESIGN §26 "As built"). Done 2026-10-04: waking on two invalid verifications, and the sibling list in the manager's brief.
+Small, all inside the manager (DESIGN §26 "As built"). Done 2026-10-04: waking on two invalid verifications, the sibling list in the manager's brief, and a worker's note waking its manager to relay it to sibling units (`relay`/`ignore`, migration 37).
 
 1. **`investigate` action.** The manager can ask for a unit that only writes findings, whose result comes back to it. Needs a unit that writes a findings file and no code.
-2. **Wake on a worker's note, and notes between siblings.** A worker's handoff note should wake its manager, but a manager woken on a healthy unit has no menu item that fits (the menu is about failed or rejected units); this needs a design call first.
 
 Possible, only if the developer wants them:
 

@@ -507,6 +507,28 @@ CREATE TABLE manager_decisions (
 CREATE INDEX manager_decisions_unit ON manager_decisions (unit_id);
 `,
   },
+  {
+    version: 37,
+    sql: `
+CREATE TABLE manager_decisions_new (
+  id INTEGER PRIMARY KEY,
+  unit_id INTEGER NOT NULL REFERENCES units (id),
+  manager_unit_id INTEGER NOT NULL REFERENCES units (id),
+  attempt_id INTEGER REFERENCES attempts (id),
+  wake TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('resume', 'fresh', 'split', 'planner', 'ask', 'stop', 'relay', 'ignore', 'fallback')),
+  reason TEXT NOT NULL,
+  note TEXT,
+  tries INTEGER NOT NULL,
+  gate_id INTEGER REFERENCES gates (id),
+  created_at TEXT NOT NULL
+);
+INSERT INTO manager_decisions_new SELECT * FROM manager_decisions;
+DROP TABLE manager_decisions;
+ALTER TABLE manager_decisions_new RENAME TO manager_decisions;
+CREATE INDEX manager_decisions_unit ON manager_decisions (unit_id);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { parseHandoff } from "./handoff.js";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { MANAGER_ACTIONS, TERMINAL_STATES, spendsAttempt, type Attempt, type AttemptId, type ManagerAction, type Unit, type UnitId } from "./domain.js";
@@ -74,13 +75,21 @@ const triesOf = (db: Db, unit: Unit) => listAttempts(db, unit.id).length;
 // Decisions that count toward the cap: all but the fixed rules stepping in.
 const spent = (ds: ManagerDecision[]) => ds.filter((d) => d.action !== "fallback").length;
 
+// A manager woken by a worker's note, not by a failure, has only `relay` and `ignore` to choose from.
+const NOTE_ACTIONS: readonly ManagerAction[] = ["relay", "ignore"];
+export const isNoteWake = (manager: Unit) => manager.context[1] === "note";
+const failureDecisions = (ds: ManagerDecision[]) => ds.filter((d) => !NOTE_ACTIONS.includes(d.action));
+
+const liveSiblings = (db: Db, target: Unit) =>
+  listUnits(db, target.projectId).filter((u) => u.id !== target.id && u.type === "work" && u.repoId === target.repoId && !TERMINAL_STATES.has(u.state));
+
 export type ManagerNeed = { kind: "wake"; wake: string } | { kind: "waiting" } | { kind: "cap"; cap: number } | { kind: "answered"; answer: string | null };
 
 // What a failed or rejected build unit needs from its manager now, or null when the fixed rules should decide.
 export function managerNeed(db: Db, target: Unit): ManagerNeed | null {
   if (!managerOn(db, target) || (target.state !== "failed" && target.state !== "rejected")) return null;
   if (liveManagerUnit(db, target)) return { kind: "waiting" };
-  const ds = listManagerDecisions(db, target.id);
+  const ds = failureDecisions(listManagerDecisions(db, target.id));
   const last = ds.at(-1);
   const tries = triesOf(db, target);
   if (last && last.tries === tries) {
@@ -99,7 +108,7 @@ export function managerNeed(db: Db, target: Unit): ManagerNeed | null {
   return { kind: "wake", wake: `U${target.seq} was ${target.state}${reason ? `: ${reason}` : ""}` };
 }
 
-export function queueManager(db: Db, target: Unit, wake: string): Unit {
+export function queueManager(db: Db, target: Unit, wake: string, kind: "failure" | "note" = "failure"): Unit {
   const unit = addUnit(db, {
     projectId: target.projectId,
     type: "manager",
@@ -109,7 +118,7 @@ export function queueManager(db: Db, target: Unit, wake: string): Unit {
     writeScope: [],
     acceptance: [],
     verify: null,
-    context: [wake],
+    context: kind === "note" ? [wake, "note"] : [wake],
     timeboxSeconds: resolveSetting(db, "timebox.verify_seconds", { projectId: target.projectId, repoId: target.repoId }).value,
     maxAttempts: 1,
   });
@@ -120,8 +129,39 @@ export function queueManager(db: Db, target: Unit, wake: string): Unit {
 
 // A fresh builder was chosen for this very state of the unit, so the runner does not resume the last session.
 export function managerForcesFresh(db: Db, unit: Unit): boolean {
-  const last = listManagerDecisions(db, unit.id).at(-1);
+  const last = failureDecisions(listManagerDecisions(db, unit.id)).at(-1);
   return !!last && last.action === "fresh" && last.tries === triesOf(db, unit);
+}
+
+const NO_NOTE = new Set(["", "none", "n/a", "nothing", "no notes"]);
+
+// The note a work unit's latest handoff left for others, or null when it left none.
+function handoffNote(db: Db, boot: RunContext["boot"], target: Unit): { attempt: Attempt; note: string } | null {
+  const attempt = listAttempts(db, target.id)
+    .filter((a) => a.state === "handed_off")
+    .at(-1);
+  const file = attempt ? layout(boot).handoff(target.projectId, target.seq, attempt.n) : null;
+  const handoff = file && existsSync(file) ? parseHandoff(readFileSync(file, "utf8")) : null;
+  const lines = (handoff?.notes ?? "")
+    .split("\n")
+    .map((l) => l.replace(/^[-*]\s*/, "").trim())
+    .filter((l) => !NO_NOTE.has(l.replace(/[.()]/g, "").toLowerCase()));
+  return attempt && lines.length ? { attempt, note: lines.join("\n") } : null;
+}
+
+// Wakes the manager of a healthy work unit whose worker left a note while other units are live in its repo, once per attempt.
+export function wakeOnNote(db: Db, boot: RunContext["boot"], target: Unit): Unit | null {
+  if (!managerOn(db, target) || TERMINAL_STATES.has(target.state) || target.state === "failed" || target.state === "rejected" || target.state === "ready")
+    return null;
+  if (liveManagerUnit(db, target) || !liveSiblings(db, target).length) return null;
+  const found = handoffNote(db, boot, target);
+  if (!found) return null;
+  const seen = db
+    .prepare("SELECT 1 FROM events WHERE type = 'manager.note_woken' AND unit_id = ? AND json_extract(data_json, '$.attemptId') = ?")
+    .get(target.id, found.attempt.id);
+  if (seen) return null;
+  recordEvent(db, "manager.note_woken", { projectId: target.projectId, unitId: target.id }, { attemptId: found.attempt.id });
+  return queueManager(db, target, `The worker of U${target.seq} left a note: ${excerpt(found.note, 600)}`, "note");
 }
 
 // A manager unit that failed or crashed before deciding: the fixed rules decide, and the record says so.
@@ -129,7 +169,7 @@ export function settleManagerUnit(db: Db, manager: Unit): void {
   if (manager.type !== "manager" || !manager.targetUnitId) return;
   const target = getUnit(db, manager.targetUnitId);
   const has = db.prepare("SELECT 1 FROM manager_decisions WHERE manager_unit_id = ?").get(manager.id);
-  if (!has) recordDecision(db, target, manager, null, "fallback", "the manager session failed before it decided", null, null);
+  if (!has) recordDecision(db, target, manager, null, isNoteWake(manager) ? "ignore" : "fallback", "the manager session failed before it decided", null, null);
   transitionUnit(db, manager.id, "abandoned", { reason: "the manager session failed; the fixed rules decide" });
 }
 
@@ -155,7 +195,8 @@ function recordDecision(
 }
 
 export type Decision =
-  { ok: true; action: Exclude<ManagerAction, "fallback">; reason: string; note: string | null; question: string | null } | { ok: false; problem: string };
+  | { ok: true; action: Exclude<ManagerAction, "fallback">; reason: string; note: string | null; question: string | null; to: string | null }
+  | { ok: false; problem: string };
 
 const MENU = MANAGER_ACTIONS.filter((a): a is Exclude<ManagerAction, "fallback"> => a !== "fallback");
 
@@ -168,7 +209,7 @@ export function parseDecision(text: string): Decision {
   const fields = new Map<string, string>();
   let key: string | null = null;
   for (const line of (end === -1 ? rest : rest.slice(0, end)).split("\n")) {
-    const kv = /^(action|reason|note|question)\s*:\s*(.*)$/i.exec(line.trim());
+    const kv = /^(action|reason|note|question|to)\s*:\s*(.*)$/i.exec(line.trim());
     if (kv) {
       key = kv[1]!.toLowerCase();
       fields.set(key, kv[2]!.trim());
@@ -178,7 +219,14 @@ export function parseDecision(text: string): Decision {
   if (!action || !(MENU as readonly string[]).includes(action)) return { ok: false, problem: `action must be one of ${MENU.join(", ")}` };
   const reason = fields.get("reason");
   if (!reason) return { ok: false, problem: "the decision has no reason" };
-  return { ok: true, action: action as (typeof MENU)[number], reason, note: fields.get("note") || null, question: fields.get("question") || null };
+  return {
+    ok: true,
+    action: action as (typeof MENU)[number],
+    reason,
+    note: fields.get("note") || null,
+    question: fields.get("question") || null,
+    to: fields.get("to") || null,
+  };
 }
 
 const ROLE_OF_UNIT: Record<string, string> = {
@@ -245,6 +293,7 @@ function managerBrief(db: Db, ctx: RunContext, manager: Unit, target: Unit, prev
   );
   const sibling = (u: Unit) =>
     `- U${u.seq} (${u.state}): ${u.goal}; writes ${u.writeScope.join(", ") || "(unspecified)"}${scopesOverlap(target.writeScope, u.writeScope) ? " (overlaps this unit)" : ""}`;
+  const noteWake = isNoteWake(manager);
   const since = resumed && previous ? previous.id : 0;
   const seen = record(db, ctx, target, since);
   const standing = standingFor(db, project.id, "manager");
@@ -260,20 +309,30 @@ ${manager.context[0] ?? `U${target.seq} needs a decision`}
 ${target.description ? `- Why it exists: ${target.description}\n` : ""}- State: ${target.state}. Tries used: ${used} of ${target.maxAttempts}.
 - Expected to write: ${target.writeScope.join(", ") || "(unspecified)"}
 - Acceptance: ${target.acceptance.join("; ") || "(none)"}
-- The fixed rules, without you, would ${policy.action === "retry" ? "retry it" : "block it"} (${policy.reason}).
+${
+  noteWake
+    ? ""
+    : `- The fixed rules, without you, would ${policy.action === "retry" ? "retry it" : "block it"} (${policy.reason}).
 - Resume the builder is ${canResume ? "available" : `not available${choice.fresh ? ` (${choice.fresh})` : ""}`}.
 - ${dependents ? `${dependents} other unit(s) depend on this one, so it cannot be split; use planner instead.` : "Nothing depends on this unit, so it can be split."}
-${siblings.length ? `\n## OTHER UNITS IN THIS REPO NOW\n${siblings.map(sibling).join("\n")}\n` : ""}${decisions.length ? `\n## YOUR EARLIER DECISIONS ON THIS UNIT\n${decisions.map((d) => `- ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}`).join("\n")}\n` : ""}
+`
+}${siblings.length ? `\n## OTHER UNITS IN THIS REPO NOW\n${siblings.map(sibling).join("\n")}\n` : ""}${decisions.length ? `\n## YOUR EARLIER DECISIONS ON THIS UNIT\n${decisions.map((d) => `- ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}`).join("\n")}\n` : ""}
 ## ${resumed ? "WHAT HAPPENED SINCE YOUR LAST DECISION" : "THE RECORD"}
 ${seen.length ? seen.join("\n\n") : "Nothing new is recorded."}
 
-## THE MENU (pick exactly one)
+${
+  noteWake
+    ? `## THE MENU (pick exactly one)
+- \`relay\`: give the note to other units that are live in this repo. Give \`to:\` (their U numbers, comma separated) and \`note:\` (what they should know, in your words). Relay only what changes how they work, such as an interface or a file this unit changed.
+- \`ignore\`: the note matters to nobody else. Give a \`reason:\`.`
+    : `## THE MENU (pick exactly one)
 - \`resume\`: the same worker session continues with the findings and your note. Only when resume is available above.
 - \`fresh\`: a new worker starts from trunk with your note. Use it when the old session went down a wrong path.
 - \`split\`: replace this unit with smaller ones. Add a \`\`\`json plan delta with only "add" (the new units); this unit is cancelled. Not possible when other units depend on it.
 - \`planner\`: block the unit and hand it to the planner, with your reason. Use it when the plan is the problem.
 - \`ask\`: ask the developer; give a \`question:\`. They answer retry or stop.
-- \`stop\`: block the unit for the developer.
+- \`stop\`: block the unit for the developer.`
+}
 
 ## REPORT
 End your final message with:
@@ -284,8 +343,9 @@ success
 ## Decision
 action: <one of the menu>
 reason: <one or two sentences the developer will read>
-note: <optional: what the next worker should do differently>
+note: <optional: what the next worker should do differently; for relay, what the other units should know>
 question: <only for ask>
+to: <only for relay: the U numbers>
 ${standing ? `\n## STANDING ORDERS\n${standing}\n` : ""}
 ## METHOD
 Load the yagura-manager skill first and follow it. You may read files and use read-only \`yagura\` commands; change nothing.
@@ -301,6 +361,8 @@ function applyDecision(
   text: string,
 ): { problem: string | null; gateId: number | null } {
   const { db } = ctx;
+  if (isNoteWake(manager) !== NOTE_ACTIONS.includes(d.action))
+    return { problem: `${d.action} is not on the menu for this wake (${isNoteWake(manager) ? "relay or ignore" : "a failure"})`, gateId: null };
   const tries = triesOf(db, target);
   const retry = (note: string | null) => {
     if (note) addUnitNote(db, target.id, `The manager says: ${note}`);
@@ -322,6 +384,17 @@ function applyDecision(
       if (!choice.resume || !choice.resume.worktreePath || !existsSync(choice.resume.worktreePath))
         return { problem: `resume is not possible: ${choice.fresh ?? "the last session's worktree is gone"}`, gateId: null };
       retry(d.note);
+      return { problem: null, gateId: null };
+    }
+    case "ignore":
+      return { problem: null, gateId: null };
+    case "relay": {
+      if (!d.note) return { problem: "a relay needs a note", gateId: null };
+      const live = new Map(liveSiblings(db, target).map((u) => [u.seq, u]));
+      const to = [...(d.to ?? "").matchAll(/U?(\d+)/gi)].map((m) => live.get(Number(m[1])));
+      if (!to.length || to.some((u) => !u))
+        return { problem: `to must name live units in this repo (${[...live.keys()].map((n) => `U${n}`).join(", ") || "none"})`, gateId: null };
+      for (const u of new Set(to)) addUnitNote(db, u!.id, `The manager says, from U${target.seq}: ${d.note}`);
       return { problem: null, gateId: null };
     }
     case "stop":
@@ -383,7 +456,7 @@ export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<A
     transitionUnit(db, unit.id, "handed_off", {});
     transitionUnit(db, unit.id, "done", {});
   };
-  if (target.state !== "failed" && target.state !== "rejected") {
+  if (!isNoteWake(unit) && target.state !== "failed" && target.state !== "rejected") {
     transitionUnit(db, unit.id, "running", { target: target.seq });
     recordEvent(db, "manager.skipped", { projectId: unit.projectId, unitId: target.id }, { reason: `U${target.seq} is ${target.state}` });
     finish();
@@ -463,7 +536,7 @@ export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<A
     ...(text ? {} : { failureMode: "unknown" as const }),
   });
 
-  let action: ManagerAction = "fallback";
+  let action: ManagerAction = isNoteWake(unit) ? "ignore" : "fallback";
   let reason = "";
   let note: string | null = null;
   let gateId: number | null = null;

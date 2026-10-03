@@ -127,9 +127,9 @@ export type PublicationKind = (typeof PUBLICATION_KINDS)[number];
 export const PUBLICATION_STATES = ["publishing", "published", "failed", "waiting", "unchanged", "removed", "left"] as const;
 export type PublicationState = (typeof PUBLICATION_STATES)[number];
 
-// What a manager may decide about a unit that failed or was rejected (§26). `fallback` records that the fixed rules decided
-// because the manager gave no usable decision.
-export const MANAGER_ACTIONS = ["resume", "fresh", "split", "planner", "ask", "stop", "fallback"] as const;
+// What a manager may decide (§26): about a unit that failed or was rejected, or (`relay`, `ignore`) about a note a worker left for it.
+// `fallback` records that the fixed rules decided because the manager gave no usable decision.
+export const MANAGER_ACTIONS = ["resume", "fresh", "split", "planner", "ask", "stop", "relay", "ignore", "fallback"] as const;
 export type ManagerAction = (typeof MANAGER_ACTIONS)[number];
 
 export const DEP_KINDS = ["needs-source", "needs-landed", "scope-overlap"] as const;

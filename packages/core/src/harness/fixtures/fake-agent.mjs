@@ -96,7 +96,7 @@ async function main() {
   const handoff =
     mode === "nohandoff"
       ? "DONE"
-      : `## Status\n${mode === "blocked" ? "blocked" : "success"}\n\n## Branch\n\`b\`\n\n## What I did\n- edited ${file}\n\n## Verification\nunit-verified\n\n## Evidence\n- python3 -m unittest -> ok\n${mode === "scope-justified" ? "\n## Outside scope\n- README.md: the new flag needs a line in the docs\n" : ""}`;
+      : `## Status\n${mode === "blocked" ? "blocked" : "success"}\n\n## Branch\n\`b\`\n\n## What I did\n- edited ${file}\n\n## Verification\nunit-verified\n\n## Evidence\n- python3 -m unittest -> ok\n${process.env.FAKE_WORKER_NOTE ? `\n## Notes, concerns, deviations\n- ${process.env.FAKE_WORKER_NOTE}\n` : ""}${mode === "scope-justified" ? "\n## Outside scope\n- README.md: the new flag needs a line in the docs\n" : ""}`;
   finish(handoff);
 }
 
@@ -137,6 +137,12 @@ function manager() {
   if (action === "garbage") return finish("## Status\nsuccess\n\nI am not sure what to do.\n");
   const repo = /^- U\d+ \(([\w-]+)\):/m.exec(brief)?.[1] ?? "repo";
   const lines = [`action: ${action}`, `reason: the fake manager chose ${action}`];
+  if (action === "relay") {
+    const to = [...brief.slice(brief.indexOf("## OTHER UNITS")).matchAll(/^- (U\d+) \(\w+\):/gm)]
+      .map((m) => m[1])
+      .slice(0, Number(process.env.FAKE_RELAY_TO ?? 1));
+    lines.push(`to: ${to.join(", ")}`, "note: the shared helper moved");
+  }
   if (action === "fresh" || action === "resume") lines.push("note: write it with care");
   if (action === "ask") lines.push("question: Should it try again?");
   const delta =
@@ -298,7 +304,13 @@ async function engine(role) {
     g("add", "-A");
     g("commit", "-q", "-m", `work ${process.env.YAGURA_UNIT}`);
     const followUps = process.env.FAKE_FOLLOWUPS ? `\n## Suggested follow-ups\n- ${process.env.FAKE_FOLLOWUPS}\n` : "\n## Suggested follow-ups\n- None.\n";
-    return setTimeout(() => finish(`## Status\nsuccess\n\n## Verification\nunit-verified\n${followUps}`), 400);
+    return setTimeout(
+      () =>
+        finish(
+          `## Status\nsuccess\n\n## Verification\nunit-verified\n${followUps}${process.env.FAKE_WORKER_NOTE ? `\n## Notes, concerns, deviations\n- ${process.env.FAKE_WORKER_NOTE}\n` : ""}`,
+        ),
+      400,
+    );
   }
   if (role === "verifier") {
     const file = /^\+\+\+ b\/(.+)$/m.exec(brief)[1];

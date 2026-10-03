@@ -11,7 +11,7 @@ import { Engine } from "./engine.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
-import { applyAskAnswer, listManagerDecisions, managerForcesFresh, managerNeed, parseDecision, queueManager, runManagerUnit } from "./manager.js";
+import { applyAskAnswer, listManagerDecisions, managerForcesFresh, managerNeed, parseDecision, queueManager, runManagerUnit, wakeOnNote } from "./manager.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
 import { runWorkUnit } from "./runner.js";
@@ -111,6 +111,7 @@ describe("parseDecision", () => {
       reason: "the old session went the wrong way",
       note: "mind the empty case",
       question: null,
+      to: null,
     });
     expect(parseDecision("## Decision\naction: ask\nreason: unclear\nquestion: Which one?\n")).toMatchObject({
       ok: true,
@@ -278,6 +279,66 @@ describe("a manager deciding about a rejected unit", () => {
     setSetting(db, "project", project, "manager.enabled", false);
     const u = await rejectedUnit();
     expect(managerNeed(db, u)).toBeNull();
+  }, 60_000);
+});
+
+describe("a manager told of a worker's note", () => {
+  // Two units in one repo: U1 has handed off with a note, U2 is still to be built.
+  async function handedOffWithNote(note = "I moved the shared helper") {
+    process.env.FAKE_WORKER_NOTE = note;
+    applyDelta(db, project, PlanDelta.parse({ add: [unitDelta("a"), unitDelta("b")] }), null);
+    const [a, b] = listUnits(db, project).filter((u) => u.type === "work");
+    await runWorkUnit(ctx, a!.id);
+    delete process.env.FAKE_WORKER_NOTE;
+    return { a: getUnit(db, a!.id), b: getUnit(db, b!.id) };
+  }
+
+  it("relays the note to the live sibling it names, and not again for the same handoff", async () => {
+    const { a, b } = await handedOffWithNote();
+    process.env.FAKE_MANAGER = "relay";
+    const m = wakeOnNote(db, ctx.boot, a)!;
+    expect(m.context[1]).toBe("note");
+    expect(wakeOnNote(db, ctx.boot, a)).toBeNull();
+    await runManagerUnit(ctx, m.id);
+    expect(getUnit(db, b.id).notes).toEqual([`The manager says, from U${a.seq}: the shared helper moved`]);
+    expect(listManagerDecisions(db, a.id)).toMatchObject([{ action: "relay", note: "the shared helper moved" }]);
+    expect(getUnit(db, a.id).state).toBe("verifying");
+    expect(wakeOnNote(db, ctx.boot, getUnit(db, a.id))).toBeNull();
+    expect(managerNeed(db, getUnit(db, a.id))).toBeNull();
+  }, 60_000);
+
+  it("records ignore, and a relay it cannot do, as ignore with the reason, touching no unit", async () => {
+    const { a, b } = await handedOffWithNote();
+    process.env.FAKE_MANAGER = "ignore";
+    await runManagerUnit(ctx, wakeOnNote(db, ctx.boot, a)!.id);
+    expect(listManagerDecisions(db, a.id)).toMatchObject([{ action: "ignore" }]);
+    expect(getUnit(db, b.id).notes).toEqual([]);
+    process.env.FAKE_MANAGER = "fresh";
+    db.prepare("DELETE FROM events WHERE type = 'manager.note_woken'").run();
+    await runManagerUnit(ctx, wakeOnNote(db, ctx.boot, a)!.id);
+    expect(listManagerDecisions(db, a.id).at(-1)).toMatchObject({
+      action: "ignore",
+      reason: expect.stringMatching(/^fresh was not possible: fresh is not on the menu/),
+    });
+  }, 60_000);
+
+  it("is not woken when the note says nothing", async () => {
+    const { a } = await handedOffWithNote("none");
+    expect(wakeOnNote(db, ctx.boot, a)).toBeNull();
+  }, 60_000);
+
+  it("is not woken when nobody else is live in the repo", async () => {
+    const { a, b } = await handedOffWithNote("a real note");
+    transitionUnit(db, b.id, "abandoned", {});
+    expect(wakeOnNote(db, ctx.boot, a)).toBeNull();
+  }, 60_000);
+
+  it("does not let a note decision stand in for a decision about a later rejection", async () => {
+    const { a } = await handedOffWithNote();
+    process.env.FAKE_MANAGER = "ignore";
+    await runManagerUnit(ctx, wakeOnNote(db, ctx.boot, a)!.id);
+    transitionUnit(db, a.id, "rejected", { reason: "verification failed" });
+    expect(managerNeed(db, getUnit(db, a.id))?.kind).toBe("wake");
   }, 60_000);
 });
 
