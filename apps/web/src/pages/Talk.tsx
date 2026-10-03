@@ -486,6 +486,14 @@ export function Talk({ threadId }: { threadId: number | null }) {
                   >
                     New session
                   </button>
+                  <Link
+                    to="/prompts?role=watchman"
+                    className="mono"
+                    style={{ fontSize: 12 }}
+                    title="The guidance the watchman follows in every conversation; edit it there"
+                  >
+                    watchman's guidance →
+                  </Link>
                 </span>
               )}
             </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, useApi, type AttemptDetail } from "../api";
+import { api, useApi, useQuery, type AttemptDetail } from "../api";
 import { lineDiff } from "../lib/linediff";
 import { Link } from "../ui/Link";
 import { useAction } from "../ui/rows";
@@ -157,10 +157,13 @@ function NotesBox({ label, value, save, rows = 3 }: { label: string; value: stri
 // With a project: its overrides and notes. Without one: the global guidance every project uses unless it sets its own, the watchman's included.
 export function Prompts({ projectId }: { projectId: string | null }) {
   const view = useApi<PromptsView>(projectId ? `/api/prompts?project=${projectId}` : "/api/prompts");
-  const [role, setRole] = useState("planner");
+  const [role, setRole] = useState(useQuery().get("role") ?? "planner");
   const [draft, setDraft] = useState("");
   const action = useAction();
   const r = view.data?.roles.find((x) => x.role === role);
+  useEffect(() => {
+    if (view.data && !r && view.data.roles[0]) setRole(view.data.roles[0].role);
+  }, [view.data, r]);
   const effective = r ? (r.project ?? r.global ?? r.default) : "";
   useEffect(() => setDraft(effective), [effective, role]);
   const put = (body: object) => api(`/api/prompts`, { method: "PUT", body: { projectId, ...body } }).then(view.reload);
