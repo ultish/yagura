@@ -80,6 +80,7 @@ export interface RepoView {
 
 interface SlotHolder {
   attemptId: number;
+  agentNo: number;
   since: string;
   unit: { projectId: string; seq: number; type: string; goal: string };
 }
@@ -87,7 +88,8 @@ interface SlotHolder {
 export interface KeptSlot {
   leaseId: number;
   attemptId: number;
-  unit: { projectId: string; seq: number; goal: string };
+  agentNo: number;
+  unit: { projectId: string; seq: number; type: string; goal: string };
   until: string;
   reason: string;
   namespace: string | null;

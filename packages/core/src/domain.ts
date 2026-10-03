@@ -261,6 +261,7 @@ export interface Attempt {
   unitId: UnitId;
   n: number;
   agentNo: number;
+  guidanceSha: string | null;
   state: AttemptState;
   harness: string;
   model: string | null;

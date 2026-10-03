@@ -153,7 +153,7 @@ function Kept({ envId, slots, onChanged }: { envId: string; slots: KeptSlot[]; o
         return (
           <div key={slot.leaseId} className="facts" style={{ flexWrap: "wrap", alignItems: "center", gap: 8 }}>
             <Link to={`/a/${slot.attemptId}`}>
-              {slot.unit.projectId} U{slot.unit.seq}
+              {slot.unit.projectId} · A{slot.agentNo} for U{slot.unit.seq}
             </Link>
             <span>{slot.reason}</span>
             <span>until {clock(slot.until)}</span>

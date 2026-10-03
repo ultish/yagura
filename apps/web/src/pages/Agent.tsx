@@ -385,6 +385,8 @@ function statusOf(d: AttemptDetail, now: number, lastActivity: string | null): {
   }
 }
 
+const PROMPT_ROLE: Record<string, string> = { plan: "planner", work: "worker", verify: "verifier", review: "reviewer" };
+
 const REJECTION_LABEL: Record<NonNullable<Attempt["rejection"]>, string> = {
   "code-fault": "verification failed",
   literals: "hard-coded values",
@@ -515,6 +517,11 @@ export function Agent({ attemptId }: { attemptId: number }) {
           {a.branch && <span>{a.branch}</span>}
           {u.writeScope.length > 0 && <span>write: {u.writeScope.join(", ")}</span>}
           {a.skills.length > 0 && <span>skills: {a.skills.join(", ")}</span>}
+          {a.guidanceSha && (
+            <span title="The version of this role's guidance this run got; the Prompts page shows the current one">
+              guidance <Link to={`/p/${u.projectId}/prompts?role=${PROMPT_ROLE[u.type] ?? u.type}`}>{a.guidanceSha}</Link>
+            </span>
+          )}
         </div>
         {action.error && <div className="s-bell">{action.error}</div>}
       </section>

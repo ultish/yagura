@@ -293,6 +293,7 @@ function toAttempt(r: Record<string, unknown>): Attempt {
     unitId: r.unit_id as UnitId,
     n: r.n as number,
     agentNo: r.agent_no as number,
+    guidanceSha: (r.guidance_sha as string | null) ?? null,
     state: r.state as Attempt["state"],
     harness: r.harness as string,
     model: (r.model as string | null) ?? null,

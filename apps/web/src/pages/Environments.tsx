@@ -235,7 +235,7 @@ function Holders({ v }: { v: EnvironmentView }) {
   if (!v.active.length && !v.queued.length) return null;
   const who = (h: EnvironmentView["active"][number] | EnvironmentView["queued"][number]) => (
     <Link to={`/a/${h.attemptId}`}>
-      {h.unit.projectId} U{h.unit.seq} {roleOf(h.unit.type)}
+      {h.unit.projectId} · {roleOf(h.unit.type)} A{h.agentNo} for U{h.unit.seq}
     </Link>
   );
   return (
