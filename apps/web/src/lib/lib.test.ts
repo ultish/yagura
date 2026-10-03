@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
 import { diffLines } from "./diff";
+import { lineDiff } from "./linediff";
 import { clip, clock, duration, modelName, when } from "./format";
 import { ifUnanswered } from "./gates";
 import { groupHits, highlight } from "./search";
@@ -302,5 +303,17 @@ describe("when", () => {
     expect(when(at(23, 58, 0), at(0, 2, 0, 3), false)).toBe("2 Oct 23:58 → 3 Oct 00:02");
     expect(when(at(12, 7, 22), null)).toBe("2 Oct 12:07:22");
     expect(when(null, null)).toBe("");
+  });
+});
+
+describe("lineDiff", () => {
+  it("keeps common lines and marks what was removed and added, in order", () => {
+    expect(lineDiff("a\nb\nc", "a\nB\nc\nd")).toEqual([
+      { kind: "same", text: "a" },
+      { kind: "del", text: "b" },
+      { kind: "add", text: "B" },
+      { kind: "same", text: "c" },
+      { kind: "add", text: "d" },
+    ]);
   });
 });

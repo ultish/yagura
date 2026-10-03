@@ -242,16 +242,20 @@ export function Project({ id }: { id: string }) {
             Planner: <Inline text={d.summary} />
           </p>
         )}
-        {d.threads.length > 0 && (
-          <div className="mono" style={{ fontSize: 12 }}>
-            conversations:{" "}
-            {d.threads.map((t) => (
-              <Link key={t} to={`/talk/${t}`} style={{ marginRight: 10 }}>
-                thread {t}
-              </Link>
-            ))}
-          </div>
-        )}
+        <div className="mono" style={{ fontSize: 12 }}>
+          {d.threads.length > 0 && (
+            <>
+              conversations:{" "}
+              {d.threads.map((t) => (
+                <Link key={t} to={`/talk/${t}`} style={{ marginRight: 10 }}>
+                  thread {t}
+                </Link>
+              ))}
+              {" · "}
+            </>
+          )}
+          <Link to={`/p/${d.project.id}/prompts`}>prompts: what its agents are told →</Link>
+        </div>
       </section>
       <Beacons d={d} now={now} />
       <section

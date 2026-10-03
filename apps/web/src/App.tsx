@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { LiveContext, useApi, useLiveVersion, usePath } from "./api";
 import { Agent, AgentByNo, UnitAgent } from "./pages/Agent";
+import { Prompts } from "./pages/Prompts";
 import { Unit } from "./pages/Unit";
 
 // The repo browser carries Monaco, so it loads only when opened.
@@ -100,6 +101,7 @@ function Routes() {
   if (path === "/search") return <Search />;
   if ((m = /^\/talk(?:\/(\d+))?\/?$/.exec(path))) return <Talk threadId={m[1] ? Number(m[1]) : null} />;
   if ((m = /^\/a\/(\d+)\/?$/.exec(path))) return <Agent key={m[1]} attemptId={Number(m[1])} />;
+  if ((m = /^\/p\/([a-z][a-z0-9-]*)\/prompts\/?$/.exec(path))) return <Prompts key={path} projectId={m[1]!} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/a\/(\d+)\/?$/.exec(path))) return <AgentByNo key={path} projectId={m[1]!} agentNo={Number(m[2])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)\/(\d+)\/?$/.exec(path))) return <UnitAgent projectId={m[1]!} seq={Number(m[2])} n={Number(m[3])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)\/?$/.exec(path))) return <Unit key={path} projectId={m[1]!} seq={Number(m[2])} />;
