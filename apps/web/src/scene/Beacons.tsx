@@ -160,7 +160,7 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
         );
       })}
       {d.deps
-        .filter((dep) => dep.kind !== "scope-overlap" && d.waiting.some((w) => w.unitId === dep.unitId))
+        .filter((dep) => d.waiting.some((w) => w.unitId === dep.unitId))
         .map((dep) => {
           const y1 = rowY.get(dep.unitId as never);
           const y2 = rowY.get(dep.dependsOn as never);
@@ -179,7 +179,7 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
                 opacity=".8"
               />
               <text x={(XS.plan + XS.land) / 2} y={(y1 + y2) / 2 + 4} textAnchor="middle" style={{ ...mono, fontSize: 11.5, fill: "var(--amber-text)" }}>
-                U{a.seq} waits for U{b.seq} to land
+                {dep.kind === "scope-overlap" ? `U${a.seq} waits for U${b.seq}: same files` : `U${a.seq} waits for U${b.seq} to land`}
               </text>
             </g>
           );

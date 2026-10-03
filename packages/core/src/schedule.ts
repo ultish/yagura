@@ -53,7 +53,10 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
         reason = null;
         break;
       }
-      reason = `waiting for U${on.seq} (${d.kind}, now ${on.state})`;
+      reason =
+        d.kind === "scope-overlap"
+          ? `waiting for U${on.seq} to finish: it writes some of the same files, so they run one after the other (now ${on.state})`
+          : `waiting for U${on.seq} (${d.kind}, now ${on.state})`;
       break;
     }
     if (result.stuck.some((s) => s.unit.id === u.id)) continue;
