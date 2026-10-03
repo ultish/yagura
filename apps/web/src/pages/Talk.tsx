@@ -145,8 +145,10 @@ function Message({
   proposals,
   known,
   queued,
+  target,
   onEdit,
 }: {
+  target: boolean;
   m: ThreadMessage;
   proposals: Proposal[];
   known: ReadonlySet<string>;
@@ -155,7 +157,16 @@ function Message({
 }) {
   const r = ROLE[m.role];
   return (
-    <div style={{ display: "flex", gap: 16, padding: "14px 0", borderTop: "1px solid var(--line2)" }}>
+    <div
+      id={`m${m.id}`}
+      style={{
+        display: "flex",
+        gap: 16,
+        padding: "14px 0",
+        borderTop: "1px solid var(--line2)",
+        ...(target ? { boxShadow: "inset 3px 0 0 var(--lamp)", paddingLeft: 12, background: "var(--mention-bg)" } : {}),
+      }}
+    >
       <div className="mono" style={{ width: 86, flexShrink: 0, fontSize: 12, color: r.color, paddingTop: 3 }}>
         {r.label}
         <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>
@@ -400,9 +411,16 @@ export function Talk({ threadId }: { threadId: number | null }) {
   const [all, setAll] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const count = view.data?.messages.length ?? 0;
+  // A link to one message (from search) opens the thread at that message, not at its end.
+  const target = Number(query.get("m")) || null;
   useEffect(() => {
+    if (target) return;
     bottom.current?.scrollIntoView({ block: "end" });
-  }, [count, threadId]);
+  }, [count, threadId, target]);
+  const loaded = !!view.data;
+  useEffect(() => {
+    if (target && loaded) document.getElementById(`m${target}`)?.scrollIntoView({ block: "center" });
+  }, [target, loaded]);
   useEffect(() => {
     setDraft({ text: say, key: Date.now() });
   }, [say, threadId]);
@@ -410,7 +428,8 @@ export function Talk({ threadId }: { threadId: number | null }) {
   const session = useAction();
 
   const v = view.data;
-  const messages = v ? (all ? v.messages : v.messages.slice(-SHOWN)) : [];
+  const older = target !== null && v !== null && !v.messages.slice(-SHOWN).some((m) => m.id === target);
+  const messages = v ? (all || older ? v.messages : v.messages.slice(-SHOWN)) : [];
   return (
     <main style={{ display: "flex", minHeight: "calc(100vh - 61px)" }}>
       <ThreadList current={threadId} />
@@ -522,6 +541,7 @@ export function Talk({ threadId }: { threadId: number | null }) {
                   )}
                   <Message
                     m={m}
+                    target={m.id === target}
                     proposals={v!.proposals.filter((p) => p.messageId === m.id)}
                     known={known}
                     queued={v!.queued.includes(m.id)}

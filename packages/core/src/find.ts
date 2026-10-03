@@ -93,13 +93,13 @@ export function find(db: Db, query: string): FindResult {
   const decisions = wordsClause("d.text", words);
   for (const r of db
     .prepare(
-      `SELECT d.id, d.thread_id, d.text, d.superseded_by, t.title FROM thread_decisions d JOIN threads t ON t.id = d.thread_id WHERE ${decisions.sql} ORDER BY d.id DESC LIMIT ${PER_KIND}`,
+      `SELECT d.id, d.thread_id, d.text, d.superseded_by, d.source_message_id, t.title FROM thread_decisions d JOIN threads t ON t.id = d.thread_id WHERE ${decisions.sql} ORDER BY d.id DESC LIMIT ${PER_KIND}`,
     )
     .all(...decisions.args) as Row[])
     hits.push({
       kind: "decision",
       ref: `D${r.id}`,
-      href: `/talk/${r.thread_id}`,
+      href: `/talk/${r.thread_id}${r.source_message_id ? `?m=${r.source_message_id}` : ""}`,
       title: r.text as string,
       meta: `${r.title}${r.superseded_by ? ` · superseded by D${r.superseded_by}` : ""}`,
       text: r.text as string,
@@ -108,13 +108,13 @@ export function find(db: Db, query: string): FindResult {
   const questions = wordsClause("(q.text || ' ' || COALESCE(q.answer, ''))", words);
   for (const r of db
     .prepare(
-      `SELECT q.id, q.thread_id, q.text, q.answer, t.title FROM thread_questions q JOIN threads t ON t.id = q.thread_id WHERE ${questions.sql} ORDER BY q.id DESC LIMIT ${PER_KIND}`,
+      `SELECT q.id, q.thread_id, q.text, q.answer, q.source_message_id, t.title FROM thread_questions q JOIN threads t ON t.id = q.thread_id WHERE ${questions.sql} ORDER BY q.id DESC LIMIT ${PER_KIND}`,
     )
     .all(...questions.args) as Row[])
     hits.push({
       kind: "question",
       ref: `Q${r.id}`,
-      href: `/talk/${r.thread_id}`,
+      href: `/talk/${r.thread_id}${r.source_message_id ? `?m=${r.source_message_id}` : ""}`,
       title: r.text as string,
       meta: `${r.title} · ${r.answer ? `answered: ${r.answer}` : "open"}`,
       text: `${r.text} ${r.answer ?? ""}`,
@@ -146,7 +146,7 @@ export function find(db: Db, query: string): FindResult {
     hits.push({
       kind: "message",
       ref: `thread ${r.thread_id} #${r.id}`,
-      href: `/talk/${r.thread_id}`,
+      href: `/talk/${r.thread_id}?m=${r.id}`,
       title: r.body as string,
       meta: `${r.role === "human" ? "you" : r.role === "system" ? "yagura" : "watchman"} · ${r.title}`,
       text: r.body as string,
