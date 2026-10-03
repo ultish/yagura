@@ -223,6 +223,17 @@ describe("a manager deciding about a rejected unit", () => {
     expect(managerNeed(db, getUnit(db, u.id))).toBeNull();
   }, 60_000);
 
+  it("lists the other live units in the repo and says which overlap its scope", async () => {
+    const u = await rejectedUnit("a");
+    applyDelta(db, project, PlanDelta.parse({ add: [unitDelta("b", { write: ["app/a/**"] }), unitDelta("c", { write: ["app/c/**"] })] }), null);
+    process.env.FAKE_MANAGER = "fresh";
+    const m = await wake(u.id);
+    const brief = readFileSync(layout(ctx.boot).brief(project, m.seq, 1), "utf8");
+    expect(brief).toContain("## OTHER UNITS IN THIS REPO NOW\n");
+    expect(brief).toMatch(/- U\d+ \(\w+\): write b; writes app\/a\/\*\* \(overlaps this unit\)/);
+    expect(brief).toMatch(/- U\d+ \(\w+\): write c; writes app\/c\/\*\*\n/);
+  }, 60_000);
+
   it("resumes its own session on a later decision and is told only what changed; a lost session starts again", async () => {
     const u = await rejectedUnit();
     process.env.FAKE_MANAGER = "fresh";

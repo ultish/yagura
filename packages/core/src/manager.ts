@@ -3,7 +3,7 @@ import { attemptRecorder, runAgentSession, write, type RunContext } from "./agen
 import { resolveSetting } from "./config.js";
 import { MANAGER_ACTIONS, TERMINAL_STATES, spendsAttempt, type Attempt, type AttemptId, type ManagerAction, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
-import { extractDelta, applyDelta, PlanRejected } from "./plan.js";
+import { extractDelta, applyDelta, PlanRejected, scopesOverlap } from "./plan.js";
 import { layout } from "./paths.js";
 import { promptPlugin, standingFor } from "./prompts.js";
 import { chooseResume } from "./resume.js";
@@ -240,6 +240,11 @@ function managerBrief(db: Db, ctx: RunContext, manager: Unit, target: Unit, prev
   });
   const canResume = Boolean(choice.resume && choice.resume.worktreePath && existsSync(choice.resume.worktreePath));
   const dependents = listDeps(db, project.id).filter((d) => d.dependsOn === target.id && d.kind !== "scope-overlap").length;
+  const siblings = listUnits(db, project.id).filter(
+    (u) => u.id !== target.id && u.type === "work" && u.repoId === target.repoId && !TERMINAL_STATES.has(u.state),
+  );
+  const sibling = (u: Unit) =>
+    `- U${u.seq} (${u.state}): ${u.goal}; writes ${u.writeScope.join(", ") || "(unspecified)"}${scopesOverlap(target.writeScope, u.writeScope) ? " (overlaps this unit)" : ""}`;
   const since = resumed && previous ? previous.id : 0;
   const seen = record(db, ctx, target, since);
   const standing = standingFor(db, project.id, "manager");
@@ -258,7 +263,7 @@ ${target.description ? `- Why it exists: ${target.description}\n` : ""}- State: 
 - The fixed rules, without you, would ${policy.action === "retry" ? "retry it" : "block it"} (${policy.reason}).
 - Resume the builder is ${canResume ? "available" : `not available${choice.fresh ? ` (${choice.fresh})` : ""}`}.
 - ${dependents ? `${dependents} other unit(s) depend on this one, so it cannot be split; use planner instead.` : "Nothing depends on this unit, so it can be split."}
-${decisions.length ? `\n## YOUR EARLIER DECISIONS ON THIS UNIT\n${decisions.map((d) => `- ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}`).join("\n")}\n` : ""}
+${siblings.length ? `\n## OTHER UNITS IN THIS REPO NOW\n${siblings.map(sibling).join("\n")}\n` : ""}${decisions.length ? `\n## YOUR EARLIER DECISIONS ON THIS UNIT\n${decisions.map((d) => `- ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}`).join("\n")}\n` : ""}
 ## ${resumed ? "WHAT HAPPENED SINCE YOUR LAST DECISION" : "THE RECORD"}
 ${seen.length ? seen.join("\n\n") : "Nothing new is recorded."}
 

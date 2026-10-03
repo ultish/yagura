@@ -289,6 +289,23 @@ describe("pack lifecycle scripts", () => {
     expect(target.state).toBe("verifying");
   });
 
+  it("blocks a unit whose verifier reached no verdict in its allowed tries when no manager is on", async () => {
+    setSetting(db, "project", project, "verify.max_retries", 1);
+    const { target } = await workThenVerify("verify-weak");
+    expect(target.state).toBe("blocked");
+  });
+
+  it("leaves such a unit rejected for its manager when one is on", async () => {
+    setSetting(db, "project", project, "verify.max_retries", 1);
+    setSetting(db, "global", "", "manager.enabled", true);
+    const { target } = await workThenVerify("verify-weak");
+    expect(target.state).toBe("rejected");
+    const why = db.prepare("SELECT data_json FROM events WHERE unit_id = ? AND type = 'unit.state' ORDER BY id DESC LIMIT 1").get(target.id) as {
+      data_json: string;
+    };
+    expect(JSON.parse(why.data_json).reason).toMatch(/^verification did not reach a verdict 1 times: /);
+  });
+
   it("sends the work back when its head does not deploy while trunk does", async () => {
     await setTrunkPack({ deploy: 'grep -q "x = 1" app/orders.py', checks: [{ name: "unit", command: "true", tier: "unit-verified" }] });
     const { target, result } = await workThenVerify("verify-pass");

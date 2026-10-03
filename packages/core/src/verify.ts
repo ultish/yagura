@@ -128,9 +128,11 @@ function applyOutcome(db: Db, target: Unit, work: Attempt, decision: VerdictDeci
         transitionUnit(db, target.id, "done", { reason });
         return;
       }
-      if (failedVerifications(db, target) >= maxRetries)
-        transitionUnit(db, target.id, "blocked", { reason: `verification did not reach a verdict ${maxRetries} times: ${decision.reason}` });
-      else addVerifyUnit(db, target);
+      if (failedVerifications(db, target) >= maxRetries) {
+        const reason = `verification did not reach a verdict ${maxRetries} times: ${decision.reason}`;
+        // With a manager on, it decides what to do about a unit its verifier cannot judge; its absence leaves the fixed rules, which block.
+        transitionUnit(db, target.id, managerOn(db, target) ? "rejected" : "blocked", { reason });
+      } else addVerifyUnit(db, target);
   }
 }
 
