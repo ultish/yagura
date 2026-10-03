@@ -3,7 +3,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
-import { acquireDaemonLock, claudeAdapter, Engine, layout, loadBootstrap, openStore, type Bootstrap } from "@yagura/core";
+import { acquireDaemonLock, claudeAdapter, Engine, layout, loadBootstrap, openStore, type Bootstrap, importStandingFiles } from "@yagura/core";
 import { createApp } from "./server.js";
 
 export { createApp } from "./server.js";
@@ -24,6 +24,7 @@ export async function startDaemon(cli: string[]): Promise<void> {
   const release = acquireDaemonLock(boot);
   const token = LOOPBACK.has(boot.bind) ? null : loadOrCreateToken(boot);
   const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
+  for (const path of importStandingFiles(db, boot)) log(`moved ${path} into the store (Prompts page notes)`);
   const engine = new Engine({ db, boot, adapters: { claude: claudeAdapter }, cli }, { log });
   const webDir = fileURLToPath(new URL("../../web/dist", import.meta.url));
   const app = createApp({ db, boot, token, cli, webDir: existsSync(join(webDir, "index.html")) ? webDir : null });

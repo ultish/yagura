@@ -89,6 +89,13 @@ async function referenceCheckouts(ctx: RunContext, projectId: ProjectId, seq: nu
   return out;
 }
 
+// What the next attempt (or the resumed session) is told about a scope rejection.
+export function scopeNote(attempt: number, paths: string[], hard: boolean): string {
+  return hard
+    ? `Attempt ${attempt} wrote ${paths.join(", ")}, which yagura never allows (the verify pack). Leave it alone.`
+    : `Attempt ${attempt} changed ${paths.join(", ")} outside SCOPE without saying why. If the path is not needed, revert it and commit; if it is, list it under "## Outside scope" in your handoff with the reason the work needs it.`;
+}
+
 export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt> {
   const { db, boot } = ctx;
   const unit = getUnit(db, unitId);
@@ -178,7 +185,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       (unit.scaffold ? " This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more." : "") +
       skillMethod(projectSkills),
     report: HANDOFF_TEMPLATE,
-    standing: standingFor(db, boot, project.id, isPack ? "pack" : "worker"),
+    standing: standingFor(db, project.id, isPack ? "pack" : "worker"),
   };
   const briefText = from
     ? renderResumePrompt({
@@ -271,9 +278,11 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       addUnitNote(
         db,
         unit.id,
-        scope.hard.length
-          ? `Attempt ${attempt.n} wrote ${scope.hard.map((v) => v.path).join(", ")}, which yagura never allows (the verify pack). Leave it alone.`
-          : `Attempt ${attempt.n} changed ${scope.unjustified.map((v) => v.path).join(", ")} outside SCOPE without saying why. If the path is not needed, revert it and commit; if it is, list it under "## Outside scope" in your handoff with the reason the work needs it.`,
+        scopeNote(
+          attempt.n,
+          (scope.hard.length ? scope.hard : scope.unjustified).map((v) => v.path),
+          scope.hard.length > 0,
+        ),
       );
       reject("scope", { reason: "scope", violations });
     } else if (handoff.status === "blocked") {

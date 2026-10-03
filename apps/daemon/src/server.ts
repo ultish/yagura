@@ -4,6 +4,7 @@ import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
   addUnitNote,
+  followUps,
   PROMPT_ROLES,
   defaultGuidance,
   effectiveGuidance,
@@ -594,8 +595,9 @@ export function createApp(opts: ServerOptions): Hono {
         project: projectId ? getPromptText(db, "project", projectId, role, "guidance") : null,
         source: e.source,
         sha: e.sha,
-        notes: projectId ? getPromptText(db, "project", projectId, role, "notes") : null,
+        notes: projectId ? getPromptText(db, "project", projectId, role, "notes") : role === "watchman" ? getPromptText(db, "global", "", role, "notes") : null,
         lastAttemptId: last?.id ?? null,
+        followUps: followUps(role),
       };
     }),
   });

@@ -729,7 +729,7 @@ async function main() {
         const e = effectiveGuidance(db, boot, role as PromptRole, projectId);
         console.log(`# ${role} guidance (${e.source}, version ${e.sha})\n\n${e.text}`);
         if (projectId) {
-          const notes = standingFor(db, boot, projectId, role as PromptRole);
+          const notes = standingFor(db, projectId, role as PromptRole);
           console.log(`# notes in its brief\n\n${notes || "(none)"}`);
         }
         return;

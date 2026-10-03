@@ -66,14 +66,40 @@ export function effectiveGuidance(db: Db, boot: Bootstrap, role: PromptRole, pro
   return { role, text, source, sha: sha(text) };
 }
 
-// The standing orders a role's brief carries: the notes for every role (or the older standing-orders.md), then the role's own.
-export function standingFor(db: Db, boot: Bootstrap, projectId: string, role: PromptRole): string {
-  const all = getPromptText(db, "project", projectId, "all", "notes") ?? readIfExists(layout(boot).standingOrders(projectId as never));
+// The standing orders a role's brief carries: the project's notes for every role, then the role's own.
+export function standingFor(db: Db, projectId: string, role: PromptRole): string {
+  const all = getPromptText(db, "project", projectId, "all", "notes");
   const own = getPromptText(db, "project", projectId, role, "notes");
   return [all, own].filter((t) => t && t.trim()).join("\n");
 }
 
-const readIfExists = (p: string) => (existsSync(p) ? readFileSync(p, "utf8") : "");
+// Standing orders used to be hand-edited files; they now live in the store, where the dashboard shows and edits them.
+// A project's file becomes its notes for every role, a conversation's file joins the watchman's notes; each file is then removed.
+export function importStandingFiles(db: Db, boot: Bootstrap): string[] {
+  const moved: string[] = [];
+  const projects = db.prepare("SELECT id FROM projects").all() as { id: string }[];
+  for (const { id } of projects) {
+    const path = layout(boot).standingOrders(id as never);
+    if (!existsSync(path)) continue;
+    const text = readFileSync(path, "utf8");
+    if (text.trim() && !getPromptText(db, "project", id, "all", "notes")) setPromptText(db, "project", id, "all", "notes", text);
+    rmSync(path);
+    moved.push(path);
+  }
+  const threads = db.prepare("SELECT id FROM threads").all() as { id: number }[];
+  for (const { id } of threads) {
+    const path = join(layout(boot).thread(id), "standing-orders.md");
+    if (!existsSync(path)) continue;
+    const text = readFileSync(path, "utf8").trim();
+    if (text) {
+      const now_ = getPromptText(db, "global", "", "watchman", "notes");
+      setPromptText(db, "global", "", "watchman", "notes", [now_?.trim(), `From thread ${id}:\n${text}`].filter(Boolean).join("\n\n"));
+    }
+    rmSync(path);
+    moved.push(path);
+  }
+  return moved;
+}
 
 // The plugin directory a session loads. With no overrides it is yagura's own; otherwise a copy whose skills carry the
 // effective guidance, named by its content so concurrent sessions never see a half-written copy.

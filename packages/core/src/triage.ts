@@ -168,6 +168,10 @@ const TRIAGE_REPORT = HANDOFF_TEMPLATE.replace(
 (one line per thread, every thread; then any other choice you made, as for any handoff)`,
 );
 
+export function renderScopeAsk(paths: string[]): string {
+  return `# yagura: your triage handoff was not accepted\n\nYou changed ${paths.join(", ")} outside SCOPE without saying why. You are in the same worktree on the same branch. Either revert the path and commit, or keep it and list it with the reason the fix needs it under "## Outside scope". Then end with the complete handoff again, in the same format as before.`;
+}
+
 export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt> {
   const { db, boot } = ctx;
   const unit = getUnit(db, unitId);
@@ -218,7 +222,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     method:
       "Load the yagura-review-triage skill first and follow it. Then load pstack:poteto-mode with the Skill tool (required) and follow its bug-fix playbook for each thread you fix, proving the fault with a failing check first.",
     report: TRIAGE_REPORT,
-    standing: standingFor(db, boot, project.id, "review-triage"),
+    standing: standingFor(db, project.id, "review-triage"),
   });
   write(paths.brief(project.id, unit.seq, attempt.n), briefText);
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, target: target.seq });
@@ -268,12 +272,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   if (judged.scope.unjustified.length && !judged.scope.hard.length && judged.handoff && adapter.canResume && sessionId) {
     const paths_ = judged.scope.unjustified.map((v) => v.path);
     recordEvent(db, "triage.asked_for_reason", { projectId: project.id, unitId: unit.id, attemptId: attempt.id }, { paths: paths_ });
-    judged = await judge(
-      await ask(
-        `# yagura: your triage handoff was not accepted\n\nYou changed ${paths_.join(", ")} outside SCOPE without saying why. You are in the same worktree on the same branch. Either revert the path and commit, or keep it and list it with the reason the fix needs it under "## Outside scope". Then end with the complete handoff again, in the same format as before.`,
-        sessionId,
-      ),
-    );
+    judged = await judge(await ask(renderScopeAsk(paths_), sessionId));
   }
   const { session, head, handoff, decisions, changed, scope } = judged;
   const violations = [...scope.hard, ...scope.unjustified];

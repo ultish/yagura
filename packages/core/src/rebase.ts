@@ -95,7 +95,7 @@ export async function runRebaseUnit(ctx: RunContext, unitId: UnitId): Promise<At
     ],
     method: "Load the yagura-rebase skill first and follow it. Then use cursor-team-kit:fix-merge-conflicts to resolve the conflicts.",
     report: HANDOFF_TEMPLATE,
-    standing: standingFor(db, boot, project.id, "rebase"),
+    standing: standingFor(db, project.id, "rebase"),
   });
   write(paths.brief(project.id, unit.seq, attempt.n), briefText);
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, target: target.seq });

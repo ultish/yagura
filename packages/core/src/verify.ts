@@ -309,7 +309,7 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       environmentNotes: environmentNotes(db, project.environmentId),
       deploys: !!pack.pack.deploy,
       timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
-      standing: standingFor(db, boot, project.id, "verifier"),
+      standing: standingFor(db, project.id, "verifier"),
       skills: projectSkills,
       pack: {
         copy: join(workspace!.path, repo.verifyPackPath),

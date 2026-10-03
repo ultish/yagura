@@ -105,7 +105,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
       repos: checkouts.map(({ id, path, trunkSha }) => ({ id, path, trunkSha })),
       status,
       playbooks: WORK_PLAYBOOKS,
-      standing: standingFor(db, boot, projectId, "planner"),
+      standing: standingFor(db, projectId, "planner"),
       timeboxMinutes: setting("timebox.work_seconds") / 60,
       specPath: existsSync(paths.spec(projectId)) ? paths.spec(projectId) : null,
       scaffoldSkills: resolveSetting(db, "skills.scaffold", { projectId, environmentId: project.environmentId }).value,

@@ -241,7 +241,7 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
     forbidden: ["no edits, commits, or any other change to the worktree", "no git push, rebase, merge, or branch switching", "no findings outside the change"],
     method: "Load the yagura-reviewer skill first and follow it. Then load any review skills METHOD names below and use them.",
     report: REVIEW_REPORT,
-    standing: standingFor(db, boot, project.id, "reviewer"),
+    standing: standingFor(db, project.id, "reviewer"),
   }).replace(
     "Load the yagura-reviewer skill first and follow it. Then load any review skills METHOD names below and use them.",
     `Load the yagura-reviewer skill first and follow it.${setting("skills.review").length ? ` Then load ${setting("skills.review").join(", ")} with the Skill tool (required) and use them.` : ""}`,

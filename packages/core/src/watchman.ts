@@ -1,4 +1,4 @@
-import { promptPlugin } from "./prompts.js";
+import { getPromptText, promptPlugin } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { assertThreadFree, beginTurn, currentSession, endSession, endTurn, getTurn, markSeen, runningTurn, turnRecorder } from "./turns.js";
@@ -333,13 +333,12 @@ function threadState(ctx: { db: Db; boot: RunContext["boot"] }, threadId: number
   const { db, boot } = ctx;
   const paths = layout(boot);
   const thread = getThread(db, threadId);
-  const standingPath = `${paths.thread(threadId)}/standing-orders.md`;
   return {
     thread,
     decisions: listDecisions(db, threadId, { activeOnly: true }).map((d) => ({ id: d.id, text: d.text })),
     questions: listQuestions(db, threadId, { openOnly: true }).map((q) => ({ id: q.id, text: q.text })),
     proposals: listProposals(db, threadId),
-    standing: existsSync(standingPath) ? readFileSync(standingPath, "utf8").trim() : "",
+    standing: (getPromptText(db, "global", "", "watchman", "notes") ?? "").trim(),
     catalog: catalog(db, boot),
     statuses: thread.projects.map((p) => {
       const project = getProject(db, p);

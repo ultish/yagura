@@ -14,6 +14,7 @@ interface RolePrompt {
   sha: string;
   notes: string | null;
   lastAttemptId: number | null;
+  followUps: { when: string; text: string }[];
 }
 interface PromptsView {
   projectId: string | null;
@@ -127,6 +128,47 @@ function Contract({ attemptId, role }: { attemptId: number | null; role: string 
   );
 }
 
+function FollowUps({ items }: { items: { when: string; text: string }[] }) {
+  return (
+    <details>
+      <summary style={{ cursor: "pointer", display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+        <h2 className="h2" style={{ display: "inline" }}>
+          Follow-ups
+        </h2>
+        <span className="mono muted" style={{ fontSize: 11.5 }}>
+          read-only · what yagura may send after the brief · {items.length}
+        </span>
+      </summary>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
+        {items.map((f) => (
+          <div key={f.when}>
+            <div style={{ fontSize: 13, marginBottom: 4 }}>{f.when}</div>
+            <pre
+              className="mono"
+              style={{
+                margin: 0,
+                fontSize: 12,
+                lineHeight: 1.5,
+                whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+                color: "var(--soft)",
+                background: "var(--bg2)",
+                border: "1px solid var(--line)",
+                borderRadius: 4,
+                padding: 10,
+                maxHeight: 320,
+                overflow: "auto",
+              }}
+            >
+              {f.text}
+            </pre>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function NotesBox({ label, value, save, rows = 3 }: { label: string; value: string | null; save: (text: string) => Promise<unknown>; rows?: number }) {
   const [text, setText] = useState(value ?? "");
   const action = useAction();
@@ -198,7 +240,7 @@ export function Prompts({ projectId }: { projectId: string | null }) {
         <span className="muted" style={{ fontSize: 13 }}>
           {projectId
             ? "Edits apply to each role's next agent. Every run records the version it got."
-            : "The guidance every project uses unless it sets its own. Notes are set per project."}
+            : "The guidance every project uses unless it sets its own. Notes are set per project, except the watchman's."}
         </span>
       </div>
       {projectId && (
@@ -301,14 +343,24 @@ export function Prompts({ projectId }: { projectId: string | null }) {
               <Diff before={r.default} after={draft} />
             </div>
           </details>
-          {projectId && (
+          {projectId ? (
             <NotesBox
               key={role}
               label={`Notes for ${(LABEL[role] ?? role).toLowerCase()}s`}
               value={r.notes}
               save={(text) => put({ scope: "project", role, kind: "notes", text })}
             />
+          ) : (
+            role === "watchman" && (
+              <NotesBox
+                key={role}
+                label="Notes for the watchman, in every conversation"
+                value={r.notes}
+                save={(text) => put({ scope: "global", role, kind: "notes", text })}
+              />
+            )
           )}
+          <FollowUps key={`f-${role}`} items={r.followUps} />
           {projectId ? (
             <Contract key={`c-${role}`} attemptId={r.lastAttemptId} role={role} />
           ) : (
