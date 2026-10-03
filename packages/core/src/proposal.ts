@@ -316,10 +316,10 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
         if (getProject(db, id).state === "closed") setProjectState(db, id, "active");
         out.units[a.project] = [...(out.units[a.project] ?? []), ...applyDelta(db, id, PlanDelta.parse({ add: a.units }), null).added.map((u) => `U${u.seq}`)];
       }
+      for (const p of body.projects) if (p.spec.trim()) writeSpec(db, p.id, parseSpec(p.spec), "watchman");
       resolveProposal(db, proposalId, "applied", out);
       return out;
     })();
-    for (const p of body.projects) if (p.spec.trim()) writeSpec(layout(boot).spec(p.id as ProjectId), parseSpec(p.spec));
     return result;
   } catch (e) {
     if (e instanceof ProposalInvalid || e instanceof PlanRejected) {

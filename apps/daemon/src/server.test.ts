@@ -80,6 +80,17 @@ const post = (path: string, body: unknown) =>
   app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("daemon API", () => {
+  it("shows and saves a project's spec, which asks the planner to look again", async () => {
+    expect(await (await get(`/api/projects/${project}/spec`)).json()).toEqual({ text: "", updatedBy: null, updatedAt: null });
+    const saved = await app.request(`/api/projects/${project}/spec`, {
+      method: "PUT",
+      headers: { authorization: "Bearer secret", "content-type": "application/json" },
+      body: JSON.stringify({ text: "# orders\n\n## Goal\n\nship it\n" }),
+    });
+    expect(await saved.json()).toMatchObject({ text: "# orders\n\n## Goal\n\nship it\n", updatedBy: "developer" });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'project.spec_changed'").get()).toEqual({ n: 1 });
+  });
+
   it("shows each role's guidance with where it comes from, and sets and resets a project's", async () => {
     const put = (body: object) =>
       app.request("/api/prompts", {

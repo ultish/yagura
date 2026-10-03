@@ -254,6 +254,8 @@ export function Project({ id }: { id: string }) {
               {" · "}
             </>
           )}
+          <Link to={`/p/${d.project.id}/spec`}>spec →</Link>
+          {" · "}
           <Link to={`/p/${d.project.id}/prompts`}>prompts: what its agents are told →</Link>
         </div>
       </section>

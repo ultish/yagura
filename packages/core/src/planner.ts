@@ -1,4 +1,5 @@
 import { promptPlugin, standingFor } from "./prompts.js";
+import { getSpec } from "./spec.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
@@ -107,7 +108,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
       playbooks: WORK_PLAYBOOKS,
       standing: standingFor(db, projectId, "planner"),
       timeboxMinutes: setting("timebox.work_seconds") / 60,
-      specPath: existsSync(paths.spec(projectId)) ? paths.spec(projectId) : null,
+      spec: getSpec(db, projectId)?.text ?? null,
       scaffoldSkills: resolveSetting(db, "skills.scaffold", { projectId, environmentId: project.environmentId }).value,
       references: setting("project.reference_repos"),
     });

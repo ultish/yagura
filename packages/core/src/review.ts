@@ -217,7 +217,7 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
   await addWorktree(mirror, worktree, branch, head);
   const files = await changedPaths(worktree, base as Sha);
   const stat = (await git(["diff", "--stat", `${base}..${head}`], { cwd: worktree })).trim();
-  const spec = readSpec(paths.spec(project.id));
+  const spec = readSpec(db, project.id);
   const specText = spec ? renderSpec(spec) : "";
   const conventions = ["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md"].filter((f) => existsSync(`${worktree}/${f}`));
   const briefText = renderBrief({

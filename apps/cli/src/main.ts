@@ -100,6 +100,9 @@ import {
   isBuild,
   jobLabel,
   PROMPT_ROLES,
+  getSpec,
+  recordEvent,
+  writeSpec,
   effectiveGuidance,
   setPromptText,
   standingFor,
@@ -151,6 +154,7 @@ const USAGE = `yagura — agent orchestration
   yagura settings [--project <id>] [--repo <id>]
   yagura settings export > settings.yaml     every explicitly set value, by layer
   yagura settings import <file.yaml>         set every value in the file (others are kept)
+  yagura spec <project> [--set <file | ->]          show a project's spec, or replace it (the planner looks again)
   yagura prompt show <role> [--project <id>]        a role's guidance and where it comes from (default, global, or the project's)
   yagura prompt set <role|all> (--project <id> | --global) [--notes] <file | ->   override a role's guidance, or set notes (all = every role)
   yagura prompt reset <role|all> (--project <id> | --global) [--notes]           back to the next layer
@@ -715,6 +719,15 @@ async function main() {
       const result = await gitRead(db, boot, rest);
       process.stdout.write(result.output);
       process.exitCode = result.code;
+      return;
+    }
+    case "spec": {
+      const { positionals, values } = args({ set: { type: "string" } });
+      const project = getProject(db, (positionals[0] ?? fail(USAGE)) as ProjectId);
+      if (values.set === undefined) return void process.stdout.write(getSpec(db, project.id)?.text ?? "(no spec)\n");
+      writeSpec(db, project.id, readFileSync(values.set === "-" ? 0 : values.set, "utf8"), "developer");
+      recordEvent(db, "project.spec_changed", { projectId: project.id }, { by: "developer" });
+      console.log(`spec of ${project.id} saved; the planner looks again on its next drain`);
       return;
     }
     case "prompt": {

@@ -212,7 +212,7 @@ ${sections.spec || "(no spec yet)"}${dropped.specSections ? `\n(${dropped.specSe
 ${b.catalog}
 
 ## LOOKING THINGS UP
-You can read, never change. Read, Grep, and Glob work in this thread's directory and in \`${b.projectsDir}/<project>/\` for each project in this thread (spec.md, briefs/, handoffs/, logs/). For anything else run \`yagura show <project> [unit#]\`, \`yagura logs\`, \`yagura trace <sha|issue>\`, \`yagura gates\`, \`yagura settings\`, \`yagura thread list|show|search|mentions\`, \`yagura env values|presets|notes\`, \`yagura template list\`, \`yagura project skills\`, or \`yagura git <repo> log|show|ls-tree|diff|grep|blame\` (trunk is \`origin/<default branch>\`). Every other tool and command is refused; look a fact up before you guess it or ask the developer for it.
+You can read, never change. Read, Grep, and Glob work in this thread's directory and in \`${b.projectsDir}/<project>/\` for each project in this thread (briefs/, handoffs/, logs/; each project's spec is in this brief). For anything else run \`yagura show <project> [unit#]\`, \`yagura logs\`, \`yagura trace <sha|issue>\`, \`yagura gates\`, \`yagura settings\`, \`yagura thread list|show|search|mentions\`, \`yagura env values|presets|notes\`, \`yagura template list\`, \`yagura project skills\`, or \`yagura git <repo> log|show|ls-tree|diff|grep|blame\` (trunk is \`origin/<default branch>\`). Every other tool and command is refused; look a fact up before you guess it or ask the developer for it.
 
 ## CONVERSATION (most recent, oldest first)
 ${dropped.messages ? `(${dropped.messages} older message(s) omitted; search them with \`yagura thread search --thread ${b.thread.id} "<words>"\`)\n\n` : ""}${sections.history}
@@ -350,7 +350,7 @@ function threadState(ctx: { db: Db; boot: RunContext["boot"] }, threadId: number
       };
     }),
     specs: thread.projects.flatMap((p) => {
-      const spec = readSpec(paths.spec(p));
+      const spec = readSpec(db, p);
       return spec ? [{ projectId: p, spec }] : [];
     }),
   };
@@ -567,8 +567,7 @@ export function storeTurn(
 
   const specs = new Map<string, Spec>();
   for (const s of records.spec) {
-    const path = layout(boot).spec(s.project as ProjectId);
-    const current = specs.get(s.project) ?? readSpec(path) ?? { preamble: `# ${s.project}`, sections: [] };
+    const current = specs.get(s.project) ?? readSpec(db, s.project) ?? { preamble: `# ${s.project}`, sections: [] };
     specs.set(s.project, editSpec(current, s.section, s.body));
   }
 
@@ -579,11 +578,13 @@ export function storeTurn(
       addDecision(db, { threadId, text: d.text, sourceMessageId: message.id, supersedes: d.supersedes ? refId(d.supersedes) : null });
     for (const q of records.questions) addQuestion(db, { threadId, text: q, sourceMessageId: message.id });
     for (const a of records.answered) resolveQuestion(db, refId(a.question), a.answer, message.id);
-    for (const p of specs.keys()) recordEvent(db, "project.spec_changed", { projectId: p as ProjectId }, { thread: threadId, message: message.id });
+    for (const [p, spec] of specs) {
+      writeSpec(db, p, spec, "watchman");
+      recordEvent(db, "project.spec_changed", { projectId: p as ProjectId }, { thread: threadId, message: message.id });
+    }
     const proposal = records.proposal ? addProposal(db, { threadId, messageId: message.id, body: records.proposal }) : null;
     return { message, proposal };
   })();
-  for (const [p, spec] of specs) writeSpec(layout(boot).spec(p as ProjectId), spec);
   return stored;
 }
 

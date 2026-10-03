@@ -1,3 +1,4 @@
+import { getSpec } from "./spec.js";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -150,7 +151,7 @@ describe("watchman turns", () => {
       turnLog: null,
     });
     expect(stored.message.body).toBe("b");
-    expect(readFileSync(layout(boot).spec("linked" as ProjectId), "utf8")).toBe("# linked\n\n## Scope\n\nall of it\n");
+    expect(getSpec(db, "linked")).toMatchObject({ text: "# linked\n\n## Scope\n\nall of it\n", updatedBy: "watchman" });
     expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'project.spec_changed'").get()).toEqual({ n: 1 });
   });
 
@@ -221,7 +222,7 @@ describe("watchman turns", () => {
     const turn = await runWatchmanTurn(ctx, t.id, "prototype a chain");
     expect(turn.applied).toEqual({ repos: ["proto"], projects: ["proto-a", "proto-b"], environments: ["local"], units: {} });
     expect(getProject(db, "proto-b" as ProjectId).state).toBe("framing");
-    expect(readFileSync(layout(boot).spec("proto-a" as ProjectId), "utf8")).toContain("## Scope");
+    expect(getSpec(db, "proto-a")!.text).toContain("## Scope");
 
     const second = await runWatchmanTurn(ctx, t.id, "timestamps do not matter; use local");
     expect(second.problem).toBeNull();
@@ -515,5 +516,25 @@ describe("watchman turns", () => {
     expect(listTurns(db).map((x) => x.state)).toEqual(["stopped"]);
     expect((await runWatchmanTurn(ctx, t.id, "prototype a chain")).problem).toBeNull();
     expect(listTurns(db).map((x) => x.state)).toEqual(["done", "stopped"]);
+  });
+});
+
+describe("specs in the store", () => {
+  it("moves a spec file into the store once and removes it", async () => {
+    const { importSpecFiles } = await import("./spec.js");
+    const { addProject, addRepo, openStore } = await import("./store.js");
+    const { mkdtempSync, mkdirSync, writeFileSync, existsSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const home = mkdtempSync(join(tmpdir(), "yagura-spec-"));
+    const b = { home, packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+    const d = openStore(":memory:");
+    addRepo(d, { id: "r", url: "file:///x", defaultBranch: "main" });
+    addProject(d, { id: "sp" as ProjectId, name: "S", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["r" as never] });
+    mkdirSync(join(home, "projects", "sp"), { recursive: true });
+    writeFileSync(layout(b).spec("sp" as ProjectId), "# sp\n\n## Goal\n\nship\n");
+    expect(importSpecFiles(d, b)).toEqual([layout(b).spec("sp" as ProjectId)]);
+    expect(getSpec(d, "sp")).toMatchObject({ text: "# sp\n\n## Goal\n\nship\n", updatedBy: "imported" });
+    expect(existsSync(layout(b).spec("sp" as ProjectId))).toBe(false);
   });
 });

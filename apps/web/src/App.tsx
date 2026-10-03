@@ -6,6 +6,7 @@ import { Unit } from "./pages/Unit";
 
 // The repo browser carries Monaco, so it loads only when opened.
 const Repo = lazy(() => import("./pages/Repo"));
+const Spec = lazy(() => import("./pages/Spec"));
 import { Agents } from "./pages/Agents";
 import { Home } from "./pages/Home";
 import { Project } from "./pages/Project";
@@ -101,6 +102,18 @@ function Routes() {
   if (path === "/search") return <Search />;
   if ((m = /^\/talk(?:\/(\d+))?\/?$/.exec(path))) return <Talk threadId={m[1] ? Number(m[1]) : null} />;
   if ((m = /^\/a\/(\d+)\/?$/.exec(path))) return <Agent key={m[1]} attemptId={Number(m[1])} />;
+  if ((m = /^\/p\/([a-z][a-z0-9-]*)\/spec\/?$/.exec(path)))
+    return (
+      <Suspense
+        fallback={
+          <main style={{ padding: 36 }} className="muted">
+            Loading the editor…
+          </main>
+        }
+      >
+        <Spec key={m[1]} projectId={m[1]!} />
+      </Suspense>
+    );
   if (path === "/prompts") return <Prompts key={path} projectId={null} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/prompts\/?$/.exec(path))) return <Prompts key={path} projectId={m[1]!} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/a\/(\d+)\/?$/.exec(path))) return <AgentByNo key={path} projectId={m[1]!} agentNo={Number(m[2])} />;

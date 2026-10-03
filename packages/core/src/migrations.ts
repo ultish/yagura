@@ -409,6 +409,17 @@ CREATE TABLE prompt_versions (
 ALTER TABLE attempts ADD COLUMN guidance_sha TEXT;
 `,
   },
+  {
+    version: 28,
+    sql: `
+CREATE TABLE project_specs (
+  project_id TEXT PRIMARY KEY REFERENCES projects (id),
+  text TEXT NOT NULL,
+  updated_by TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

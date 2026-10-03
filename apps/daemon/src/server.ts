@@ -4,6 +4,9 @@ import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
   addUnitNote,
+  getSpec,
+  recordEvent,
+  writeSpec,
   followUps,
   PROMPT_ROLES,
   defaultGuidance,
@@ -600,6 +603,23 @@ export function createApp(opts: ServerOptions): Hono {
         followUps: followUps(role),
       };
     }),
+  });
+  app.get("/api/projects/:id/spec", (c) => {
+    const project = getProject(db, c.req.param("id") as ProjectId);
+    return c.json(getSpec(db, project.id) ?? { text: "", updatedBy: null, updatedAt: null });
+  });
+  app.put("/api/projects/:id/spec", async (c) => {
+    const project = getProject(db, c.req.param("id") as ProjectId);
+    const b = (await c.req.json().catch(() => ({}))) as { text?: unknown; since?: string | null };
+    if (typeof b.text !== "string") return c.json({ error: "text is required" }, 400);
+    const current = getSpec(db, project.id);
+    if (b.since !== undefined && (current?.updatedAt ?? null) !== b.since)
+      return c.json({ error: `the spec was changed (by ${current?.updatedBy ?? "someone"}) since you opened it; reload to see it before saving` }, 409);
+    db.transaction(() => {
+      writeSpec(db, project.id, b.text as string, "developer");
+      recordEvent(db, "project.spec_changed", { projectId: project.id }, { by: "developer" });
+    })();
+    return c.json(getSpec(db, project.id));
   });
   app.get("/api/prompts", (c) => {
     const projectId = c.req.query("project") || null;
