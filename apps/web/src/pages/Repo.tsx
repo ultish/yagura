@@ -5,6 +5,7 @@ import { clock } from "../lib/format";
 import { Inline } from "../lib/markdown";
 import { followTheme, languageOf, monaco } from "../lib/monaco";
 import { Link } from "../ui/Link";
+import { DisagreeButton } from "../ui/Disagree";
 import { DisagreeForm } from "./Unit";
 
 type Tab = { kind: "file"; path: string } | { kind: "change"; sha: string; label: string };
@@ -247,7 +248,14 @@ function ChangeView({ repoId, sha, projectOf, onOpen }: { repoId: string; sha: s
       <div className="repo-pad">
         {diff.error && <div className="s-bell">{diff.error}</div>}
         {!diff.data && !diff.error && <div className="muted">Loading the diff…</div>}
-        {diff.data && <DiffPanel data={diff.data} stats={data.stats} onOpen={onOpen} />}
+        {diff.data && (
+          <DiffPanel
+            data={diff.data}
+            stats={data.stats}
+            onOpen={onOpen}
+            disagree={data.commit.projectId && data.commit.seq !== null ? { projectId: data.commit.projectId, seq: data.commit.seq } : undefined}
+          />
+        )}
         {data.truncated && <div className="muted">The rest of this change is too large to show.</div>}
       </div>
     </div>
@@ -310,9 +318,7 @@ function Rail({ commit, mode, onShowChange }: { commit: CommitUnit | null; mode:
       </div>
       {known && all && !disagreeing && (
         <div>
-          <button type="button" className="btn sm story-disagree" onClick={() => setDisagreeing(true)}>
-            Disagree…
-          </button>
+          <DisagreeButton onClick={() => setDisagreeing(true)} />
         </div>
       )}
       {known && all && disagreeing && (

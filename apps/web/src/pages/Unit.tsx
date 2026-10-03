@@ -6,10 +6,10 @@ import { RoleIcon } from "../ui/RoleIcon";
 import { DiffPanel, type DiffData } from "../ui/evidence";
 import { Link } from "../ui/Link";
 import { RunningDot } from "../ui/Running";
+import { DisagreeButton, DisagreeForm as Disagreement } from "../ui/Disagree";
 import { useAction } from "../ui/rows";
 
 const JUDGMENT: Record<string, string> = { chose: "choice", noted: "note" };
-const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "7px 10px", fontSize: 14, width: "100%" } as const;
 
 function Line({ l }: { l: StoryLine }) {
   return (
@@ -34,68 +34,7 @@ function Line({ l }: { l: StoryLine }) {
 
 export function DisagreeForm({ projectId, seq, entry, onDone }: { projectId: string; seq: number; entry: StoryEntry; onDone: () => void }) {
   const first = entry.lines.find((l) => l.kind === "chose" || l.kind === "noted") ?? entry.lines[0]!;
-  const [ref, setRef] = useState(first.ref);
-  const [reason, setReason] = useState("");
-  const [action, setAction] = useState<"follow-up" | "note">("follow-up");
-  const save = useAction();
-  const id = `disagree-${entry.lines[0]!.ref}`;
-  return (
-    <form
-      className="story-form"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const about = entry.lines.find((l) => l.ref === ref)!.text;
-        void save.run(async () => {
-          await api(`/api/projects/${projectId}/units/${seq}/disagreements`, { body: { ref, about, reason, action } });
-          onDone();
-        });
-      }}
-    >
-      <fieldset>
-        <legend>About which part?</legend>
-        {entry.lines.map((l) => (
-          <label key={l.ref} className="story-choice">
-            <input type="radio" name={`${id}-about`} checked={ref === l.ref} onChange={() => setRef(l.ref)} />
-            <span>
-              <Inline text={l.text} />
-            </span>
-          </label>
-        ))}
-      </fieldset>
-      <label className="story-field">
-        Why
-        <textarea
-          id={`${id}-why`}
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          required
-          rows={3}
-          placeholder="What is wrong, in your words. It is kept with the decision and shown to the agents that act on it."
-          style={field}
-        />
-      </label>
-      <fieldset>
-        <legend>What should happen</legend>
-        <label className="story-choice">
-          <input type="radio" name={`${id}-then`} checked={action === "follow-up"} onChange={() => setAction("follow-up")} />
-          <span>Plan a follow-up unit that fixes it forward (trunk is never rewritten)</span>
-        </label>
-        <label className="story-choice">
-          <input type="radio" name={`${id}-then`} checked={action === "note"} onChange={() => setAction("note")} />
-          <span>Only record it: later verifiers of this repo read it as context</span>
-        </label>
-      </fieldset>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <button className="btn sm lamp" type="submit" disabled={save.busy || !reason.trim()}>
-          Record disagreement
-        </button>
-        <button className="btn sm" type="button" onClick={onDone}>
-          Cancel
-        </button>
-        {save.error && <span className="s-bell">{save.error}</span>}
-      </div>
-    </form>
-  );
+  return <Disagreement unit={{ projectId, seq }} options={entry.lines.map((l) => ({ ref: l.ref, text: l.text }))} initial={first.ref} onDone={onDone} />;
 }
 
 function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; reload: () => void }) {
@@ -156,9 +95,7 @@ function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; 
         )}
         {entry.lines.length > 0 && entry.actor !== "yagura" && !open && (
           <div>
-            <button className="btn sm story-disagree" type="button" onClick={() => setOpen(true)}>
-              Disagree
-            </button>
+            <DisagreeButton onClick={() => setOpen(true)} />
           </div>
         )}
         {open && (
@@ -286,7 +223,12 @@ function CodeTab({ story }: { story: UnitStory }) {
       {diff.error && <div className="s-bell">{diff.error}</div>}
       {!diff.data && !diff.error && <div className="muted">Loading the diff…</div>}
       {diff.data && (
-        <DiffPanel data={diff.data} stats={code.stats} editorLink={code.source === "landed" ? (f) => editor(`file=${encodeURIComponent(f)}&`) : undefined} />
+        <DiffPanel
+          data={diff.data}
+          stats={code.stats}
+          disagree={{ projectId: story.projectId, seq: u.seq }}
+          editorLink={code.source === "landed" ? (f) => editor(`file=${encodeURIComponent(f)}&`) : undefined}
+        />
       )}
       {code.truncated && <div className="muted repo-pad">The rest of this change is too large to show.</div>}
     </div>

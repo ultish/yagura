@@ -1469,3 +1469,8 @@ b .role-icon,
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+.diff-file .story-disagree {
+  margin: 2px 0;
+  align-self: center;
+}

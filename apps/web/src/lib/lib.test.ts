@@ -3,6 +3,7 @@ import type { BellItem, LogLine, ProjectDetail, ProjectSummary, UnitView } from 
 import { lineDiff } from "./linediff";
 import { clip, clock, duration, modelName, when } from "./format";
 import { announce, faviconHref, newItems, tabTitle } from "./bellalert";
+import { codeAbout } from "./disagree";
 import { ifUnanswered } from "./gates";
 import { groupHits, highlight } from "./search";
 import { mentionHref, mentionQuery } from "./mention";
@@ -361,5 +362,17 @@ describe("the bell outside the page", () => {
   it("adds a vermilion lamp to the icon only when ringing", () => {
     expect(faviconHref(true)).toContain("%23e5553a");
     expect(faviconHref(false)).not.toContain("%23e5553a");
+  });
+});
+
+describe("disagreeing with code", () => {
+  it("points at the selected lines with a short quote, or at the file's change when nothing is selected", () => {
+    expect(codeAbout("app/main.py", { start: 3, end: 5, text: "  x = 1\n  y = 2\n" })).toEqual({
+      ref: "code:app/main.py:3-5",
+      about: "app/main.py:3-5 — x = 1 y = 2",
+    });
+    expect(codeAbout("app/main.py", { start: 7, end: 7, text: "return None" })).toEqual({ ref: "code:app/main.py:7", about: "app/main.py:7 — return None" });
+    expect(codeAbout("app/main.py", null)).toEqual({ ref: "code:app/main.py", about: "app/main.py: the change to this file" });
+    expect(codeAbout("a.txt", { start: 1, end: 1, text: "x".repeat(400) }).about).toHaveLength("a.txt:1 — ".length + 160);
   });
 });

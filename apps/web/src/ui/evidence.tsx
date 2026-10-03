@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
+import { codeAbout, type CodeSelection } from "../lib/disagree";
+import { DisagreeButton, DisagreeForm, type DisagreeOption } from "./Disagree";
 import { streamUrl, useApi, type EvidenceRun } from "../api";
 import { followTheme, languageOf, monaco } from "../lib/monaco";
 import { duration, sha } from "../lib/format";
@@ -135,7 +137,7 @@ interface DiffFile {
 const STATUS_MARK = { added: "A", modified: "M", deleted: "D" } as const;
 
 // The same editor as the repo browser, in diff mode: both sides of the file, changes marked, unchanged stretches folded.
-function FileDiff({ file, sideBySide }: { file: DiffFile; sideBySide: boolean }) {
+function FileDiff({ file, sideBySide, selection }: { file: DiffFile; sideBySide: boolean; selection: MutableRefObject<CodeSelection | null> }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
   useEffect(() => {
@@ -155,7 +157,16 @@ function FileDiff({ file, sideBySide }: { file: DiffFile; sideBySide: boolean })
       fontSize: 12.5,
       contextmenu: false,
     });
+    const mod = editor.current.getModifiedEditor();
+    const watch = mod.onDidChangeCursorSelection((e) => {
+      const model = mod.getModel();
+      selection.current =
+        e.selection.isEmpty() || !model
+          ? null
+          : { start: e.selection.startLineNumber, end: e.selection.endLineNumber, text: model.getValueInRange(e.selection) };
+    });
     return () => {
+      watch.dispose();
       const m = editor.current?.getModel();
       editor.current?.dispose();
       m?.original.dispose();
@@ -189,14 +200,18 @@ export function DiffPanel({
   stats,
   editorLink,
   onOpen,
+  disagree,
 }: {
   data: DiffData;
   stats?: Record<string, { added: number; removed: number }>;
   editorLink?: (path: string) => string;
   onOpen?: (path: string) => void;
+  disagree?: { projectId: string; seq: number };
 }) {
   const [at, setAt] = useState(0);
   const [sideBySide, setSideBySide] = useState(false);
+  const selection = useRef<CodeSelection | null>(null);
+  const [disagreeing, setDisagreeing] = useState<{ path: string; options: DisagreeOption[]; hint?: string } | null>(null);
   if (data.files === null) return <div className="empty">No diff: this attempt has no committed head yet, or its commits are gone from the mirror.</div>;
   if (!data.files.length) return <div className="empty">The head is the same as trunk; nothing changed.</div>;
   const file = data.files[Math.min(at, data.files.length - 1)]!;
@@ -220,7 +235,16 @@ export function DiffPanel({
       <div className="diff-files" role="list">
         {data.files.map((f, i) => (
           <div key={f.path} role="listitem" className={`diff-file ${f.status}${f === file ? " on" : ""}`}>
-            <button type="button" className="diff-name" onClick={() => setAt(i)} aria-current={f === file}>
+            <button
+              type="button"
+              className="diff-name"
+              onClick={() => {
+                setAt(i);
+                setDisagreeing(null);
+                selection.current = null;
+              }}
+              aria-current={f === file}
+            >
               <span className="diff-mark">{STATUS_MARK[f.status]}</span>
               {f.path}
             </button>
@@ -229,6 +253,21 @@ export function DiffPanel({
                 <span className="s-pine">+{stats[f.path]!.added}</span>
                 <span className="s-bell">−{stats[f.path]!.removed}</span>
               </>
+            )}
+            {disagree && (
+              <DisagreeButton
+                onClick={() => {
+                  setAt(i);
+                  const sel = f === file ? selection.current : null;
+                  const here = codeAbout(f.path, sel);
+                  const whole = codeAbout(f.path, null);
+                  setDisagreeing({
+                    path: f.path,
+                    options: [...(sel ? [{ ref: here.ref, text: here.about, plain: true }] : []), { ref: whole.ref, text: whole.about, plain: true }],
+                    hint: sel ? undefined : "To point at particular lines, select them in the diff first, then press Disagree… again.",
+                  });
+                }}
+              />
             )}
             {editorLink && f.status !== "deleted" && (
               <Link to={editorLink(f.path)} title="Open the whole file, each line tagged with the unit that wrote it">
@@ -248,7 +287,19 @@ export function DiffPanel({
       ) : file.tooLarge ? (
         <div className="empty">{file.path} is over 1 MB, too large to show here.</div>
       ) : (
-        <FileDiff file={file} sideBySide={sideBySide} />
+        <>
+          {disagree && disagreeing && disagreeing.path === file.path && (
+            <DisagreeForm
+              key={disagreeing.options.map((o) => o.ref).join("|")}
+              unit={disagree}
+              options={disagreeing.options}
+              hint={disagreeing.hint}
+              where
+              onDone={() => setDisagreeing(null)}
+            />
+          )}
+          <FileDiff file={file} sideBySide={sideBySide} selection={selection} />
+        </>
       )}
     </div>
   );
