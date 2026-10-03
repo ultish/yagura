@@ -1435,12 +1435,11 @@ b .role-icon,
 .goal-link {
   cursor: pointer;
   color: var(--amber-text);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
 .goal-link:hover {
   color: var(--amber-hover);
+  text-decoration: underline;
 }
 .goal-link:focus-visible {
   outline: 1px solid var(--amber);
@@ -1448,13 +1447,12 @@ b .role-icon,
 }
 .beacon-label text {
   fill: var(--amber-text) !important;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
   text-underline-offset: 4px;
 }
 .beacon-label:hover text,
 .beacon-label:focus-visible text {
   fill: var(--amber-hover) !important;
+  text-decoration: underline;
 }
 .beacon-label:focus-visible {
   outline: none;
