@@ -5,8 +5,7 @@ import { clock } from "../lib/format";
 import { Inline } from "../lib/markdown";
 import { followTheme, languageOf, monaco } from "../lib/monaco";
 import { Link } from "../ui/Link";
-import { DisagreeButton } from "../ui/Disagree";
-import { DisagreeForm } from "./Unit";
+import { DisagreeButton, DisagreeForm, type DisagreeOption } from "../ui/Disagree";
 
 type Tab = { kind: "file"; path: string } | { kind: "change"; sha: string; label: string };
 const firstSentence = (text: string) => {
@@ -148,7 +147,7 @@ function CodeView({
   path: string;
   projectId: string | null;
   line: number | null;
-  onPick: (c: CommitUnit) => void;
+  onPick: (c: CommitUnit, at: { line: number; text: string }) => void;
 }) {
   const { data: file, error } = useApi<FileView>(`/api/repos/${repoId}/file?path=${encodeURIComponent(path)}`);
   const host = useRef<HTMLDivElement>(null);
@@ -204,11 +203,11 @@ function CodeView({
       ed.revealLineInCenter(line);
       ed.setPosition({ lineNumber: line, column: 1 });
       const sha = file.blame[line - 1];
-      if (sha && file.commits[sha]) onPick(file.commits[sha]!);
+      if (sha && file.commits[sha]) onPick(file.commits[sha]!, { line, text: ed.getModel()?.getLineContent(line) ?? "" });
     }
     const pickLine = (line: number | undefined) => {
       const sha = line ? file.blame[line - 1] : undefined;
-      if (sha && file.commits[sha]) onPick(file.commits[sha]!);
+      if (line && sha && file.commits[sha]) onPick(file.commits[sha]!, { line, text: ed.getModel()?.getLineContent(line) ?? "" });
     };
     // A click on an editor without focus only focuses it, so the mouse is read directly; the cursor covers the keyboard.
     const subs = [ed.onMouseDown((e) => pickLine(e.target.position?.lineNumber)), ed.onDidChangeCursorPosition((e) => pickLine(e.position.lineNumber))];
@@ -262,14 +261,35 @@ function ChangeView({ repoId, sha, projectOf, onOpen }: { repoId: string; sha: s
   );
 }
 
-function Rail({ commit, mode, onShowChange }: { commit: CommitUnit | null; mode: "line" | "change"; onShowChange: (c: CommitUnit) => void }) {
+function Rail({
+  commit,
+  mode,
+  lineAt,
+  cameFrom,
+  onShowChange,
+}: {
+  commit: CommitUnit | null;
+  mode: "line" | "change";
+  lineAt: { path: string; line: number; text: string } | null;
+  cameFrom: { projectId: string; seq: number } | null;
+  onShowChange: (c: CommitUnit) => void;
+}) {
   const known = commit?.projectId && commit.seq !== null;
   const { data: story, reload } = useApi<UnitStory>(known ? `/api/projects/${commit!.projectId}/units/${commit!.seq}/story` : null);
   const [disagreeing, setDisagreeing] = useState(false);
-  useEffect(() => setDisagreeing(false), [commit?.sha]);
+  useEffect(() => setDisagreeing(false), [commit?.sha, lineAt?.path, lineAt?.line]);
   if (!commit) return <aside className="repo-rail muted">Select a line to see the unit behind it.</aside>;
   const lines = story?.entries.filter((e) => e.lines.length && e.actor !== "yagura").flatMap((e) => e.lines) ?? [];
-  const all: StoryEntry | null = story && lines.length ? { ...story.entries[0]!, lines } : null;
+  // A disagreement lives on a unit. A change yagura did not make has none, so it goes on the unit the reader came from.
+  const unit = known ? { projectId: commit.projectId!, seq: commit.seq! } : cameFrom;
+  const quote = lineAt ? lineAt.text.trim().replace(/\s+/g, " ").slice(0, 160) : "";
+  const options: DisagreeOption[] = [
+    ...(lineAt && mode === "line"
+      ? [{ ref: `code:${lineAt.path}:${lineAt.line}`, text: `${lineAt.path}:${lineAt.line}${quote ? ` — ${quote}` : ""}`, plain: true }]
+      : []),
+    ...lines.map((l) => ({ ref: l.ref, text: l.text })),
+    ...(lines.length ? [] : [{ ref: `commit:${commit.sha}`, text: `${short(commit.sha)} · ${commit.subject}`, plain: true }]),
+  ];
   return (
     <aside className="repo-rail">
       <div className="repo-rail-who">{mode === "change" ? "This change is" : "Selected line written by"}</div>
@@ -309,23 +329,43 @@ function Rail({ commit, mode, onShowChange }: { commit: CommitUnit | null; mode:
         </>
       )}
       <div className="repo-links">
-        {known && <Link to={`/p/${commit.projectId}/u/${commit.seq}`}>Open the full story</Link>}
-        {mode === "line" && (
-          <button type="button" className="linkish" onClick={() => onShowChange(commit)}>
-            Show this change
+        {known ? (
+          <Link to={`/p/${commit.projectId}/u/${commit.seq}`}>Open the full story</Link>
+        ) : (
+          <span className="muted" title="Yagura did not make this change, so there is no unit story">
+            No unit story
+          </span>
+        )}
+        {mode === "line" ? (
+          <button
+            type="button"
+            className="linkish"
+            title="Open the whole commit that last wrote this line: every file it changed, not just this one"
+            onClick={() => onShowChange(commit)}
+          >
+            Show the whole commit
           </button>
+        ) : (
+          <span className="muted">Showing the whole commit</span>
         )}
       </div>
-      {known && all && !disagreeing && (
+      {!disagreeing && (
         <div>
-          <DisagreeButton onClick={() => setDisagreeing(true)} />
+          <DisagreeButton
+            disabled={!unit}
+            title={
+              unit ? undefined : "This change was not made by a yagura unit, and you did not open the browser from one, so there is no unit to record it on"
+            }
+            onClick={() => setDisagreeing(true)}
+          />
         </div>
       )}
-      {known && all && disagreeing && (
+      {unit && disagreeing && (
         <DisagreeForm
-          projectId={commit.projectId!}
-          seq={commit.seq!}
-          entry={all}
+          unit={unit}
+          options={options}
+          hint={known ? undefined : `Yagura did not make this change, so this is recorded on U${unit.seq}, the unit you came from.`}
+          where={!known}
           onDone={() => {
             setDisagreeing(false);
             reload();
@@ -343,6 +383,7 @@ export default function Repo({ id }: { id: string }) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [picked, setPicked] = useState<CommitUnit | null>(null);
+  const [pickedLine, setPickedLine] = useState<{ path: string; line: number; text: string } | null>(null);
   const [lastFile, setLastFile] = useState<string | null>(null);
   const projectId = repos?.find((r) => r.repo.id === id)?.projects.length === 1 ? repos.find((r) => r.repo.id === id)!.projects[0]!.id : null;
   const projectOf = (c: CommitUnit) => (c.seq === null ? short(c.sha) : unitLabel(c, projectId));
@@ -457,13 +498,22 @@ export default function Repo({ id }: { id: string }) {
               path={current.path}
               projectId={projectId}
               line={current.path === query.get("file") ? line : null}
-              onPick={setPicked}
+              onPick={(c, at) => {
+                setPicked(c);
+                setPickedLine({ path: current.path, ...at });
+              }}
             />
           )}
           {current?.kind === "change" && <ChangeView repoId={id} sha={current.sha} projectOf={projectOf} onOpen={(path) => open({ kind: "file", path })} />}
           {!current && <div className="muted repo-pad">Open a file from the explorer, or a change from the history.</div>}
         </section>
-        <Rail commit={railCommit} mode={showingChange ? "change" : "line"} onShowChange={(c) => open({ kind: "change", sha: c.sha, label: projectOf(c) })} />
+        <Rail
+          commit={railCommit}
+          mode={showingChange ? "change" : "line"}
+          lineAt={showingChange ? null : pickedLine}
+          cameFrom={from ? { projectId: from[1]!, seq: Number(from[2]) } : null}
+          onShowChange={(c) => open({ kind: "change", sha: c.sha, label: projectOf(c) })}
+        />
       </div>
     </main>
   );

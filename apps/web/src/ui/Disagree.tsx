@@ -14,9 +14,9 @@ export interface DisagreeOption {
 
 const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "7px 10px", fontSize: 14, width: "100%" } as const;
 
-export function DisagreeButton({ onClick }: { onClick: () => void }) {
+export function DisagreeButton({ onClick, disabled, title }: { onClick: () => void; disabled?: boolean; title?: string }) {
   return (
-    <button className="btn sm story-disagree" type="button" onClick={onClick}>
+    <button className="btn sm story-disagree" type="button" onClick={onClick} disabled={disabled} title={title}>
       Disagree…
     </button>
   );
