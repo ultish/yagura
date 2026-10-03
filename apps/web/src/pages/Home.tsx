@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, navigate, useApi, useNow, type AgentRow, type BellItem, type ProjectSummary, type Thread } from "../api";
 import { roleOf } from "../lib/units";
+import { RoleLabel } from "../ui/RoleIcon";
 import { duration, tokens } from "../lib/format";
 import { Watch, WatchStrip } from "../scene/Watch";
 import { Link } from "../ui/Link";
@@ -95,7 +96,14 @@ function Lanterns({ now }: { now: number }) {
           <span className="shoji" style={{ width: 12, height: 16, borderRadius: 2, background: "var(--lamp)", flexShrink: 0 }} />
           <span style={{ flexGrow: 1, minWidth: 0 }}>
             <span style={{ display: "block", fontSize: 14.5 }}>
-              {a.unit.projectId} · {a.unit.type === "plan" ? "planner" : `${role(a)} A${a.agentNo}`}
+              {a.unit.projectId} ·{" "}
+              {a.unit.type === "plan" ? (
+                <RoleLabel role="planner" />
+              ) : (
+                <>
+                  <RoleLabel role={role(a)} /> A{a.agentNo}
+                </>
+              )}
             </span>
             <span className="mono muted" style={{ display: "block", fontSize: 12 }}>
               {a.startedAt ? duration(now - Date.parse(a.startedAt)) : "starting"}

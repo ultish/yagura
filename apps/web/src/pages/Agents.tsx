@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, useApi, useNow, type AgentRow, type WatchmanTurnRow } from "../api";
 import { roleOf } from "../lib/units";
+import { RoleLabel } from "../ui/RoleIcon";
 import { duration, modelName, tokens, usd, when } from "../lib/format";
 import { Link } from "../ui/Link";
 import { RunningDot } from "../ui/Running";
@@ -37,7 +38,9 @@ export function Agents() {
         facts={
           <>
             <span>
-              <b>watchman</b>
+              <b>
+                <RoleLabel role="watchman" />
+              </b>
             </span>
             <span>{modelName(t.model)}</span>
             <span>{usd(t.costUsd)}</span>
@@ -87,7 +90,7 @@ export function Agents() {
         key={a.id}
         seq={
           <Link to={`/a/${a.id}`}>
-            {a.unit.projectId} · {roleOf(a.unit.type, a.harness)} A{a.agentNo}
+            {a.unit.projectId} · <RoleLabel role={roleOf(a.unit.type, a.harness)} /> A{a.agentNo}
           </Link>
         }
         goal={<Inline text={a.target?.goal ?? a.unit.goal} />}

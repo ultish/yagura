@@ -14,6 +14,7 @@ import {
 } from "../api";
 import { slotLine } from "./environment-values";
 import { roleOf } from "../lib/units";
+import { RoleLabel } from "../ui/RoleIcon";
 import { clock, duration, modelName, tokens, when } from "../lib/format";
 import { Inline, Markdown } from "../lib/markdown";
 import { buildTimeline, type Step } from "../lib/timeline";
@@ -321,7 +322,7 @@ function AgentFlow({ d }: { d: AttemptDetail }) {
   const next = agents[at + 1];
   const hop = (x: (typeof agents)[number], arrow: string) => (
     <Link to={`/a/${x.attemptId}`} style={{ textDecoration: "none" }}>
-      {arrow} {x.role} A{x.agentNo} <span className={`chip story-${x.tone}`}>{x.outcome}</span>
+      {arrow} <RoleLabel role={x.role} /> A{x.agentNo} <span className={`chip story-${x.tone}`}>{x.outcome}</span>
     </Link>
   );
   return (
@@ -341,11 +342,11 @@ function AgentFlow({ d }: { d: AttemptDetail }) {
             {i > 0 && <span className="muted">→</span>}
             {x.attemptId === d.attempt.id ? (
               <b aria-current="step" style={{ borderBottom: "2px solid var(--lamp)" }}>
-                A{x.agentNo} {x.role}
+                A{x.agentNo} <RoleLabel role={x.role} />
               </b>
             ) : (
               <Link to={`/a/${x.attemptId}`} title={`${x.outcome}${x.counted ? "" : " · not counted"}`}>
-                A{x.agentNo} {x.role}
+                A{x.agentNo} <RoleLabel role={x.role} />
               </Link>
             )}
             <span className={`story-${x.tone}`} title={x.outcome}>
@@ -454,7 +455,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
           <Link to={`/p/${u.projectId}`} style={{ textDecoration: "none" }}>
             {u.projectId}
           </Link>{" "}
-          / <Link to={`/p/${u.projectId}/u/${d.target?.seq ?? u.seq}`}>U{d.target?.seq ?? u.seq}</Link> / {role} A{a.agentNo}
+          / <Link to={`/p/${u.projectId}/u/${d.target?.seq ?? u.seq}`}>U{d.target?.seq ?? u.seq}</Link> / <RoleLabel role={role} /> A{a.agentNo}
           {a.resumesAttemptId && (
             <>
               {" "}

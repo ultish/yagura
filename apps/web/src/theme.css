@@ -1301,3 +1301,23 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+
+.role-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.role-icon {
+  flex: none;
+  color: var(--muted);
+}
+a:hover > .role-icon,
+a:hover .role-icon,
+b .role-icon,
+.story-who .role-icon {
+  color: inherit;
+}
+.story-who .role-icon {
+  margin-right: 6px;
+  vertical-align: -2px;
+}

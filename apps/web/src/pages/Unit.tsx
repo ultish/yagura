@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, useApi, useQuery, type StoryEntry, type StoryLine, type UnitCode, type UnitStory } from "../api";
 import { clip, clock, duration, modelName, when } from "../lib/format";
 import { Inline } from "../lib/markdown";
+import { RoleIcon } from "../ui/RoleIcon";
 import { Link } from "../ui/Link";
 import { RunningDot } from "../ui/Running";
 import { useAction } from "../ui/rows";
@@ -106,6 +107,7 @@ function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; 
       <div className="story-body">
         <div className="story-head">
           <span className="story-who">
+            <RoleIcon role={entry.actor} />
             {a ? (
               <Link to={`/a/${a.id}`}>
                 <b>{entry.who}</b>
