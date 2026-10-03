@@ -188,10 +188,12 @@ export function DiffPanel({
   data,
   stats,
   editorLink,
+  onOpen,
 }: {
   data: DiffData;
   stats?: Record<string, { added: number; removed: number }>;
   editorLink?: (path: string) => string;
+  onOpen?: (path: string) => void;
 }) {
   const [at, setAt] = useState(0);
   const [sideBySide, setSideBySide] = useState(false);
@@ -229,6 +231,11 @@ export function DiffPanel({
               </>
             )}
             {editorLink && f.status !== "deleted" && <Link to={editorLink(f.path)}>open in editor →</Link>}
+            {onOpen && f.status !== "deleted" && (
+              <button type="button" className="diff-open" onClick={() => onOpen(f.path)}>
+                open in editor →
+              </button>
+            )}
           </div>
         ))}
       </div>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DiffPanel, type DiffData } from "../ui/evidence";
 import { useApi, useQuery, type CommitUnit, type FileView, type StoryEntry, type UnitStory } from "../api";
 import { clock } from "../lib/format";
 import { Inline } from "../lib/markdown";
@@ -222,10 +223,16 @@ function CodeView({
 }
 
 function ChangeView({ repoId, sha, projectOf, onOpen }: { repoId: string; sha: string; projectOf: (c: CommitUnit) => string; onOpen: (path: string) => void }) {
-  const { data, error } = useApi<{ commit: CommitUnit; files: string[]; diff: string; truncated: boolean }>(`/api/repos/${repoId}/change/${sha}`);
+  const { data, error } = useApi<{
+    commit: CommitUnit;
+    base: string;
+    files: string[];
+    stats: Record<string, { added: number; removed: number }>;
+    truncated: boolean;
+  }>(`/api/repos/${repoId}/change/${sha}`);
+  const diff = useApi<DiffData>(data ? `/api/repos/${repoId}/diff-files?base=${data.base}&head=${data.commit.sha}` : null);
   if (error) return <div className="s-bell repo-pad">{error}</div>;
   if (!data) return <div className="muted repo-pad">Loading…</div>;
-  const rows = data.diff.split("\n").filter((l) => !l.startsWith("index ") && !l.startsWith("+++ ") && !l.startsWith("--- "));
   return (
     <div className="repo-change">
       <div className="repo-change-head">
@@ -233,27 +240,15 @@ function ChangeView({ repoId, sha, projectOf, onOpen }: { repoId: string; sha: s
           <b>{projectOf(data.commit)}</b> · <Inline text={data.commit.subject} />
         </div>
         {data.commit.verdict && <div className="s-pine">✓ {data.commit.verdict}</div>}
-        <div className="repo-chips">
-          {data.files.map((f) => (
-            <button key={f} type="button" className="chip" onClick={() => onOpen(f)}>
-              {f}
-            </button>
-          ))}
-        </div>
         <div className="muted mono" style={{ fontSize: 12 }}>
           landed {clock(data.commit.date)} · {short(data.commit.sha)}
         </div>
       </div>
-      <div className="repo-diff mono">
-        {rows.map((l, i) => {
-          const cls = l.startsWith("diff --git") ? "file" : l.startsWith("@@") ? "hunk" : l.startsWith("+") ? "add" : l.startsWith("-") ? "del" : "";
-          return (
-            <div key={i} className={`repo-diff-row ${cls}`}>
-              {cls === "file" ? l.replace(/^diff --git a\/(\S+).*/, "$1") : l || " "}
-            </div>
-          );
-        })}
-        {data.truncated && <div className="muted repo-pad">The rest of this change is too large to show.</div>}
+      <div className="repo-pad">
+        {diff.error && <div className="s-bell">{diff.error}</div>}
+        {!diff.data && !diff.error && <div className="muted">Loading the diff…</div>}
+        {diff.data && <DiffPanel data={diff.data} stats={data.stats} onOpen={onOpen} />}
+        {data.truncated && <div className="muted">The rest of this change is too large to show.</div>}
       </div>
     </div>
   );

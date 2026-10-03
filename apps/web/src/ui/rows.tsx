@@ -51,6 +51,7 @@ export function Row({
   seq,
   goal,
   to,
+  tag,
   status,
   tone,
   facts,
@@ -60,6 +61,7 @@ export function Row({
   seq: ReactNode;
   goal: ReactNode;
   to?: string;
+  tag?: ReactNode;
   status?: ReactNode;
   tone?: string;
   facts?: ReactNode;
@@ -70,7 +72,10 @@ export function Row({
     <div className="item">
       <span className="seq">{seq}</span>
       <div className="body">
-        <div className="goal">{to ? <GoalLink to={to}>{goal}</GoalLink> : goal}</div>
+        <div className="goal">
+          {to ? <GoalLink to={to}>{goal}</GoalLink> : goal}
+          {tag}
+        </div>
         {status && <div className={`status s-${tone ?? "muted"}`}>{status}</div>}
         {facts && <div className="facts">{facts}</div>}
         {extra}

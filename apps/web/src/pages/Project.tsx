@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api, navigate, useApi, useNow, type ProjectDetail, type UnitView } from "../api";
 import { modelName, sha, spend, tokens } from "../lib/format";
+import { Package } from "lucide-react";
 import { type Group, groupOf, isBuild, jobName, latestAttempt, openGateFor, statusLine, verifiersOf } from "../lib/units";
 import { Inline } from "../lib/markdown";
 import { Beacons } from "../scene/Beacons";
@@ -55,6 +56,13 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
       seq={<Link to={`/p/${d.project.id}/u/${u.seq}`}>U{u.seq}</Link>}
       goal={<Inline text={u.goal} />}
       to={`/p/${d.project.id}/u/${u.seq}`}
+      tag={
+        d.repos.length > 1 && u.repoId ? (
+          <Link className="repo-tag" to={`/r/${u.repoId}`}>
+            {u.repoId}
+          </Link>
+        ) : null
+      }
       status={<Inline text={status.text} />}
       tone={status.tone}
       facts={facts}
@@ -177,7 +185,6 @@ export function Project({ id }: { id: string }) {
   const work = d.units.filter(isBuild);
   const byGroup = (g: Group) => work.filter((u) => groupOf(d, u) === g);
   const facts = [
-    d.repos.map((r) => `${r.id}@${r.defaultBranch}`).join(", "),
     p.environmentId ? `env ${p.environmentId}` : "no environment",
     p.mergePolicy === "auto" ? "merges automatically" : "merge by hand",
     d.repos.some((r) => r.publish)
@@ -197,8 +204,24 @@ export function Project({ id }: { id: string }) {
   return (
     <main>
       <section style={{ padding: "26px 36px 8px", display: "flex", flexDirection: "column", gap: 10 }}>
-        <div className="mono muted" style={{ fontSize: 12.5 }}>
-          {facts.join(" · ")}
+        <div className="mono muted" style={{ fontSize: 12.5, display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 12px" }}>
+          {d.repos.map((r) => {
+            const units = work.filter((u) => u.repoId === r.id);
+            const landed = units.filter((u) => u.state === "landed" || u.state === "done").length;
+            return (
+              <Link
+                key={r.id}
+                className="repo-chip"
+                to={`/r/${r.id}`}
+                title={`${r.id}: open the repo browser${r.publish ? "; publishes an artifact other repos build on" : ""}`}
+              >
+                {r.publish && <Package size={13} strokeWidth={1.75} aria-hidden="true" />}
+                {r.id}@{r.defaultBranch}
+                <span className="muted">{units.length ? `${landed}/${units.length} landed` : "no units"}</span>
+              </Link>
+            );
+          })}
+          <span>{facts.join(" · ")}</span>
         </div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
           <h1 className="serif" style={{ margin: 0, fontSize: 42, fontWeight: 600 }}>

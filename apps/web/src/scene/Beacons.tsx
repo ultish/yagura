@@ -133,6 +133,7 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
               <text x="36" y={y + 5} style={{ fontFamily: "Zen Kaku Gothic New, sans-serif", fontSize: 15, fill: "var(--text)" }}>
                 <tspan style={{ ...mono, fontSize: 12.5, fill: "var(--muted)" }}>U{u.seq} </tspan>
                 {u.goal.length > 44 ? `${u.goal.slice(0, 43)}…` : u.goal}
+                {d.repos.length > 1 && u.repoId && <tspan style={{ ...mono, fontSize: 11.5, fill: "var(--muted)" }}>{`  ${u.repoId}`}</tspan>}
               </text>
             </g>
             <path d={`M${xs[0]} ${y} L${landed ? 1166 : xs[lastReached]} ${y}`} style={{ stroke: "var(--seg-lit)" }} strokeWidth="2.5" />
