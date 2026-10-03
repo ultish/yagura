@@ -131,6 +131,29 @@ function api() {
     if (!m) fail(`404 merge request ${parts[mrAt + 1]}`);
     const tail = parts.slice(mrAt + 2);
     if (tail[0] === "discussions" && tail.length === 1 && method === "GET") return out(m.discussions);
+    if (tail.length === 0 && method === "GET")
+      return out({
+        ...m,
+        diff_refs: {
+          base_sha: git("rev-parse", `refs/heads/${m.target_branch}`),
+          start_sha: git("rev-parse", `refs/heads/${m.target_branch}`),
+          head_sha: git("rev-parse", `refs/heads/${m.source_branch}`),
+        },
+      });
+    if (tail[0] === "discussions" && tail.length === 1 && method === "POST") {
+      const id = `d${m.discussions.length + 1}`;
+      const note = {
+        id: Date.now(),
+        body: body.body,
+        system: false,
+        author: { username: "yagura-bot" },
+        resolvable: true,
+        resolved: false,
+        position: body.position,
+      };
+      m.discussions.push({ id, individual_note: false, notes: [note] });
+      return out({ id });
+    }
     if (tail[0] === "notes" && method === "POST") {
       const note = { id: Date.now(), body: body.body, system: false, author: { username: "yagura-bot" } };
       m.discussions.push({ id: `d${m.discussions.length + 1}`, individual_note: true, notes: [note] });

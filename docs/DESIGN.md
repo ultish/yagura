@@ -907,7 +907,18 @@ Tests with the fake agent: a review with one blocking finding becomes a triage t
 - Dashboard: the unit story has a Reviewer entry per review (each finding with its fate: fixed in which commit, dismissed and why, asked, or kept as a note; "N to settle" / "N settled" / "nothing to settle"), and "Reviewer (the fixes)" for a re-review; reviewer findings no longer show as people's PR comments or with a reply check; the Agents tab names reviewers with a findings summary; a verified unit under review reads "Verified; code review in U7 before it lands."
 - Tests: `review.test.ts` (findings parser), engine tests "code review (§24)" (blocking finding → triage fix → verified → re-reviewed → landed; nit as a note; a security finding asked, answered, fixed; review off for one project; a reviewer that writes rejected twice and blocked), the story test. Checked under the daemon with the fake agent in a scratch home: review U16 raised a blocking finding, triage U17 fixed it, U18 verified the fix, U19 re-reviewed the fixes with nothing found, and U4 landed; the story and Agents tab read as above.
 - On the pull request: `postReviewComments` posts one comment per finished review ("yagura's code review (U8): - [nit] `tests/test_csv.py:41` … → kept as a note"; "nothing to raise" when clean), keyed so it is posted once, from `propose` after each push and from every PR poll; `findingFates` gives the same wording to the story. Test: fake `gh` over a real origin shows one comment after landing and a later poll. The fourth real run (before this) showed PR #14 with no comments.
-- Not yet: a real blocking or should finding taken through triage on a real run.
+- A real blocking and should finding went through triage on a real run (2026-10-02/03, Haiku, sandbox).
+
+### Review on the pull request (decided and built 2026-10-03, developer)
+
+On a forge the pull request opens as soon as the unit is verified, before yagura's review, so the review happens where people look:
+
+- The engine opens the pull request first (`prFirst`: on a forge, verified, no pull request yet, and no other unit landing in the repo; a busy repo reviews meanwhile), then queues the review; units whose pull request is open stay in the review loop (`needed` → review, `answered` → triage) while `landing`.
+- `watchMergeRequest` merges only once `reviewStatus` is `settled` ("yagura's code review is not settled yet" otherwise), under `merge: auto` and `merge: human` alike.
+- `postReviewComments` posts each finding once on its line: `ForgeAdapter.comment` (GitHub `POST repos/…/pulls/<n>/comments` on the pull request's head; GitLab a discussion positioned with the merge request's `diff_refs`), recording where in `review_posts` (migration 31). A line the forge refuses (outside the diff it shows) becomes a plain comment naming the file and line. A review with nothing to raise says so in one comment.
+- `postReplies` answers yagura's findings where they were posted: `ForgeAdapter.replyTo` (GitHub `…/comments/<id>/replies`; GitLab the discussion's notes), or a plain comment "On F1: …" for one posted plainly. Replies go after the findings are posted on each poll.
+- A triage that changes nothing leaves a landing unit landing (it used to move it to verified, which a landing unit cannot be).
+- Tests: fake `gh` (finding on its line, the reply in its thread, no merge while review is unsettled; a refused line as plain comment and plain reply) and fake `glab` (a positioned discussion and its reply); the forge mechanics tests turn review off. Checked under the daemon with fake agents and fake `gh`: each of three pull requests opened first, got its finding on the line, "Fixed in …" in that thread, "review of the fixes: nothing to raise", and merged.
 
 ### Order
 

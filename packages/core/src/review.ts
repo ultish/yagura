@@ -6,7 +6,7 @@ import { renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { TERMINAL_STATES, type Attempt, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
-import { type ForgeAdapter, type PrThread } from "./forge.js";
+import { getMergeRequest, type ForgeAdapter, type PrThread } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, git, headSha } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { verifiedHead } from "./land.js";
@@ -133,22 +133,40 @@ export function findingFates(db: Db, review: Unit): FindingFate[] | null {
   });
 }
 
-// One comment per finished review on the unit's pull request, so people reviewing it there see what yagura's reviewer found and what became of it.
+// Each finding goes on its own line of the unit's pull request, once, so people reviewing it there see it where it applies,
+// and triage's answer goes into that thread (postReplies). A review with nothing to raise says so in one comment.
 export async function postReviewComments(db: Db, forge: ForgeAdapter, target: Unit, number: number): Promise<number> {
   const reviews = reviewsOf(db, target).filter((r) => r.state === "done");
   if (!reviews.length) return 0;
+  const head = getMergeRequest(db, target.id)?.headSha ?? null;
   const posted = await forge.replyKeys(number);
+  const done = (threadId: string) => !!db.prepare("SELECT 1 FROM review_posts WHERE unit_id = ? AND thread_id = ?").get(target.id, threadId);
+  const record = (threadId: string, ref: string | null) =>
+    db.prepare("INSERT OR IGNORE INTO review_posts (unit_id, thread_id, forge_ref, posted_at) VALUES (?, ?, ?, ?)").run(target.id, threadId, ref, now());
   let n = 0;
   for (const r of reviews) {
-    const key = `${target.projectId}/U${r.seq}/review`;
     const fates = findingFates(db, r);
-    if (!fates || posted.has(key)) continue;
+    if (!fates) continue;
     const title = `yagura's code review${/again/.test(r.goal) ? " of the fixes" : ""}`;
-    const body = fates.length
-      ? `${title}:\n\n${fates.map((f) => `- [${f.severity}] \`${f.path}${f.line ? `:${f.line}` : ""}\` ${f.text}\n  → ${f.fate}`).join("\n")}`
-      : `${title}: nothing to raise.`;
-    await forge.reply(number, { id: `review-U${r.seq}`, kind: "comment" }, body, key);
-    n++;
+    if (!fates.length) {
+      const key = `${target.projectId}/U${r.seq}/review`;
+      if (done(key) || posted.has(key)) continue;
+      record(key, await forge.comment(number, null, `${title}: nothing to raise.`, key));
+      n++;
+      continue;
+    }
+    for (const f of fates) {
+      const threadId = `review:U${r.seq}:F${f.n}`;
+      const key = `${target.projectId}/U${r.seq}/F${f.n}`;
+      if (done(threadId) || posted.has(key)) continue;
+      const where = `\`${f.path}${f.line ? `:${f.line}` : ""}\``;
+      const at = f.line && head ? { path: f.path, line: f.line, headSha: head } : null;
+      record(
+        threadId,
+        await forge.comment(number, at, `${title}, [${f.severity}] ${at ? "" : `${where} `}${f.text}`, key, `${title}, [${f.severity}] ${where} ${f.text}`),
+      );
+      n++;
+    }
   }
   return n;
 }

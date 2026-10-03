@@ -138,9 +138,11 @@ export class Engine {
   }
 
   private land(project: Project): void {
-    for (const u of listUnits(this.db, project.id).filter((x) => x.state === "verified" && x.repoId)) {
+    const openPr = new Set(openMergeRequests(this.db).map((mr) => mr.unitId));
+    // A unit whose pull request is open is still reviewed there: on a forge the pull request opens before review settles.
+    for (const u of listUnits(this.db, project.id).filter((x) => (x.state === "verified" || (x.state === "landing" && openPr.has(x.id))) && x.repoId)) {
       const key = `land:${u.repoId}`;
-      if (this.inflight.has(key)) continue;
+      if (u.state === "verified" && this.inflight.has(key)) continue;
       // A consumer lands after what it builds against, and only on a verdict proven against that source as it is now.
       if (sourceDeps(this.db, u).some((d) => d.state !== "landed" && d.state !== "done")) continue;
       const stale = staleSource(this.db, u);
@@ -149,22 +151,27 @@ export class Engine {
         this.log(`  U${u.seq} re-verifies: ${stale}`);
         continue;
       }
-      // Nothing lands before its code review settles (§24): queue the review, or the next triage wave once the developer answered.
+      const onForge = getRepo(this.db, u.repoId!).forge !== "none";
+      // One lander per repo: a unit whose pull request is open stays landing until it merges.
+      const repoBusy = listUnits(this.db, project.id).some((x) => x.repoId === u.repoId && x.state === "landing" && x.id !== u.id);
+      // On a forge the pull request opens first, so yagura's review happens on it; a repo busy with another landing reviews meanwhile.
+      const prFirst = onForge && u.state === "verified" && !openPr.has(u.id) && !repoBusy;
+      // Nothing merges before its code review settles (§24): queue the review, or the next triage wave once the developer answered.
       const review = reviewStatus(this.db, u);
-      if (review.state === "needed") {
-        const r = queueReview(this.db, u, review.since);
+      if (!prFirst && review.state === "needed") {
+        queueReview(this.db, u, review.since);
         this.log(`  review of U${u.seq} queued`);
         continue;
       }
-      if (review.state === "answered") {
+      if (!prFirst && review.state === "answered") {
         const t = queueTriage(this.db, u, `the review of U${u.seq}`, review.fresh);
         if (t) this.log(`  triage of the review of U${u.seq} queued`);
         continue;
       }
-      if (review.state !== "settled") continue;
-      // One lander per repo: a unit whose pull request is open stays landing until it merges.
-      if (listUnits(this.db, project.id).some((x) => x.repoId === u.repoId && x.state === "landing")) continue;
-      const onForge = getRepo(this.db, u.repoId!).forge !== "none";
+      // From here it is about opening or merging; a landing unit's pull request is the watcher's, and it merges only once review settles.
+      if (u.state === "landing") continue;
+      if (review.state !== "settled" && !onForge) continue;
+      if (repoBusy) continue;
       if (project.mergePolicy === "human") {
         const gate = listGates(this.db, project.id)
           .filter((g) => g.kind === "land" && g.unitId === u.id)

@@ -431,6 +431,18 @@ CREATE TABLE env_templates (
 );
 `,
   },
+  {
+    version: 31,
+    sql: `
+CREATE TABLE review_posts (
+  unit_id INTEGER NOT NULL REFERENCES units (id),
+  thread_id TEXT NOT NULL,
+  forge_ref TEXT,
+  posted_at TEXT NOT NULL,
+  PRIMARY KEY (unit_id, thread_id)
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

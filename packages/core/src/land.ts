@@ -15,7 +15,7 @@ import {
   prNoun,
   prRef,
 } from "./forge.js";
-import { postReviewComments } from "./review.js";
+import { postReviewComments, reviewStatus } from "./review.js";
 import { startRetroWatch } from "./retro.js";
 import { routeProblem } from "./route.js";
 import { gateResolved } from "./gates.js";
@@ -401,8 +401,8 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   }
   const status = await forge.status(mr.number);
   recordMergeStatus(db, unit.id, status);
-  await postReplies(db, forge, unit, mr.number);
   await postReviewComments(db, forge, unit, mr.number);
+  await postReplies(db, forge, unit, mr.number);
   if (!["landing", "blocked"].includes(unit.state)) return null;
   const l = landing(ctx, unit);
   if (status.state === "merged") return finishMerged(l, status, mr.number);
@@ -441,6 +441,8 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   if (status.failing.length) return ciFailed(l, forge, mr.number, mr.headSha, status.failing);
   if (status.pending.length) return waiting(`checks running: ${status.pending.join(", ")}`);
   if (status.merge !== "clean") return waiting(`the forge says ${status.merge}`);
+  const review = reviewStatus(db, unit);
+  if (review.state !== "settled") return waiting(review.state === "waiting" ? review.reason : "yagura's code review is not settled yet");
   if (!mergeApproved(db, project, unit)) return waiting("waiting for the land gate");
   await forge.merge(mr.number, mr.headSha, resolveSetting(db, "forge.merge_method", { repoId: repo.id }).value);
   const after = await forge.status(mr.number);

@@ -46,6 +46,33 @@ process.stdin.on("end", () => {
       },
     });
   }
+  // REST: a line comment on a pull request, or a reply to one (yagura's own reviewer).
+  if (group === "api") {
+    const path = [verb, ...rest].find((a) => /^repos\//.test(a));
+    const m = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/comments(?:\/(\d+)\/replies)?$/.exec(path ?? "");
+    if (!m) fail(`unknown api ${path}`);
+    const p = state.prs.find((x) => x.number === Number(m[1]));
+    if (!p) fail(`no pull request ${m[1]}`);
+    const body = JSON.parse(stdin);
+    p.threads = p.threads ?? [];
+    if (m[2]) {
+      const t = p.threads.find((x) => x.restId === Number(m[2]));
+      if (!t) fail(`no comment ${m[2]}`);
+      t.comments.push({ author: { login: "ultish" }, body: body.body });
+      return out({ id: Number(m[2]) * 100 + t.comments.length });
+    }
+    if (process.env.FAKE_GH_LINE_REFUSED) fail("gh: Validation Failed (HTTP 422): pull_request_review_thread.line must be part of the diff");
+    const id = 1000 + p.threads.length;
+    p.threads.push({
+      id: `PRRT_${id}`,
+      restId: id,
+      isResolved: false,
+      path: body.path,
+      line: body.line,
+      comments: [{ author: { login: "ultish" }, body: body.body }],
+    });
+    return out({ id });
+  }
   if (group === "run") {
     const runs = state.runs ?? [];
     if (verb === "list")

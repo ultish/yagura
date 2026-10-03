@@ -343,7 +343,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
       db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, verdict.id);
       transitionUnit(db, target.id, "verifying", { reason, reviewUnit: unit.seq });
       addVerifyUnit(db, getUnit(db, target.id));
-    } else if (!asked.length && getUnit(db, target.id).state !== "verified")
+    } else if (!asked.length && !["verified", "landing"].includes(getUnit(db, target.id).state))
       transitionUnit(db, target.id, "verified", { reason: `review threads answered by ${jobLabel(db, unit)}; nothing to change`, reviewUnit: unit.seq });
   })();
   recordEvent(db, "triage.done", refs, { target: target.seq, head, changed, asked });
@@ -357,17 +357,30 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
 
 // Replies are posted apart from the decisions they report, so a forge outage never costs the triage it follows;
 // the PR watcher posts whatever is still pending on every poll, and each reply goes out once.
+// Where one of yagura's reviewer findings was posted on the forge: a line thread to reply in, or null for a plain comment.
+export function reviewPost(db: Db, unitId: UnitId, threadId: string): { ref: string | null } | null {
+  const r = db.prepare("SELECT forge_ref FROM review_posts WHERE unit_id = ? AND thread_id = ?").get(unitId, threadId) as
+    { forge_ref: string | null } | undefined;
+  return r ? { ref: r.forge_ref } : null;
+}
+
 export async function postReplies(db: Db, forge: ForgeAdapter, target: Unit, number: number): Promise<number> {
   let posted = 0;
+  // yagura's own reviewer findings are answered where they were posted on the forge; a finding not posted yet waits.
   const pending = listThreadRows(db, target.id).filter(
-    (r) => (r.decision === "fixed" || r.decision === "dismissed") && !r.repliedAt && !isReviewThread(r.threadId),
+    (r) => (r.decision === "fixed" || r.decision === "dismissed") && !r.repliedAt && (!isReviewThread(r.threadId) || reviewPost(db, target.id, r.threadId)),
   );
   if (!pending.length) return 0;
   const already = await forge.replyKeys(number);
   for (const row of pending) {
     const key = `${target.projectId}/U${target.seq}/w${row.waveUnitId}/${row.threadId}`;
     const body = row.decision === "fixed" ? `Fixed in ${row.commitSha!.slice(0, 10)} (yagura ${target.projectId}/U${target.seq}): ${row.reason}` : row.reason!;
-    if (!already.has(key)) await forge.reply(number, { id: row.threadId, kind: row.kind }, body, key);
+    const post = isReviewThread(row.threadId) ? reviewPost(db, target.id, row.threadId)! : null;
+    if (!already.has(key)) {
+      if (post?.ref) await forge.replyTo(number, post.ref, body, key);
+      else if (post) await forge.reply(number, { id: row.threadId, kind: "comment" }, `On ${row.threadId.replace(/^review:U\d+:/, "")}: ${body}`, key);
+      else await forge.reply(number, { id: row.threadId, kind: row.kind }, body, key);
+    }
     db.prepare("UPDATE mr_threads SET replied_at = ? WHERE unit_id = ? AND thread_id = ?").run(now(), target.id, row.threadId);
     posted++;
   }

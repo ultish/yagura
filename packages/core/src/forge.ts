@@ -30,6 +30,11 @@ export interface ForgeAdapter {
   threads(number: number): Promise<PrThread[]>;
   replyKeys(number: number): Promise<Set<string>>;
   reply(number: number, thread: Pick<PrThread, "id" | "kind">, body: string, key: string): Promise<void>;
+  // A comment on one line of the change, for yagura's own reviewer; returns where to reply, or null when the forge took
+  // it only as a plain comment (the line is not in the diff it shows).
+  // `plain` is the text to post instead when the forge refuses the line (it names the location itself).
+  comment(number: number, at: { path: string; line: number; headSha: Sha } | null, body: string, key: string, plain?: string): Promise<string | null>;
+  replyTo(number: number, ref: string, body: string, key: string): Promise<void>;
 }
 
 // What the forge calls a change under review: "pull request #4" on GitHub, "merge request !4" on GitLab.
@@ -269,6 +274,31 @@ export function githubForge(bin: string, repo: string): ForgeAdapter {
         await gh(bin, ["api", "graphql", ...host, "-f", `query=${REPLY_MUTATION}`, "-F", `thread=${thread.id}`, "-F", "body=@-"], keyed(body, key));
       else await gh(bin, ["pr", "comment", String(number), ...R, "--body-file", "-"], keyed(body, key));
     },
+    async comment(number, at, body, key, plain) {
+      const path = `repos/${repoParts.slice(-2).join("/")}/pulls/${number}/comments`;
+      if (at)
+        try {
+          const posted = JSON.parse(
+            await gh(
+              bin,
+              ["api", ...host, "--method", "POST", path, "--input", "-"],
+              JSON.stringify({ body: keyed(body, key), commit_id: at.headSha, path: at.path, line: at.line, side: "RIGHT" }),
+            ),
+          ) as { id: number };
+          return `c:${posted.id}`;
+        } catch {
+          // GitHub refuses a line outside the diff it shows; the finding still goes on the pull request.
+        }
+      await gh(bin, ["pr", "comment", String(number), ...R, "--body-file", "-"], keyed(plain ?? body, key));
+      return null;
+    },
+    async replyTo(number, ref, body, key) {
+      await gh(
+        bin,
+        ["api", ...host, "--method", "POST", `repos/${repoParts.slice(-2).join("/")}/pulls/${number}/comments/${ref.slice(2)}/replies`, "--input", "-"],
+        JSON.stringify({ body: keyed(body, key) }),
+      );
+    },
   };
 }
 
@@ -446,6 +476,27 @@ export function gitlabForge(bin: string, repo: string): ForgeAdapter {
       if (thread.kind === "review-thread")
         await api(["--method", "POST", `${project}/merge_requests/${iid}/discussions/${thread.id}/notes`], { body: keyed(body, key) });
       else await api(["--method", "POST", `${project}/merge_requests/${iid}/notes`], { body: keyed(body, key) });
+    },
+    async comment(iid, at, body, key, plain) {
+      if (at)
+        try {
+          const refs = (JSON.parse(await api([`${project}/merge_requests/${iid}`])) as { diff_refs: { base_sha: string; start_sha: string; head_sha: string } })
+            .diff_refs;
+          const d = JSON.parse(
+            await api(["--method", "POST", `${project}/merge_requests/${iid}/discussions`], {
+              body: keyed(body, key),
+              position: { position_type: "text", ...refs, new_path: at.path, old_path: at.path, new_line: at.line },
+            }),
+          ) as { id: string };
+          return `d:${d.id}`;
+        } catch {
+          // GitLab refuses a position outside the diff; the finding still goes on the merge request.
+        }
+      await api(["--method", "POST", `${project}/merge_requests/${iid}/notes`], { body: keyed(plain ?? body, key) });
+      return null;
+    },
+    async replyTo(iid, ref, body, key) {
+      await api(["--method", "POST", `${project}/merge_requests/${iid}/discussions/${ref.slice(2)}/notes`], { body: keyed(body, key) });
     },
   };
 }

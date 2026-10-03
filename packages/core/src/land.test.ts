@@ -323,7 +323,17 @@ describe("landUnit (forge none)", () => {
 describe("landing through a GitHub pull request (fake gh over a real origin)", () => {
   const ghState = () =>
     JSON.parse(readFileSync(join(root, "gh.json"), "utf8")) as {
-      prs: { number: number; head: string; title: string; body: string; state: string; checks: unknown[]; mergeStateStatus?: string; comment?: string }[];
+      prs: {
+        number: number;
+        head: string;
+        title: string;
+        body: string;
+        state: string;
+        checks: unknown[];
+        mergeStateStatus?: string;
+        comment?: string;
+        threads?: unknown[];
+      }[];
       calls: string[];
       runs?: { reruns?: number }[];
     };
@@ -343,6 +353,8 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     setRepoForge(db, "testbed" as RepoId, "gh");
     setSetting(db, "repo", "testbed", "forge.repo", "ultish/sandbox");
     setSetting(db, "global", "", "forge.gh_bin", bin);
+    // These tests are about the forge; yagura's own code review gets its own tests.
+    setSetting(db, "global", "", "review.enabled", false);
   });
 
   it("opens one pull request with the squashed commit and merges it when clean, carrying the verdict to the merged commit", async () => {
@@ -370,25 +382,60 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(ghState().calls.filter((c) => c.startsWith("pr merge"))).toEqual([`pr merge 1 --repo ultish/sandbox --rebase --match-head-commit ${mr.headSha}`]);
   });
 
-  it("posts what yagura's reviewer found, and what became of it, on the pull request once", async () => {
+  const reviewOnOpenPr = async (finding: string) => {
+    setSetting(db, "global", "", "review.enabled", true);
     setMergePolicy(db, project, "auto");
     const work = await verifiedUnit();
+    expect((await landUnit(ctx, work.id)).outcome).toBe("proposed");
     const review = queueReview(db, getUnit(db, work.id), null);
-    process.env.FAKE_REVIEW = "nit:a clearer name would help";
+    process.env.FAKE_REVIEW = finding;
     try {
       await runReviewUnit(ctx, review.id);
     } finally {
       delete process.env.FAKE_REVIEW;
     }
-    await landUnit(ctx, work.id);
-    await watchMergeRequest(ctx, work.id);
-    const comments = (ghState().prs[0] as unknown as { comments: { body: string }[] }).comments;
-    expect(comments).toHaveLength(1);
-    expect(comments[0]!.body).toMatch(
-      new RegExp(
-        `^\\*\\*yagura\\*\\* · automated, posted with this account\\n\\nyagura's code review:\\n\\n- \\[nit\\] \`app/orders\\.py:1\` a clearer name would help\\n  → kept as a note`,
-      ),
+    return work;
+  };
+  const fixIt = () =>
+    db
+      .prepare("UPDATE mr_threads SET decision = 'fixed', commit_sha = 'abcdef1234567', reason = 'handled the empty case' WHERE thread_id LIKE 'review:%'")
+      .run();
+
+  it("posts each of yagura's reviewer findings on its line of the open pull request, answers it there, and merges only once review settles", async () => {
+    const work = await reviewOnOpenPr("blocking:please fix: the empty case is not handled");
+    expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "waiting", reason: expect.stringMatching(/review/) });
+    const thread = ghState().prs[0]!.threads![0]! as unknown as { path: string; line: number; comments: { body: string }[] };
+    expect(thread).toMatchObject({ path: "app/orders.py", line: 1 });
+    expect(thread.comments[0]!.body).toMatch(
+      /^\*\*yagura\*\* · automated, posted with this account\n\nyagura's code review, \[blocking\] please fix: the empty case is not handled/,
     );
+    fixIt();
+    await watchMergeRequest(ctx, work.id);
+    await watchMergeRequest(ctx, work.id);
+    expect(thread.comments).toHaveLength(1);
+    const after = ghState().prs[0]!.threads![0]! as unknown as { comments: { body: string }[] };
+    expect(after.comments.map((c) => c.body.split("\n")[2])).toEqual([
+      "yagura's code review, [blocking] please fix: the empty case is not handled",
+      "Fixed in abcdef1234 (yagura p/U1): handled the empty case",
+    ]);
+    expect(ghState().prs[0]!.state).toBe("OPEN");
+  });
+
+  it("posts a finding on a line the forge refuses as a plain comment, and answers it as one", async () => {
+    process.env.FAKE_GH_LINE_REFUSED = "1";
+    try {
+      const work = await reviewOnOpenPr("should:please fix: the error is swallowed");
+      await watchMergeRequest(ctx, work.id);
+      fixIt();
+      await watchMergeRequest(ctx, work.id);
+      const comments = (ghState().prs[0] as unknown as { comments: { body: string }[] }).comments.map((c) => c.body.split("\n")[2]);
+      expect(comments).toEqual([
+        "yagura's code review, [should] `app/orders.py:1` please fix: the error is swallowed",
+        "On F1: Fixed in abcdef1234 (yagura p/U1): handled the empty case",
+      ]);
+    } finally {
+      delete process.env.FAKE_GH_LINE_REFUSED;
+    }
   });
 
   it("waits for the land gate under merge: human, then merges", async () => {
@@ -688,6 +735,35 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     setRepoForge(db, "testbed" as RepoId, "glab");
     setSetting(db, "repo", "testbed", "forge.repo", "gitlab.dev.local/team/apps/sandbox");
     setSetting(db, "global", "", "forge.glab_bin", bin);
+    setSetting(db, "global", "", "review.enabled", false);
+  });
+
+  it("posts yagura's reviewer findings as positioned discussions on the merge request, and answers them there", async () => {
+    setSetting(db, "global", "", "review.enabled", true);
+    setMergePolicy(db, project, "auto");
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    const review = queueReview(db, getUnit(db, work.id), null);
+    process.env.FAKE_REVIEW = "blocking:please fix: the empty case is not handled";
+    try {
+      await runReviewUnit(ctx, review.id);
+    } finally {
+      delete process.env.FAKE_REVIEW;
+    }
+    await watchMergeRequest(ctx, work.id);
+    db.prepare("UPDATE mr_threads SET decision = 'fixed', commit_sha = 'abcdef1234567', reason = 'handled it' WHERE thread_id LIKE 'review:%'").run();
+    await watchMergeRequest(ctx, work.id);
+    const d = (
+      glState().mrs[0] as unknown as {
+        discussions: { individual_note: boolean; notes: { body: string; position?: { new_path: string; new_line: number } }[] }[];
+      }
+    ).discussions[0]!;
+    expect(d.individual_note).toBe(false);
+    expect(d.notes[0]!.position).toMatchObject({ new_path: "app/orders.py", new_line: 1 });
+    expect(d.notes.map((n) => n.body.split("\n")[2])).toEqual([
+      "yagura's code review, [blocking] please fix: the empty case is not handled",
+      "Fixed in abcdef1234 (yagura p/U1): handled it",
+    ]);
   });
 
   it("opens one merge request and merges it when GitLab says it is mergeable, carrying the verdict to the merge commit", async () => {
