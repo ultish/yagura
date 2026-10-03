@@ -11,6 +11,8 @@ export interface HarnessRun {
   resume?: string;
   allowedTools?: string[];
   disallowedTools?: string[];
+  // Extra Claude Code settings as JSON (hooks yagura needs), merged over the developer's own.
+  settings?: string;
 }
 
 export interface HarnessAdapter {

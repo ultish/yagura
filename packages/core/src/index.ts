@@ -58,3 +58,4 @@ export * from "./retro.js";
 export * from "./turncalls.js";
 export * from "./prompts.js";
 export * from "./followups.js";
+export * from "./watchman-guard.js";

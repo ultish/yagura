@@ -93,6 +93,7 @@ export const claudeAdapter: HarnessAdapter = {
       ...run.addDirs.flatMap((d) => ["--add-dir", d]),
       ...(run.allowedTools?.length ? ["--allowed-tools", run.allowedTools.join(",")] : []),
       ...(run.disallowedTools?.length ? ["--disallowed-tools", run.disallowedTools.join(",")] : []),
+      ...(run.settings ? ["--settings", run.settings] : []),
       ...(run.model ? ["--model", run.model] : []),
       ...(run.resume ? ["--resume", run.resume] : []),
       ...run.extraArgs,

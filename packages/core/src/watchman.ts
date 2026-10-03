@@ -1,4 +1,5 @@
 import { getPromptText, promptPlugin } from "./prompts.js";
+import { watchmanGuardSettings } from "./watchman-guard.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { assertThreadFree, beginTurn, currentSession, endSession, endTurn, getTurn, markSeen, runningTurn, turnRecorder } from "./turns.js";
@@ -720,6 +721,7 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
         resume,
         allowedTools: setting("watchman.allowed_tools"),
         disallowedTools: WATCHMAN_DENIED_TOOLS,
+        settings: watchmanGuardSettings(boot, setting("watchman.allowed_tools")),
       },
       cwd,
       env: {},
