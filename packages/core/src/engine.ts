@@ -55,7 +55,7 @@ export interface EngineOptions {
 export const LANDING_CUTOFF = 0.7;
 const COST_WARNING = 0.8;
 const PLAN_TRIGGERS = ["landed", "blocked", "abandoned", "done"];
-const YAGURA_GATES = ["report", "land", "environment", "review"];
+const YAGURA_GATES = ["report", "land", "environment", "review", "release"];
 
 function suggestsFollowUps(db: Db, boot: RunContext["boot"], unitId: UnitId): boolean {
   const unit = getUnit(db, unitId);

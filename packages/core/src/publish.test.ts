@@ -33,6 +33,7 @@ import {
   openStore,
   setMergePolicy,
   setProjectEnvironment,
+  setReleasePolicy,
   type Db,
 } from "./store.js";
 import { runVerifyUnit } from "./verify.js";
@@ -241,4 +242,39 @@ describe("published artifacts", () => {
     expect(await trunkFile("app", "app/deps.txt")).toBe("lib=1.5.0");
     expect(existsSync(join(nexus, test))).toBe(false);
   }, 90_000);
+  it("release: auto has yagura publish the landed version itself, so nothing waits for CI", async () => {
+    setReleasePolicy(db, project, "auto");
+    const [lib, app] = [getUnitBySeq(db, project, 1), getUnitBySeq(db, project, 2)];
+    await runWorkUnit(ctx, lib.id);
+    await verify(1);
+    await runJobs();
+    expect((await landUnit(ctx, lib.id)).outcome).toBe("landed");
+    expect(existsSync(join(nexus, "1.5.0"))).toBe(false);
+    await runJobs();
+    expect(existsSync(join(nexus, "1.5.0", "VERSION"))).toBe(true);
+    expect(listPublications(db, lib.id).find((p) => p.kind === "release")).toMatchObject({ state: "published", version: "1.5.0" });
+    expect(landWait(db, getUnit(db, app.id))).toBeNull();
+  }, 60_000);
+
+  it("release: human asks first, publishes on 'publish', and keeps waiting for CI on 'wait for CI'", async () => {
+    setReleasePolicy(db, project, "human");
+    const lib = getUnitBySeq(db, project, 1);
+    await runWorkUnit(ctx, lib.id);
+    await verify(1);
+    await runJobs();
+    await landUnit(ctx, lib.id);
+    await runJobs();
+    const gate = listGates(db, project, "open").find((g) => g.kind === "release")!;
+    expect(gate.question).toBe("U1 landed in lib, and 1.5.0 is not released. Publish it to the release repository now, or wait for CI?");
+    expect(landWait(db, getUnit(db, getUnitBySeq(db, project, 2).id))!.reason).toContain("it publishes once you answer the release question");
+    await new Promise((r) => setTimeout(r, 5));
+    await watchRelease(ctx, lib.id);
+    expect(existsSync(join(nexus, "1.5.0"))).toBe(false);
+    expect(listGates(db, project, "open").filter((g) => g.kind === "release")).toHaveLength(1);
+
+    answerGate(db, gate.id, "publish");
+    await watchRelease(ctx, lib.id);
+    expect(listPublications(db, lib.id).find((p) => p.kind === "release")).toMatchObject({ state: "published", version: "1.5.0" });
+    expect(existsSync(join(nexus, "1.5.0", "VERSION"))).toBe(true);
+  }, 60_000);
 });

@@ -5,7 +5,7 @@ import { z } from "zod";
 import { write } from "./agent.js";
 import { resolveSetting, setSetting, type Bootstrap } from "./config.js";
 import { SKILL_PURPOSES } from "./skills.js";
-import { LAND_ROUTES, MERGE_POLICIES, PASS_TIERS, type EnvironmentId, type LandRoute, type ProjectId, type RepoId } from "./domain.js";
+import { LAND_ROUTES, MERGE_POLICIES, PASS_TIERS, RELEASE_POLICIES, type EnvironmentId, type LandRoute, type ProjectId, type RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import { VerifyPack } from "./pack.js";
 import { layout } from "./paths.js";
@@ -49,6 +49,7 @@ export const ProposalBody = z
             repos: z.array(z.string()).min(1),
             environment: z.string().nullable().default(null),
             merge: z.enum(MERGE_POLICIES).default("human"),
+            release: z.enum(RELEASE_POLICIES).default("ci"),
             land: z.enum(LAND_ROUTES).optional(),
             minTier: z.enum(PASS_TIERS).default("unit-verified"),
             after: z.array(z.string()).default([]),
@@ -299,6 +300,7 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
           after: p.after as ProjectId[],
           phaseGate: p.phaseGate,
           mergePolicy: p.merge,
+          releasePolicy: p.release,
           land: p.land ?? null,
           environmentId: env as EnvironmentId,
         });
@@ -355,6 +357,7 @@ export function describeProposal(body: ProposalBody): string {
     const facts = [
       `repos ${p.repos.join(", ")}`,
       `merge ${p.merge}`,
+      p.release === "ci" ? "" : p.release === "auto" ? "yagura publishes its releases" : "asks before publishing a release",
       p.land === "pr" ? "lands through pull/merge requests" : p.land === "push" ? "pushes to the default branch" : "",
       `min ${p.minTier}`,
       p.after.length ? `after ${p.after.join(", ")}` : "",

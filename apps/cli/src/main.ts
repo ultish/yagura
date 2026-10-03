@@ -36,6 +36,7 @@ import {
   listGates,
   setAndon,
   setMergePolicy,
+  setReleasePolicy,
   registerRepo,
   addUnitNote,
   evidenceCli,
@@ -117,7 +118,7 @@ const USAGE = `yagura — agent orchestration
 
   yagura repo add <git URL> [--id <id>] [--forge gh|glab | --land push]   mirror an existing repo; github.com lands through pull requests, hosts in forge.glab_hosts through merge requests; any other remote needs --forge or --land push
   yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified] [--issue <ref>...]
-                  [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
+                  [--after <project>...] [--phase-gate] [--merge auto|human] [--release ci|auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
                   [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>] [--needs <seq>[:source]...]
   yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab land through pull/merge requests (forge.repo, forge.merge_method)
@@ -137,7 +138,7 @@ const USAGE = `yagura — agent orchestration
   yagura template export <name>                     print a template as YAML, to share
   yagura template import <file | ->                 add or replace a template from YAML
   yagura template rm <name>
-  yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...] [--reference <repo id>...]
+  yagura project set <id> [--env <env id>] [--merge auto|human] [--release ci|auto|human] [--issue <ref>...] [--reference <repo id>...]
   yagura project skills <id>                       checks the project's skills.* are installed where agents run
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
   yagura steer <project>/U<n> <message>          tell a unit's running agent something; it reads it after its current step
@@ -296,6 +297,7 @@ async function main() {
         "min-tier": { type: "string", default: "unit-verified" },
         env: { type: "string" },
         merge: { type: "string" },
+        release: { type: "string" },
         issue: { type: "string", multiple: true },
         after: { type: "string", multiple: true },
         "phase-gate": { type: "boolean" },
@@ -317,7 +319,15 @@ async function main() {
         console.log(`project ${id}: reference repos → ${many(values.reference).join(", ")}`);
         if (!values.env && !values.merge && !values.issue) return;
       }
-      if (positionals[0] === "set" && id && (values.env || values.merge || values.issue)) {
+      if (positionals[0] === "set" && id && (values.env || values.merge || values.release || values.issue)) {
+        if (values.release) {
+          if (values.release !== "ci" && values.release !== "auto" && values.release !== "human") fail("--release must be ci, auto, or human");
+          setReleasePolicy(db, id as ProjectId, values.release as "ci" | "auto" | "human");
+          if (!values.env && !values.merge && !values.issue) {
+            console.log(`project ${id}: release → ${values.release}`);
+            return;
+          }
+        }
         if (values.issue) setProjectRefs(db, id as ProjectId, many(values.issue));
         if (values.env) setProjectEnvironment(db, id as ProjectId, values.env as EnvironmentId);
         if (values.merge) {
@@ -343,6 +353,7 @@ async function main() {
         after: many(values.after) as ProjectId[],
         phaseGate: !!values["phase-gate"],
         mergePolicy: values.merge === "auto" ? "auto" : "human",
+        releasePolicy: values.release === "auto" || values.release === "human" ? values.release : "ci",
         environmentId: (values.env as EnvironmentId) ?? null,
       });
       console.log(`project ${p.id}: ${p.goal}`);

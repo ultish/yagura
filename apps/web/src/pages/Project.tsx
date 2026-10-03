@@ -179,6 +179,13 @@ export function Project({ id }: { id: string }) {
     d.repos.map((r) => `${r.id}@${r.defaultBranch}`).join(", "),
     p.environmentId ? `env ${p.environmentId}` : "no environment",
     p.mergePolicy === "auto" ? "merges automatically" : "merge by hand",
+    d.repos.some((r) => r.publish)
+      ? p.releasePolicy === "auto"
+        ? "yagura publishes releases"
+        : p.releasePolicy === "human"
+          ? "asks before a release"
+          : "CI publishes releases"
+      : "",
     `≥ ${p.minTier}`,
     `${d.maxInFlight} agent slots`,
     spend(d.costUsd, d.budgetUsd),

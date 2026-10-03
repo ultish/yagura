@@ -23,7 +23,22 @@ import { parsePack } from "./pack.js";
 import { layout, unitRef } from "./paths.js";
 import { addVerifyUnit } from "./runner.js";
 import { reverifyAgainstSources, sourceDeps, sourceSha } from "./sources.js";
-import { createAttempt, getProject, getRepo, getUnit, listDeps, listUnits, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
+import { gateResolved } from "./gates.js";
+import {
+  addGate,
+  createAttempt,
+  getProject,
+  listGates,
+  getRepo,
+  getUnit,
+  listDeps,
+  listUnits,
+  now,
+  recordEvent,
+  transitionUnit,
+  updateAttempt,
+  type Db,
+} from "./store.js";
 
 export interface Publication {
   id: number;
@@ -267,7 +282,18 @@ export async function watchRelease(ctx: { db: Db; boot: Bootstrap }, unitId: Uni
   if (rel.state !== "waiting") return rel;
   const publish = repo.publish ?? (await trunkPublish(ctx, repo));
   if (!publish) return rel;
-  const check = await step(ctx, unit, rel.logPath!, "available", publish.available, ctx.boot.home, { YAGURA_VERSION: rel.version! });
+  let check = await step(ctx, unit, rel.logPath!, "available", publish.available, ctx.boot.home, { YAGURA_VERSION: rel.version! });
+  if (!check.ok && (await releaseByYagura(ctx, unit, rel))) {
+    const pub = await inCheckout(ctx, unit, repo, landed, (dir) =>
+      step(ctx, unit, rel!.logPath!, "publish the release", publish.command, dir, { YAGURA_VERSION: rel!.version!, YAGURA_SHA: landed }),
+    );
+    if (!pub.ok) {
+      setPublication(db, rel.id, { state: "failed", checkedAt: now(), reason: `publishing ${rel.version} failed: ${pub.detail}` });
+      recordEvent(db, "publish.release_failed", refs, { repo: repo.id, version: rel.version, reason: pub.detail });
+      return listPublications(db, unit.id).find((p) => p.id === rel!.id)!;
+    }
+    check = await step(ctx, unit, rel.logPath!, "available", publish.available, ctx.boot.home, { YAGURA_VERSION: rel.version! });
+  }
   if (check.ok) {
     setPublication(db, rel.id, { state: "published", reason: null, checkedAt: now() });
     recordEvent(db, "publish.released", refs, { repo: repo.id, version: rel.version });
@@ -284,6 +310,29 @@ export async function watchRelease(ctx: { db: Db; boot: Bootstrap }, unitId: Uni
     } else setPublication(db, rel.id, { checkedAt: now() });
   }
   return listPublications(db, unit.id).find((p) => p.id === rel.id)!;
+}
+
+// Under `release: auto` yagura publishes the landed version itself; under `human` it asks first and publishes on "publish".
+async function releaseByYagura(ctx: { db: Db; boot: Bootstrap }, unit: Unit, rel: Publication): Promise<boolean> {
+  const { db } = ctx;
+  const policy = getProject(db, unit.projectId).releasePolicy;
+  if (policy === "auto") return true;
+  if (policy !== "human") return false;
+  const gate = listGates(db, unit.projectId)
+    .filter((g) => g.kind === "release" && g.unitId === unit.id)
+    .at(-1);
+  if (!gate || gate.state === "cancelled") {
+    addGate(db, {
+      projectId: unit.projectId,
+      unitId: unit.id,
+      kind: "release",
+      question: `U${unit.seq} landed in ${unit.repoId}, and ${rel.version} is not released. Publish it to the release repository now, or wait for CI?`,
+      options: ["publish", "wait for CI"],
+      defaultOption: "wait for CI",
+    });
+    return false;
+  }
+  return gateResolved(gate, "publish");
 }
 
 // Test builds go once the upstream and every consumer of it are finished; without an unpublish command Nexus's cleanup policy has them.
@@ -345,7 +394,11 @@ export function landWait(db: Db, unit: Unit): { reason: string; stuck: boolean }
   for (const up of ups) {
     const a = upstreamArtifact(db, up, unit.repoId);
     if (a && "stuck" in a) return { reason: a.stuck, stuck: true };
-    if (a && "wait" in a) return { reason: `${a.wait}: CI publishes it, then yagura moves this change onto it and lands it`, stuck: false };
+    if (a && "wait" in a) {
+      const policy = getProject(db, unit.projectId).releasePolicy;
+      const who = policy === "auto" ? "yagura publishes it" : policy === "human" ? "it publishes once you answer the release question" : "CI publishes it";
+      return { reason: `${a.wait}: ${who}, then yagura moves this change onto it and lands it`, stuck: false };
+    }
   }
   return null;
 }
