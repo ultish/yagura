@@ -62,11 +62,12 @@ export function Watch({ projects, now }: { projects: ProjectSummary[]; now: numb
         const x1 = a.from.x;
         const x2 = a.to.x;
         const top = Math.min(a.from.y - 258 * a.from.scale, a.to.y - 258 * a.to.scale);
+        // `from` waits on `to`: drawn from the one waited on, so the dashes travel the way the release will.
         return (
           <g key={a.label}>
             <path
               className="signal"
-              d={`M${x1} ${a.from.y - 170 * a.from.scale} Q ${(x1 + x2) / 2} ${Math.max(6, top - 30)} ${x2} ${a.to.y - 170 * a.to.scale}`}
+              d={`M${x2} ${a.to.y - 170 * a.to.scale} Q ${(x1 + x2) / 2} ${Math.max(6, top - 30)} ${x1} ${a.from.y - 170 * a.from.scale}`}
               fill="none"
               style={{ stroke: "var(--lamp)" }}
               strokeWidth="2"
