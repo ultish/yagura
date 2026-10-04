@@ -1,3 +1,5 @@
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -83,6 +85,22 @@ describe("store", () => {
     })();
     expect(otherWrite).toBe("database is locked");
     expect(mine.prepare("SELECT id FROM repos ORDER BY id").all()).toEqual([{ id: "r" }, { id: "y" }]);
+  });
+
+  it("waits for another process that holds the write lock, and retries a transaction that still comes back busy", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "yagura-db-")), "yagura.db");
+    const mine = openStore(path);
+    addRepo(mine, { id: "r", url: "file:///r", defaultBranch: "main" });
+    const script = `const D = require(${JSON.stringify(createRequire(import.meta.url).resolve("better-sqlite3"))}); const d = new D(${JSON.stringify(path)}); d.pragma("busy_timeout = 5000"); d.exec("BEGIN IMMEDIATE"); console.log("locked"); setTimeout(() => { d.exec("COMMIT"); process.exit(0); }, 700);`;
+    const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "inherit"] });
+    await new Promise<void>((resolve) => child.stdout.once("data", () => resolve()));
+    mine.pragma("busy_timeout = 50");
+    const started = Date.now();
+    mine.transaction(() => {
+      mine.prepare("INSERT INTO repos (id, url, default_branch, created_at) VALUES ('z', 'file:///z', 'main', 't')").run();
+    })();
+    expect(Date.now() - started).toBeGreaterThan(400);
+    expect(mine.prepare("SELECT id FROM repos ORDER BY id").all()).toEqual([{ id: "r" }, { id: "z" }]);
   });
 
   it("brings a fresh database to the latest schema version", () => {

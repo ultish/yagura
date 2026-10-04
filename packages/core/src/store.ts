@@ -28,19 +28,37 @@ export type Db = Database.Database;
 
 export const now = () => new Date().toISOString() as IsoTime;
 
+export const BUSY_TIMEOUT_MS = 30_000;
+const BUSY_RETRIES = 4;
+const BUSY_RETRY_MS = 100;
+const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+
 export function openStore(path: string): Db {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  db.pragma("busy_timeout = 5000");
-  // The evidence CLI and agent commands write to this file from their own processes. A deferred transaction that reads and then
-  // writes fails at once with "database is locked" when another process commits in between (busy_timeout does not apply), so
-  // every transaction takes the write lock first and waits its turn.
+  // Several processes write to this file (the daemon, the CLI, the evidence CLI an agent calls). SQLite makes a blocked writer
+  // wait this long before it gives up with SQLITE_BUSY ("database is locked").
+  db.pragma(`busy_timeout = ${BUSY_TIMEOUT_MS}`);
+  // A deferred transaction that reads and then writes fails at once, without waiting, when another process commits in between,
+  // so every transaction takes the write lock first. If that still comes back busy after the wait above, it is retried with a
+  // growing pause before the error is allowed through; a transaction's function must therefore only touch the database
+  // (or do idempotent work), since a busy commit runs it again.
   const deferred = db.transaction.bind(db);
   db.transaction = ((fn: (...args: never[]) => unknown) => {
     const t = deferred(fn);
-    return Object.assign((...args: never[]) => t.immediate(...args), { deferred: t.deferred, immediate: t.immediate, exclusive: t.exclusive });
+    const run = (...args: never[]) => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return t.immediate(...args);
+        } catch (e) {
+          if ((e as { code?: string }).code !== "SQLITE_BUSY" || db.inTransaction || attempt >= BUSY_RETRIES) throw e;
+          sleep(BUSY_RETRY_MS * 2 ** attempt);
+        }
+      }
+    };
+    return Object.assign(run, { deferred: t.deferred, immediate: t.immediate, exclusive: t.exclusive });
   }) as typeof db.transaction;
   const initialized = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'").get();
   if (!initialized) db.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
