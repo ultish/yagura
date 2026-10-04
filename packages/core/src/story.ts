@@ -62,7 +62,7 @@ export interface UnitStory {
   ended: IsoTime | null;
   entries: StoryEntry[];
   agents: StoryAgent[];
-  // Questions waiting for the developer about this unit: land it, publish its release.
+  // Questions waiting for the developer about this unit: land it.
   gates: Gate[];
   // The manager's wakes, oldest first: why it was woken, what it decided, and what it cost.
   manager: ManagerTurn[];
@@ -431,9 +431,6 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
   const PUBLISHING: Record<string, { who: string; status: (d: Record<string, unknown>) => { text: string; tone: "pine" | "amber" | "bell" | "muted" } }> = {
     "publish.test": { who: "Test build", status: (d) => ({ text: `published ${String(d.version)}`, tone: "pine" }) },
     "publish.failed": { who: "Test build", status: () => ({ text: "publishing failed", tone: "bell" }) },
-    "publish.released": { who: "Release", status: (d) => ({ text: `CI released ${String(d.version)}`, tone: "pine" }) },
-    "publish.release_failed": { who: "Release", status: (d) => ({ text: `no release of ${String(d.version ?? d.repo)}`, tone: "bell" }) },
-    "publish.cleaned": { who: "Test builds", status: (d) => ({ text: `${Number(d.removed)} removed`, tone: "muted" }) },
     "consumer.repinned": { who: "Re-pinned", status: () => ({ text: "moved to its sources' current versions", tone: "amber" }) },
   };
   for (const e of events.filter((x) => x.unit_id === unit.id && x.type in PUBLISHING)) {

@@ -133,7 +133,6 @@ export function addProject(
     after?: ProjectId[];
     phaseGate?: boolean;
     mergePolicy?: Project["mergePolicy"];
-    releasePolicy?: Project["releasePolicy"];
     land?: Project["land"];
     environmentId?: EnvironmentId | null;
   },
@@ -142,8 +141,8 @@ export function addProject(
     for (const dep of p.after ?? []) getProject(db, dep);
     if (p.environmentId) getEnvironment(db, p.environmentId);
     db.prepare(
-      `INSERT INTO projects (id, name, goal, predicate, min_tier, state, refs_json, after_json, phase_gate, merge_policy, release_policy, land, environment_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO projects (id, name, goal, predicate, min_tier, state, refs_json, after_json, phase_gate, merge_policy, land, environment_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       p.id,
       p.name,
@@ -155,7 +154,6 @@ export function addProject(
       JSON.stringify(p.after ?? []),
       p.phaseGate ? 1 : 0,
       p.mergePolicy ?? "human",
-      p.releasePolicy ?? "ci",
       p.land ?? null,
       p.environmentId ?? null,
       now(),
@@ -178,7 +176,6 @@ export function getProject(db: Db, id: ProjectId): Project {
     environmentId: (r.environment_id as Project["environmentId"]) ?? null,
     state: r.state as Project["state"],
     mergePolicy: r.merge_policy as Project["mergePolicy"],
-    releasePolicy: r.release_policy as Project["releasePolicy"],
     land: (r.land as Project["land"] | null) ?? null,
     andonReason: (r.andon_reason as string | null) ?? null,
     refs: JSON.parse((r.refs_json as string | undefined) ?? "[]"),
@@ -499,10 +496,6 @@ export function projectCost(db: Db, projectId: ProjectId): number {
 export function setAndon(db: Db, projectId: ProjectId, reason: string | null): void {
   db.prepare("UPDATE projects SET andon_reason = ? WHERE id = ?").run(reason, projectId);
   recordEvent(db, reason ? "project.andon" : "project.andon_cleared", { projectId }, { reason });
-}
-
-export function setReleasePolicy(db: Db, projectId: ProjectId, policy: Project["releasePolicy"]): void {
-  db.prepare("UPDATE projects SET release_policy = ? WHERE id = ?").run(policy, projectId);
 }
 
 export function setMergePolicy(db: Db, projectId: ProjectId, policy: Project["mergePolicy"]): void {

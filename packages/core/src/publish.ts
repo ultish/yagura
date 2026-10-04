@@ -23,22 +23,7 @@ import { parsePack } from "./pack.js";
 import { layout, unitRef } from "./paths.js";
 import { addVerifyUnit } from "./runner.js";
 import { reverifyAgainstSources, sourceDeps, sourceSha } from "./sources.js";
-import { gateResolved } from "./gates.js";
-import {
-  addGate,
-  createAttempt,
-  getProject,
-  listGates,
-  getRepo,
-  getUnit,
-  listDeps,
-  listUnits,
-  now,
-  recordEvent,
-  transitionUnit,
-  updateAttempt,
-  type Db,
-} from "./store.js";
+import { createAttempt, getProject, getRepo, getUnit, listDeps, listUnits, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
 
 export interface Publication {
   id: number;
@@ -103,12 +88,14 @@ function setPublication(db: Db, id: number, fields: Partial<Pick<Publication, "v
 // The release version is what CI publishes from trunk: the build's version without a snapshot marker.
 export const releaseVersion = (raw: string) => raw.trim().replace(/-SNAPSHOT$/, "");
 
+// A snapshot stays a snapshot (1.5.0-SNAPSHOT becomes 1.5.0-yg-p-u2-ab12cd3-SNAPSHOT), so a build range such as 1.5.+ never resolves it
+// and nothing yagura publishes can pass for a release. Other ecosystems use the pack's own suffix.
 export function qualifiedVersion(base: string, projectId: ProjectId, seq: number, sha: Sha, suffix: string): string {
   const project = projectId
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
-  return `${releaseVersion(base)}-yg-${project}-u${seq}-${sha.slice(0, 7)}${suffix}`;
+  return `${releaseVersion(base)}-yg-${project}-u${seq}-${sha.slice(0, 7)}${/-SNAPSHOT$/.test(base.trim()) ? "-SNAPSHOT" : suffix}`;
 }
 
 // Units in another repo that build on this one's artifact and are not finished.
@@ -122,20 +109,19 @@ function liveConsumers(db: Db, up: Unit, kinds: readonly string[]): Unit[] {
 export type UpstreamArtifact = { version: string } | { wait: string } | { stuck: string } | null;
 
 // The artifact a consumer in `consumerRepo` builds against, what it waits for, or why it cannot get one; null when the upstream's repo does not publish.
+// yagura publishes snapshots only: a landed upstream's consumers keep the snapshot they were proven against (none when it never had one), and the real release is the developer's merge.
 export function upstreamArtifact(db: Db, up: Unit, consumerRepo: RepoId | null): UpstreamArtifact {
   if (!up.repoId || up.repoId === consumerRepo) return null;
   const repo = getRepo(db, up.repoId);
   if (!repo.publish) return null;
+  if (up.state === "done" && !up.landedSha) return null;
+  const tests = listPublications(db, up.id).filter((p) => p.kind === "test");
   if (up.landedSha) {
-    const rel = publicationAt(db, up.id, "release", up.landedSha);
-    if (rel?.state === "published") return { version: rel.version! };
-    if (!rel || rel.state === "waiting")
-      return { wait: `waits for ${repo.id}${rel?.version ? ` ${rel.version}` : ""} from U${up.seq}'s landing to be released` };
-    return { stuck: rel.reason ?? `${repo.id} from U${up.seq}'s landing was not released` };
+    const last = tests.filter((p) => p.state === "published").at(-1);
+    return last ? { version: last.version! } : null;
   }
-  if (up.state === "done") return null;
   const head = sourceSha(db, up);
-  const test = head ? publicationAt(db, up.id, "test", head) : null;
+  const test = tests.find((p) => p.sha === head);
   if (test?.state === "published") return { version: test.version! };
   if (test?.state === "failed") return { stuck: `the test build of U${up.seq} in ${repo.id} failed: ${test.reason}` };
   return { wait: `waits for the test build of U${up.seq} in ${repo.id}` };
@@ -223,8 +209,6 @@ export async function publishTestBuild(ctx: { db: Db; boot: Bootstrap }, unitId:
     const baseVersion = releaseVersion(base.stdout);
     const version = qualifiedVersion(base.stdout, unit.projectId, unit.seq, head, publish.suffix);
     setPublication(db, id, { version, baseVersion });
-    const before = await step(ctx, unit, log, "available (the head's own version, before publishing)", publish.available, dir, { YAGURA_VERSION: baseVersion });
-    setPublication(db, id, { baseReleased: before.ok });
     const pub = await step(ctx, unit, log, "publish", publish.command, dir, { YAGURA_VERSION: version, YAGURA_SHA: head });
     if (!pub.ok) {
       setPublication(db, id, { state: "failed", reason: pub.detail });
@@ -247,125 +231,15 @@ export async function publishTestBuild(ctx: { db: Db; boot: Bootstrap }, unitId:
   return done;
 }
 
-// CI releases a landed upstream; yagura reads the version it will carry and polls until it can be fetched.
-export async function watchRelease(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId): Promise<Publication | null> {
-  const { db } = ctx;
-  const unit = getUnit(db, unitId);
-  const landed = unit.landedSha;
-  if (!landed) return null;
-  const repo = getRepo(db, unit.repoId!);
-  const refs = { projectId: unit.projectId, unitId: unit.id };
-  let rel = publicationAt(db, unit.id, "release", landed);
-  if (!rel) {
-    const publish = await trunkPublish(ctx, repo);
-    if (!publish) return null;
-    const log = startLog(ctx, unit, "release", landed);
-    const id = insertPublication(db, unit, "release", landed, "waiting", log);
-    const v = await inCheckout(ctx, unit, repo, landed, (dir) => step(ctx, unit, log, "version", publish.version, dir, { YAGURA_SHA: landed }));
-    const version = v.ok ? releaseVersion(v.stdout) : "";
-    if (!version) setPublication(db, id, { state: "failed", reason: v.ok ? "the pack's version command printed nothing" : v.detail });
-    else {
-      setPublication(db, id, { version });
-      const already = listPublications(db, unit.id).find((p) => p.kind === "test" && p.baseVersion === version && p.baseReleased);
-      if (already)
-        setPublication(db, id, {
-          state: "unchanged",
-          reason: `U${unit.seq} landed without changing ${repo.id}'s version: ${version} was already released before it, so no release carries its change. Bump the version the way ${repo.id} does`,
-        });
-    }
-    rel = listPublications(db, unit.id).find((p) => p.id === id)!;
-    if (rel.state !== "waiting") {
-      recordEvent(db, "publish.release_failed", refs, { repo: repo.id, version: rel.version, reason: rel.reason });
-      return rel;
-    }
-  }
-  if (rel.state !== "waiting") return rel;
-  const publish = repo.publish ?? (await trunkPublish(ctx, repo));
-  if (!publish) return rel;
-  let check = await step(ctx, unit, rel.logPath!, "available", publish.available, ctx.boot.home, { YAGURA_VERSION: rel.version! });
-  if (!check.ok && (await releaseByYagura(ctx, unit, rel))) {
-    const pub = await inCheckout(ctx, unit, repo, landed, (dir) =>
-      step(ctx, unit, rel!.logPath!, "publish the release", publish.command, dir, { YAGURA_VERSION: rel!.version!, YAGURA_SHA: landed }),
-    );
-    if (!pub.ok) {
-      setPublication(db, rel.id, { state: "failed", checkedAt: now(), reason: `publishing ${rel.version} failed: ${pub.detail}` });
-      recordEvent(db, "publish.release_failed", refs, { repo: repo.id, version: rel.version, reason: pub.detail });
-      return listPublications(db, unit.id).find((p) => p.id === rel!.id)!;
-    }
-    check = await step(ctx, unit, rel.logPath!, "available", publish.available, ctx.boot.home, { YAGURA_VERSION: rel.version! });
-  }
-  if (check.ok) {
-    setPublication(db, rel.id, { state: "published", reason: null, checkedAt: now() });
-    recordEvent(db, "publish.released", refs, { repo: repo.id, version: rel.version });
-  } else {
-    const minutes = resolveSetting(db, "publish.release_wait_minutes", { projectId: unit.projectId, repoId: repo.id }).value;
-    const waited = (Date.now() - Date.parse(rel.createdAt)) / 60_000;
-    if (waited >= minutes) {
-      setPublication(db, rel.id, {
-        state: "failed",
-        checkedAt: now(),
-        reason: `${repo.id} ${rel.version} was not released within ${minutes} minutes of U${unit.seq} landing (${check.detail})`,
-      });
-      recordEvent(db, "publish.release_failed", refs, { repo: repo.id, version: rel.version, reason: "timed out" });
-    } else setPublication(db, rel.id, { checkedAt: now() });
-  }
-  return listPublications(db, unit.id).find((p) => p.id === rel.id)!;
-}
-
-// Under `release: auto` yagura publishes the landed version itself; under `human` it asks first and publishes on "publish".
-async function releaseByYagura(ctx: { db: Db; boot: Bootstrap }, unit: Unit, rel: Publication): Promise<boolean> {
-  const { db } = ctx;
-  const policy = getProject(db, unit.projectId).releasePolicy;
-  if (policy === "auto") return true;
-  if (policy !== "human") return false;
-  const gate = listGates(db, unit.projectId)
-    .filter((g) => g.kind === "release" && g.unitId === unit.id)
-    .at(-1);
-  if (!gate || gate.state === "cancelled") {
-    addGate(db, {
-      projectId: unit.projectId,
-      unitId: unit.id,
-      kind: "release",
-      question: `U${unit.seq} landed in ${unit.repoId}, and ${rel.version} is not released. Publish it to the release repository now, or wait for CI?`,
-      options: ["publish", "wait for CI"],
-      defaultOption: "wait for CI",
-    });
-    return false;
-  }
-  return gateResolved(gate, "publish");
-}
-
-// Test builds go once the upstream and every consumer of it are finished; without an unpublish command Nexus's cleanup policy has them.
-export async function cleanUpTestBuilds(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId): Promise<number> {
-  const { db } = ctx;
-  const unit = getUnit(db, unitId);
-  const repo = getRepo(db, unit.repoId!);
-  let n = 0;
-  for (const p of listPublications(db, unit.id).filter((x) => x.kind === "test" && x.state === "published")) {
-    const unpublish = repo.publish?.unpublish;
-    if (!unpublish) {
-      setPublication(db, p.id, { state: "left", reason: "no unpublish command; left to the repository's cleanup policy" });
-      continue;
-    }
-    const r = await step(ctx, unit, p.logPath!, "unpublish", unpublish, ctx.boot.home, { YAGURA_VERSION: p.version! });
-    setPublication(db, p.id, r.ok ? { state: "removed" } : { state: "left", reason: r.detail });
-    if (r.ok) n++;
-  }
-  recordEvent(db, "publish.cleaned", { projectId: unit.projectId, unitId: unit.id }, { repo: repo.id, removed: n });
-  return n;
-}
-
 export interface PublishJob {
   key: string;
   label: string;
   run: (ctx: { db: Db; boot: Bootstrap }) => Promise<unknown>;
 }
 
-// What the engine should do about artifacts in a project now: publish verified heads consumers need, watch for
-// releases of landed upstreams, and clean up after finished ones.
+// What the engine should do about artifacts in a project now: publish verified heads consumers need. Snapshots are never removed.
 export function publishJobs(db: Db, projectId: ProjectId): PublishJob[] {
   const jobs: PublishJob[] = [];
-  const poll = resolveSetting(db, "forge.poll_seconds").value * 1000;
   for (const u of listUnits(db, projectId)) {
     if (!u.repoId || !getRepo(db, u.repoId).publish) continue;
     const pubs = listPublications(db, u.id);
@@ -374,19 +248,12 @@ export function publishJobs(db: Db, projectId: ProjectId): PublishJob[] {
       if (head && !pubs.some((p) => p.kind === "test" && p.sha === head))
         jobs.push({ key: `publish:${u.id}`, label: `publish a test build of U${u.seq}`, run: (c) => publishTestBuild(c, u.id, head) });
     }
-    if (u.landedSha && liveConsumers(db, u, ["needs-source", "needs-landed"]).length) {
-      const rel = pubs.find((p) => p.kind === "release" && p.sha === u.landedSha);
-      if (!rel || (rel.state === "waiting" && (!rel.checkedAt || Date.now() - Date.parse(rel.checkedAt) >= poll)))
-        jobs.push({ key: `release:${u.id}`, label: `watch for the release of U${u.seq}`, run: (c) => watchRelease(c, u.id) });
-    }
-    if (TERMINAL_STATES.has(u.state) && pubs.some((p) => p.kind === "test" && p.state === "published") && !liveConsumers(db, u, ["needs-source"]).length)
-      jobs.push({ key: `unpublish:${u.id}`, label: `clean up U${u.seq}'s test builds`, run: (c) => cleanUpTestBuilds(c, u.id) });
   }
   return jobs;
 }
 
-// What a verified consumer is waiting for before it can land, in words: its sources landing, then CI releasing them.
-// `stuck` means no amount of waiting helps (the release will not come), so the unit blocks.
+// What a verified consumer is waiting for before it can land, in words: its sources landing.
+// `stuck` means no amount of waiting helps (a source's test build failed), so the unit blocks.
 export function landWait(db: Db, unit: Unit): { reason: string; stuck: boolean } | null {
   const ups = sourceDeps(db, unit);
   const open = ups.find((up) => up.state !== "landed" && up.state !== "done");
@@ -394,11 +261,6 @@ export function landWait(db: Db, unit: Unit): { reason: string; stuck: boolean }
   for (const up of ups) {
     const a = upstreamArtifact(db, up, unit.repoId);
     if (a && "stuck" in a) return { reason: a.stuck, stuck: true };
-    if (a && "wait" in a) {
-      const policy = getProject(db, unit.projectId).releasePolicy;
-      const who = policy === "auto" ? "yagura publishes it" : policy === "human" ? "it publishes once you answer the release question" : "CI publishes it";
-      return { reason: `${a.wait}: ${who}, then yagura moves this change onto it and lands it`, stuck: false };
-    }
   }
   return null;
 }

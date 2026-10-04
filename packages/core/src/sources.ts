@@ -12,7 +12,7 @@ export interface Source {
   repoId: RepoId;
   sha: Sha;
   path: string;
-  // The test build or release of the source, when its repo publishes one (§14).
+  // The test build of the source, when its repo publishes one (§14).
   version?: string;
 }
 

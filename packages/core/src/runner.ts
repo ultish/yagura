@@ -105,7 +105,7 @@ function releasedUpstreams(db: Db, unit: Unit): string[] {
     .flatMap((d) => {
       const up = getUnit(db, d.dependsOn);
       const a = upstreamArtifact(db, up, unit.repoId);
-      return a && "version" in a ? [`U${up.seq} landed in ${up.repoId} and is released as ${a.version}; depend on exactly that version.`] : [];
+      return a && "version" in a ? [`U${up.seq} landed in ${up.repoId}, and its build is published as ${a.version}; depend on exactly that version.`] : [];
     });
 }
 

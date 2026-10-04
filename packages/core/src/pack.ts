@@ -26,7 +26,6 @@ export const VerifyPack = z.object({
       command: z.string().min(1),
       suffix: z.string().default(""),
       available: z.string().min(1),
-      unpublish: z.string().min(1).optional(),
     })
     .strict()
     .optional(),

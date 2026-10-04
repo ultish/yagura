@@ -15,25 +15,20 @@ import { parseClaudeLine } from "./harness/claude.js";
 import { landUnit, liveVerdict } from "./land.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
-import { landWait, cleanUpTestBuilds, listPublications, moveConsumer, publishJobs, qualifiedVersion, upstreamArtifact, watchRelease } from "./publish.js";
+import { landWait, listPublications, publishJobs, qualifiedVersion, upstreamArtifact } from "./publish.js";
 import { runWorkUnit } from "./runner.js";
 import { readiness } from "./schedule.js";
-import { staleSource } from "./sources.js";
 import {
   addEnvironment,
   addProject,
   addRepo,
-  answerGate,
-  getRepo,
   getUnit,
   getUnitBySeq,
   listAttempts,
-  listGates,
   listUnits,
   openStore,
   setMergePolicy,
   setProjectEnvironment,
-  setReleasePolicy,
   type Db,
 } from "./store.js";
 import { runVerifyUnit } from "./verify.js";
@@ -58,7 +53,6 @@ const PUBLISH = {
   command: 'mkdir -p "$NEXUS/$YAGURA_VERSION" && cp VERSION "$NEXUS/$YAGURA_VERSION/"',
   suffix: "-SNAPSHOT",
   available: 'test -d "$NEXUS/$YAGURA_VERSION"',
-  unpublish: 'rm -rf "$NEXUS/$YAGURA_VERSION"',
 };
 
 async function origin(root: string, name: string, publish?: object): Promise<string> {
@@ -116,24 +110,25 @@ const runJobs = async () => {
 const trunkFile = (repo: "lib" | "app", path: string) => readFileAt(origins[repo], "main", path);
 
 describe("published artifacts", () => {
-  it("names a test build by project, unit, and head, without a snapshot marker in the middle", () => {
+  it("names a test build by project, unit, and head; a snapshot stays a snapshot whatever the pack's suffix says", () => {
     expect(qualifiedVersion("1.5.0-SNAPSHOT\n", "Orders API" as ProjectId, 3, "a1b2c3d4e5f6" as never, "-SNAPSHOT")).toBe(
       "1.5.0-yg-orders-api-u3-a1b2c3d-SNAPSHOT",
     );
+    expect(qualifiedVersion("1.5.0-SNAPSHOT", "web" as ProjectId, 4, "a1b2c3d4e5f6" as never, "")).toBe("1.5.0-yg-web-u4-a1b2c3d-SNAPSHOT");
     expect(qualifiedVersion("2.0.1", "web" as ProjectId, 12, "0123456789" as never, "")).toBe("2.0.1-yg-web-u12-0123456");
+    expect(qualifiedVersion("2.0.1", "web" as ProjectId, 12, "0123456789" as never, "-rc")).toBe("2.0.1-yg-web-u12-0123456-rc");
   });
 
-  it("publishes the upstream's verified head for its consumer, moves the consumer to the release once CI publishes it, and cleans up", async () => {
+  it("publishes the upstream's verified head as a snapshot for its consumer, which lands pinned to it, and leaves the snapshot where it is", async () => {
     const [lib, app] = [getUnitBySeq(db, project, 1), getUnitBySeq(db, project, 2)];
     await runWorkUnit(ctx, lib.id);
     await verify(1);
     const head = liveVerdict(db, lib.id)!.head_sha;
-    expect(getRepo(db, "lib" as RepoId).publish).toMatchObject({ suffix: "-SNAPSHOT" });
     expect(readiness(db, project).waiting.map((w) => w.reason)).toEqual(["waits for the test build of U1 in lib"]);
 
     await runJobs();
     const test = `1.5.0-yg-p-u1-${head.slice(0, 7)}-SNAPSHOT`;
-    expect(listPublications(db, lib.id)).toMatchObject([{ kind: "test", state: "published", version: test, baseVersion: "1.5.0", baseReleased: false }]);
+    expect(listPublications(db, lib.id)).toMatchObject([{ kind: "test", state: "published", version: test, baseVersion: "1.5.0" }]);
     expect(existsSync(join(nexus, test, "VERSION"))).toBe(true);
     expect(readiness(db, project).ready.map((u) => u.seq)).toEqual([2]);
 
@@ -143,138 +138,27 @@ describe("published artifacts", () => {
     await verify(2);
     expect(
       JSON.parse((db.prepare("SELECT artifact_versions_json AS v FROM verdicts WHERE unit_id = ? AND voided_at IS NULL").get(app.id) as { v: string }).v),
-    ).toEqual({
-      U1: test,
-    });
+    ).toEqual({ U1: test });
 
     expect((await landUnit(ctx, lib.id)).outcome).toBe("landed");
-    await runJobs();
-    expect(upstreamArtifact(db, getUnit(db, lib.id), "app" as RepoId)).toEqual({ wait: "waits for lib 1.5.0 from U1's landing to be released" });
-    expect(landWait(db, getUnit(db, app.id))).toEqual({
-      reason: "waits for lib 1.5.0 from U1's landing to be released: CI publishes it, then yagura moves this change onto it and lands it",
-      stuck: false,
-    });
-
-    mkdirSync(join(nexus, "1.5.0"));
-    await watchRelease(ctx, lib.id);
+    expect(publishJobs(db, project)).toEqual([]);
+    expect(upstreamArtifact(db, getUnit(db, lib.id), "app" as RepoId)).toEqual({ version: test });
     expect(landWait(db, getUnit(db, app.id))).toBeNull();
-    expect(upstreamArtifact(db, getUnit(db, lib.id), "app" as RepoId)).toEqual({ version: "1.5.0" });
-    const stale = staleSource(db, getUnit(db, app.id))!;
-    expect(await moveConsumer(ctx, app.id, stale)).toBe("repinned");
-    const repin = listAttempts(db, app.id).at(-1)!;
-    expect(repin).toMatchObject({ harness: "yagura-repin", state: "handed_off" });
-    expect(await git(["show", `${repin.headSha}:app/deps.txt`], { gitDir: layout(ctx.boot).mirror("app" as RepoId) })).toBe("lib=1.5.0");
-    expect(getUnit(db, app.id).state).toBe("verifying");
-
-    await verify(2);
-    expect(staleSource(db, getUnit(db, app.id))).toBeNull();
     expect((await landUnit(ctx, app.id)).outcome).toBe("landed");
-    expect(await trunkFile("app", "app/deps.txt")).toBe("lib=1.5.0");
-
-    expect(publishJobs(db, project).map((j) => j.key)).toEqual([`unpublish:${lib.id}`]);
-    expect(await cleanUpTestBuilds(ctx, lib.id)).toBe(1);
-    expect(existsSync(join(nexus, test))).toBe(false);
-    expect(existsSync(join(nexus, "1.5.0"))).toBe(true);
+    expect(await trunkFile("app", "app/deps.txt")).toBe(`lib=${test}`);
+    expect(existsSync(join(nexus, test, "VERSION"))).toBe(true);
+    expect(listPublications(db, lib.id)[0]).toMatchObject({ state: "published" });
   }, 90_000);
 
-  it("blocks the consumer when the upstream landed without changing a version that was already released", async () => {
-    mkdirSync(join(nexus, "1.5.0"));
-    const [lib, app] = [getUnitBySeq(db, project, 1), getUnitBySeq(db, project, 2)];
-    await runWorkUnit(ctx, lib.id);
-    await verify(1);
-    await runJobs();
-    expect(listPublications(db, lib.id)[0]).toMatchObject({ baseVersion: "1.5.0", baseReleased: true });
-    expect((await landUnit(ctx, lib.id)).outcome).toBe("landed");
-    await runJobs();
-    const reason =
-      "U1 landed without changing lib's version: 1.5.0 was already released before it, so no release carries its change. Bump the version the way lib does";
-    expect(listPublications(db, lib.id).find((p) => p.kind === "release")).toMatchObject({ state: "unchanged", reason });
-    expect(readiness(db, project).stuck).toMatchObject([{ unit: { id: app.id }, reason }]);
-  }, 60_000);
-
-  it("runs the whole flow from the engine: a consumer that starts after the upstream landed waits for the release and pins it", async () => {
-    setSetting(db, "global", "", "forge.poll_seconds", 1);
-    const log: string[] = [];
-    const engine = new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) });
-    await engine.runUntilIdle();
-    const [lib, app] = [getUnitBySeq(db, project, 1), getUnitBySeq(db, project, 2)];
-    expect(getUnit(db, lib.id).state).toBe("landed");
-    expect(getUnit(db, app.id).state).not.toBe("landed");
-    expect(upstreamArtifact(db, getUnit(db, lib.id), "app" as RepoId)).toEqual({ wait: "waits for lib 1.5.0 from U1's landing to be released" });
-
-    mkdirSync(join(nexus, "1.5.0"));
-    await new Promise((r) => setTimeout(r, 1100));
-    await engine.runUntilIdle();
-    expect(getUnit(db, app.id).state).toBe("landed");
-    expect(await trunkFile("app", "app/deps.txt")).toBe("lib=1.5.0");
-    expect(
-      listPublications(db, lib.id)
-        .filter((p) => p.kind === "test")
-        .every((p) => p.state === "removed"),
-    ).toBe(true);
-  }, 90_000);
-  it("from the engine, a consumer verified on the test build is re-pinned to the release and lands after it", async () => {
-    setSetting(db, "global", "", "forge.poll_seconds", 1);
-    setMergePolicy(db, project, "human");
+  it("runs the whole flow from the engine: both units land, the consumer pinned to the snapshot, which stays published", async () => {
     const engine = new Engine(ctx, { projectId: project, tickMs: 50 });
+    await engine.runUntilIdle();
     const [lib, app] = [getUnitBySeq(db, project, 1), getUnitBySeq(db, project, 2)];
-    const land = (seq: number) => {
-      const unitId = getUnitBySeq(db, project, seq).id;
-      for (const g of listGates(db, project, "open").filter((x) => x.kind === "land" && x.unitId === unitId)) answerGate(db, g.id, "land");
-    };
-    await engine.runUntilIdle();
-    const test = listPublications(db, lib.id)[0]!.version!;
-    expect([getUnit(db, lib.id).state, getUnit(db, app.id).state]).toEqual(["verified", "verified"]);
-    expect(await git(["show", `${liveVerdict(db, app.id)!.head_sha}:app/deps.txt`], { gitDir: layout(ctx.boot).mirror("app" as RepoId) })).toBe(`lib=${test}`);
-
-    land(1);
-    land(2);
-    await engine.runUntilIdle();
-    expect([getUnit(db, lib.id).state, getUnit(db, app.id).state]).toEqual(["landed", "verified"]);
-
-    mkdirSync(join(nexus, "1.5.0"));
-    await new Promise((r) => setTimeout(r, 1100));
-    await engine.runUntilIdle();
-    expect(listAttempts(db, app.id).map((a) => a.harness)).toEqual(["claude", "yagura-repin"]);
-    land(2);
-    await engine.runUntilIdle();
-    expect(getUnit(db, app.id).state).toBe("landed");
-    expect(await trunkFile("app", "app/deps.txt")).toBe("lib=1.5.0");
-    expect(existsSync(join(nexus, test))).toBe(false);
+    expect([getUnit(db, lib.id).state, getUnit(db, app.id).state]).toEqual(["landed", "landed"]);
+    const test = listPublications(db, lib.id).at(-1)!.version!;
+    expect(test).toMatch(/^1\.5\.0-yg-p-u1-[0-9a-f]{7}-SNAPSHOT$/);
+    expect(await trunkFile("app", "app/deps.txt")).toBe(`lib=${test}`);
+    expect(existsSync(join(nexus, test, "VERSION"))).toBe(true);
+    expect(listPublications(db, lib.id).every((p) => p.state === "published")).toBe(true);
   }, 90_000);
-  it("release: auto has yagura publish the landed version itself, so nothing waits for CI", async () => {
-    setReleasePolicy(db, project, "auto");
-    const [lib, app] = [getUnitBySeq(db, project, 1), getUnitBySeq(db, project, 2)];
-    await runWorkUnit(ctx, lib.id);
-    await verify(1);
-    await runJobs();
-    expect((await landUnit(ctx, lib.id)).outcome).toBe("landed");
-    expect(existsSync(join(nexus, "1.5.0"))).toBe(false);
-    await runJobs();
-    expect(existsSync(join(nexus, "1.5.0", "VERSION"))).toBe(true);
-    expect(listPublications(db, lib.id).find((p) => p.kind === "release")).toMatchObject({ state: "published", version: "1.5.0" });
-    expect(landWait(db, getUnit(db, app.id))).toBeNull();
-  }, 60_000);
-
-  it("release: human asks first, publishes on 'publish', and keeps waiting for CI on 'wait for CI'", async () => {
-    setReleasePolicy(db, project, "human");
-    const lib = getUnitBySeq(db, project, 1);
-    await runWorkUnit(ctx, lib.id);
-    await verify(1);
-    await runJobs();
-    await landUnit(ctx, lib.id);
-    await runJobs();
-    const gate = listGates(db, project, "open").find((g) => g.kind === "release")!;
-    expect(gate.question).toBe("U1 landed in lib, and 1.5.0 is not released. Publish it to the release repository now, or wait for CI?");
-    expect(landWait(db, getUnit(db, getUnitBySeq(db, project, 2).id))!.reason).toContain("it publishes once you answer the release question");
-    await new Promise((r) => setTimeout(r, 5));
-    await watchRelease(ctx, lib.id);
-    expect(existsSync(join(nexus, "1.5.0"))).toBe(false);
-    expect(listGates(db, project, "open").filter((g) => g.kind === "release")).toHaveLength(1);
-
-    answerGate(db, gate.id, "publish");
-    await watchRelease(ctx, lib.id);
-    expect(listPublications(db, lib.id).find((p) => p.kind === "release")).toMatchObject({ state: "published", version: "1.5.0" });
-    expect(existsSync(join(nexus, "1.5.0", "VERSION"))).toBe(true);
-  }, 60_000);
 });

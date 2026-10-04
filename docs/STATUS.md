@@ -4,6 +4,8 @@ Updated 2026-10-03 (handoff for a cleared session, end of session 26ff87bb). Eve
 
 **Resume here (handoff, 2026-10-03, end of session 26ff87bb):**
 
+- **Changed 2026-10-04 (developer): yagura publishes snapshots only and never releases or deletes.** A test version of a `-SNAPSHOT` library is always `<version>-yg-<project>-u<n>-<sha7>-SNAPSHOT` (so `1.5.+` never resolves it); yagura does not wait for, publish, or ask about a release (the `release` policy, `--release`, the release gate, `publish.release_wait_minutes`, and the pack's `unpublish` are gone) and never deletes a snapshot, because the real version appears only when the developer merges to main. A consumer lands pinned to the snapshot it was proven against. DESIGN §14 says so; the `release` kind, gate kind, and `release_policy` column stay in the database unused.
+
 - **State.** `main` is clean and pushed (last code commit `f2dddcd`, then this handoff); `pnpm -r test` passes (core 300, web 27, daemon 20; one run once showed a failure line that could not be reproduced in five reruns) and `pnpm -r typecheck` is clean. Database at migration 38. A demo daemon is still running on :7300, on code from before the manager (restarting it migrates its database from 33 to 36; tested on a copy), with Reposilite in docker (`yg-reposilite`, :8088), started by `scripts/demo-publish.sh up`; `scripts/demo-publish.sh down` stops both. The demo project `demo` is closed (U1, U2, U10 landed); U10 carries a hand-written description (it predates the field).
 - **Built this session (2026-10-03, phase 6 and dashboard polish).**
   - Phase 6, published artifacts (DESIGN §14 "Published artifacts", `publish.ts`): a pack's `publish` block (`version`, `command`, `suffix`, `available`, `unpublish`); yagura publishes a verified head under `<version>-yg-<project>-u<n>-<sha7>` for consumers to pin, waits for the real release of a landed upstream, moves the consumer's pin itself (a `yagura-repin` attempt, then verification), checks the code for a superseded test version before landing (`repinIfStale`), and cleans up. A project's `release` policy (`ci` default, `auto`, `human`; `--release` on `project new|set`, in watchman proposals; migration 33) decides who publishes the release; `human` raises a `release` gate. `landWait` says what a verified unit waits for (project page, story, engine log). `yagura unit add --needs <seq>[:source]`. Proven with real Gradle against Reposilite; `scripts/demo-publish.sh up|release|status|down` replays it (fake agents; `RELEASE=ci|auto|human`).
@@ -68,7 +70,7 @@ None of these needs new code unless it finds a bug. Cost estimates are the fixed
 3. **A desktop notification.** Grant permission on localhost or HTTPS and let a gate arrive while the tab is in the background; check the click opens the right page and the favicon lamp blinks.
 4. **Restart the demo daemon** (it runs pre-manager code) and look at its migrated database (33 to 36 was tested on a copy).
 
-**Phase 6, published artifacts (DESIGN §14), proven only for Gradle and a Maven repository (Reposilite)** 5. **An npm round** (a package published with `npm publish --tag yg`, consumer pinned, re-pinned to the release). 6. **A container-image round** (push and a registry lookup as the availability check). 7. **A real Nexus** in place of Reposilite, including the unpublish command and Nexus's cleanup policy. 8. **A real agent writing the pack's `publish` block** (pack writer and verifier skills describe it). 9. **`release: human` and `release: auto` in a run with real agents**, and the CI-timeout path (`publish.release_wait_minutes`, default 60) once.
+**Phase 6, published artifacts (DESIGN §14), proven only for Gradle and a Maven repository (Reposilite)** 5. **An npm round** (a package published with `npm publish --tag yg`, consumer pinned to the yg build). 6. **A container-image round** (push and a registry lookup as the availability check). 7. **A real Nexus** in place of Reposilite (a snapshots repository; a consumer resolving a `-SNAPSHOT` pin from it). 8. **A real agent writing the pack's `publish` block** (pack writer and verifier skills describe it). 9. (Removed 2026-10-04: there is no release flow.)
 
 **Forges** 10. **A trunk CI failure on GitHub**: the sandbox needs an Actions workflow, which changes the developer's repo. 11. **The yagura label and the inline review findings on a real GitHub PR** (seen on GitLab; GitHub only with a fake `gh`).
 
@@ -84,7 +86,7 @@ None of these needs new code unless it finds a bug. Cost estimates are the fixed
 - Links between separate projects: a project handles several repos, so a library and its consumer are normally one project.
 - A readable planner handoff: the raw plan JSON is readable enough.
 - A separate `investigate` unit type and "route a twice-rejected unit to the planner" as features: they are manager menu items (§26).
-- A separate release unit and expand/migrate/contract machinery: CI releases, and breaking changes stay planner guidance enforced by dependencies.
+- A separate release unit and expand/migrate/contract machinery; releasing at all, and deleting snapshots (developer, 2026-10-04: yagura has no authority to push to main): breaking changes stay planner guidance enforced by dependencies.
 
 ### History
 

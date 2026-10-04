@@ -57,7 +57,7 @@ export interface EngineOptions {
 export const LANDING_CUTOFF = 0.7;
 const COST_WARNING = 0.8;
 const PLAN_TRIGGERS = ["landed", "blocked", "abandoned", "done"];
-const YAGURA_GATES = ["report", "land", "environment", "review", "release", "manager"];
+const YAGURA_GATES = ["report", "land", "environment", "review", "manager"];
 
 function suggestsFollowUps(db: Db, boot: RunContext["boot"], unitId: UnitId): boolean {
   const unit = getUnit(db, unitId);
@@ -179,7 +179,6 @@ export class Engine {
       const key = `land:${u.repoId}`;
       if (u.state === "verified" && this.inflight.has(key)) continue;
       // A consumer lands after what it builds against, and only on a verdict proven against that source as it is now.
-      // A published upstream lands, then CI releases it; the consumer moves to the release before it lands (§14).
       const wait = landWait(this.db, u);
       if (wait?.stuck) {
         transitionUnit(this.db, u.id, "blocked", { reason: wait.reason });
@@ -291,7 +290,7 @@ export class Engine {
     this.log(`  U${u.seq} ${line}`);
   }
 
-  // Test builds, release watches, and clean-up run for every project, a closed one included, until nothing is left to do.
+  // Test builds run for every project, a closed one included, until nothing is left to do.
   private publishing(project: Project): void {
     for (const job of publishJobs(this.db, project.id))
       if (!this.inflight.has(job.key))
@@ -300,7 +299,6 @@ export class Engine {
           job.label,
           () => job.run(this.ctx),
           () => undefined,
-          job.key.startsWith("release:"),
         );
   }
 

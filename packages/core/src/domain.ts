@@ -29,9 +29,6 @@ export type ProjectState = (typeof PROJECT_STATES)[number];
 
 export const MERGE_POLICIES = ["auto", "human"] as const;
 export type MergePolicy = (typeof MERGE_POLICIES)[number];
-// Who publishes a library's real version once its change has landed: the repo's CI, yagura at once, or yagura after the developer says so (§14).
-export const RELEASE_POLICIES = ["ci", "auto", "human"] as const;
-export type ReleasePolicy = (typeof RELEASE_POLICIES)[number];
 
 export const UNIT_TYPES = [
   "plan",
@@ -241,7 +238,6 @@ export interface PackPublish {
   command: string;
   suffix: string;
   available: string;
-  unpublish?: string;
 }
 
 export interface Project {
@@ -253,7 +249,6 @@ export interface Project {
   environmentId: EnvironmentId | null;
   state: ProjectState;
   mergePolicy: MergePolicy;
-  releasePolicy: ReleasePolicy;
   land: LandRoute | null;
   andonReason: string | null;
   refs: string[];

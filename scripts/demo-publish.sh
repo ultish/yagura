@@ -1,8 +1,6 @@
 #!/bin/sh
 # Phase 6 demo: a library and an app in two repos, Reposilite (docker) standing in for Nexus, fake agents.
 #   scripts/demo-publish.sh up        set everything up and start the daemon
-#   scripts/demo-publish.sh release   play CI: publish lib's trunk as 1.5.0 (only with RELEASE=ci up)
-#   RELEASE=ci|auto|human             who publishes the release: CI (you, by 'release'), yagura, or yagura after you say so; default auto
 #   scripts/demo-publish.sh status    units, publications, and what the repository holds
 #   scripts/demo-publish.sh down      stop the daemon and Reposilite
 # Needs docker, gradle, java, curl, sqlite3. Everything lives in $DEMO (default /tmp/yagura-demo-publish).
@@ -11,7 +9,6 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 DEMO=${DEMO:-/tmp/yagura-demo-publish}
 PORT=${YAGURA_PORT:-7300}
-RELEASE=${RELEASE:-auto}
 REPO_PORT=8088
 export YAGURA_HOME=$DEMO/home
 export YAGURA_PORT=$PORT
@@ -70,8 +67,7 @@ EOF
     "version": "sed -n 's/^version=//p' gradle.properties",
     "command": "gradle -q publish -Pversion=\"$YAGURA_VERSION\"",
     "suffix": "-SNAPSHOT",
-    "available": "case \"$YAGURA_VERSION\" in *-SNAPSHOT) curl -sf -o /dev/null \"$MAVEN_REPO/snapshots/com/example/lib/$YAGURA_VERSION/maven-metadata.xml\";; *) curl -sf -o /dev/null \"$MAVEN_REPO/releases/com/example/lib/$YAGURA_VERSION/lib-$YAGURA_VERSION.pom\";; esac",
-    "unpublish": "curl -sf -u \"$MAVEN_USER:$MAVEN_PASSWORD\" -X DELETE \"$MAVEN_REPO/snapshots/com/example/lib/$YAGURA_VERSION\""
+    "available": "case \"$YAGURA_VERSION\" in *-SNAPSHOT) curl -sf -o /dev/null \"$MAVEN_REPO/snapshots/com/example/lib/$YAGURA_VERSION/maven-metadata.xml\";; *) curl -sf -o /dev/null \"$MAVEN_REPO/releases/com/example/lib/$YAGURA_VERSION/lib-$YAGURA_VERSION.pom\";; esac"
   }
 }
 EOF
@@ -136,7 +132,7 @@ EOF
   Y env value set local MAVEN_REPO "$MAVEN_REPO" --note "Reposilite standing in for Nexus" >/dev/null
   Y env value set local MAVEN_USER "$MAVEN_USER" >/dev/null
   Y env value set local MAVEN_PASSWORD "$MAVEN_PASSWORD" >/dev/null
-  Y project new demo --goal "lib gains a feature that app uses" --predicate "both landed" --repo lib --repo app --merge human --release "$RELEASE" --env local >/dev/null
+  Y project new demo --goal "lib gains a feature that app uses" --predicate "both landed" --repo lib --repo app --merge human --env local >/dev/null
   Y unit add demo --repo lib --goal "write lib" --write 'lib/**' --accept "lib file exists" --verify true >/dev/null
   Y unit add demo --repo app --goal "write app against lib's change" --write 'app/**' --accept "app file exists" --verify true --needs 1:source >/dev/null
 
@@ -148,17 +144,9 @@ Running. Open http://127.0.0.1:$PORT/p/demo
   1. U1 (lib) verifies; a test build lands in Reposilite:  $MAVEN_REPO/#/snapshots/com/example/lib
   2. U2 (app) builds on that test version and is verified.
   3. Answer the land gate for U1 (bell, or: YAGURA_HOME=$YAGURA_HOME yagura gate answer <id> land).
-  4. Release ($RELEASE): ci = U2 waits and you play CI with  scripts/demo-publish.sh release ; auto = yagura publishes 1.5.0 itself;
-     human = a release question appears on the bell, answer "publish".
-  5. Within ~5 s yagura re-pins U2 to 1.5.0 and verifies it again; land U2's gate. The test build is deleted.
+  4. Land U2's gate. It lands pinned to U1's test build (app/deps.txt); nothing is released or deleted, and the snapshot stays in Reposilite.
 Log: tail -f $DEMO/daemon.log     State: scripts/demo-publish.sh status     Stop: scripts/demo-publish.sh down
 EOF
-}
-
-release() {
-  rm -rf "$DEMO/ci" && git clone -q "$DEMO/lib.git" "$DEMO/ci"
-  (cd "$DEMO/ci" && git log --oneline | head -1 && gradle -q publish -Pversion=1.5.0)
-  echo "published lib 1.5.0 from lib's trunk, as CI would"
 }
 
 status() {
