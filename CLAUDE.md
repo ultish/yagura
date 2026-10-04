@@ -5,7 +5,7 @@ Agent orchestration for long-running engineering projects: a deterministic daemo
 ## Read first
 
 - `docs/DESIGN.md` is the agreed spec. Build to it; if the code needs to diverge, update the design in the same change.
-- `docs/STATUS.md` is where the build is: finished phases, the next phase's task list, open decisions, and known gaps. Update it whenever a phase or task lands.
+- `docs/STATUS.md` is where the build is: a handoff block, what is left, what was decided not to build, and known limits. Keep it short: when something is finished and no longer needed to act, move it to `docs/STATUS-ARCHIVE.md` (phase checklists, real-run findings, build notes), which is read only for history. Update STATUS whenever a phase or task lands.
 
 ## Layout
 
