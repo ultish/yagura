@@ -168,11 +168,12 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
           if (y1 === undefined || y2 === undefined) return null;
           const a = d.units.find((u) => u.id === dep.unitId)!;
           const b = d.units.find((u) => u.id === dep.dependsOn)!;
+          // Drawn from the unit being waited on to the one waiting, so the dashes travel the way the release will.
           return (
             <g key={`${dep.unitId}-${dep.dependsOn}`}>
               <path
                 className="signal"
-                d={`M${XS.plan + 6} ${y1 - 4} C ${XS.plan + 100} ${y1 - 30} ${XS.land - 90} ${y2 + 40} ${XS.land - 6} ${y2 + 6}`}
+                d={`M${XS.land - 6} ${y2 + 6} C ${XS.land - 90} ${y2 + 40} ${XS.plan + 100} ${y1 - 30} ${XS.plan + 6} ${y1 - 4}`}
                 fill="none"
                 style={{ stroke: "var(--lamp)" }}
                 strokeWidth="1.5"
