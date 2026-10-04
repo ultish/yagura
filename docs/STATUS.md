@@ -4,7 +4,7 @@ Updated 2026-10-03 (handoff for a cleared session, end of session 26ff87bb). Eve
 
 **Resume here (handoff, 2026-10-03, end of session 26ff87bb):**
 
-- **Changed 2026-10-04 (developer): yagura publishes snapshots only and never releases or deletes.** A test version of a `-SNAPSHOT` library is always `<version>-yg-<project>-u<n>-<sha7>-SNAPSHOT` (so `1.5.+` never resolves it); yagura does not wait for, publish, or ask about a release (the `release` policy, `--release`, the release gate, `publish.release_wait_minutes`, and the pack's `unpublish` are gone) and never deletes a snapshot, because the real version appears only when the developer merges to main. A consumer lands pinned to the snapshot it was proven against. DESIGN §14 says so; the `release` kind, gate kind, and `release_policy` column stay in the database unused.
+- **Changed 2026-10-04 (developer): yagura publishes snapshots only and never releases or deletes.** A test version of a `-SNAPSHOT` library is always `<version>-yg-<project>-u<n>-<sha7>-SNAPSHOT` (so `1.5.+` never resolves it); yagura does not wait for, publish, or ask about a release (the `release` policy, `--release`, the release gate, `publish.release_wait_minutes`, and the pack's `unpublish` are gone) and never deletes a snapshot, because the real version appears only when the developer merges to main. A consumer lands pinned to the snapshot it was proven against, and its pull request gets a comment saying so (`postPinNotice`, once per set of pinned versions). DESIGN §14 says so; the `release` kind, gate kind, and `release_policy` column stay in the database unused.
 
 - **State.** `main` is clean and pushed (last code commit `f2dddcd`, then this handoff); `pnpm -r test` passes (core 300, web 27, daemon 20; one run once showed a failure line that could not be reproduced in five reruns) and `pnpm -r typecheck` is clean. Database at migration 38. A demo daemon is still running on :7300, on code from before the manager (restarting it migrates its database from 33 to 36; tested on a copy), with Reposilite in docker (`yg-reposilite`, :8088), started by `scripts/demo-publish.sh up`; `scripts/demo-publish.sh down` stops both. The demo project `demo` is closed (U1, U2, U10 landed); U10 carries a hand-written description (it predates the field).
 - **Built this session (2026-10-03, phase 6 and dashboard polish).**
@@ -51,11 +51,9 @@ Manager gaps (DESIGN §26 "As built"), all done 2026-10-04: waking on two invali
 
 Nothing small is left in the manager. Done 2026-10-04: the `investigate` action (a unit type that writes only findings, which come back to the manager).
 
-Possible, only if the developer wants them:
+Possible, only if the developer wants it:
 
-5. **A `manager.review` gate**: ask the developer before a manager's choice takes effect. Not built because the choices take effect at once and can be Disagreed with afterwards.
-6. **A disagreement that belongs to the project, not a unit.** Today one about code yagura did not write is recorded on the unit the reader came from. A project-level record is needed if that proves wrong.
-7. **Re-pinning a consumer whose pinned version sits where `git grep` cannot find it** (a generated lock file). Such a consumer is verified again, not re-pinned.
+1. **A `manager.review` gate**: ask the developer before a manager's choice takes effect. Not built because the choices take effect at once and can be Disagreed with afterwards; build it only if real manager runs show poor decisions.
 
 Nothing else is known to be missing from the design.
 
@@ -83,6 +81,7 @@ None of these needs new code unless it finds a bug. Cost estimates are the fixed
 - Skill capture from example repos (§11): can be done outside yagura.
 - Other harnesses (codex, grok), pack manifests for pstack-claude forks, and measurement-driven hillclimb projects (phase 7).
 - Better handling of the session limit (429).
+- A project-level record for disagreements about code yagura did not write, and re-pinning a consumer whose version sits in a generated lock file (developer, 2026-10-04: not relevant).
 - Links between separate projects: a project handles several repos, so a library and its consumer are normally one project.
 - A readable planner handoff: the raw plan JSON is readable enough.
 - A separate `investigate` unit type and "route a twice-rejected unit to the planner" as features: they are manager menu items (§26).

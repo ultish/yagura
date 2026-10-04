@@ -33,6 +33,7 @@ import {
   getUnit,
   listAttempts,
   listGates,
+  listUnits,
   now,
   recordEvent,
   setLandedSha,
@@ -265,6 +266,29 @@ export function prBody(message: string): string {
   return `${lines.map((line, i) => (trailer(line) && trailer(lines[i + 1]) ? `${line}\\` : line)).join("\n")}\n`;
 }
 
+// A consumer proven on a test build lands pinned to it; yagura never releases, so the pin is the developer's to replace after the library merges.
+export async function postPinNotice(db: Db, forge: ForgeAdapter, unit: Unit, number: number): Promise<boolean> {
+  const verdict = liveVerdict(db, unit.id);
+  if (!verdict) return false;
+  const row = db.prepare("SELECT artifact_versions_json AS v FROM verdicts WHERE id = ?").get(verdict.id) as { v: string | null };
+  const versions = Object.entries(JSON.parse(row.v ?? "{}") as Record<string, string>);
+  if (!versions.length) return false;
+  const key = `${unit.projectId}/U${unit.seq}/pin/${versions.map(([u, v]) => `${u}=${v}`).join(",")}`;
+  if ((await forge.replyKeys(number)).has(key)) return false;
+  const units = listUnits(db, unit.projectId);
+  const named = versions.map(([u, v]) => {
+    const repo = units.find((x) => `U${x.seq}` === u)?.repoId;
+    return `- \`${v}\` (built from ${u}${repo ? ` in ${repo}` : ""})`;
+  });
+  await forge.comment(
+    number,
+    null,
+    `This change was proven against a test build of what it depends on, so it is pinned to:\n${named.join("\n")}\n\nThat is a snapshot, not a release, and yagura keeps it published. Once the change it was built from is merged and released, replace the pin with the real version before relying on this on trunk.`,
+    key,
+  );
+  return true;
+}
+
 // The push lands before the pull request opens, so when opening fails the branch still holds yagura's push and no pull request records it.
 function lastBranchPush(db: Db, unitId: UnitId, branch: string): Sha | null {
   const row = db
@@ -307,6 +331,9 @@ async function propose(l: Landing, forge: ForgeAdapter, squash: Extract<Squash, 
     });
     recordEvent(db, "pr.pushed", { projectId: l.project.id, unitId: l.unit.id }, { number: pr.number, url: pr.url, head: squash.landed, onto: squash.trunk });
     await postReviewComments(db, forge, l.unit, pr.number).catch((e: unknown) =>
+      recordEvent(db, "review.comment_deferred", { projectId: l.project.id, unitId: l.unit.id }, { error: e instanceof Error ? e.message : String(e) }),
+    );
+    await postPinNotice(db, forge, l.unit, pr.number).catch((e: unknown) =>
       recordEvent(db, "review.comment_deferred", { projectId: l.project.id, unitId: l.unit.id }, { error: e instanceof Error ? e.message : String(e) }),
     );
     return { unit: getUnit(db, l.unit.id), outcome: "proposed", landedSha: null, reason: `${prRef(l.repo.forge, pr.number)}: ${pr.url}` };
@@ -402,6 +429,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   const status = await forge.status(mr.number);
   recordMergeStatus(db, unit.id, status);
   await postReviewComments(db, forge, unit, mr.number);
+  await postPinNotice(db, forge, unit, mr.number);
   await postReplies(db, forge, unit, mr.number);
   if (!["landing", "blocked"].includes(unit.state)) return null;
   const l = landing(ctx, unit);

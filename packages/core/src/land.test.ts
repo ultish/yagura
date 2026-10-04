@@ -421,6 +421,20 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(ghState().prs[0]!.state).toBe("OPEN");
   });
 
+  it("tells the pull request which test build the change is pinned to, once", async () => {
+    setMergePolicy(db, project, "human");
+    const work = await verifiedUnit();
+    db.prepare("UPDATE verdicts SET artifact_versions_json = ? WHERE unit_id = ?").run(JSON.stringify({ U7: "1.5.0-yg-p-u7-ab12cd3-SNAPSHOT" }), work.id);
+    await landUnit(ctx, work.id);
+    await watchMergeRequest(ctx, work.id);
+    await watchMergeRequest(ctx, work.id);
+    const comments = (ghState().prs[0] as unknown as { comments?: { body: string }[] }).comments ?? [];
+    const pins = comments.filter((c) => c.body.includes("pinned to:"));
+    expect(pins).toHaveLength(1);
+    expect(pins[0]!.body).toContain("- `1.5.0-yg-p-u7-ab12cd3-SNAPSHOT` (built from U7)");
+    expect(pins[0]!.body).toContain("That is a snapshot, not a release");
+  });
+
   it("posts a finding on a line the forge refuses as a plain comment, and answers it as one", async () => {
     process.env.FAKE_GH_LINE_REFUSED = "1";
     try {
