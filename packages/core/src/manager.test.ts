@@ -121,6 +121,16 @@ describe("parseDecision", () => {
     });
   });
 
+  it("reads the last Decision section when the analysis above it has a Decision heading of its own", () => {
+    const text =
+      "## Analysis\nThe verifier is right.\n\n## Decision\n\nOnly the developer can decide this.\n\n---\n\n## Status\nsuccess\n\n## Decision\naction: ask\nreason: scope conflict\nquestion: Keep the emojis?\n";
+    expect(parseDecision(text)).toMatchObject({ ok: true, action: "ask", reason: "scope conflict", question: "Keep the emojis?" });
+    expect(parseDecision("## Decision\nonly prose here\n\n## Decision\nstill prose\n")).toMatchObject({
+      ok: false,
+      problem: expect.stringContaining('no usable "action:" line'),
+    });
+  });
+
   it("refuses an answer it cannot act on", () => {
     expect(parseDecision("I am not sure.")).toEqual({ ok: false, problem: "the answer has no ## Decision section" });
     expect(parseDecision("## Decision\naction: delete\nreason: x\n")).toMatchObject({ ok: false });

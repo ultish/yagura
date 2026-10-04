@@ -6,7 +6,7 @@ import { renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { TERMINAL_STATES, type Attempt, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
-import { getMergeRequest, postOnce, type ForgeAdapter, type PrThread } from "./forge.js";
+import { getMergeRequest, postOnce, signed, type ForgeAdapter, type PrThread } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, git, headSha } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { verifiedHead } from "./land.js";
@@ -29,6 +29,7 @@ import {
   updateAttempt,
   type Db,
   jobLabel,
+  agentRef,
 } from "./store.js";
 import { listDecisions, threadsForProject } from "./threads.js";
 import { freshThreads, isReviewThread, listThreadRows, queueTriage } from "./triage.js";
@@ -147,13 +148,14 @@ export async function postReviewComments(db: Db, forge: ForgeAdapter, target: Un
   for (const r of reviews) {
     const fates = findingFates(db, r);
     if (!fates) continue;
-    const title = `yagura's code review${/again/.test(r.goal) ? " of the fixes" : ""}`;
+    const who = { role: "reviewer", run: agentRef(db, r) };
+    const again = /again/.test(r.goal);
     if (!fates.length) {
       const key = `${target.projectId}/U${r.seq}/review`;
       if (done(key) || posted.has(key)) continue;
       const sent = await postOnce(key, async () => {
         if (done(key)) return false;
-        record(key, await forge.comment(number, null, `${title}: nothing to raise.`, key));
+        record(key, await forge.comment(number, null, signed(who, again ? "No findings in the fixes." : "No findings."), key));
         return true;
       });
       if (sent?.posted) n++;
@@ -169,7 +171,13 @@ export async function postReviewComments(db: Db, forge: ForgeAdapter, target: Un
         if (done(threadId)) return false;
         record(
           threadId,
-          await forge.comment(number, at, `${title}, [${f.severity}] ${at ? "" : `${where} `}${f.text}`, key, `${title}, [${f.severity}] ${where} ${f.text}`),
+          await forge.comment(
+            number,
+            at,
+            signed(who, `**${f.severity}**${at ? "" : ` \u00b7 ${where}`} \u2014 ${f.text}`),
+            key,
+            signed(who, `**${f.severity}** \u00b7 ${where} \u2014 ${f.text}`),
+          ),
         );
         return true;
       });

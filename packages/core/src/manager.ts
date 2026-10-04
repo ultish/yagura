@@ -218,9 +218,20 @@ const MENU = MANAGER_ACTIONS.filter((a): a is Exclude<ManagerAction, "fallback">
 
 // "## Decision" with "action:", "reason:", and optionally "note:" or "question:" lines.
 export function parseDecision(text: string): Decision {
-  const head = /^##\s+Decision\s*$/im.exec(text);
-  if (!head) return { ok: false, problem: "the answer has no ## Decision section" };
-  const rest = text.slice(head.index + head[0].length);
+  // The report is the last thing in the answer, but the analysis above it may use a "## Decision" heading of its own, so the
+  // sections are tried from the last to the first and the first usable one wins.
+  const heads = [...text.matchAll(/^##\s+Decision\s*$/gim)];
+  if (!heads.length) return { ok: false, problem: "the answer has no ## Decision section" };
+  let problem: Decision | null = null;
+  for (let i = heads.length - 1; i >= 0; i--) {
+    const found = parseDecisionSection(text.slice(heads[i]!.index + heads[i]![0].length));
+    if (found.ok) return found;
+    problem ??= found;
+  }
+  return problem!;
+}
+
+function parseDecisionSection(rest: string): Decision {
   const end = rest.search(/^##\s/m);
   const fields = new Map<string, string>();
   let key: string | null = null;
@@ -232,7 +243,8 @@ export function parseDecision(text: string): Decision {
     } else if (key && line.trim()) fields.set(key, `${fields.get(key)} ${line.trim()}`);
   }
   const action = fields.get("action")?.toLowerCase().replace(/[`"']/g, "");
-  if (!action || !(MENU as readonly string[]).includes(action)) return { ok: false, problem: `action must be one of ${MENU.join(", ")}` };
+  if (!action || !(MENU as readonly string[]).includes(action))
+    return { ok: false, problem: `its Decision section has no usable "action:" line (one of ${MENU.join(", ")})` };
   const reason = fields.get("reason");
   if (!reason) return { ok: false, problem: "the decision has no reason" };
   return {

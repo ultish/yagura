@@ -359,6 +359,12 @@ export function jobLabel(db: Db, unit: Pick<Unit, "id" | "type">): string {
   return a ? `A${a.agent_no}` : `its ${unit.type === "review-triage" ? "triage" : unit.type} (not started)`;
 }
 
+// The agent run that did a job, "A4", or its unit, "U7", before any run has started; for a header that must always name something.
+export function agentRef(db: Db, unit: Pick<Unit, "id" | "seq" | "type">): string {
+  const label = jobLabel(db, unit);
+  return /^A\d+$/.test(label) ? label : `U${unit.seq}`;
+}
+
 export function createAttempt(db: Db, unitId: UnitId, harness: string, model: string | null): Attempt {
   const id = db.transaction(() => {
     const n = (db.prepare("SELECT COALESCE(MAX(n), 0) + 1 AS next FROM attempts WHERE unit_id = ?").get(unitId) as { next: number }).next;

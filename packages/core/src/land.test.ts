@@ -406,17 +406,15 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(await watchMergeRequest(ctx, work.id)).toMatchObject({ outcome: "waiting", reason: expect.stringMatching(/review/) });
     const thread = ghState().prs[0]!.threads![0]! as unknown as { path: string; line: number; comments: { body: string }[] };
     expect(thread).toMatchObject({ path: "app/orders.py", line: 1 });
-    expect(thread.comments[0]!.body).toMatch(
-      /^\*\*yagura\*\* · automated, posted with this account\n\nyagura's code review, \[blocking\] please fix: the empty case is not handled/,
-    );
+    expect(thread.comments[0]!.body).toMatch(/^👁️ \*\*yagura reviewer\*\* · A\d+\n\n\*\*blocking\*\* — please fix: the empty case is not handled/);
     fixIt();
     await watchMergeRequest(ctx, work.id);
     await watchMergeRequest(ctx, work.id);
     expect(thread.comments).toHaveLength(1);
     const after = ghState().prs[0]!.threads![0]! as unknown as { comments: { body: string }[] };
     expect(after.comments.map((c) => c.body.split("\n")[2])).toEqual([
-      "yagura's code review, [blocking] please fix: the empty case is not handled",
-      "Fixed in abcdef1234 (yagura p/U1): handled the empty case",
+      "**blocking** — please fix: the empty case is not handled",
+      "**Fixed** in `abcdef1234` — handled the empty case",
     ]);
     expect(ghState().prs[0]!.state).toBe("OPEN");
   });
@@ -429,10 +427,10 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     await watchMergeRequest(ctx, work.id);
     await watchMergeRequest(ctx, work.id);
     const comments = (ghState().prs[0] as unknown as { comments?: { body: string }[] }).comments ?? [];
-    const pins = comments.filter((c) => c.body.includes("pinned to:"));
+    const pins = comments.filter((c) => c.body.includes("Pinned to a test build"));
     expect(pins).toHaveLength(1);
-    expect(pins[0]!.body).toContain("- `1.5.0-yg-p-u7-ab12cd3-SNAPSHOT` (built from U7)");
-    expect(pins[0]!.body).toContain("That is a snapshot, not a release");
+    expect(pins[0]!.body).toContain("- `1.5.0-yg-p-u7-ab12cd3-SNAPSHOT` (from U7)");
+    expect(pins[0]!.body).toContain("It is a snapshot, not a release");
   });
 
   it("posts a finding on a line the forge refuses as a plain comment, and answers it as one", async () => {
@@ -444,8 +442,8 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
       await watchMergeRequest(ctx, work.id);
       const comments = (ghState().prs[0] as unknown as { comments: { body: string }[] }).comments.map((c) => c.body.split("\n")[2]);
       expect(comments).toEqual([
-        "yagura's code review, [should] `app/orders.py:1` please fix: the error is swallowed",
-        "On F1: Fixed in abcdef1234 (yagura p/U1): handled the empty case",
+        "**should** · `app/orders.py:1` — please fix: the error is swallowed",
+        "On F1: **Fixed** in `abcdef1234` — handled the empty case",
       ]);
     } finally {
       delete process.env.FAKE_GH_LINE_REFUSED;
@@ -622,7 +620,7 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(await watchMergeRequest(ctx, work.id)).toBeNull();
     expect(ghState().prs[0]).toMatchObject({
       state: "CLOSED",
-      comment: "**yagura** · automated, posted with this account\n\nyagura abandoned p/U1, so this pull request will not be merged.\n\n<!-- yagura -->",
+      comment: "⚙️ **yagura**\n\nyagura abandoned p/U1, so this pull request will not be merged.\n\n<!-- yagura -->",
     });
   });
 
@@ -652,10 +650,10 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(brief).not.toContain("old and resolved");
     const pr = () => ghState().prs[0] as unknown as { threads: { comments: { body: string }[] }[]; comments: { body: string }[] };
     expect(pr().threads[0]!.comments[1]!.body).toMatch(
-      /^\*\*yagura\*\* · automated, posted with this account\n\nFixed in [0-9a-f]{10} \(yagura p\/U1\): added the review fix to app\/orders.py\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/RT_1 -->$/,
+      /^💬 \*\*yagura review triage\*\* · A\d+\n\n\*\*Fixed\*\* in `[0-9a-f]{10}` — added the review fix to app\/orders.py\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/RT_1 -->$/,
     );
     expect(pr().threads[1]!.comments[1]!.body).toMatch(
-      /^\*\*yagura\*\* · automated, posted with this account\n\nthe existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:/,
+      /^💬 \*\*yagura review triage\*\* · A\d+\n\n\*\*No change\*\* — the existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:/,
     );
     const ask = listGates(db, project, "open").find((g) => g.kind === "review")!;
     expect(ask.question).toMatch(/^On pull request #1, bob wrote: "security: this logs the auth token"\. This touches security, auth, or data/);
@@ -679,7 +677,7 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     await runTriageUnit(ctx, getUnitBySeq(db, project, 5).id);
     expect(readFileSync(layout(ctx.boot).brief(project, 5, 1), "utf8")).toContain("The developer decided: dismiss. Do that.");
     expect(pr().comments.at(-1)!.body).toMatch(
-      /^\*\*yagura\*\* · automated, posted with this account\n\nthe existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/IC_1 -->$/,
+      /^💬 \*\*yagura review triage\*\* · A\d+\n\n\*\*No change\*\* — the existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/IC_1 -->$/,
     );
     expect(getUnitBySeq(db, project, 1).state).toBe("verified");
     await landUnit(ctx, work.id);
@@ -775,8 +773,8 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     expect(d.individual_note).toBe(false);
     expect(d.notes[0]!.position).toMatchObject({ new_path: "app/orders.py", new_line: 1 });
     expect(d.notes.map((n) => n.body.split("\n")[2])).toEqual([
-      "yagura's code review, [blocking] please fix: the empty case is not handled",
-      "Fixed in abcdef1234 (yagura p/U1): handled it",
+      "**blocking** — please fix: the empty case is not handled",
+      "**Fixed** in `abcdef1234` — handled it",
     ]);
   });
 
@@ -883,13 +881,13 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     const discussions = glState().mrs[0]!.discussions;
     const replies = (id: string) => discussions.find((d) => d.id === id)!.notes.filter((n) => String(n.body).includes("<!-- yagura -->"));
     expect(replies("dA").map((n) => n.body)).toEqual([
-      expect.stringMatching(/^\*\*yagura\*\* · automated, posted with this account\n\nFixed in [0-9a-f]{10} \(yagura p\/U1\): added the review fix/),
+      expect.stringMatching(/^💬 \*\*yagura review triage\*\* · A\d+\n\n\*\*Fixed\*\* in `[0-9a-f]{10}` — added the review fix/),
     ]);
     expect(
       discussions.filter(
         (d) =>
           d.individual_note &&
-          d.notes.some((n) => String(n.body).startsWith("**yagura** · automated, posted with this account\n\nthe existing test covers this case")),
+          d.notes.some((n) => /^💬 \*\*yagura review triage\*\* · A\d+\n\n\*\*No change\*\* — the existing test covers this case/.test(String(n.body))),
       ),
     ).toHaveLength(1);
   });
@@ -901,9 +899,7 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     expect(await watchMergeRequest(ctx, work.id)).toBeNull();
     const mr = glState().mrs[0]!;
     expect(mr.state).toBe("closed");
-    expect(mr.discussions.at(-1)!.notes[0]!.body).toBe(
-      "**yagura** · automated, posted with this account\n\nyagura abandoned p/U1, so this merge request will not be merged.\n\n<!-- yagura -->",
-    );
+    expect(mr.discussions.at(-1)!.notes[0]!.body).toBe("⚙️ **yagura**\n\nyagura abandoned p/U1, so this merge request will not be merged.\n\n<!-- yagura -->");
   });
 
   it("lands a unit again on retry after its branch was pushed but the merge request could not open, without a new attempt", async () => {

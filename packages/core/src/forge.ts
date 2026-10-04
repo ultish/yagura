@@ -56,9 +56,25 @@ export interface PrThread {
 
 // Everything yagura posts carries this marker, so its own replies never read as new review activity.
 export const YAGURA_MARK = "<!-- yagura -->";
-// yagura posts through the developer's own account, so every post says up front who wrote it.
-export const POST_LABEL = "**yagura** · automated, posted with this account";
-export const marked = (body: string) => `${POST_LABEL}\n\n${body}\n\n${YAGURA_MARK}`;
+// yagura posts through the developer's own account, so every post opens with one line saying who wrote it: yagura, the agent
+// (role and run number, "A4"), and then the comment. An emoji per agent makes the author readable at a glance.
+export const AGENT_EMOJI: Record<string, string> = {
+  reviewer: "\u{1F441}\uFE0F",
+  "review triage": "\u{1F4AC}",
+  rebase: "\u{1F500}",
+  manager: "\u{1F9ED}",
+  worker: "\u{1F528}",
+  verifier: "\u{1F6E1}\uFE0F",
+  planner: "\u{1F5FA}\uFE0F",
+};
+const YAGURA_EMOJI = "\u2699\uFE0F";
+// `who` is the agent that wrote the text; yagura's own engine (a pin notice, a close) passes none.
+export function signed(who: { role: string; run: string } | null, text: string): string {
+  const head = who ? `${AGENT_EMOJI[who.role] ?? YAGURA_EMOJI} **yagura ${who.role}** \u00b7 ${who.run}` : `${YAGURA_EMOJI} **yagura**`;
+  return `${head}\n\n${text}`;
+}
+const SIGNED = /^\S+ \*\*yagura[ *]/;
+export const marked = (body: string) => `${SIGNED.test(body) ? body : signed(null, body)}\n\n${YAGURA_MARK}`;
 // The PR watcher and the end of a triage run can both be about to post the same reply. The forge's keys do not show a post
 // still in flight, so within this process only one caller posts a given key at a time; a caller that finds it taken skips it,
 // and one that gets it after the first finished must check its own records again before posting.

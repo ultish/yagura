@@ -54,7 +54,8 @@ describe("posting to a forge once", () => {
       },
     } as unknown as ForgeAdapter;
     const counts = await Promise.all([postReplies(db, forge, unit, 1), postReplies(db, forge, unit, 1)]);
-    expect(replies).toEqual(["the acceptance test forbids it"]);
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatch(/\*\*No change\*\* — the acceptance test forbids it$/);
     expect(counts.reduce((a, b) => a + b, 0)).toBe(1);
     expect(await postReplies(db, forge, unit, 1)).toBe(0);
   });

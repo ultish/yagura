@@ -9,6 +9,7 @@ import {
   getMergeRequest,
   postOnce,
   recordMergeStatus,
+  signed,
   saveMergeRequest,
   setMergeState,
   type ForgeAdapter,
@@ -280,12 +281,15 @@ export async function postPinNotice(db: Db, forge: ForgeAdapter, unit: Unit, num
     const units = listUnits(db, unit.projectId);
     const named = versions.map(([u, v]) => {
       const repo = units.find((x) => `U${x.seq}` === u)?.repoId;
-      return `- \`${v}\` (built from ${u}${repo ? ` in ${repo}` : ""})`;
+      return `- \`${v}\` (from ${u}${repo ? ` in ${repo}` : ""})`;
     });
     await forge.comment(
       number,
       null,
-      `This change was proven against a test build of what it depends on, so it is pinned to:\n${named.join("\n")}\n\nThat is a snapshot, not a release, and yagura keeps it published. Once the change it was built from is merged and released, replace the pin with the real version before relying on this on trunk.`,
+      signed(
+        null,
+        `**Pinned to a test build** of what this depends on:\n${named.join("\n")}\n\nIt is a snapshot, not a release, and yagura keeps it published. After that change is merged and released, replace the pin with the real version.`,
+      ),
       key,
     );
     return true;
@@ -426,7 +430,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   if (unit.state === "abandoned" || unit.state === "done") {
     const why =
       unit.state === "done" ? `${project.id}/U${unit.seq}'s change is already on ${repo.defaultBranch}` : `yagura abandoned ${project.id}/U${unit.seq}`;
-    await forge.close(mr.number, `${why}, so this ${prNoun(repo.forge)} will not be merged.`);
+    await forge.close(mr.number, signed(null, `${why}, so this ${prNoun(repo.forge)} will not be merged.`));
     setMergeState(db, unit.id, "closed", project.id, { number: mr.number, reason: unit.state === "done" ? "already on trunk" : "unit abandoned" });
     return null;
   }
