@@ -421,11 +421,13 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     const text = row.comments.join("\n");
     // A change to what the unit must do is the developer's to approve, whatever the arbiter ruled; one that does not fit the unit as it is is dropped.
     let ops = autoApplied.has(i) ? [] : (amendments.get(i + 1) ?? []);
+    let unapplied: string | null = null;
     if (ops.length) {
       const fits = applyOps(target.acceptance, target.verify ?? "", ops);
       if ("problem" in fits) {
         recordEvent(db, "amendment.invalid", refs, { thread: `T${i + 1}`, problem: fits.problem });
         ops = [];
+        unapplied = fits.problem;
       } else if (decision !== "asked") {
         decision = "asked";
         reason = `This would change what U${target.seq} must do, so yagura will not do it without you. The arbiter said: ${reason}`;
@@ -443,7 +445,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
         kind: "review",
         question: `On ${ref}, ${row.author} wrote: "${text.slice(0, 400)}". ${reason}${
           ops.length ? ` Approving also changes U${target.seq}'s acceptance: ${describeOps(ops).join("; ")}.` : ""
-        } Fix it or dismiss it?`,
+        }${unapplied ? ` The arbiter proposed a change to the acceptance that yagura could not apply (${unapplied}), so approving changes nothing there.` : ""} Fix it or dismiss it?`,
         options: ["fix", "dismiss"],
       });
       if (ops.length) proposeAmendment(db, { unitId: target.id, gateId, threadId: row.threadId, author: row.author, quote: text, changes: ops });

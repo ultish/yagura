@@ -33,6 +33,15 @@ describe("parseAmendments verify lines", () => {
   });
 });
 
+describe("backticks around a criterion", () => {
+  it("matches a criterion the model wrapped in backticks, and stores it without them", () => {
+    const text = "## Amendments\n- T1: replace: `shout('app') === 'HELLO, APP!'` => `shout('app') === 'HELLO, APP! \u{1F389}'`\n";
+    const ops = parseAmendments(text, 1).get(1)!;
+    expect(ops).toEqual([{ kind: "replace", from: "shout('app') === 'HELLO, APP!'", to: "shout('app') === 'HELLO, APP! \u{1F389}'" }]);
+    expect(applyOps(["`shout('app') === 'HELLO, APP!'`"], "v", ops)).toEqual({ acceptance: ["shout('app') === 'HELLO, APP! \u{1F389}'"], verify: "v" });
+  });
+});
+
 describe("applyOps", () => {
   it("replaces, adds, and removes criteria by their wording, ignoring case and spacing, and refuses one the unit does not have", () => {
     const next = applyOps(["A  works", "B works"], "run it", [

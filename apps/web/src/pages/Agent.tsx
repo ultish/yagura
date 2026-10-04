@@ -476,7 +476,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
           )}
         </div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
-          <h1 className="serif" style={{ margin: 0, fontSize: 28, fontWeight: 600, maxWidth: 900, lineHeight: 1.3 }}>
+          <h1 className="serif" style={{ margin: 0, fontSize: 28, fontWeight: 600, flex: "1 1 480px", minWidth: 0, lineHeight: 1.3 }}>
             <Inline text={u.goal} />
           </h1>
           {a.state === "running" && !stopping && (

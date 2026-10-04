@@ -36,7 +36,13 @@ const toAmendment = (r: Record<string, unknown>): Amendment => ({
 export const listAmendments = (db: Db, unitId: UnitId): Amendment[] =>
   (db.prepare("SELECT * FROM unit_amendments WHERE unit_id = ? ORDER BY id").all(unitId) as Record<string, unknown>[]).map(toAmendment);
 
-const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+// The model often wraps a criterion in backticks as code; the criterion itself has none.
+const unquote = (s: string) =>
+  s
+    .trim()
+    .replace(/^`+|`+$/g, "")
+    .trim();
+const norm = (s: string) => unquote(s).replace(/\s+/g, " ").toLowerCase();
 
 // The model sometimes wraps the command in backticks or follows it with an explanation; only the command is a VERIFY.
 const shellCommand = (body: string) => /`([^`]+)`/.exec(body)?.[1]?.trim() ?? body.split(/\s+[—–]\s+/)[0]!.trim();
@@ -51,12 +57,12 @@ export function parseAmendments(text: string, count: number): Map<number, AmendO
     const kind = m[2]!.toLowerCase();
     const body = m[3]!.trim();
     let op: AmendOp | null = null;
-    if (kind === "add") op = { kind: "add", text: body };
-    else if (kind === "remove") op = { kind: "remove", text: body };
+    if (kind === "add") op = { kind: "add", text: unquote(body) };
+    else if (kind === "remove") op = { kind: "remove", text: unquote(body) };
     else if (kind === "verify") op = { kind: "verify", command: shellCommand(body) };
     else {
       const [from, to] = body.split(/\s*=>\s*/);
-      if (from && to) op = { kind: "replace", from: from.trim(), to: to.trim() };
+      if (from && to) op = { kind: "replace", from: unquote(from), to: unquote(to) };
     }
     if (op) out.set(i, [...(out.get(i) ?? []), op]);
   }
