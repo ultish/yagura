@@ -15,7 +15,7 @@ import { parseClaudeLine } from "./harness/claude.js";
 import { landUnit, liveVerdict } from "./land.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
-import { landWait, listPublications, publishJobs, qualifiedVersion, upstreamArtifact } from "./publish.js";
+import { landWait, listPublications, publishJobs, qualifiedVersion, testBuildWait, upstreamArtifact } from "./publish.js";
 import { runWorkUnit } from "./runner.js";
 import { readiness } from "./schedule.js";
 import {
@@ -149,6 +149,17 @@ describe("published artifacts", () => {
     expect(existsSync(join(nexus, test, "VERSION"))).toBe(true);
     expect(listPublications(db, lib.id)[0]).toMatchObject({ state: "published" });
   }, 90_000);
+
+  it("holds the upstream back until its test build is published, so a consumer is never left without the pin", async () => {
+    const lib = getUnitBySeq(db, project, 1);
+    await runWorkUnit(ctx, lib.id);
+    await verify(1);
+    expect(testBuildWait(db, getUnit(db, lib.id))).toBe("waits for its test build to be published, which U2 builds on");
+    await runJobs();
+    expect(listPublications(db, lib.id)[0]).toMatchObject({ state: "published" });
+    expect(testBuildWait(db, getUnit(db, lib.id))).toBeNull();
+    expect(testBuildWait(db, getUnitBySeq(db, project, 2))).toBeNull();
+  }, 60_000);
 
   it("runs the whole flow from the engine: both units land, the consumer pinned to the snapshot, which stays published", async () => {
     const engine = new Engine(ctx, { projectId: project, tickMs: 50 });

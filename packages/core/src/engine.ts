@@ -13,7 +13,7 @@ import { runRebaseUnit } from "./rebase.js";
 import { runInvestigateUnit } from "./investigate.js";
 import { applyAskAnswer, managerNeed, queueManager, runManagerUnit, settleManagerUnit, wakeOnNote } from "./manager.js";
 import { sourceDeps, staleSource } from "./sources.js";
-import { landWait, moveConsumer, publishJobs, repinIfStale } from "./publish.js";
+import { landWait, moveConsumer, publishJobs, repinIfStale, testBuildWait } from "./publish.js";
 import { queueTriage, runTriageUnit } from "./triage.js";
 import { queueReview, reviewStatus, runReviewUnit } from "./review.js";
 import { checkRetroWatch, scanReverts, watchingFor } from "./retro.js";
@@ -187,6 +187,11 @@ export class Engine {
       }
       if (wait) {
         this.sayOnce(u, wait.reason);
+        continue;
+      }
+      const build = u.state === "verified" ? testBuildWait(this.db, u) : null;
+      if (build) {
+        this.sayOnce(u, build);
         continue;
       }
       const stale = staleSource(this.db, u);

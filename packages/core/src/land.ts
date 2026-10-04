@@ -45,6 +45,7 @@ import {
   jobLabel,
 } from "./store.js";
 import { landMessage } from "./audit.js";
+import { testBuildWait } from "./publish.js";
 
 export type LandOutcome = "landed" | "blocked" | "reverifying" | "proposed" | "waiting" | "rework" | "rebasing" | "triaging";
 
@@ -480,6 +481,8 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   const review = reviewStatus(db, unit);
   if (review.state !== "settled") return waiting(review.state === "waiting" ? review.reason : "yagura's code review is not settled yet");
   if (!mergeApproved(db, project, unit)) return waiting("waiting for the land gate");
+  const build = testBuildWait(db, unit);
+  if (build) return waiting(build);
   await forge.merge(mr.number, mr.headSha, resolveSetting(db, "forge.merge_method", { repoId: repo.id }).value);
   const after = await forge.status(mr.number);
   recordMergeStatus(db, unit.id, after);

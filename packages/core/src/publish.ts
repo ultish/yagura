@@ -252,6 +252,17 @@ export function publishJobs(db: Db, projectId: ProjectId): PublishJob[] {
   return jobs;
 }
 
+// A publishing upstream does not land until its test build is published when another repo's unit builds on it: once it has landed no
+// test build can be made, and the consumer would go without the pin. A failed publish does not hold it (the consumer is stuck on its own).
+export function testBuildWait(db: Db, unit: Unit): string | null {
+  if (!unit.repoId || !getRepo(db, unit.repoId).publish) return null;
+  if (!liveConsumers(db, unit, ["needs-source"]).length) return null;
+  const head = sourceSha(db, unit);
+  const test = head ? publicationAt(db, unit.id, "test", head) : null;
+  if (test?.state === "published" || test?.state === "failed") return null;
+  return `waits for its test build to be published, which U${liveConsumers(db, unit, ["needs-source"])[0]!.seq} builds on`;
+}
+
 // What a verified consumer is waiting for before it can land, in words: its sources landing.
 // `stuck` means no amount of waiting helps (a source's test build failed), so the unit blocks.
 export function landWait(db: Db, unit: Unit): { reason: string; stuck: boolean } | null {
