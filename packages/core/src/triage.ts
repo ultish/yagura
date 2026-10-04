@@ -6,7 +6,7 @@ import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { REBASE_HARNESS, type Attempt, type IsoTime, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
-import { forgeFor, getMergeRequest, type ForgeAdapter, type PrThread, type ThreadKind, prRef } from "./forge.js";
+import { forgeFor, getMergeRequest, postOnce, type ForgeAdapter, type PrThread, type ThreadKind, prRef } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { verifiedHead } from "./land.js";
@@ -376,13 +376,20 @@ export async function postReplies(db: Db, forge: ForgeAdapter, target: Unit, num
     const key = `${target.projectId}/U${target.seq}/w${row.waveUnitId}/${row.threadId}`;
     const body = row.decision === "fixed" ? `Fixed in ${row.commitSha!.slice(0, 10)} (yagura ${target.projectId}/U${target.seq}): ${row.reason}` : row.reason!;
     const post = isReviewThread(row.threadId) ? reviewPost(db, target.id, row.threadId)! : null;
-    if (!already.has(key)) {
-      if (post?.ref) await forge.replyTo(number, post.ref, body, key);
-      else if (post) await forge.reply(number, { id: row.threadId, kind: "comment" }, `On ${row.threadId.replace(/^review:U\d+:/, "")}: ${body}`, key);
-      else await forge.reply(number, { id: row.threadId, kind: row.kind }, body, key);
-    }
-    db.prepare("UPDATE mr_threads SET replied_at = ? WHERE unit_id = ? AND thread_id = ?").run(now(), target.id, row.threadId);
-    posted++;
+    const sent = await postOnce(key, async () => {
+      const current = db.prepare("SELECT replied_at FROM mr_threads WHERE unit_id = ? AND thread_id = ?").get(target.id, row.threadId) as {
+        replied_at: string | null;
+      };
+      if (current.replied_at) return false;
+      if (!already.has(key)) {
+        if (post?.ref) await forge.replyTo(number, post.ref, body, key);
+        else if (post) await forge.reply(number, { id: row.threadId, kind: "comment" }, `On ${row.threadId.replace(/^review:U\d+:/, "")}: ${body}`, key);
+        else await forge.reply(number, { id: row.threadId, kind: row.kind }, body, key);
+      }
+      db.prepare("UPDATE mr_threads SET replied_at = ? WHERE unit_id = ? AND thread_id = ?").run(now(), target.id, row.threadId);
+      return true;
+    });
+    if (sent?.posted) posted++;
   }
   return posted;
 }

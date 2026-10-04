@@ -7,6 +7,7 @@ import {
   forgeFor,
   ForgeError,
   getMergeRequest,
+  postOnce,
   recordMergeStatus,
   saveMergeRequest,
   setMergeState,
@@ -274,19 +275,22 @@ export async function postPinNotice(db: Db, forge: ForgeAdapter, unit: Unit, num
   const versions = Object.entries(JSON.parse(row.v ?? "{}") as Record<string, string>);
   if (!versions.length) return false;
   const key = `${unit.projectId}/U${unit.seq}/pin/${versions.map(([u, v]) => `${u}=${v}`).join(",")}`;
-  if ((await forge.replyKeys(number)).has(key)) return false;
-  const units = listUnits(db, unit.projectId);
-  const named = versions.map(([u, v]) => {
-    const repo = units.find((x) => `U${x.seq}` === u)?.repoId;
-    return `- \`${v}\` (built from ${u}${repo ? ` in ${repo}` : ""})`;
+  const sent = await postOnce(key, async () => {
+    if ((await forge.replyKeys(number)).has(key)) return false;
+    const units = listUnits(db, unit.projectId);
+    const named = versions.map(([u, v]) => {
+      const repo = units.find((x) => `U${x.seq}` === u)?.repoId;
+      return `- \`${v}\` (built from ${u}${repo ? ` in ${repo}` : ""})`;
+    });
+    await forge.comment(
+      number,
+      null,
+      `This change was proven against a test build of what it depends on, so it is pinned to:\n${named.join("\n")}\n\nThat is a snapshot, not a release, and yagura keeps it published. Once the change it was built from is merged and released, replace the pin with the real version before relying on this on trunk.`,
+      key,
+    );
+    return true;
   });
-  await forge.comment(
-    number,
-    null,
-    `This change was proven against a test build of what it depends on, so it is pinned to:\n${named.join("\n")}\n\nThat is a snapshot, not a release, and yagura keeps it published. Once the change it was built from is merged and released, replace the pin with the real version before relying on this on trunk.`,
-    key,
-  );
-  return true;
+  return !!sent?.posted;
 }
 
 // The push lands before the pull request opens, so when opening fails the branch still holds yagura's push and no pull request records it.

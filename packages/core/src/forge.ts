@@ -59,6 +59,20 @@ export const YAGURA_MARK = "<!-- yagura -->";
 // yagura posts through the developer's own account, so every post says up front who wrote it.
 export const POST_LABEL = "**yagura** · automated, posted with this account";
 export const marked = (body: string) => `${POST_LABEL}\n\n${body}\n\n${YAGURA_MARK}`;
+// The PR watcher and the end of a triage run can both be about to post the same reply. The forge's keys do not show a post
+// still in flight, so within this process only one caller posts a given key at a time; a caller that finds it taken skips it,
+// and one that gets it after the first finished must check its own records again before posting.
+const posting = new Set<string>();
+export async function postOnce<T>(key: string, post: () => Promise<T>): Promise<{ posted: T } | null> {
+  if (posting.has(key)) return null;
+  posting.add(key);
+  try {
+    return { posted: await post() };
+  } finally {
+    posting.delete(key);
+  }
+}
+
 // GitHub can report a failure for a reply it did post, so each reply carries a key yagura checks before posting again.
 const keyed = (body: string, key: string) => `${marked(body)}\n<!-- yagura-reply:${key} -->`;
 

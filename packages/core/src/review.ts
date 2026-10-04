@@ -6,7 +6,7 @@ import { renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { TERMINAL_STATES, type Attempt, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
-import { getMergeRequest, type ForgeAdapter, type PrThread } from "./forge.js";
+import { getMergeRequest, postOnce, type ForgeAdapter, type PrThread } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, git, headSha } from "./git.js";
 import { parseHandoff } from "./handoff.js";
 import { verifiedHead } from "./land.js";
@@ -151,8 +151,12 @@ export async function postReviewComments(db: Db, forge: ForgeAdapter, target: Un
     if (!fates.length) {
       const key = `${target.projectId}/U${r.seq}/review`;
       if (done(key) || posted.has(key)) continue;
-      record(key, await forge.comment(number, null, `${title}: nothing to raise.`, key));
-      n++;
+      const sent = await postOnce(key, async () => {
+        if (done(key)) return false;
+        record(key, await forge.comment(number, null, `${title}: nothing to raise.`, key));
+        return true;
+      });
+      if (sent?.posted) n++;
       continue;
     }
     for (const f of fates) {
@@ -161,11 +165,15 @@ export async function postReviewComments(db: Db, forge: ForgeAdapter, target: Un
       if (done(threadId) || posted.has(key)) continue;
       const where = `\`${f.path}${f.line ? `:${f.line}` : ""}\``;
       const at = f.line && head ? { path: f.path, line: f.line, headSha: head } : null;
-      record(
-        threadId,
-        await forge.comment(number, at, `${title}, [${f.severity}] ${at ? "" : `${where} `}${f.text}`, key, `${title}, [${f.severity}] ${where} ${f.text}`),
-      );
-      n++;
+      const sent = await postOnce(key, async () => {
+        if (done(threadId)) return false;
+        record(
+          threadId,
+          await forge.comment(number, at, `${title}, [${f.severity}] ${at ? "" : `${where} `}${f.text}`, key, `${title}, [${f.severity}] ${where} ${f.text}`),
+        );
+        return true;
+      });
+      if (sent?.posted) n++;
     }
   }
   return n;
