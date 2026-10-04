@@ -131,6 +131,25 @@ describe("unit stages and status", () => {
     expect(statusLine(detail([u]), u, NOW)).toEqual({ text: "Worker running for 12m (try 1 of 2).", tone: "lamp" });
   });
 
+  it("shows a unit whose pull request is open as waiting on you while its land gate is open", () => {
+    const u = unit({ state: "landing", verdict: { id: 1, tier: "unit-verified", headSha: "x" } });
+    const gate = { id: 3, unitId: 1, state: "open", kind: "land", question: "U1 is verified. Merge its pull request on lib?", options: ["land", "hold"] };
+    const d = detail([u], { gates: [gate] as never });
+    expect(stages(d, u, NOW).map((s) => [s.light, s.label])).toEqual([
+      ["lit", null],
+      ["lit", null],
+      ["lit", null],
+      ["bell", "merge?"],
+    ]);
+    expect(statusLine(d, u, NOW)).toEqual({
+      text: "Its pull request is open on r; it waits for you: U1 is verified. Merge its pull request on lib?",
+      tone: "bell",
+    });
+    const answered = detail([u]);
+    expect(stages(answered, u, NOW)[3]).toMatchObject({ light: "flame", label: "landing" });
+    expect(statusLine(answered, u, NOW)).toEqual({ text: "Landing on r.", tone: "lamp" });
+  });
+
   it("rings the land bell when a verified unit waits on a gate, and groups it with the bell", () => {
     const u = unit({ state: "verified", verdict: { id: 1, tier: "unit-verified", headSha: "x" } });
     const v = unit({ id: 2 as never, seq: 2, type: "verify", targetUnitId: 1 as never, state: "done", attempts: [attempt({ id: 20, agentNo: 4 })] });

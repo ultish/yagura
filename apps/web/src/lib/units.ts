@@ -80,15 +80,17 @@ export function stages(d: ProjectDetail, u: UnitView, now: number): Stage[] {
           : { name: "verify", light: "off", label: null, href: null };
   const landLight: Stage = past(["landed", "done"])
     ? { name: "land", light: "lit", label: null, href: null }
-    : u.state === "landing"
-      ? { name: "land", light: "flame", label: "landing", href: null }
-      : blockedAtLand
-        ? { name: "land", light: "ember", label: "blocked", href: null }
-        : u.state === "verified" && waitingReason(d, u)
-          ? { name: "land", light: "wait", label: "waits", href: null }
-          : u.state === "verified" && gate
-            ? { name: "land", light: "bell", label: "land?", href: null }
-            : { name: "land", light: "off", label: null, href: null };
+    : u.state === "landing" && gate
+      ? { name: "land", light: "bell", label: gate.kind === "land" ? "merge?" : "asks you", href: null }
+      : u.state === "landing"
+        ? { name: "land", light: "flame", label: "landing", href: null }
+        : blockedAtLand
+          ? { name: "land", light: "ember", label: "blocked", href: null }
+          : u.state === "verified" && waitingReason(d, u)
+            ? { name: "land", light: "wait", label: "waits", href: null }
+            : u.state === "verified" && gate
+              ? { name: "land", light: "bell", label: "land?", href: null }
+              : { name: "land", light: "off", label: null, href: null };
   const lastRun = (attempts: Attempt[]) => running(attempts) ?? attempts.at(-1) ?? null;
   const verifierRun = verifiersOf(d, u)
     .map((v) => lastRun(v.attempts))
@@ -143,8 +145,12 @@ export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: 
           }
         : { text: `Verified at ${u.verdict?.tier ?? "?"}. Landing next.`, tone: "info" };
     }
-    case "landing":
-      return { text: `Landing on ${repo}.`, tone: "lamp" };
+    case "landing": {
+      const ask = openGateFor(d, u);
+      return ask
+        ? { text: `Its pull request is open on ${repo}; it waits for you: ${ask.question}`, tone: "bell" }
+        : { text: `Landing on ${repo}.`, tone: "lamp" };
+    }
     case "landed":
     case "done":
       return { text: u.landedSha ? `Landed ${sha(u.landedSha)} on ${repo}${u.verdict ? ` at ${u.verdict.tier}` : ""}.` : "Done.", tone: "pine" };
