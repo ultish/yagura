@@ -161,6 +161,88 @@ function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
   );
 }
 
+const KIND: Record<string, string> = { "needs-source": "needs its code", "needs-landed": "needs it landed", "scope-overlap": "same files" };
+
+// What this unit depends on and what depends on it, under the title: each linked, with where it stands and the build it used.
+function DepStrip({ story }: { story: UnitStory }) {
+  const edges = story.dependencies;
+  if (!edges.length) return null;
+  const needs = edges.filter((e) => e.direction === "needs");
+  const feeds = edges.filter((e) => e.direction === "feeds");
+  const link = (e: UnitStory["dependencies"][number]) => (
+    <Link to={`/p/${story.projectId}/u/${e.other.seq}`}>
+      U{e.other.seq}
+      {e.other.repoId ? ` · ${e.other.repoId}` : ""}
+    </Link>
+  );
+  return (
+    <div className="dep-strip">
+      {needs.map((e) => (
+        <div key={`n${e.other.id}`}>
+          <div className="dep-row">
+            <span className="dep-k">Depends on</span>
+            {link(e)}
+            <span className="chip">{KIND[e.kind]}</span>
+            <span className={`chip story-${e.state.tone}`}>{e.state.text}</span>
+          </div>
+          {e.build && (
+            <div className="dep-row">
+              <span className="dep-k">Built against</span>
+              <span className="mono">{e.build.version}</span>
+              {e.build.repoId && <span className="muted">{e.build.repoId}</span>}
+            </div>
+          )}
+        </div>
+      ))}
+      {feeds.map((e) => (
+        <div key={`f${e.other.id}`} className="dep-row">
+          <span className="dep-k">Feeds</span>
+          {link(e)}
+          <span className="chip">{KIND[e.kind]}</span>
+          <span className={`chip story-${e.state.tone}`}>{e.state.text}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DependenciesTab({ story }: { story: UnitStory }) {
+  return (
+    <div className="hub-table-wrap">
+      <table className="hub-table">
+        <thead>
+          <tr>
+            <th>Unit</th>
+            <th>Direction</th>
+            <th>Kind</th>
+            <th>Build</th>
+            <th>State</th>
+          </tr>
+        </thead>
+        <tbody>
+          {story.dependencies.map((e) => (
+            <tr key={`${e.direction}${e.other.id}`}>
+              <td>
+                <Link to={`/p/${story.projectId}/u/${e.other.seq}`}>
+                  U{e.other.seq}
+                  {e.other.repoId ? ` · ${e.other.repoId}` : ""}
+                </Link>
+                <div className="muted">{clip(e.other.goal, 70)}</div>
+              </td>
+              <td>{e.direction === "needs" ? `U${story.unit.seq} depends on it` : `depends on U${story.unit.seq}`}</td>
+              <td>{KIND[e.kind]}</td>
+              <td className="mono">{e.build ? e.build.version : ""}</td>
+              <td>
+                <span className={`chip story-${e.state.tone}`}>{e.state.text}</span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // Wakes the unit lead of a stuck unit now, with the developer's note.
 function AskUnitLead({ projectId, seq, reload }: { projectId: string; seq: number; reload: () => void }) {
   const [open, setOpen] = useState(false);
@@ -309,7 +391,7 @@ function ManagerTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
   );
 }
 
-type HubTab = "story" | "agents" | "code" | "manager";
+type HubTab = "story" | "agents" | "code" | "manager" | "deps";
 
 export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
   const { data: story, error, reload } = useApi<UnitStory>(`/api/projects/${projectId}/units/${seq}/story`);
@@ -320,7 +402,16 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
     saveOrder(next);
     setOrder(next);
   };
-  const tab: HubTab = query.get("tab") === "agents" ? "agents" : query.get("tab") === "code" ? "code" : query.get("tab") === "manager" ? "manager" : "story";
+  const tab: HubTab =
+    query.get("tab") === "deps"
+      ? "deps"
+      : query.get("tab") === "agents"
+        ? "agents"
+        : query.get("tab") === "code"
+          ? "code"
+          : query.get("tab") === "manager"
+            ? "manager"
+            : "story";
   if (error)
     return (
       <main style={{ padding: 36 }} className="s-bell">
@@ -367,6 +458,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
         {story.started && <span>{when(story.started, story.ended, false)}</span>}
         {u.state === "running" && running?.attempt && <Link to={`/a/${running.attempt.id}`}>running now · watch it live</Link>}
       </div>
+      <DepStrip story={story} />
       {u.type === "work" && ["blocked", "failed", "rejected"].includes(u.state) && <AskUnitLead projectId={projectId} seq={u.seq} reload={reload} />}
       <OpenGates gates={story.gates} reload={reload} />
       <div className="hub-tabs" role="tablist">
@@ -375,6 +467,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             ["story", "Story", null],
             ["agents", "Agents", story.agents.length],
             ["code", "Code", u.repoId ? "" : null],
+            ...(story.dependencies.length ? ([["deps", "Dependencies", story.dependencies.length]] as const) : []),
             ...(u.type === "work" ? ([["manager", "Unit lead", story.manager.length]] as const) : []),
           ] as const
         ).map(([k, label, n]) => (
@@ -418,6 +511,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
       )}
       {tab === "agents" && <AgentsTab story={story} order={order} />}
       {tab === "code" && <CodeTab story={story} />}
+      {tab === "deps" && <DependenciesTab story={story} />}
       {tab === "manager" && <ManagerTab story={story} order={order} />}
     </main>
   );

@@ -15,6 +15,7 @@ import { parseClaudeLine } from "./harness/claude.js";
 import { landUnit, liveVerdict } from "./land.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
+import { dependencyEdges } from "./chain.js";
 import { landWait, listPublications, publishJobs, qualifiedVersion, testBuildWait, upstreamArtifact } from "./publish.js";
 import { runWorkUnit } from "./runner.js";
 import { readiness } from "./schedule.js";
@@ -148,6 +149,34 @@ describe("published artifacts", () => {
     expect(await trunkFile("app", "app/deps.txt")).toBe(`lib=${test}`);
     expect(existsSync(join(nexus, test, "VERSION"))).toBe(true);
     expect(listPublications(db, lib.id)[0]).toMatchObject({ state: "published" });
+  }, 90_000);
+
+  it("tells each unit what it depends on and what depends on it, with the build used and where the edge stands", async () => {
+    const [lib, app] = [getUnitBySeq(db, project, 1), getUnitBySeq(db, project, 2)];
+    expect(dependencyEdges(db, app)).toMatchObject([{ direction: "needs", kind: "needs-source", other: { seq: 1, repoId: "lib" }, build: null }]);
+    expect(dependencyEdges(db, lib)).toMatchObject([{ direction: "feeds", other: { seq: 2, repoId: "app" } }]);
+    await runWorkUnit(ctx, lib.id);
+    await verify(1);
+    expect(dependencyEdges(db, app)[0]).toMatchObject({ build: null, state: { text: "waits for the test build of U1 in lib", tone: "amber" } });
+    await runJobs();
+    const test = listPublications(db, lib.id)[0]!.version!;
+    expect(dependencyEdges(db, getUnit(db, app.id))[0]).toMatchObject({
+      build: { version: test, repoId: "lib" },
+      state: { text: "can start: U1's test build is published", tone: "amber" },
+    });
+    await runWorkUnit(ctx, app.id);
+    await verify(2);
+    const edge = dependencyEdges(db, getUnit(db, app.id))[0]!;
+    expect(edge).toMatchObject({ build: { version: test }, state: { text: "waits for U1 to land (now verified)", tone: "amber" } });
+    expect((await landUnit(ctx, lib.id)).outcome).toBe("landed");
+    expect(dependencyEdges(db, getUnit(db, app.id))[0]).toMatchObject({ build: { version: test }, state: { text: "U1 landed", tone: "pine" } });
+    const { unitStory } = await import("./story.js");
+    const story = unitStory(db, ctx.boot, getUnit(db, app.id));
+    expect(story.entries.find((e) => e.who === "Test build")).toMatchObject({
+      status: { text: "built against U1" },
+      body: `Started on U1's test build ${test} (lib).`,
+    });
+    expect(story.dependencies).toHaveLength(1);
   }, 90_000);
 
   it("holds the upstream back until its test build is published, so a consumer is never left without the pin", async () => {

@@ -993,6 +993,27 @@ textarea {
   color: var(--text);
   border-bottom-color: var(--amber);
 }
+.dep-strip {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line2);
+  display: grid;
+  gap: 6px;
+  font-size: 13.5px;
+}
+.dep-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+.dep-k {
+  color: var(--faint);
+  min-width: 7.5em;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 .hub-tabs .hub-sort {
   margin-left: auto;
   align-self: center;

@@ -13,6 +13,7 @@ import { getGate, getProject, getUnit, listAttempts, listGates, listUnits, type 
 import { isReviewThread, listThreadRows } from "./triage.js";
 import { findingFates } from "./review.js";
 import { describeOps, listAmendments } from "./amend.js";
+import { dependencyEdges, type DepEdge } from "./chain.js";
 import { listManagerDecisions, managerOn } from "./manager.js";
 
 // A unit's page reads as one story: who did what, what each chose, and what yagura checked about it. Agents' lines are
@@ -68,6 +69,8 @@ export interface UnitStory {
   // The manager's wakes, oldest first: why it was woken, what it decided, and what it cost.
   manager: ManagerTurn[];
   managerOn: boolean;
+  // What this unit depends on and what depends on it, with the build used and where each edge stands.
+  dependencies: DepEdge[];
 }
 // Every session that worked on a unit: the planner run that planned it (shared with the units it planned alongside),
 // its own attempts, and the verifiers, triage, and rebases that targeted it.
@@ -469,6 +472,22 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     });
   }
 
+  // The moment a consumer's worker was first handed the build of what it depends on.
+  for (const dep of dependencyEdges(db, unit).filter((e) => e.direction === "needs" && e.kind === "needs-source" && e.build)) {
+    const first = listAttempts(db, unit.id).find((a) => a.startedAt && a.sources.some((s) => s.unit === `U${dep.other.seq}` && s.version));
+    if (!first) continue;
+    entries.push({
+      at: first.startedAt as IsoTime,
+      actor: "yagura",
+      who: "Test build",
+      attempt: null,
+      status: { text: `built against U${dep.other.seq}`, tone: "amber" },
+      body: `Started on U${dep.other.seq}'s test build ${dep.build!.version}${dep.build!.repoId ? ` (${dep.build!.repoId})` : ""}.`,
+      lines: [],
+      folded: null,
+    });
+  }
+
   const stillWaiting = unit.state === "verified" ? landWait(db, unit) : null;
   if (stillWaiting)
     entries.push({
@@ -534,6 +553,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     agents: agentsOf(db, unit, related, planUnit, handoffOf, events),
     gates: listGates(db, project.id, "open").filter((g) => g.unitId === unit.id),
     managerOn: managerOn(db, unit),
+    dependencies: dependencyEdges(db, unit),
     manager: decisions.map((d) => {
       const a = d.attemptId ? listAttempts(db, d.managerUnitId).find((x) => x.id === d.attemptId) : undefined;
       return {

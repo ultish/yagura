@@ -1,4 +1,5 @@
 import { byTime } from "./sort";
+import { depLine } from "./units";
 import { AGENT_EMOJI } from "@yagura/core";
 import { ICONS } from "../ui/RoleIcon";
 import { describe, expect, it } from "vitest";
@@ -436,5 +437,29 @@ describe("role glyphs", () => {
       "arbiter",
     ])
       expect(AGENT_EMOJI[role], role).toBeTruthy();
+  });
+});
+
+describe("depLine", () => {
+  const dep = { unitId: 2, dependsOn: 1, kind: "needs-source" };
+  const base = (a: Partial<UnitView>, b: Partial<UnitView>, over: Partial<ProjectDetail> = {}) =>
+    detail([unit({ id: 1 as never, seq: 1, ...a }), unit({ id: 2 as never, seq: 2, ...b })], over);
+  it("moves only while the consumer is really waiting, and shows who the wait is on", () => {
+    expect(depLine(base({ state: "landing" }, { state: "verified" }, { waiting: [{ unitId: 2, reason: "x" }] as never }), dep)).toEqual({
+      tone: "amber",
+      moving: true,
+      label: "U2 waits for U1 to land",
+    });
+    const gated = base(
+      { state: "landing" },
+      { state: "verified" },
+      { waiting: [{ unitId: 2, reason: "x" }] as never, gates: [{ id: 1, unitId: 1, state: "open", kind: "land", options: [] }] as never },
+    );
+    expect(depLine(gated, dep)).toEqual({ tone: "bell", moving: true, label: "U2 waits for U1 to land, and U1 waits for you" });
+  });
+  it("stays still when nothing waits, goes quiet when the upstream landed, and notes a cancelled one", () => {
+    expect(depLine(base({ state: "running" }, { state: "running" }), dep)).toEqual({ tone: "amber", moving: false, label: "U2 builds on U1" });
+    expect(depLine(base({ state: "landed" }, { state: "verified" }), dep)).toEqual({ tone: "pine", moving: false, label: "U2 builds on U1 (landed)" });
+    expect(depLine(base({ state: "abandoned" }, { state: "ready" }), dep)).toMatchObject({ tone: "muted", moving: false });
   });
 });

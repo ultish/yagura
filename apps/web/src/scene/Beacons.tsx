@@ -1,12 +1,14 @@
 import type { ProjectDetail, UnitView } from "../api";
 import { navigate } from "../api";
 import { sha } from "../lib/format";
-import { type Light, type Stage, isBuild, stages } from "../lib/units";
+import { GitMerge, Hammer, Map as MapIcon, ShieldCheck } from "lucide-react";
+import { type Light, type Stage, depLine, isBuild, stages } from "../lib/units";
 import { Castle, SceneDefs } from "./Tower";
 
 const XS = { plan: 456, work: 636, verify: 816, land: 996 } as const;
 const ROW = 56;
 const TOP = 80;
+const TONE_STROKE = { amber: "var(--lamp)", bell: "var(--bell)", pine: "var(--pine)", muted: "var(--faint)" } as const;
 const mono = { fontFamily: "JetBrains Mono, monospace", fontSize: 12 } as const;
 
 function Beacon({ x, y, stage }: { x: number; y: number; stage: Stage }) {
@@ -94,11 +96,17 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
         style={{ fill: "var(--ridge2)" }}
       />
       <g style={{ ...mono, fill: "var(--muted)" }} textAnchor="middle">
-        {Object.entries(XS).map(([name, x]) => (
-          <text key={name} x={x} y="36">
-            {name}
-          </text>
-        ))}
+        {(Object.entries(XS) as [keyof typeof XS, number][]).map(([name, x]) => {
+          const Icon = { plan: MapIcon, work: Hammer, verify: ShieldCheck, land: GitMerge }[name];
+          return (
+            <g key={name}>
+              <Icon x={x - name.length * 3.6 - 22} y={23} size={16} strokeWidth={1.75} color="var(--muted)" aria-hidden="true" />
+              <text x={x + 8} y="36">
+                {name}
+              </text>
+            </g>
+          );
+        })}
       </g>
       <Castle
         x={1240}
@@ -160,32 +168,57 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
           </g>
         );
       })}
-      {d.deps
-        .filter((dep) => d.waiting.some((w) => w.unitId === dep.unitId))
-        .map((dep) => {
-          const y1 = rowY.get(dep.unitId as never);
-          const y2 = rowY.get(dep.dependsOn as never);
-          if (y1 === undefined || y2 === undefined) return null;
-          const a = d.units.find((u) => u.id === dep.unitId)!;
-          const b = d.units.find((u) => u.id === dep.dependsOn)!;
-          // Drawn from the unit being waited on to the one waiting, so the dashes travel the way the release will.
-          return (
-            <g key={`${dep.unitId}-${dep.dependsOn}`}>
-              <path
-                className="signal"
-                d={`M${XS.land - 6} ${y2 + 6} C ${XS.land - 90} ${y2 + 40} ${XS.plan + 100} ${y1 - 30} ${XS.plan + 6} ${y1 - 4}`}
-                fill="none"
-                style={{ stroke: "var(--lamp)" }}
-                strokeWidth="1.5"
-                strokeDasharray="3 7"
-                opacity=".8"
-              />
-              <text x={(XS.plan + XS.land) / 2} y={(y1 + y2) / 2 + 4} textAnchor="middle" style={{ ...mono, fontSize: 11.5, fill: "var(--amber-text)" }}>
-                {dep.kind === "scope-overlap" ? `U${a.seq} waits for U${b.seq}: same files` : `U${a.seq} waits for U${b.seq} to land`}
+      <defs>
+        {(["amber", "bell", "pine", "muted"] as const).map((tone) => (
+          <marker key={tone} id={`dep-arrow-${tone}`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0 0 L8 4 L0 8 z" style={{ fill: TONE_STROKE[tone] }} />
+          </marker>
+        ))}
+      </defs>
+      {d.deps.map((dep) => {
+        const y1 = rowY.get(dep.unitId as never);
+        const y2 = rowY.get(dep.dependsOn as never);
+        if (y1 === undefined || y2 === undefined) return null;
+        const a = d.units.find((u) => u.id === dep.unitId)!;
+        const line = depLine(d, dep);
+        // Drawn from the unit being waited on to the one that builds on it, so the dashes travel the way the release will.
+        const path = `M${XS.land - 6} ${y2 + 6} C ${XS.land - 90} ${y2 + 40} ${XS.plan + 100} ${y1 - 30} ${XS.plan + 6} ${y1 - 4}`;
+        const open = () => navigate(`/p/${d.project.id}/u/${a.seq}?tab=deps`);
+        return (
+          <g
+            key={`${dep.unitId}-${dep.dependsOn}`}
+            role="link"
+            tabIndex={0}
+            aria-label={`${line.label}: open its dependencies`}
+            style={{ cursor: "pointer" }}
+            onClick={open}
+            onKeyDown={(e) => e.key === "Enter" && open()}
+          >
+            <title>{line.label}</title>
+            <path d={path} fill="none" stroke="transparent" strokeWidth="16" />
+            <path
+              className={line.moving ? "signal" : undefined}
+              d={path}
+              fill="none"
+              style={{ stroke: TONE_STROKE[line.tone] }}
+              strokeWidth="1.5"
+              strokeDasharray="3 7"
+              opacity={line.moving ? 0.9 : 0.4}
+              markerEnd={`url(#dep-arrow-${line.tone})`}
+            />
+            {line.moving && (
+              <text
+                x={(XS.plan + XS.land) / 2}
+                y={(y1 + y2) / 2 + 4}
+                textAnchor="middle"
+                style={{ ...mono, fontSize: 11.5, fill: line.tone === "bell" ? "var(--bell-text)" : "var(--amber-text)" }}
+              >
+                {line.label}
               </text>
-            </g>
-          );
-        })}
+            )}
+          </g>
+        );
+      })}
     </svg>
   );
 }

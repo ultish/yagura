@@ -169,6 +169,27 @@ export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: 
   }
 }
 
+export interface DepLine {
+  tone: "pine" | "amber" | "bell" | "muted";
+  // Only a unit that is really waiting moves; a line that is just a relationship stays still.
+  moving: boolean;
+  label: string;
+}
+
+// How a dependency line on the project page looks: consumer `dep.unitId` builds on upstream `dep.dependsOn`.
+export function depLine(d: ProjectDetail, dep: { unitId: number; dependsOn: number; kind: string }): DepLine {
+  const consumer = d.units.find((u) => u.id === dep.unitId)!;
+  const upstream = d.units.find((u) => u.id === dep.dependsOn)!;
+  const named = `U${consumer.seq} ${dep.kind === "scope-overlap" ? "shares files with" : "builds on"} U${upstream.seq}`;
+  if (upstream.state === "abandoned") return { tone: "muted", moving: false, label: `${named} (cancelled)` };
+  if (["landed", "done"].includes(upstream.state)) return { tone: "pine", moving: false, label: `${named} (landed)` };
+  const waiting = d.waiting.some((w) => w.unitId === consumer.id);
+  if (!waiting) return { tone: "amber", moving: false, label: named };
+  const needsYou = d.gates.some((g) => g.unitId === upstream.id && g.state === "open");
+  const why = dep.kind === "scope-overlap" ? `U${consumer.seq} waits for U${upstream.seq}: same files` : `U${consumer.seq} waits for U${upstream.seq} to land`;
+  return { tone: needsYou ? "bell" : "amber", moving: true, label: needsYou ? `${why}, and U${upstream.seq} waits for you` : why };
+}
+
 export function groupOf(d: ProjectDetail, u: UnitView): Group {
   if (u.state === "blocked" || openGateFor(d, u)) return "bell";
   if (["landed", "done"].includes(u.state)) return "landed";
