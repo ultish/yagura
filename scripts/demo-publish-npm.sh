@@ -88,7 +88,11 @@ EOF
     printf 'node_modules/\n' > $r-seed/.gitignore
     (cd $r-seed && git init -q -b main && git add -A && git_ commit -qm init)
     if [ -n "$GITHUB" ]; then
-      (cd $r-seed && git -c credential.helper='!gh auth git-credential' push -q -f "https://github.com/$GH_OWNER/yagura-demo-$r.git" main)
+      url="https://github.com/$GH_OWNER/yagura-demo-$r.git"
+      gitgh() { git -c credential.helper='!gh auth git-credential' "$@"; }
+      # A fresh run starts from the seed: yagura's own branches from an earlier run (which also closes their pull requests) go first.
+      for b in $(gitgh ls-remote --heads "$url" 'yg/*' | sed 's#.*refs/heads/##'); do gitgh push -q "$url" --delete "$b" || true; done
+      (cd $r-seed && gitgh push -q -f "$url" main)
     else
       git clone -q --bare $r-seed $r.git
     fi
