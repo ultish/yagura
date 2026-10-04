@@ -1,3 +1,4 @@
+import { byTime } from "./sort";
 import { describe, expect, it } from "vitest";
 import type { BellItem, LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
 import { lineDiff } from "./linediff";
@@ -393,5 +394,20 @@ describe("disagreeing with code", () => {
     expect(codeAbout("app/main.py", { start: 7, end: 7, text: "return None" })).toEqual({ ref: "code:app/main.py:7", about: "app/main.py:7 — return None" });
     expect(codeAbout("app/main.py", null)).toEqual({ ref: "code:app/main.py", about: "app/main.py: the change to this file" });
     expect(codeAbout("a.txt", { start: 1, end: 1, text: "x".repeat(400) }).about).toHaveLength("a.txt:1 — ".length + 160);
+  });
+});
+
+describe("byTime", () => {
+  const items = [
+    { id: "b", at: "2026-10-04T06:00:00Z" },
+    { id: "a", at: "2026-10-04T05:00:00Z" },
+    { id: "none", at: null },
+    { id: "c", at: "2026-10-04T07:00:00Z" },
+    { id: "c2", at: "2026-10-04T07:00:00Z" },
+  ];
+  it("sorts oldest first with an untimed item first, stable among equal times, and mirrors it for newest first", () => {
+    expect(byTime(items, (x) => x.at, "oldest").map((x) => x.id)).toEqual(["none", "a", "b", "c", "c2"]);
+    expect(byTime(items, (x) => x.at, "newest").map((x) => x.id)).toEqual(["c2", "c", "b", "a", "none"]);
+    expect(items.map((x) => x.id)).toEqual(["b", "a", "none", "c", "c2"]);
   });
 });

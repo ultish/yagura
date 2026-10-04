@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api, useApi, useQuery, type StoryEntry, type StoryLine, type UnitCode, type UnitStory } from "../api";
 import { clip, clock, duration, modelName, when } from "../lib/format";
 import { Inline } from "../lib/markdown";
+import { byTime, saveOrder, savedOrder, type TimeOrder } from "../lib/sort";
 import { RoleIcon } from "../ui/RoleIcon";
 import { DiffPanel, type DiffData } from "../ui/evidence";
 import { Link } from "../ui/Link";
@@ -114,7 +115,7 @@ function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; 
   );
 }
 
-function AgentsTab({ story }: { story: UnitStory }) {
+function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
   if (!story.agents.length) return <div className="muted">No agent has worked on U{story.unit.seq} yet.</div>;
   return (
     <div className="hub-table-wrap">
@@ -130,7 +131,7 @@ function AgentsTab({ story }: { story: UnitStory }) {
           </tr>
         </thead>
         <tbody>
-          {story.agents.map((a) => (
+          {byTime(story.agents, (a) => a.startedAt, order).map((a) => (
             <tr key={a.attemptId} className={a.counted ? undefined : "dim"}>
               <td>
                 <Link to={`/a/${a.attemptId}`}>
@@ -235,7 +236,7 @@ function CodeTab({ story }: { story: UnitStory }) {
   );
 }
 
-function ManagerTab({ story }: { story: UnitStory }) {
+function ManagerTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
   if (!story.managerOn && !story.manager.length)
     return (
       <div className="muted">
@@ -255,7 +256,7 @@ function ManagerTab({ story }: { story: UnitStory }) {
         Each time the manager is woken it is told what changed since its last decision and answers with one action. Open its run to read exactly what it was
         told.
       </p>
-      {story.manager.map((t) => (
+      {byTime(story.manager, (t) => t.at, order).map((t) => (
         <section key={t.decisionId} className="mgr-turn">
           <div className="mgr-head mono">
             {t.agentNo !== null ? `A${t.agentNo}` : "no run"} · {clock(t.at)} · {t.resumed ? "same session, told what changed" : "first wake"} · $
@@ -291,6 +292,12 @@ type HubTab = "story" | "agents" | "code" | "manager";
 export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
   const { data: story, error, reload } = useApi<UnitStory>(`/api/projects/${projectId}/units/${seq}/story`);
   const query = useQuery();
+  const [order, setOrder] = useState<TimeOrder>(savedOrder);
+  const flip = () => {
+    const next: TimeOrder = order === "oldest" ? "newest" : "oldest";
+    saveOrder(next);
+    setOrder(next);
+  };
   const tab: HubTab = query.get("tab") === "agents" ? "agents" : query.get("tab") === "code" ? "code" : query.get("tab") === "manager" ? "manager" : "story";
   if (error)
     return (
@@ -359,6 +366,16 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             {typeof n === "number" && <span className="hub-n">{n}</span>}
           </Link>
         ))}
+        {tab !== "code" && (
+          <button
+            type="button"
+            className="hub-sort"
+            onClick={flip}
+            title={order === "oldest" ? "Showing the oldest first; click for the newest first" : "Showing the newest first; click for the oldest first"}
+          >
+            {order === "oldest" ? "Oldest first ↑" : "Newest first ↓"}
+          </button>
+        )}
       </div>
       {tab === "story" && (
         <>
@@ -369,16 +386,16 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             <span>· choice / note: judgment nobody checked</span>
           </div>
           <div className="story-ledger">
-            {story.entries.map((e, i) => (
+            {byTime(story.entries, (e) => e.at, order).map((e, i) => (
               <Entry key={`${e.at}-${i}`} story={story} entry={e} reload={reload} />
             ))}
             {!story.entries.length && <div className="muted">Nothing has happened on U{u.seq} yet.</div>}
           </div>
         </>
       )}
-      {tab === "agents" && <AgentsTab story={story} />}
+      {tab === "agents" && <AgentsTab story={story} order={order} />}
       {tab === "code" && <CodeTab story={story} />}
-      {tab === "manager" && <ManagerTab story={story} />}
+      {tab === "manager" && <ManagerTab story={story} order={order} />}
     </main>
   );
 }

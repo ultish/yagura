@@ -993,6 +993,19 @@ textarea {
   color: var(--text);
   border-bottom-color: var(--amber);
 }
+.hub-tabs .hub-sort {
+  margin-left: auto;
+  align-self: center;
+  font-size: 13px;
+  color: var(--muted);
+  border: 1px solid var(--btnline);
+  border-radius: 6px;
+  padding: 3px 10px;
+}
+.hub-tabs .hub-sort:hover {
+  color: var(--text);
+  border-color: var(--amber);
+}
 .hub-tabs .mono {
   align-self: center;
   margin-left: 14px;
