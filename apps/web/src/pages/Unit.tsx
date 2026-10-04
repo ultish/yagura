@@ -243,25 +243,46 @@ function DependenciesTab({ story }: { story: UnitStory }) {
   );
 }
 
-// Wakes the unit lead of a stuck unit now, with the developer's note.
-function AskUnitLead({ projectId, seq, reload }: { projectId: string; seq: number; reload: () => void }) {
-  const [open, setOpen] = useState(false);
-  if (open)
+// The same stuck-unit controls as the project page's row: retry with a note, ask the unit lead, cancel.
+function UnitActions({ projectId, unit, reload }: { projectId: string; unit: { seq: number; type: string; state: string }; reload: () => void }) {
+  const [mode, setMode] = useState<"retry" | "wake" | null>(null);
+  const action = useAction();
+  const base = `/api/projects/${projectId}/units/${unit.seq}`;
+  const canRetry = unit.state === "blocked";
+  const canWake = unit.type === "work" && ["blocked", "failed", "rejected"].includes(unit.state);
+  const canCancel = ["blocked", "ready", "draft"].includes(unit.state);
+  if (mode)
     return (
       <NoteForm
-        label="Ask the unit lead"
-        placeholder="What should the unit lead look at? (optional)"
-        submit={(note) => api(`/api/projects/${projectId}/units/${seq}/wake`, { body: { note } })}
+        label={mode === "retry" ? "Retry" : "Ask the unit lead"}
+        placeholder={mode === "retry" ? "What should the next try do differently? (optional)" : "What should the unit lead look at? (optional)"}
+        submit={(note) => api(`${base}/${mode === "retry" ? "retry" : "wake"}`, { body: { note } })}
         onDone={() => {
-          setOpen(false);
+          setMode(null);
           reload();
         }}
       />
     );
+  if (!canRetry && !canWake && !canCancel) return null;
   return (
-    <button className="btn" type="button" onClick={() => setOpen(true)} style={{ marginTop: 8 }}>
-      Ask the unit lead
-    </button>
+    <div className="hub-ask-buttons" style={{ marginTop: 8 }}>
+      {canRetry && (
+        <button className="btn" type="button" onClick={() => setMode("retry")}>
+          Retry with a note
+        </button>
+      )}
+      {canWake && (
+        <button className="btn" type="button" onClick={() => setMode("wake")}>
+          Ask the unit lead
+        </button>
+      )}
+      {canCancel && (
+        <button className="btn" type="button" disabled={action.busy} onClick={() => action.run(() => api(`${base}/cancel`, { body: {} }).then(reload))}>
+          Cancel
+        </button>
+      )}
+      {action.error && <span className="s-bell">{action.error}</span>}
+    </div>
   );
 }
 
@@ -284,7 +305,7 @@ function OpenGates({ gates, reload }: { gates: UnitStory["gates"]; reload: () =>
                 disabled={action.busy}
                 onClick={() => action.run(() => api(`/api/gates/${g.id}/answer`, { body: { answer: o } }).then(reload))}
               >
-                {o === "land" ? "Land" : o === "hold" ? "Hold" : o === "publish" ? "Publish" : o}
+                {o === "land" ? "Merge" : o === "hold" ? "Hold" : o === "publish" ? "Publish" : o}
               </button>
             ))}
           </div>
@@ -459,7 +480,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
         {u.state === "running" && running?.attempt && <Link to={`/a/${running.attempt.id}`}>running now · watch it live</Link>}
       </div>
       <DepStrip story={story} />
-      {u.type === "work" && ["blocked", "failed", "rejected"].includes(u.state) && <AskUnitLead projectId={projectId} seq={u.seq} reload={reload} />}
+      <UnitActions projectId={projectId} unit={u} reload={reload} />
       <OpenGates gates={story.gates} reload={reload} />
       <div className="hub-tabs" role="tablist">
         {(

@@ -121,9 +121,14 @@ body {
 }
 a {
   color: var(--amber);
+  text-decoration: none;
 }
 a:hover {
   color: var(--amber-hover);
+  text-decoration: underline;
+}
+a.btn:hover {
+  text-decoration: none;
 }
 button,
 input,
@@ -916,8 +921,11 @@ textarea {
   border: 0;
   padding: 0;
   color: var(--amber);
-  text-decoration: underline;
+  text-decoration: none;
   cursor: pointer;
+}
+.linkish:hover {
+  text-decoration: underline;
 }
 /* The unit gutter inside Monaco: a colour bar per unit, its label where its block starts. */
 .yg-u {
@@ -1224,9 +1232,12 @@ textarea {
 .search-ref {
   font-size: 12px;
   color: var(--amber-text);
-  text-decoration: underline;
+  text-decoration: none;
   text-underline-offset: 2px;
   white-space: nowrap;
+}
+.search-row:hover .search-ref {
+  text-decoration: underline;
 }
 .search-text {
   min-width: 0;

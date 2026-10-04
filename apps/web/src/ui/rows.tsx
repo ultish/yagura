@@ -230,7 +230,7 @@ export function BellRow({ item, showProject }: { item: BellItem; showProject: bo
   ) : (
     <Link to={`/p/${item.projectId}`}>{showProject ? item.projectId : "project"}</Link>
   );
-  const labels: Record<string, string> = { land: "Land", hold: "Hold", start: "Start", seen: "Seen" };
+  const labels: Record<string, string> = { land: "Merge", hold: "Hold", start: "Start", seen: "Seen" };
   const thread = g.kind === "report" ? threadOf(g.question) : null;
   const unanswered = ifUnanswered(g, now);
   // The default is the likely answer; with a hold default, the action it holds back is.

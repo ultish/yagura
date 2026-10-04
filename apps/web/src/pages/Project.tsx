@@ -115,7 +115,7 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
                   disabled={action.busy}
                   onClick={() => action.run(() => api(`/api/gates/${gate.id}/answer`, { body: { answer: o } }))}
                 >
-                  {o === "land" ? "Land" : o === "hold" ? "Hold" : o}
+                  {o === "land" ? "Merge" : o === "hold" ? "Hold" : o}
                 </button>
               ))}
             {u.state === "blocked" && (
