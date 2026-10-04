@@ -4,7 +4,7 @@ import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
 import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
-import { REBASE_HARNESS, type Attempt, type IsoTime, type Sha, type Unit, type UnitId } from "./domain.js";
+import { type Attempt, type IsoTime, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
 import { amendmentContext, applyOps, autoApproveAmendment, describeOps, parseAmendments, proposeAmendment, settleAmendment } from "./amend.js";
 import { forgeFor, getMergeRequest, postOnce, signed, type ForgeAdapter, type PrThread, type ThreadKind, prRef } from "./forge.js";
@@ -33,8 +33,6 @@ import {
   agentRef,
   firstAgentRef,
 } from "./store.js";
-
-export const MAX_TRIAGE_WAVES = 3;
 
 // Findings from yagura's own reviewer live only in yagura; nothing on the forge answers to them.
 export const isReviewThread = (threadId: string) => /^review:U\d+:F\d+$/.test(threadId);
@@ -100,11 +98,7 @@ export function freshThreads(db: Db, unitId: UnitId, threads: PrThread[]): { thr
   return fresh;
 }
 
-export const triageWaves = (db: Db, target: Unit) =>
-  (db.prepare("SELECT COUNT(*) AS n FROM units WHERE type = 'review-triage' AND target_unit_id = ?").get(target.id) as { n: number }).n;
-
-export function queueTriage(db: Db, target: Unit, ref: string, fresh: { thread: PrThread; directive: string | null }[]): Unit | null {
-  if (triageWaves(db, target) >= MAX_TRIAGE_WAVES) return null;
+export function queueTriage(db: Db, target: Unit, ref: string, fresh: { thread: PrThread; directive: string | null }[]): Unit {
   const unit = addUnit(db, {
     projectId: target.projectId,
     type: "review-triage",
@@ -124,7 +118,7 @@ export function queueTriage(db: Db, target: Unit, ref: string, fresh: { thread: 
       db.prepare(
         `INSERT INTO mr_threads (unit_id, thread_id, kind, author, path, line, comments_json, wave_unit_id, directive, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (unit_id, thread_id) DO UPDATE SET comments_json = excluded.comments_json, wave_unit_id = excluded.wave_unit_id,
-           directive = excluded.directive, decision = NULL, reason = NULL, gate_id = NULL`,
+           directive = excluded.directive, decision = NULL, reason = NULL, gate_id = NULL, replied_at = NULL`,
       ).run(target.id, t.id, t.kind, t.author, t.path, t.line, JSON.stringify(t.comments), unit.id, directive, now());
     }
     transitionUnit(db, unit.id, "ready", { target: target.seq, threads: fresh.length });
@@ -469,8 +463,8 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     transitionUnit(db, unit.id, "handed_off", { head, asked });
     transitionUnit(db, unit.id, "done");
     if (changed) {
-      // The fixes are the target's to verify, on a head yagura records for it at no cost to the target's tries.
-      const onTarget = createAttempt(db, target.id, REBASE_HARNESS, null);
+      // The fixes are the target's to verify, on a head yagura records as one of its tries: a worker's change counts the same whoever sent it back.
+      const onTarget = createAttempt(db, target.id, workHarness, setting("role.worker.model"));
       updateAttempt(db, onTarget.id, { state: "handed_off", baseSha: work.baseSha, headSha: head, branch, startedAt: now(), endedAt: now() });
       const reason = `review fixes from ${jobLabel(db, unit)} on ${ref}`;
       db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, verdict.id);
@@ -501,14 +495,19 @@ export async function postReplies(db: Db, forge: ForgeAdapter, target: Unit, num
   let posted = 0;
   // yagura's own reviewer findings are answered where they were posted on the forge; a finding not posted yet waits.
   const pending = listThreadRows(db, target.id).filter(
-    (r) => (r.decision === "fixed" || r.decision === "dismissed") && !r.repliedAt && (!isReviewThread(r.threadId) || reviewPost(db, target.id, r.threadId)),
+    (r) => r.decision !== null && !r.repliedAt && (!isReviewThread(r.threadId) || reviewPost(db, target.id, r.threadId)),
   );
   if (!pending.length) return 0;
   const already = await forge.replyKeys(number);
   for (const row of pending) {
     const key = `${target.projectId}/U${target.seq}/w${row.waveUnitId}/${row.threadId}`;
     const who = { role: "arbiter", run: row.waveUnitId ? firstAgentRef(db, getUnit(db, row.waveUnitId)) : `U${target.seq}` };
-    const text = row.decision === "fixed" ? `**Fixed** in \`${row.commitSha!.slice(0, 10)}\` \u2014 ${row.reason}` : `**No change** \u2014 ${row.reason}`;
+    const text =
+      row.decision === "fixed"
+        ? `**Fixed** in \`${row.commitSha!.slice(0, 10)}\` \u2014 ${row.reason}`
+        : row.decision === "asked"
+          ? `**Waiting for the developer** \u2014 ${row.reason}`
+          : `**No change** \u2014 ${row.reason}`;
     const post = isReviewThread(row.threadId) ? reviewPost(db, target.id, row.threadId)! : null;
     const sent = await postOnce(key, async () => {
       const current = db.prepare("SELECT replied_at FROM mr_threads WHERE unit_id = ? AND thread_id = ?").get(target.id, row.threadId) as {

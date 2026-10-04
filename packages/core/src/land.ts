@@ -25,7 +25,7 @@ import { addDetachedWorktree, ensureMirror, git, gitWithEnv, patchId, removeWork
 import { layout } from "./paths.js";
 import { markPackProven } from "./packs.js";
 import { MAX_REBASES, queueRebase } from "./rebase.js";
-import { freshThreads, listThreadRows, MAX_TRIAGE_WAVES, queueTriage, postReplies } from "./triage.js";
+import { freshThreads, listThreadRows, queueTriage, postReplies } from "./triage.js";
 import { addVerifyUnit } from "./runner.js";
 import {
   addUnitNote,
@@ -154,9 +154,8 @@ async function squashOntoTrunk(l: Landing): Promise<Squash> {
   }
 }
 
-function triageOrBlock(l: Landing, number: number, fresh: Parameters<typeof queueTriage>[3]): LandResult {
+function queueTriageWave(l: Landing, number: number, fresh: Parameters<typeof queueTriage>[3]): LandResult {
   const triage = queueTriage(l.db, l.unit, prRef(l.repo.forge, number), fresh);
-  if (!triage) return block(l, `${prRef(l.repo.forge, number)} has new review threads after ${MAX_TRIAGE_WAVES} triage waves; it needs you`);
   const reason = `${fresh.length} review thread(s) on ${prRef(l.repo.forge, number)}; the arbiter is queued`;
   if (l.unit.state === "landing") transitionUnit(l.db, l.unit.id, "blocked", { reason, reviewUnit: triage.seq });
   return { unit: getUnit(l.db, l.unit.id), outcome: "triaging", landedSha: null, reason };
@@ -446,7 +445,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
   if (unit.state === "blocked" && listThreadRows(db, unit.id).some((r) => r.decision === "asked")) {
     const answered = freshThreads(db, unit.id, await forge.threads(mr.number)).filter((f) => f.directive);
     const open = listThreadRows(db, unit.id).filter((r) => r.decision === "asked").length;
-    if (answered.length && answered.length >= open) return triageOrBlock(l, mr.number, answered);
+    if (answered.length && answered.length >= open) return queueTriageWave(l, mr.number, answered);
     return null;
   }
   if (unit.state !== "landing") return null;
@@ -471,7 +470,7 @@ export async function watchMergeRequest(ctx: { db: Db; boot: Bootstrap }, unitId
     return propose(l, forge, squash);
   }
   const fresh = freshThreads(db, unit.id, await forge.threads(mr.number));
-  if (fresh.length) return triageOrBlock(l, mr.number, fresh);
+  if (fresh.length) return queueTriageWave(l, mr.number, fresh);
   const waiting = (reason: string): LandResult => ({ unit, outcome: "waiting", landedSha: null, reason });
   const asking = listThreadRows(db, unit.id).filter((r) => r.decision === "asked");
   if (asking.length) return waiting(`waiting for your answer on ${asking.length} review thread(s)`);
