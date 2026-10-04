@@ -3,6 +3,7 @@
 #   NEXUS_USER=admin NEXUS_PASSWORD=... scripts/demo-publish-npm.sh up     set everything up and start the daemon
 #   scripts/demo-publish-npm.sh status                                      units, publications, and what Nexus holds
 #   scripts/demo-publish-npm.sh down                                        stop the daemon (Nexus is left alone)
+#   GITHUB=1 ...                                                            land through pull requests on ${GH_OWNER:-ultish}/yagura-demo-lib and yagura-demo-app (private, scratch; they are reset on each up)
 #   REAL=1 ...                                                              the same with real Haiku agents (a few dollars), human land gates, and real goals
 # NEXUS_URL (default http://localhost:8081) and NEXUS_NPM_REPO (default npm) name the registry. Needs node, npm, curl, sqlite3.
 # Everything lives in $DEMO (default /tmp/yagura-demo-npm); the registry credentials go into $DEMO/npmrc, never into a repo.
@@ -10,8 +11,11 @@ set -eu
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REAL=${REAL:-}
-DEMO=${DEMO:-/tmp/yagura-${REAL:+real-}demo-npm}
-PORT=${YAGURA_PORT:-${REAL:+7302}}
+GITHUB=${GITHUB:-}
+GH_OWNER=${GH_OWNER:-ultish}
+DEMO=${DEMO:-/tmp/yagura-${REAL:+real-}${GITHUB:+gh-}demo-npm}
+PORT=${YAGURA_PORT:-${GITHUB:+7303}}
+PORT=${PORT:-${REAL:+7302}}
 PORT=${PORT:-7301}
 NEXUS_URL=${NEXUS_URL:-http://localhost:8081}
 NEXUS_NPM_REPO=${NEXUS_NPM_REPO:-npm}
@@ -83,7 +87,11 @@ EOF
   for r in lib app; do
     printf 'node_modules/\n' > $r-seed/.gitignore
     (cd $r-seed && git init -q -b main && git add -A && git_ commit -qm init)
-    git clone -q --bare $r-seed $r.git
+    if [ -n "$GITHUB" ]; then
+      (cd $r-seed && git -c credential.helper='!gh auth git-credential' push -q -f "https://github.com/$GH_OWNER/yagura-demo-$r.git" main)
+    else
+      git clone -q --bare $r-seed $r.git
+    fi
   done
 
   echo "publishing @demo/lib 1.4.0 (already released) and checking the app installs it..."
@@ -103,8 +111,13 @@ EOF
     Y set project.budget_usd 4 >/dev/null
   fi
   Y set forge.poll_seconds 5 >/dev/null
-  Y repo add "$DEMO/lib.git" --id lib --land push >/dev/null
-  Y repo add "$DEMO/app.git" --id app --land push >/dev/null
+  if [ -n "$GITHUB" ]; then
+    Y repo add "https://github.com/$GH_OWNER/yagura-demo-lib.git" --id lib >/dev/null
+    Y repo add "https://github.com/$GH_OWNER/yagura-demo-app.git" --id app >/dev/null
+  else
+    Y repo add "$DEMO/lib.git" --id lib --land push >/dev/null
+    Y repo add "$DEMO/app.git" --id app --land push >/dev/null
+  fi
   Y env add local --provider local-process --capacity 2 >/dev/null
   Y env value set local NPM_CONFIG_USERCONFIG "$DEMO/npmrc" --note "npm config with the registry and its login" >/dev/null
   Y project new demo --goal "lib gains a feature that app uses" --predicate "both landed" --repo lib --repo app --merge human --env local >/dev/null
@@ -125,7 +138,7 @@ Running. Open http://127.0.0.1:$PORT/p/demo
   1. U1 (lib) verifies; a test build @demo/lib@1.5.0-yg-demo-u1-<sha> is published to $REGISTRY under the yg tag (never latest).
   2. U2 (app) installs that exact version from the registry and is verified.
   3. Answer the land gate for U1, then U2's (bell, or: YAGURA_HOME=$YAGURA_HOME yagura gate answer <id> land).
-  U2 lands pinned to U1's test build (app/deps.txt); nothing is released or deleted.
+  U2 lands pinned to U1's test build; nothing is released or deleted.${GITHUB:+ Each land gate answered opens or merges a pull request on GitHub.}
 Log: tail -f $DEMO/daemon.log     State: scripts/demo-publish-npm.sh status     Stop: scripts/demo-publish-npm.sh down
 EOF
 }
@@ -139,7 +152,10 @@ status() {
   npm dist-tag ls @demo/lib 2>&1 | sed 's/^/  dist-tag /'
   npm view @demo/lib versions 2>&1 | sed 's/^/  versions /'
   [ -d "$DEMO/chk" ] && rm -rf "$DEMO/chk"
-  if git clone -q "$DEMO/app.git" "$DEMO/chk" 2>/dev/null && [ -f "$DEMO/chk/app/deps.txt" ]; then echo; echo "app's trunk pins: $(cat "$DEMO/chk/app/deps.txt")"; fi
+  APP=$DEMO/app.git; [ -n "$GITHUB" ] && APP=https://github.com/$GH_OWNER/yagura-demo-app.git
+  if git -c credential.helper='!gh auth git-credential' clone -q "$APP" "$DEMO/chk" 2>/dev/null; then
+    echo; echo "app's trunk pins: $(cat "$DEMO/chk/app/deps.txt" 2>/dev/null || node -p "require('$DEMO/chk/package.json').dependencies['@demo/lib']")"
+  fi
 }
 
 down() {
