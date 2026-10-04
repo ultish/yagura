@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -19,6 +19,7 @@ import {
   addRepo,
   getProject,
   getRepo,
+  getUnit,
   setAndon,
   listAttempts,
   listUnits,
@@ -181,6 +182,29 @@ describe("Engine", () => {
         const a = listAmendments(db, u.id).find((x) => x.state === "approved")!;
         expect(a.before?.acceptance).toEqual(originals.get(u.id));
       }
+      expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+    }, 120_000);
+
+    it("applies a trusted author's requirement change at once, with no gate, and the worker builds to the amended acceptance", async () => {
+      const { listGates } = await import("./store.js");
+      const { listAmendments } = await import("./amend.js");
+      setSetting(db, "project", project, "review.trusted_authors", ["yagura reviewer"]);
+      process.env.FAKE_REVIEW = "blocking:please fix: add celebration emojis";
+      process.env.FAKE_TRIAGE_AMEND = "1";
+      await run();
+      expect(listGates(db, project, "open").filter((g) => g.kind === "review")).toEqual([]);
+      const amended = units("work").filter((u) => listAmendments(db, u.id).some((a) => a.state === "approved"));
+      expect(amended.length).toBeGreaterThan(0);
+      for (const u of amended) {
+        expect(u.acceptance).toContain("celebration emojis are part of the output");
+        const a = listAmendments(db, u.id).find((x) => x.state === "approved")!;
+        expect(a.gateId).toBeNull();
+      }
+      const fixBriefs = units("review-triage")
+        .flatMap((t) => listAttempts(db, t.id).slice(1))
+        .map((a) => readFileSync(layout(ctx.boot).brief(project, getUnit(db, a.unitId).seq, a.n), "utf8"));
+      expect(fixBriefs.length).toBeGreaterThan(0);
+      for (const b of fixBriefs) expect(b).toContain("## ACCEPTANCE\n- celebration emojis are part of the output");
       expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
     }, 120_000);
 

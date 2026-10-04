@@ -6,7 +6,7 @@ import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { REBASE_HARNESS, type Attempt, type IsoTime, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
-import { amendmentContext, applyOps, describeOps, parseAmendments, proposeAmendment, settleAmendment } from "./amend.js";
+import { amendmentContext, applyOps, autoApproveAmendment, describeOps, parseAmendments, proposeAmendment, settleAmendment } from "./amend.js";
 import { forgeFor, getMergeRequest, postOnce, signed, type ForgeAdapter, type PrThread, type ThreadKind, prRef } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha } from "./git.js";
 import { parseHandoff } from "./handoff.js";
@@ -220,6 +220,8 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   mkdirSync(dirname(worktree), { recursive: true });
   await addWorktree(mirror, worktree, branch, verdict.head_sha);
   const envValues = valueMap(db, project.environmentId);
+  const trusted = new Set(setting("review.trusted_authors").map((a) => a.toLowerCase()));
+  const trustedHere = [...new Set(rows.filter((r) => trusted.has(r.author.toLowerCase())).map((r) => r.author))];
   const threadContext = [
     ...triageContext(
       rows,
@@ -227,6 +229,11 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
       ref,
     ),
     ...amendmentContext(db, target.id),
+    ...(trustedHere.length
+      ? [
+          `The developer trusts ${trustedHere.join(", ")}. Where one of them asks for something that changes what the unit must do, rule it fix and write the Amendments for it: yagura applies that amendment at once, without asking the developer.`,
+        ]
+      : []),
   ];
   const judgeBrief = renderBrief({
     goal: `Judge the review threads on ${ref} for U${target.seq} (${target.goal}). For each thread rule: fix (the fault is real and the code must change; say exactly what a worker must change), dismissed (the reviewer is wrong, and you can show why concretely), or asked (only the developer can decide). You change nothing.`,
@@ -300,6 +307,24 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     ...(rulingHandoff ? {} : { failureMode: "unknown" as const }),
   });
 
+  // A trusted author's requirement change is approved by the developer's standing setting: it is applied now, so the worker builds to it.
+  const amendments = rulingHandoff ? parseAmendments(rulingHandoff.raw, rows.length) : new Map();
+  const autoApplied = new Set<number>();
+  if (!judgeProblem)
+    for (const [i, row] of rows.entries()) {
+      const ops = amendments.get(i + 1) ?? [];
+      if (!ops.length || decisions.get(i + 1)?.decision !== "fixed" || !trusted.has(row.author.toLowerCase())) continue;
+      const problem = autoApproveAmendment(db, {
+        unitId: target.id,
+        threadId: row.threadId,
+        author: row.author,
+        quote: row.comments.join("\n").slice(0, 400),
+        changes: ops,
+      });
+      if (problem) recordEvent(db, "amendment.invalid", { projectId: project.id, unitId: unit.id }, { thread: `T${i + 1}`, problem });
+      else autoApplied.add(i);
+    }
+
   // 2. A worker makes the changes the arbiter ruled necessary, on the same branch.
   let attempt = judgeAttempt;
   let handoff = rulingHandoff;
@@ -329,8 +354,8 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
         ...amendmentContext(db, target.id),
       ],
       readonly: [],
-      acceptance: target.acceptance,
-      verify: target.verify ?? "(none)",
+      acceptance: getUnit(db, target.id).acceptance,
+      verify: getUnit(db, target.id).verify ?? "(none)",
       env: envValues,
       timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
       forbidden: ["no git push, rebase, merge, or branch switching", "nothing outside SCOPE", "no reply to reviewers yourself; yagura posts the replies"],
@@ -397,12 +422,11 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   }
 
   const asked: string[] = [];
-  const amendments = parseAmendments(handoff!.raw, rows.length);
   for (const [i, row] of rows.entries()) {
     let { decision, reason } = decisions.get(i + 1)!;
     const text = row.comments.join("\n");
     // A change to what the unit must do is the developer's to approve, whatever the arbiter ruled; one that does not fit the unit as it is is dropped.
-    let ops = amendments.get(i + 1) ?? [];
+    let ops = autoApplied.has(i) ? [] : (amendments.get(i + 1) ?? []);
     if (ops.length) {
       const fits = applyOps(target.acceptance, target.verify ?? "", ops);
       if ("problem" in fits) {

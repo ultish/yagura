@@ -184,12 +184,15 @@ function triage() {
   const amend = process.env.FAKE_TRIAGE_AMEND;
   const accept = /## ACCEPTANCE\n- (.+)/.exec(brief)?.[1];
   const lines = threads.map((t) => {
+    if (amend && /The developer trusts/.test(brief)) return `- T${t.n}: fix — make the greeting celebrate`;
     if (amend && !/The developer decided: (fix|dismiss)/.test(t.text)) return `- T${t.n}: asked — should this change what the unit must do?`;
     const fix = /please fix|The developer decided: fix/.test(t.text) && !/The developer decided: dismiss/.test(t.text);
     return fix ? `- T${t.n}: fix — added the review fix to ${file}` : `- T${t.n}: dismissed — the existing test covers this case`;
   });
   const amendments = amend
-    ? lines.filter((l) => l.includes("asked")).map((l) => `- ${/^- (T\d+)/.exec(l)[1]}: replace: ${accept} => celebration emojis are part of the output`)
+    ? lines
+        .filter((l) => l.includes("asked") || l.includes("make the greeting celebrate"))
+        .map((l) => `- ${/^- (T\d+)/.exec(l)[1]}: replace: ${accept} => celebration emojis are part of the output`)
     : [];
   finish(
     `## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Decisions\n${lines.join("\n")}\n${amendments.length ? `\n## Amendments\n${amendments.join("\n")}\n` : ""}`,

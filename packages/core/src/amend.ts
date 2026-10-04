@@ -93,7 +93,7 @@ export const describeOps = (ops: AmendOp[]): string[] =>
 // The arbiter's proposal, held until the developer answers the gate that carries it. An unusable one returns its problem and is not stored.
 export function proposeAmendment(
   db: Db,
-  p: { unitId: UnitId; gateId: number; threadId: string; author: string; quote: string; changes: AmendOp[] },
+  p: { unitId: UnitId; gateId: number | null; threadId: string; author: string; quote: string; changes: AmendOp[] },
 ): { id: number } | { problem: string } {
   const unit = getUnit(db, p.unitId);
   const check = applyOps(unit.acceptance, unit.verify ?? "", p.changes);
@@ -108,7 +108,7 @@ export function proposeAmendment(
 }
 
 // The developer's answer to the gate: "fix" approves it and changes the unit; anything else rejects it and leaves the unit as it was.
-export function settleAmendment(db: Db, unitId: UnitId, threadId: string, answer: string | null): Amendment | null {
+export function settleAmendment(db: Db, unitId: UnitId, threadId: string, answer: string | null, by = "developer"): Amendment | null {
   const row = db
     .prepare("SELECT * FROM unit_amendments WHERE unit_id = ? AND thread_id = ? AND state = 'proposed' ORDER BY id DESC LIMIT 1")
     .get(unitId, threadId) as Record<string, unknown> | undefined;
@@ -130,8 +130,16 @@ export function settleAmendment(db: Db, unitId: UnitId, threadId: string, answer
   const before = { acceptance: unit.acceptance, verify: unit.verify ?? "" };
   amendUnit(db, unitId, { acceptance: applied.acceptance, verify: applied.verify });
   db.prepare("UPDATE unit_amendments SET state = 'approved', before_json = ?, decided_at = ? WHERE id = ?").run(JSON.stringify(before), now(), amendment.id);
-  recordEvent(db, "amendment.approved", refs, { amendment: amendment.id, by: "developer", changes: describeOps(amendment.changes) });
+  recordEvent(db, "amendment.approved", refs, { amendment: amendment.id, by, changes: describeOps(amendment.changes) });
   return toAmendment({ ...row, state: "approved", before_json: JSON.stringify(before) });
+}
+
+// A comment from an author the developer trusts: proposed and approved in one step, with no gate. Returns why it could not be applied, or null.
+export function autoApproveAmendment(db: Db, p: { unitId: UnitId; threadId: string; author: string; quote: string; changes: AmendOp[] }): string | null {
+  const made = proposeAmendment(db, { ...p, gateId: null });
+  if ("problem" in made) return made.problem;
+  const settled = settleAmendment(db, p.unitId, p.threadId, "fix", `${p.author} (trusted author)`);
+  return settled?.state === "approved" ? null : "the amendment could not be applied";
 }
 
 // Lines for any agent's brief: what the developer changed, in their own words, and that the criteria above already reflect it.

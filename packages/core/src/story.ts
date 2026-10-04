@@ -342,12 +342,12 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     const rejected = a.state === "rejected";
     entries.push({
       at: (a.decidedAt ?? a.createdAt) as IsoTime,
-      actor: a.state === "proposed" ? "yagura" : "person",
-      who: a.state === "proposed" ? "Amendment" : "You",
+      actor: a.state === "proposed" || a.gateId === null ? "yagura" : "person",
+      who: a.state === "proposed" ? "Amendment" : a.gateId === null ? "Yagura" : "You",
       attempt: null,
       status:
         a.state === "approved"
-          ? { text: "approved an amendment", tone: "pine" }
+          ? { text: a.gateId === null ? "amendment applied (trusted author)" : "approved an amendment", tone: "pine" }
           : rejected
             ? { text: "rejected an amendment", tone: "muted" }
             : { text: "amendment waits for you", tone: "bell" },
