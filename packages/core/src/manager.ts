@@ -5,6 +5,7 @@ import { resolveSetting } from "./config.js";
 import { MANAGER_ACTIONS, TERMINAL_STATES, spendsAttempt, type Attempt, type AttemptId, type ManagerAction, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
 import { queueInvestigation } from "./investigate.js";
+import { amendmentContext } from "./amend.js";
 import { extractDelta, applyDelta, PlanRejected, scopesOverlap } from "./plan.js";
 import { layout } from "./paths.js";
 import { promptPlugin, standingFor } from "./prompts.js";
@@ -338,14 +339,16 @@ ${manager.context[0] ?? `U${target.seq} needs a decision`}
 ${target.description ? `- Why it exists: ${target.description}\n` : ""}- State: ${target.state}. Tries used: ${used} of ${target.maxAttempts}.
 - Expected to write: ${target.writeScope.join(", ") || "(unspecified)"}
 - Acceptance: ${target.acceptance.join("; ") || "(none)"}
-${
-  noteWake
-    ? ""
-    : `- The fixed rules, without you, would ${policy.action === "retry" ? "retry it" : "block it"} (${policy.reason}).
+${amendmentContext(db, target.id)
+  .map((l) => `- ${l}\n`)
+  .join("")}${
+    noteWake
+      ? ""
+      : `- The fixed rules, without you, would ${policy.action === "retry" ? "retry it" : "block it"} (${policy.reason}).
 - Resume the builder is ${canResume ? "available" : `not available${choice.fresh ? ` (${choice.fresh})` : ""}`}.
 - ${dependents ? `${dependents} other unit(s) depend on this one, so it cannot be split; use planner instead.` : "Nothing depends on this unit, so it can be split."}
 `
-}${siblings.length ? `\n## OTHER UNITS IN THIS REPO NOW\n${siblings.map(sibling).join("\n")}\n` : ""}${decisions.length ? `\n## YOUR EARLIER DECISIONS ON THIS UNIT\n${decisions.map((d) => `- ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}`).join("\n")}\n` : ""}
+  }${siblings.length ? `\n## OTHER UNITS IN THIS REPO NOW\n${siblings.map(sibling).join("\n")}\n` : ""}${decisions.length ? `\n## YOUR EARLIER DECISIONS ON THIS UNIT\n${decisions.map((d) => `- ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}`).join("\n")}\n` : ""}
 ## ${resumed ? "WHAT HAPPENED SINCE YOUR LAST DECISION" : "THE RECORD"}
 ${seen.length ? seen.join("\n\n") : "Nothing new is recorded."}
 

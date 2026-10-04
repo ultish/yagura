@@ -650,10 +650,10 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     expect(brief).not.toContain("old and resolved");
     const pr = () => ghState().prs[0] as unknown as { threads: { comments: { body: string }[] }[]; comments: { body: string }[] };
     expect(pr().threads[0]!.comments[1]!.body).toMatch(
-      /^💬 \*\*yagura review triage\*\* · A\d+\n\n\*\*Fixed\*\* in `[0-9a-f]{10}` — added the review fix to app\/orders.py\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/RT_1 -->$/,
+      /^⚖️ \*\*yagura review triage\*\* · A\d+\n\n\*\*Fixed\*\* in `[0-9a-f]{10}` — added the review fix to app\/orders.py\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/RT_1 -->$/,
     );
     expect(pr().threads[1]!.comments[1]!.body).toMatch(
-      /^💬 \*\*yagura review triage\*\* · A\d+\n\n\*\*No change\*\* — the existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:/,
+      /^⚖️ \*\*yagura review triage\*\* · A\d+\n\n\*\*No change\*\* — the existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:/,
     );
     const ask = listGates(db, project, "open").find((g) => g.kind === "review")!;
     expect(ask.question).toMatch(/^On pull request #1, bob wrote: "security: this logs the auth token"\. This touches security, auth, or data/);
@@ -677,7 +677,7 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
     await runTriageUnit(ctx, getUnitBySeq(db, project, 5).id);
     expect(readFileSync(layout(ctx.boot).brief(project, 5, 1), "utf8")).toContain("The developer decided: dismiss. Do that.");
     expect(pr().comments.at(-1)!.body).toMatch(
-      /^💬 \*\*yagura review triage\*\* · A\d+\n\n\*\*No change\*\* — the existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/IC_1 -->$/,
+      /^⚖️ \*\*yagura review triage\*\* · A\d+\n\n\*\*No change\*\* — the existing test covers this case\n\n<!-- yagura -->\n<!-- yagura-reply:p\/U1\/w\d+\/IC_1 -->$/,
     );
     expect(getUnitBySeq(db, project, 1).state).toBe("verified");
     await landUnit(ctx, work.id);
@@ -881,13 +881,13 @@ describe("landing through a GitLab merge request (fake glab over a real origin)"
     const discussions = glState().mrs[0]!.discussions;
     const replies = (id: string) => discussions.find((d) => d.id === id)!.notes.filter((n) => String(n.body).includes("<!-- yagura -->"));
     expect(replies("dA").map((n) => n.body)).toEqual([
-      expect.stringMatching(/^💬 \*\*yagura review triage\*\* · A\d+\n\n\*\*Fixed\*\* in `[0-9a-f]{10}` — added the review fix/),
+      expect.stringMatching(/^⚖️ \*\*yagura review triage\*\* · A\d+\n\n\*\*Fixed\*\* in `[0-9a-f]{10}` — added the review fix/),
     ]);
     expect(
       discussions.filter(
         (d) =>
           d.individual_note &&
-          d.notes.some((n) => /^💬 \*\*yagura review triage\*\* · A\d+\n\n\*\*No change\*\* — the existing test covers this case/.test(String(n.body))),
+          d.notes.some((n) => /^⚖️ \*\*yagura review triage\*\* · A\d+\n\n\*\*No change\*\* — the existing test covers this case/.test(String(n.body))),
       ),
     ).toHaveLength(1);
   });

@@ -58,14 +58,22 @@ export interface PrThread {
 export const YAGURA_MARK = "<!-- yagura -->";
 // yagura posts through the developer's own account, so every post opens with one line saying who wrote it: yagura, the agent
 // (role and run number, "A4"), and then the comment. An emoji per agent makes the author readable at a glance.
+// Each emoji has a twin icon in the dashboard (apps/web/src/ui/RoleIcon.tsx): map, hammer, shield-check, eye, scale, compass, shuffle,
+// search, package. A test in the web app keeps the two lists covering the same roles. The names under "later" are the decided new names.
 export const AGENT_EMOJI: Record<string, string> = {
-  reviewer: "\u{1F441}\uFE0F",
-  "review triage": "\u{1F4AC}",
-  rebase: "\u{1F500}",
-  manager: "\u{1F9ED}",
+  planner: "\u{1F5FA}\uFE0F",
   worker: "\u{1F528}",
   verifier: "\u{1F6E1}\uFE0F",
-  planner: "\u{1F5FA}\uFE0F",
+  reviewer: "\u{1F441}\uFE0F",
+  "review triage": "\u2696\uFE0F",
+  manager: "\u{1F9ED}",
+  rebase: "\u{1F500}",
+  investigator: "\u{1F50D}",
+  "pack writer": "\u{1F4E6}",
+  // later: project lead, unit lead, arbiter
+  "project lead": "\u{1F5FA}\uFE0F",
+  "unit lead": "\u{1F9ED}",
+  arbiter: "\u2696\uFE0F",
 };
 const YAGURA_EMOJI = "\u2699\uFE0F";
 // `who` is the agent that wrote the text; yagura's own engine (a pin notice, a close) passes none.

@@ -24,6 +24,7 @@ import { managerForcesFresh } from "./manager.js";
 import { environmentNotes, listValues, valueMap } from "./envvalues.js";
 import { LEASE_VARS } from "./leases.js";
 import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
+import { amendmentContext } from "./amend.js";
 import { classifyFailure, parseHandoff, syntheticFailureHandoff } from "./handoff.js";
 import { layout, unitRef } from "./paths.js";
 import { assessScope } from "./scope.js";
@@ -159,6 +160,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     scope: { write: unit.writeScope, forbid: unit.forbidScope, hard: packForbid },
     context: [
       ...(unit.description ? [`Why this unit exists: ${unit.description}`] : []),
+      ...amendmentContext(db, unit.id),
       ...(isPack
         ? packContract({
             packPath: repo.verifyPackPath,

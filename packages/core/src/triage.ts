@@ -6,6 +6,7 @@ import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { REBASE_HARNESS, type Attempt, type IsoTime, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
+import { amendmentContext, applyOps, describeOps, parseAmendments, proposeAmendment, settleAmendment } from "./amend.js";
 import { forgeFor, getMergeRequest, postOnce, signed, type ForgeAdapter, type PrThread, type ThreadKind, prRef } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha } from "./git.js";
 import { parseHandoff } from "./handoff.js";
@@ -117,12 +118,14 @@ export function queueTriage(db: Db, target: Unit, ref: string, fresh: { thread: 
     maxAttempts: 1,
   });
   db.transaction(() => {
-    for (const { thread: t, directive } of fresh)
+    for (const { thread: t, directive } of fresh) {
+      if (directive !== null) settleAmendment(db, target.id, t.id, directive);
       db.prepare(
         `INSERT INTO mr_threads (unit_id, thread_id, kind, author, path, line, comments_json, wave_unit_id, directive, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (unit_id, thread_id) DO UPDATE SET comments_json = excluded.comments_json, wave_unit_id = excluded.wave_unit_id,
            directive = excluded.directive, decision = NULL, reason = NULL, gate_id = NULL`,
       ).run(target.id, t.id, t.kind, t.author, t.path, t.line, JSON.stringify(t.comments), unit.id, directive, now());
+    }
     transitionUnit(db, unit.id, "ready", { target: target.seq, threads: fresh.length });
   })();
   return getUnit(db, unit.id);
@@ -166,7 +169,13 @@ const TRIAGE_REPORT = HANDOFF_TEMPLATE.replace(
 - T1: fixed — what you changed, in one line
 - T2: dismissed — the concrete disproof yagura posts as the reply (a test, a line of code, a spec reference)
 - T3: asked — the question the developer must decide
-(one line per thread, every thread; then any other choice you made, as for any handoff)`,
+(one line per thread, every thread; then any other choice you made, as for any handoff)
+
+## Amendments
+- T3: replace: <an acceptance criterion exactly as ACCEPTANCE words it> => <what it becomes>
+- T3: add: <a new criterion>
+- T3: verify: <the new VERIFY command, only when the old one would fail the amended criteria>
+(Only when a reviewer's comment would change what the unit must do, so that ACCEPTANCE no longer holds. Mark that thread asked: the developer approves or rejects the change, and nothing is applied before they do. Leave the section out otherwise.)`,
 );
 
 export function renderScopeAsk(paths: string[]): string {
@@ -209,11 +218,14 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     goal: `Triage the review threads on ${ref} for U${target.seq} (${target.goal}). For each thread decide: fixed (change the code on this branch and commit), dismissed (the reviewer is wrong, and you can show why concretely), or asked (only the developer can decide).`,
     repo: { id: repo.id, worktree, branch, baseSha: verdict.head_sha },
     scope: { write: target.writeScope, forbid: target.forbidScope, hard: [`${repo.verifyPackPath}/**`] },
-    context: triageContext(
-      rows,
-      all.filter((r) => r.waveUnitId !== unit.id),
-      ref,
-    ),
+    context: [
+      ...triageContext(
+        rows,
+        all.filter((r) => r.waveUnitId !== unit.id),
+        ref,
+      ),
+      ...amendmentContext(db, target.id),
+    ],
     readonly: [],
     acceptance: target.acceptance,
     verify: target.verify ?? "(none)",
@@ -305,9 +317,22 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   }
 
   const asked: string[] = [];
+  const amendments = parseAmendments(handoff!.raw, rows.length);
   for (const [i, row] of rows.entries()) {
     let { decision, reason } = decisions.get(i + 1)!;
     const text = row.comments.join("\n");
+    // A change to what the unit must do is the developer's to approve, whatever the arbiter ruled; one that does not fit the unit as it is is dropped.
+    let ops = amendments.get(i + 1) ?? [];
+    if (ops.length) {
+      const fits = applyOps(target.acceptance, target.verify ?? "", ops);
+      if ("problem" in fits) {
+        recordEvent(db, "amendment.invalid", refs, { thread: `T${i + 1}`, problem: fits.problem });
+        ops = [];
+      } else if (decision !== "asked") {
+        decision = "asked";
+        reason = `This would change what U${target.seq} must do, so yagura will not do it without you. The arbiter said: ${reason}`;
+      }
+    }
     if (decision === "dismissed" && SENSITIVE.test(text) && row.directive !== "dismiss") {
       decision = "asked";
       reason = `This touches security, auth, or data, so yagura will not dismiss it without you. The triage said: ${reason}`;
@@ -318,9 +343,12 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
         projectId: project.id,
         unitId: target.id,
         kind: "review",
-        question: `On ${ref}, ${row.author} wrote: "${text.slice(0, 400)}". ${reason} Fix it or dismiss it?`,
+        question: `On ${ref}, ${row.author} wrote: "${text.slice(0, 400)}". ${reason}${
+          ops.length ? ` Approving also changes U${target.seq}'s acceptance: ${describeOps(ops).join("; ")}.` : ""
+        } Fix it or dismiss it?`,
         options: ["fix", "dismiss"],
       });
+      if (ops.length) proposeAmendment(db, { unitId: target.id, gateId, threadId: row.threadId, author: row.author, quote: text, changes: ops });
       asked.push(`T${i + 1}`);
     }
     db.prepare("UPDATE mr_threads SET decision = ?, reason = ?, commit_sha = ?, gate_id = ? WHERE unit_id = ? AND thread_id = ?").run(

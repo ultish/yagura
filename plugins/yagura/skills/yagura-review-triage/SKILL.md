@@ -16,6 +16,7 @@ Reviewers left threads on a pull request for a verified unit. Decide every threa
 - **Asked** means only the developer can decide (product intent, taste, a trade-off). The Decisions line is the question.
 - **Never dismiss** a finding about security, auth, secrets, data loss, or migrations; yagura turns such a dismissal into a question for the developer anyway.
 - **Respect earlier decisions.** Threads in the decision log stay decided unless a reviewer added new evidence. Where CONTEXT says "The developer decided", do exactly that.
+- **A comment that changes what the unit must do is an amendment.** When fixing a comment would make ACCEPTANCE (or the VERIFY command) false, as when a reviewer asks for something the criteria forbid, do not fix it and do not dismiss it. Mark that thread `asked`, and under `## Amendments` write the exact change: `- T3: replace: <criterion exactly as ACCEPTANCE words it> => <what it becomes>`, `- T3: add: <a new criterion>`, and `- T3: verify: <the new VERIFY command>` only if the old one would fail. yagura shows the developer who commented, their words, and your change; nothing is applied until they approve. Where CONTEXT says the developer amended the unit, the criteria above already reflect it: build to them.
 - **No replies, pushes, rebases, merges, or branch switches.** yagura does those.
 
 ## The handoff

@@ -1,4 +1,6 @@
 import { byTime } from "./sort";
+import { AGENT_EMOJI } from "@yagura/core";
+import { ICONS } from "../ui/RoleIcon";
 import { describe, expect, it } from "vitest";
 import type { BellItem, LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
 import { lineDiff } from "./linediff";
@@ -409,5 +411,29 @@ describe("byTime", () => {
     expect(byTime(items, (x) => x.at, "oldest").map((x) => x.id)).toEqual(["none", "a", "b", "c", "c2"]);
     expect(byTime(items, (x) => x.at, "newest").map((x) => x.id)).toEqual(["c2", "c", "b", "a", "none"]);
     expect(items.map((x) => x.id)).toEqual(["b", "a", "none", "c", "c2"]);
+  });
+});
+
+describe("role glyphs", () => {
+  it("gives every role that has a pull request emoji a dashboard icon, so the two never drift apart", () => {
+    const iconed = new Set(Object.keys(ICONS));
+    expect(Object.keys(AGENT_EMOJI).filter((role) => !iconed.has(role))).toEqual([]);
+  });
+  it("covers the roles people see today and the decided new names", () => {
+    for (const role of [
+      "planner",
+      "worker",
+      "verifier",
+      "reviewer",
+      "review triage",
+      "manager",
+      "rebase",
+      "investigator",
+      "pack writer",
+      "project lead",
+      "unit lead",
+      "arbiter",
+    ])
+      expect(AGENT_EMOJI[role], role).toBeTruthy();
   });
 });

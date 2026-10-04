@@ -113,6 +113,7 @@ describe("Engine", () => {
     const units = (type: string) => listUnits(db, project).filter((u) => u.type === type);
     afterEach(() => {
       delete process.env.FAKE_REVIEW;
+      delete process.env.FAKE_TRIAGE_AMEND;
     });
 
     it("turns a blocking finding into a triage fix, verifies and re-reviews the fix, then lands", async () => {
@@ -152,6 +153,54 @@ describe("Engine", () => {
       expect(units("review-triage")).toEqual([]);
       expect(units("work")[0]!.notes.some((n) => /^Reviewer nit \(A\d+\) app\/a\/p-U\d+\.txt:1: a shorter name would read better$/.test(n))).toBe(true);
     }, 60_000);
+
+    it("holds a change to what the unit must do until the developer approves it, then applies it for every later agent", async () => {
+      const { listGates, answerGate } = await import("./store.js");
+      const { listAmendments } = await import("./amend.js");
+      process.env.FAKE_REVIEW = "blocking:please fix: add celebration emojis";
+      process.env.FAKE_TRIAGE_AMEND = "1";
+      await run();
+      const originals = new Map(units("work").map((u) => [u.id, u.acceptance]));
+      const asks = () => listGates(db, project, "open").filter((g) => g.kind === "review");
+      expect(asks().length).toBeGreaterThan(0);
+      expect(asks()[0]!.question).toMatch(/Approving also changes U\d+'s acceptance: change "[^"]+" to "celebration emojis are part of the output"\./);
+      const proposed = units("work").flatMap((u) => listAmendments(db, u.id));
+      expect(proposed.length).toBeGreaterThan(0);
+      expect(proposed.every((a) => a.state === "proposed")).toBe(true);
+      for (const u of units("work")) expect(u.acceptance).toEqual(originals.get(u.id));
+
+      for (let i = 0; i < 6 && asks().length; i++) {
+        for (const g of asks()) answerGate(db, g.id, "fix");
+        await run();
+      }
+      const amended = units("work").filter((u) => listAmendments(db, u.id).some((a) => a.state === "approved"));
+      expect(amended.length).toBeGreaterThan(0);
+      for (const u of amended) {
+        expect(u.acceptance).toContain("celebration emojis are part of the output");
+        expect(u.acceptance).not.toEqual(originals.get(u.id));
+        const a = listAmendments(db, u.id).find((x) => x.state === "approved")!;
+        expect(a.before?.acceptance).toEqual(originals.get(u.id));
+      }
+      expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+    }, 120_000);
+
+    it("leaves the unit as it was when the developer rejects the change", async () => {
+      const { listGates, answerGate } = await import("./store.js");
+      const { listAmendments } = await import("./amend.js");
+      process.env.FAKE_REVIEW = "blocking:please fix: add celebration emojis";
+      process.env.FAKE_TRIAGE_AMEND = "1";
+      await run();
+      const originals = new Map(units("work").map((u) => [u.id, u.acceptance]));
+      const asks = () => listGates(db, project, "open").filter((g) => g.kind === "review");
+      for (let i = 0; i < 6 && asks().length; i++) {
+        for (const g of asks()) answerGate(db, g.id, "dismiss");
+        await run();
+      }
+      const all = units("work").flatMap((u) => listAmendments(db, u.id));
+      expect(all.length).toBeGreaterThan(0);
+      expect(all.every((a) => a.state === "rejected")).toBe(true);
+      for (const u of units("work")) expect(u.acceptance).toEqual(originals.get(u.id));
+    }, 120_000);
 
     it("asks the developer before a security finding is dismissed, then fixes it as answered", async () => {
       const { listGates, answerGate } = await import("./store.js");

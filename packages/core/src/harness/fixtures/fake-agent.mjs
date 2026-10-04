@@ -176,7 +176,11 @@ function manager() {
 function triage() {
   const threads = [...brief.matchAll(/^- T(\d+) · [\s\S]*?(?=^- T\d+ · |^- Decisions from|^## )/gm)].map((m) => ({ n: m[1], text: m[0] }));
   const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
+  // FAKE_TRIAGE_AMEND: a thread the developer has not decided yet is asked, with an amendment that would change the unit's first acceptance criterion.
+  const amend = process.env.FAKE_TRIAGE_AMEND;
+  const accept = /## ACCEPTANCE\n- (.+)/.exec(brief)?.[1];
   const lines = threads.map((t) => {
+    if (amend && !/The developer decided: (fix|dismiss)/.test(t.text)) return `- T${t.n}: asked — should this change what the unit must do?`;
     const fix = /please fix|The developer decided: fix/.test(t.text) && !/The developer decided: dismiss/.test(t.text);
     if (fix) appendFileSync(file, `# review fix T${t.n}\n`);
     return fix ? `- T${t.n}: fixed — added the review fix to ${file}` : `- T${t.n}: dismissed — the existing test covers this case`;
@@ -189,7 +193,10 @@ function triage() {
     }
     execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-qam", "review fixes"]);
   }
-  const handoff = `## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Decisions\n${lines.join("\n")}\n`;
+  const amendments = amend
+    ? lines.filter((l) => l.includes("asked")).map((l) => `- ${/^- (T\d+)/.exec(l)[1]}: replace: ${accept} => celebration emojis are part of the output`)
+    : [];
+  const handoff = `## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Decisions\n${lines.join("\n")}\n${amendments.length ? `\n## Amendments\n${amendments.join("\n")}\n` : ""}`;
   writeFileSync(join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`), handoff);
   finish(handoff);
 }

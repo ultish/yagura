@@ -168,6 +168,7 @@ export interface VerifyBrief {
   pack: { copy: string; lifecycle: string[] };
   earlier: string[];
   developerNotes: string[];
+  amendments?: string[];
 }
 
 const DIFF_LIMIT = 60_000;
@@ -215,7 +216,7 @@ Recipe from the unit: ${v.verifyRecipe}
 yagura ran the pack before you started${v.pack.lifecycle.length ? `:\n${list(v.pack.lifecycle)}` : " (checks above)."}
 
 Your editable copy is ${v.pack.copy}; every evidence run, on base and on head, uses your copy. If the pack is wrong (a command that cannot work, a deploy that no longer matches how the app runs) or does not check what this change built, fix or extend it there. Edit files only; do not run git. When you finish, yagura re-runs the doctor and every check on both sides with your copy, commits your edit on its own, and lands it after this unit. Say what you changed and why under Pack changes. For a pack that has drifted a long way, pstack:maintain-verification-skill guides a full pass.
-${v.earlier.length ? `\n## EARLIER VERIFICATIONS OF THIS UNIT\n${list(v.earlier)}\n` : ""}${v.developerNotes.length ? `\n## WHERE THE DEVELOPER DISAGREED WITH EARLIER WORK ON THIS REPO\nWeigh these when you decide what to test.\n${list(v.developerNotes)}\n` : ""}
+${v.amendments?.length ? `\n## THE DEVELOPER AMENDED THIS UNIT (outranks ACCEPTANCE as first written)\n${list(v.amendments)}\n` : ""}${v.earlier.length ? `\n## EARLIER VERIFICATIONS OF THIS UNIT\n${list(v.earlier)}\n` : ""}${v.developerNotes.length ? `\n## WHERE THE DEVELOPER DISAGREED WITH EARLIER WORK ON THIS REPO\nWeigh these when you decide what to test.\n${list(v.developerNotes)}\n` : ""}
 ## ENV
 ${list(Object.entries(v.leaseVars).map(([k, val]) => `${k}=${val}${v.envNotes[k] ? ` (${v.envNotes[k]})` : ""}`))}${v.environmentNotes.trim() ? `\n\nAbout this environment: ${v.environmentNotes.trim()}` : ""}
 

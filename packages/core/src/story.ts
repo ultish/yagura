@@ -12,6 +12,7 @@ import { layout } from "./paths.js";
 import { getGate, getProject, getUnit, listAttempts, listGates, listUnits, type Db, jobLabel, type Gate } from "./store.js";
 import { isReviewThread, listThreadRows } from "./triage.js";
 import { findingFates } from "./review.js";
+import { describeOps, listAmendments } from "./amend.js";
 import { listManagerDecisions, managerOn } from "./manager.js";
 
 // A unit's page reads as one story: who did what, what each chose, and what yagura checked about it. Agents' lines are
@@ -332,6 +333,26 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
             ? `${d.action === "relay" ? "Note passed on" : "Note for the next worker"}: ${d.note}`
             : null,
       lines: d.action === "fallback" ? [] : [line(`m${d.id}`, "chose", `${MANAGER_ACTION_TEXT[d.action]}: ${d.reason}`)],
+      folded: null,
+    });
+  }
+
+  // Changes to what the unit must do, proposed from a review comment and decided by the developer.
+  for (const a of listAmendments(db, unit.id)) {
+    const rejected = a.state === "rejected";
+    entries.push({
+      at: (a.decidedAt ?? a.createdAt) as IsoTime,
+      actor: a.state === "proposed" ? "yagura" : "person",
+      who: a.state === "proposed" ? "Amendment" : "You",
+      attempt: null,
+      status:
+        a.state === "approved"
+          ? { text: "approved an amendment", tone: "pine" }
+          : rejected
+            ? { text: "rejected an amendment", tone: "muted" }
+            : { text: "amendment waits for you", tone: "bell" },
+      body: `${a.author} wrote: "${a.quote.slice(0, 240)}"\n${describeOps(a.changes).join("; ")}`,
+      lines: [],
       folded: null,
     });
   }

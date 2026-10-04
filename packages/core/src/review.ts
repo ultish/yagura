@@ -1,3 +1,4 @@
+import { amendmentContext } from "./amend.js";
 import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -260,6 +261,7 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
     scope: { write: ["nothing: this is a read-only review"], forbid: [], hard: ["**"] },
     context: [
       `The change to review: \`git diff ${base}..${head}\` in your worktree${since ? " (only the fixes made after the last review)" : ""}.\n${stat}`,
+      ...amendmentContext(db, target.id),
       `The verifier proved its behaviour at ${verdict.tier}; you judge the code itself: correctness the checks miss, design, fit with the repo's existing code and conventions, duplication, error handling, security, and tests that would not catch a regression.`,
       ...beyondScope(db, target.id),
       ...(conventions.length ? [`The repo's own conventions: ${conventions.join(", ")}`] : []),

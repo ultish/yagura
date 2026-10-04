@@ -562,6 +562,25 @@ CREATE INDEX manager_decisions_unit ON manager_decisions (unit_id);
 `,
   },
   { version: 38, rebuild: addInvestigateUnitType },
+  {
+    version: 39,
+    sql: `
+CREATE TABLE unit_amendments (
+  id INTEGER PRIMARY KEY,
+  unit_id INTEGER NOT NULL REFERENCES units (id),
+  gate_id INTEGER REFERENCES gates (id),
+  thread_id TEXT,
+  author TEXT NOT NULL,
+  quote TEXT NOT NULL,
+  changes_json TEXT NOT NULL,
+  before_json TEXT,
+  state TEXT NOT NULL DEFAULT 'proposed' CHECK (state IN ('proposed', 'approved', 'rejected')),
+  created_at TEXT NOT NULL,
+  decided_at TEXT
+);
+CREATE INDEX unit_amendments_unit ON unit_amendments (unit_id);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;
