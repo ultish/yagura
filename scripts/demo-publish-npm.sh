@@ -29,6 +29,12 @@ git_() { git -c user.name=demo -c user.email=demo@localhost "$@"; }
 up() {
   : "${NEXUS_USER:?set NEXUS_USER}" "${NEXUS_PASSWORD:?set NEXUS_PASSWORD}"
   [ -f "$ROOT/apps/cli/dist/main.js" ] || (cd "$ROOT" && pnpm -r build)
+  # yagura's database module is built for one Node version; a different one fails at the first yagura command, so check before anything is set up.
+  node -e "require(require.resolve('better-sqlite3', { paths: ['$ROOT/packages/core'] }))" > /dev/null 2>&1 || {
+    echo "yagura's database module was built for a different Node than this one ($(node -v))."
+    echo "Either run this with the Node you built with, or rebuild it for this one:  (cd $ROOT && pnpm rebuild better-sqlite3)"
+    exit 1
+  }
   down quiet
   rm -rf "$DEMO" && mkdir -p "$DEMO"
   curl -sf -m 5 -u "$NEXUS_USER:$NEXUS_PASSWORD" -o /dev/null "$NEXUS_URL/service/rest/v1/status" || { echo "cannot reach Nexus at $NEXUS_URL with that user"; exit 1; }
@@ -38,7 +44,6 @@ up() {
   cat > "$DEMO/npmrc" <<EOF
 registry=$REGISTRY
 //$HOSTPATH:_auth=$AUTH
-always-auth=true
 EOF
   chmod 600 "$DEMO/npmrc"
 
