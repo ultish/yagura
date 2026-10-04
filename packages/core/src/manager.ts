@@ -87,7 +87,7 @@ const liveSiblings = (db: Db, target: Unit) =>
 
 export type ManagerNeed = { kind: "wake"; wake: string } | { kind: "waiting" } | { kind: "cap"; cap: number } | { kind: "answered"; answer: string | null };
 
-// What a failed or rejected build unit needs from its manager now, or null when the fixed rules should decide.
+// What a failed or rejected build unit needs from its unit lead now, or null when the fixed rules should decide.
 export function managerNeed(db: Db, target: Unit): ManagerNeed | null {
   if (!managerOn(db, target) || (target.state !== "failed" && target.state !== "rejected")) return null;
   if (liveManagerUnit(db, target)) return { kind: "waiting" };
@@ -96,7 +96,7 @@ export function managerNeed(db: Db, target: Unit): ManagerNeed | null {
   const tries = triesOf(db, target);
   const cap = resolveSetting(db, "manager.max_decisions_per_unit", { projectId: target.projectId, repoId: target.repoId }).value;
   if (last?.action === "investigate" && last.tries === tries) {
-    // The manager asked to find something out: it waits for the investigator, then is woken once with what it found.
+    // The unit lead asked to find something out: it waits for the investigator, then is woken once with what it found.
     const inv = listUnits(db, target.projectId)
       .filter((u) => u.type === "investigate" && u.targetUnitId === target.id && u.id > last.managerUnitId)
       .at(-1);
@@ -166,7 +166,7 @@ function handoffNote(db: Db, boot: RunContext["boot"], target: Unit): { attempt:
   return attempt && lines.length ? { attempt, note: lines.join("\n") } : null;
 }
 
-// Wakes the manager of a healthy work unit whose worker left a note while other units are live in its repo, once per attempt.
+// Wakes the unit lead of a healthy work unit whose worker left a note while other units are live in its repo, once per attempt.
 export function wakeOnNote(db: Db, boot: RunContext["boot"], target: Unit): Unit | null {
   if (!managerOn(db, target) || TERMINAL_STATES.has(target.state) || target.state === "failed" || target.state === "rejected" || target.state === "ready")
     return null;
@@ -186,8 +186,9 @@ export function settleManagerUnit(db: Db, manager: Unit): void {
   if (manager.type !== "manager" || !manager.targetUnitId) return;
   const target = getUnit(db, manager.targetUnitId);
   const has = db.prepare("SELECT 1 FROM manager_decisions WHERE manager_unit_id = ?").get(manager.id);
-  if (!has) recordDecision(db, target, manager, null, isNoteWake(manager) ? "ignore" : "fallback", "the manager session failed before it decided", null, null);
-  transitionUnit(db, manager.id, "abandoned", { reason: "the manager session failed; the fixed rules decide" });
+  if (!has)
+    recordDecision(db, target, manager, null, isNoteWake(manager) ? "ignore" : "fallback", "the unit lead session failed before it decided", null, null);
+  transitionUnit(db, manager.id, "abandoned", { reason: "the unit lead session failed; the fixed rules decide" });
 }
 
 function recordDecision(
@@ -398,7 +399,7 @@ function applyDecision(
     return { problem: `${d.action} is not on the menu for this wake (${isNoteWake(manager) ? "relay or ignore" : "a failure"})`, gateId: null };
   const tries = triesOf(db, target);
   const retry = (note: string | null) => {
-    if (note) addUnitNote(db, target.id, `The manager says: ${note}`);
+    if (note) addUnitNote(db, target.id, `The unit lead says: ${note}`);
     bumpMaxAttempts(db, target.id, tries + 1);
     transitionUnit(db, target.id, "ready", { by: "manager", reason: d.reason });
   };
@@ -432,14 +433,14 @@ function applyDecision(
       const to = [...(d.to ?? "").matchAll(/U?(\d+)/gi)].map((m) => live.get(Number(m[1])));
       if (!to.length || to.some((u) => !u))
         return { problem: `to must name live units in this repo (${[...live.keys()].map((n) => `U${n}`).join(", ") || "none"})`, gateId: null };
-      for (const u of new Set(to)) addUnitNote(db, u!.id, `The manager says, from U${target.seq}: ${d.note}`);
+      for (const u of new Set(to)) addUnitNote(db, u!.id, `The unit lead says, from U${target.seq}: ${d.note}`);
       return { problem: null, gateId: null };
     }
     case "stop":
-      transitionUnit(db, target.id, "blocked", { by: "manager", reason: `the manager stopped it: ${d.reason}` });
+      transitionUnit(db, target.id, "blocked", { by: "manager", reason: `the unit lead stopped it: ${d.reason}` });
       return { problem: null, gateId: null };
     case "planner":
-      transitionUnit(db, target.id, "blocked", { by: "manager", reason: `the manager sent it to the planner: ${d.reason}` });
+      transitionUnit(db, target.id, "blocked", { by: "manager", reason: `the unit lead sent it to the project lead: ${d.reason}` });
       return { problem: null, gateId: null };
     case "ask": {
       const gateId = addGate(db, {
@@ -454,7 +455,7 @@ function applyDecision(
     }
     case "split": {
       if (listDeps(db, target.projectId).some((x) => x.dependsOn === target.id && x.kind !== "scope-overlap"))
-        return { problem: "other units depend on this one, so it cannot be split; send it to the planner", gateId: null };
+        return { problem: "other units depend on this one, so it cannot be split; send it to the project lead", gateId: null };
       const extracted = extractDelta(text);
       if (!extracted.ok) return { problem: extracted.reason, gateId: null };
       const delta = extracted.delta;
@@ -463,7 +464,7 @@ function applyDecision(
         return { problem: "a split may only add units (and cancel this one)", gateId: null };
       try {
         db.transaction(() => {
-          transitionUnit(db, target.id, "abandoned", { by: "manager", reason: `split by the manager: ${d.reason}` });
+          transitionUnit(db, target.id, "abandoned", { by: "manager", reason: `split by the unit lead: ${d.reason}` });
           applyDelta(db, target.projectId, { ...delta, cancel: [] }, null);
         })();
       } catch (e) {
@@ -475,19 +476,19 @@ function applyDecision(
   }
 }
 
-// Acting on the developer's answer to a question the manager asked.
+// Acting on the developer's answer to a question the unit lead asked.
 export function applyAskAnswer(db: Db, target: Unit, answer: string | null): void {
   if (answer === "retry") {
     bumpMaxAttempts(db, target.id, triesOf(db, target) + 1);
     addUnitNote(db, target.id, "The developer said to try again.");
     transitionUnit(db, target.id, "ready", { by: "developer" });
-  } else transitionUnit(db, target.id, "blocked", { by: "developer", reason: "the manager asked and the developer chose to stop" });
+  } else transitionUnit(db, target.id, "blocked", { by: "developer", reason: "the unit lead asked and the developer chose to stop" });
 }
 
 export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt | null> {
   const { db, boot } = ctx;
   const unit = getUnit(db, unitId);
-  if (unit.type !== "manager" || !unit.targetUnitId) throw new Error(`U${unit.seq} is not a manager unit`);
+  if (unit.type !== "manager" || !unit.targetUnitId) throw new Error(`U${unit.seq} is not a unit lead unit`);
   if (unit.state !== "ready") throw new Error(`U${unit.seq} is ${unit.state}, not ready`);
   const target = getUnit(db, unit.targetUnitId);
   const finish = () => {
@@ -584,8 +585,8 @@ export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<A
   let reason = "";
   let note: string | null = null;
   let gateId: number | null = null;
-  if (!text) reason = run.result.timedOut ? "the manager ran out of time" : "the manager ended without an answer";
-  else if (run.result.missingSkills.length) reason = `the manager skipped required skills: ${run.result.missingSkills.join(", ")}`;
+  if (!text) reason = run.result.timedOut ? "the unit lead ran out of time" : "the unit lead ended without an answer";
+  else if (run.result.missingSkills.length) reason = `the unit lead skipped required skills: ${run.result.missingSkills.join(", ")}`;
   else {
     const parsed = parseDecision(text);
     if (!parsed.ok) reason = parsed.problem;

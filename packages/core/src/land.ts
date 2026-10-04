@@ -156,7 +156,7 @@ async function squashOntoTrunk(l: Landing): Promise<Squash> {
 function triageOrBlock(l: Landing, number: number, fresh: Parameters<typeof queueTriage>[3]): LandResult {
   const triage = queueTriage(l.db, l.unit, prRef(l.repo.forge, number), fresh);
   if (!triage) return block(l, `${prRef(l.repo.forge, number)} has new review threads after ${MAX_TRIAGE_WAVES} triage waves; it needs you`);
-  const reason = `${fresh.length} review thread(s) on ${prRef(l.repo.forge, number)}; a review triage is queued`;
+  const reason = `${fresh.length} review thread(s) on ${prRef(l.repo.forge, number)}; the arbiter is queued`;
   if (l.unit.state === "landing") transitionUnit(l.db, l.unit.id, "blocked", { reason, reviewUnit: triage.seq });
   return { unit: getUnit(l.db, l.unit.id), outcome: "triaging", landedSha: null, reason };
 }

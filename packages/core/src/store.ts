@@ -356,7 +356,13 @@ function toAttempt(r: Record<string, unknown>): Attempt {
 // Verify, review, triage, rebase, and plan rows are agent jobs, not slices of work: they are named by their agent, "A13", once one has started.
 export function jobLabel(db: Db, unit: Pick<Unit, "id" | "type">): string {
   const a = db.prepare("SELECT agent_no FROM attempts WHERE unit_id = ? ORDER BY id DESC LIMIT 1").get(unit.id) as { agent_no: number } | undefined;
-  return a ? `A${a.agent_no}` : `its ${unit.type === "review-triage" ? "triage" : unit.type} (not started)`;
+  return a ? `A${a.agent_no}` : `its ${unit.type === "review-triage" ? "arbiter" : unit.type} (not started)`;
+}
+
+// The first agent run on a unit, "A4": for a unit with two agents (an arbiter, then the worker it called), the one that ruled.
+export function firstAgentRef(db: Db, unit: Pick<Unit, "id" | "seq">): string {
+  const a = db.prepare("SELECT agent_no FROM attempts WHERE unit_id = ? ORDER BY id LIMIT 1").get(unit.id) as { agent_no: number } | undefined;
+  return a ? `A${a.agent_no}` : `U${unit.seq}`;
 }
 
 // The agent run that did a job, "A4", or its unit, "U7", before any run has started; for a header that must always name something.

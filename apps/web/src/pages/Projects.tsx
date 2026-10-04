@@ -48,7 +48,7 @@ export function Projects() {
                       : n
                         ? `${n} thing${n === 1 ? "" : "s"} need you.`
                         : s.running || s.planning
-                          ? `${s.running} agent${s.running === 1 ? "" : "s"} at work${s.planning ? ", planner thinking" : ""}.`
+                          ? `${s.running} agent${s.running === 1 ? "" : "s"} at work${s.planning ? ", project lead thinking" : ""}.`
                           : s.project.state === "closed"
                             ? `Closed ${clock(s.project.closedAt)}.`
                             : s.project.state === "framing"

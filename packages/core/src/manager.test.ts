@@ -145,7 +145,7 @@ describe("a manager deciding about a rejected unit", () => {
     await wake(u.id);
     const after = getUnit(db, u.id);
     expect(after.state).toBe("ready");
-    expect(after.notes).toEqual(["The manager says: write it with care"]);
+    expect(after.notes).toEqual(["The unit lead says: write it with care"]);
     expect(listManagerDecisions(db, u.id)).toMatchObject([{ action: "fresh", reason: "the fake manager chose fresh", note: "write it with care", tries: 1 }]);
     expect(managerForcesFresh(db, after)).toBe(true);
     await runWorkUnit(ctx, u.id);
@@ -190,8 +190,8 @@ describe("a manager deciding about a rejected unit", () => {
       r: string;
     }[];
     expect(reasons.map((x) => x.r)).toEqual([
-      "the manager stopped it: the fake manager chose stop",
-      "the manager sent it to the planner: the fake manager chose planner",
+      "the unit lead stopped it: the fake manager chose stop",
+      "the unit lead sent it to the project lead: the fake manager chose planner",
     ]);
   }, 60_000);
 
@@ -353,7 +353,7 @@ describe("a manager told of a worker's note", () => {
     expect(m.context[1]).toBe("note");
     expect(wakeOnNote(db, ctx.boot, a)).toBeNull();
     await runManagerUnit(ctx, m.id);
-    expect(getUnit(db, b.id).notes).toEqual([`The manager says, from U${a.seq}: the shared helper moved`]);
+    expect(getUnit(db, b.id).notes).toEqual([`The unit lead says, from U${a.seq}: the shared helper moved`]);
     expect(listManagerDecisions(db, a.id)).toMatchObject([{ action: "relay", note: "the shared helper moved" }]);
     expect(getUnit(db, a.id).state).toBe("verifying");
     expect(wakeOnNote(db, ctx.boot, getUnit(db, a.id))).toBeNull();
@@ -419,7 +419,7 @@ describe("the engine with a manager", () => {
     expect(work.map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
     expect(listUnits(db, project).filter((u) => u.type === "manager").length).toBe(3);
     expect(work.flatMap((u) => listManagerDecisions(db, u.id)).map((d) => d.action)).toEqual(["resume", "resume", "resume"]);
-    expect(log.some((l) => l.includes("goes to its manager"))).toBe(true);
+    expect(log.some((l) => l.includes("goes to its unit lead"))).toBe(true);
     for (const u of work) expect(listAttempts(db, u.id).filter((a) => a.resumesAttemptId).length).toBe(1);
   }, 120_000);
 
@@ -433,7 +433,7 @@ describe("the engine with a manager", () => {
     const investigations = listUnits(db, project).filter((u) => u.type === "investigate");
     expect(investigations.length).toBeGreaterThanOrEqual(2);
     expect(investigations.every((u) => u.state === "done")).toBe(true);
-    expect(log.some((l) => l.includes("its manager has used"))).toBe(true);
+    expect(log.some((l) => l.includes("its unit lead has used"))).toBe(true);
   }, 180_000);
 
   it("leaves a rejection to the fixed rules when the manager is off", async () => {

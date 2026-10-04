@@ -25,7 +25,7 @@ function Line({ l }: { l: StoryLine }) {
       {l.disagreements.map((d) => (
         <div key={d.id} className="story-disagreed">
           You disagreed: {d.reason}
-          {d.state === "open" && " · the planner will plan a follow-up"}
+          {d.state === "open" && " · the project lead will plan a follow-up"}
           {d.state === "noted" && " · later verifiers on this repo will see it"}
         </div>
       ))}
@@ -240,20 +240,20 @@ function ManagerTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
   if (!story.managerOn && !story.manager.length)
     return (
       <div className="muted">
-        The manager is off for this project (the setting manager.enabled), so the fixed rules decide what happens after a rejection or failure.
+        The unit lead is off for this project (the setting manager.enabled), so the fixed rules decide what happens after a rejection or failure.
       </div>
     );
   if (!story.manager.length)
     return (
       <div className="muted">
-        No decisions yet. U{story.unit.seq}'s manager is woken only when its worker is rejected, fails, or runs out of tries; a unit that goes smoothly never
+        No decisions yet. U{story.unit.seq}'s unit lead is woken only when its worker is rejected, fails, or runs out of tries; a unit that goes smoothly never
         needs it.
       </div>
     );
   return (
     <div className="mgr">
       <p className="muted">
-        Each time the manager is woken it is told what changed since its last decision and answers with one action. Open its run to read exactly what it was
+        Each time the unit lead is woken it is told what changed since its last decision and answers with one action. Open its run to read exactly what it was
         told.
       </p>
       {byTime(story.manager, (t) => t.at, order).map((t) => (
@@ -352,7 +352,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             ["story", "Story", null],
             ["agents", "Agents", story.agents.length],
             ["code", "Code", u.repoId ? "" : null],
-            ...(u.type === "work" ? ([["manager", "Manager", story.manager.length]] as const) : []),
+            ...(u.type === "work" ? ([["manager", "Unit lead", story.manager.length]] as const) : []),
           ] as const
         ).map(([k, label, n]) => (
           <Link

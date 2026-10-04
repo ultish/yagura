@@ -143,7 +143,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     entries.push({
       at: created.ts,
       actor: "planner",
-      who: `Planner · drain ${drain}`,
+      who: `Project lead · drain ${drain}`,
       attempt: planUnit && planAttempt ? attemptOf(planUnit, planAttempt) : null,
       status: null,
       body: summary ? ((JSON.parse(summary.data_json) as { reason?: string }).reason ?? null) : null,
@@ -323,7 +323,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     entries.push({
       at: (a?.endedAt ?? d.createdAt) as IsoTime,
       actor: "manager",
-      who: "Manager",
+      who: "Unit lead",
       attempt: m && a ? attemptOf(m, a) : null,
       status: { text: MANAGER_ACTION_TEXT[d.action], tone: d.action === "fallback" ? "muted" : "amber" },
       body:
@@ -384,7 +384,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     entries.push({
       at: last.startedAt ?? t.createdAt,
       actor: t.type === "review-triage" ? "review-triage" : "rebase",
-      who: t.type === "review-triage" ? "Review triage" : "Rebase",
+      who: t.type === "review-triage" ? "Arbiter" : "Rebase",
       attempt: attemptOf(t, last),
       status: { text: "done", tone: "pine" },
       body: null,
@@ -583,7 +583,7 @@ export const MANAGER_ACTION_TEXT: Record<ManagerAction, string> = {
   resume: "resumed the builder",
   fresh: "started a fresh builder",
   split: "split the unit",
-  planner: "sent it to the planner",
+  planner: "sent it to the project lead",
   ask: "asked you",
   stop: "stopped it",
   investigate: "asked for an investigation",
@@ -593,12 +593,12 @@ export const MANAGER_ACTION_TEXT: Record<ManagerAction, string> = {
 };
 
 const ROLE: Partial<Record<string, string>> = {
-  manager: "Manager",
-  plan: "Planner",
+  manager: "Unit lead",
+  plan: "Project lead",
   work: "Worker",
   pack: "Pack writer",
   verify: "Verifier",
-  "review-triage": "Review triage",
+  "review-triage": "Arbiter",
   review: "Reviewer",
   rebase: "Rebase",
   investigate: "Investigator",

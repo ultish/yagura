@@ -135,16 +135,16 @@ export class Engine {
       if (u.type === "verify" && u.state === "failed")
         transitionUnit(this.db, u.id, "abandoned", { reason: "verifier attempt failed; outcome applied to its target" });
       if (u.type === "investigate" && (u.state === "failed" || u.state === "blocked")) {
-        transitionUnit(this.db, u.id, "abandoned", { reason: "the investigation failed; its manager is told" });
-        this.log(`  U${u.seq}: the investigation failed; its manager decides what next`);
+        transitionUnit(this.db, u.id, "abandoned", { reason: "the investigation failed; its unit lead is told" });
+        this.log(`  U${u.seq}: the investigation failed; its unit lead decides what next`);
       }
       if (u.type === "manager" && (u.state === "failed" || u.state === "blocked")) {
         settleManagerUnit(this.db, u);
-        this.log(`  U${u.seq}: the manager session failed; the fixed rules decide`);
+        this.log(`  U${u.seq}: the unit lead session failed; the fixed rules decide`);
       }
       if (u.type === "work" && !this.inflight.has(`unit:${u.id}`)) {
         const m = wakeOnNote(this.db, this.ctx.boot, u);
-        if (m) this.log(`  U${u.seq} left a note; its manager decides who needs it`);
+        if (m) this.log(`  U${u.seq} left a note; its unit lead decides who needs it`);
       }
       if (!isBuild(u) || (u.state !== "failed" && u.state !== "rejected")) continue;
       // A manager decides what happens next when one is on for the project; its absence, failure, or spent decisions leave it to the fixed rules.
@@ -152,13 +152,13 @@ export class Engine {
       if (need?.kind === "waiting") continue;
       if (need?.kind === "wake") {
         const m = queueManager(this.db, u, need.wake);
-        this.log(`  U${u.seq} goes to its manager (${need.wake})`);
+        this.log(`  U${u.seq} goes to its unit lead (${need.wake})`);
         void m;
         continue;
       }
       if (need?.kind === "cap") {
-        transitionUnit(this.db, u.id, "blocked", { reason: `its manager has used ${need.cap} decisions on it; it needs you` });
-        this.log(`  U${u.seq} blocked: its manager has used ${need.cap} decisions`);
+        transitionUnit(this.db, u.id, "blocked", { reason: `its unit lead has used ${need.cap} decisions on it; it needs you` });
+        this.log(`  U${u.seq} blocked: its unit lead has used ${need.cap} decisions`);
         continue;
       }
       if (need?.kind === "answered") {

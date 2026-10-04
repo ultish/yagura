@@ -48,7 +48,7 @@ export function DisagreeForm({
     return (
       <div className="story-form">
         Recorded on U{unit.seq}.{" "}
-        {action === "follow-up" ? "The planner will plan a follow-up unit for it." : "Later verifiers of this repo will read it as context."}{" "}
+        {action === "follow-up" ? "The project lead will plan a follow-up unit for it." : "Later verifiers of this repo will read it as context."}{" "}
         <Link to={`/p/${unit.projectId}/u/${unit.seq}`}>See it in U{unit.seq}'s story →</Link>{" "}
         <button type="button" className="diff-open" onClick={onDone}>
           Close

@@ -98,7 +98,7 @@ function Lanterns({ now }: { now: number }) {
             <span style={{ display: "block", fontSize: 14.5 }}>
               {a.unit.projectId} ·{" "}
               {a.unit.type === "plan" ? (
-                <RoleLabel role="planner" />
+                <RoleLabel role="planner" text="project lead" />
               ) : (
                 <>
                   <RoleLabel role={role(a)} /> A{a.agentNo}

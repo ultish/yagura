@@ -72,6 +72,7 @@ async function main() {
         : "## Status\nsuccess\n\n## Findings\n- the failing test depends on the clock: it passes before noon\n\n## Notes, concerns, deviations\n- none\n",
     );
   if (process.env.YAGURA_ROLE === "rebase") return rebase();
+  if (/Apply the arbiter's rulings/.test(brief)) return fixer();
   if (process.env.YAGURA_ROLE === "review-triage") return triage();
   if (process.env.YAGURA_ROLE === "reviewer") return reviewer();
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
@@ -117,8 +118,10 @@ function resumed(sessionId) {
   emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
   if (process.env.YAGURA_ROLE === "manager") return manager();
-  if (process.env.YAGURA_ROLE === "review-triage") {
-    const before = readFileSync(join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`), "utf8");
+  // A resumed fixer (asked to explain a path outside scope) answers again with what it handed off, plus the reason.
+  const savedFix = join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`);
+  if (existsSync(savedFix)) {
+    const before = readFileSync(savedFix, "utf8");
     return finish(`${before}\n## Outside scope\n- outside/extra.txt: the fix needs a test that proves it\n`);
   }
   const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
@@ -173,6 +176,7 @@ function manager() {
 }
 
 // Fixes threads that say "please fix" (or that the developer said to fix), and dismisses the rest.
+// The arbiter only rules: each thread is fix, dismissed, or (with FAKE_TRIAGE_AMEND) asked. It changes nothing.
 function triage() {
   const threads = [...brief.matchAll(/^- T(\d+) · [\s\S]*?(?=^- T\d+ · |^- Decisions from|^## )/gm)].map((m) => ({ n: m[1], text: m[0] }));
   const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
@@ -182,21 +186,28 @@ function triage() {
   const lines = threads.map((t) => {
     if (amend && !/The developer decided: (fix|dismiss)/.test(t.text)) return `- T${t.n}: asked — should this change what the unit must do?`;
     const fix = /please fix|The developer decided: fix/.test(t.text) && !/The developer decided: dismiss/.test(t.text);
-    if (fix) appendFileSync(file, `# review fix T${t.n}\n`);
-    return fix ? `- T${t.n}: fixed — added the review fix to ${file}` : `- T${t.n}: dismissed — the existing test covers this case`;
+    return fix ? `- T${t.n}: fix — added the review fix to ${file}` : `- T${t.n}: dismissed — the existing test covers this case`;
   });
-  if (lines.some((l) => l.includes("fixed"))) {
-    if (process.env.FAKE_TRIAGE_OUTSIDE) {
-      mkdirSync("outside", { recursive: true });
-      writeFileSync("outside/extra.txt", "a test the fix needs\n");
-      execFileSync("git", ["add", "outside/extra.txt"]);
-    }
-    execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-qam", "review fixes"]);
-  }
   const amendments = amend
     ? lines.filter((l) => l.includes("asked")).map((l) => `- ${/^- (T\d+)/.exec(l)[1]}: replace: ${accept} => celebration emojis are part of the output`)
     : [];
-  const handoff = `## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Decisions\n${lines.join("\n")}\n${amendments.length ? `\n## Amendments\n${amendments.join("\n")}\n` : ""}`;
+  finish(
+    `## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Decisions\n${lines.join("\n")}\n${amendments.length ? `\n## Amendments\n${amendments.join("\n")}\n` : ""}`,
+  );
+}
+
+// The worker the arbiter's rulings go to: it changes the code for each thread the arbiter ruled a fix, and commits.
+function fixer() {
+  const threads = [...brief.matchAll(/^- T(\d+) · /gm)].map((m) => m[1]);
+  const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
+  for (const n of threads) appendFileSync(file, `# review fix T${n}\n`);
+  if (process.env.FAKE_TRIAGE_OUTSIDE) {
+    mkdirSync("outside", { recursive: true });
+    writeFileSync("outside/extra.txt", "a test the fix needs\n");
+    execFileSync("git", ["add", "outside/extra.txt"]);
+  }
+  execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-qam", "review fixes"]);
+  const handoff = `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file} for ${threads.map((n) => `T${n}`).join(", ")}\n\n## Verification\nunit-verified\n`;
   writeFileSync(join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`), handoff);
   finish(handoff);
 }

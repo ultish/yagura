@@ -5,13 +5,13 @@ import { duration, sha } from "./format";
 export const isBuild = (u: { type: string }) => u.type === "work" || u.type === "pack";
 
 const ROLES: Record<string, string> = {
-  plan: "planner",
+  plan: "project lead",
   work: "worker",
   verify: "verifier",
   pack: "pack writer",
   review: "reviewer",
-  "review-triage": "review triage",
-  manager: "manager",
+  "review-triage": "arbiter",
+  manager: "unit lead",
   investigate: "investigator",
 };
 export const roleOf = (unitType: string, harness?: string) =>
@@ -36,7 +36,7 @@ const elapsed = (a: Attempt, now: number) => (a.startedAt ? duration(now - Date.
 // A verify, review, triage, or rebase row is an agent job, not a slice of work: it is named by its agent once one has started.
 export const jobName = (u: UnitView): string => {
   const a = u.attempts.at(-1);
-  return a ? `A${a.agentNo}` : `its ${u.type === "review-triage" ? "triage" : u.type}`;
+  return a ? `A${a.agentNo}` : `its ${u.type === "review-triage" ? "arbiter" : u.type}`;
 };
 
 export function verifiersOf(d: ProjectDetail, u: UnitView): UnitView[] {
@@ -131,9 +131,9 @@ export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: 
         .at(-1);
       if (review)
         return review.state === "blocked"
-          ? { text: `Verified; its ${review.type === "review" ? "code review" : "review triage"} is blocked.`, tone: "bell" }
+          ? { text: `Verified; its ${review.type === "review" ? "code review" : "arbiter"} is blocked.`, tone: "bell" }
           : {
-              text: `Verified; ${review.type === "review" ? "code review" : "triage of the review findings"} before it lands.`,
+              text: `Verified; ${review.type === "review" ? "code review" : "the arbiter ruling on the review findings"} before it lands.`,
               tone: "lamp",
             };
       const wait = waitingReason(d, u);
@@ -159,9 +159,9 @@ export function statusLine(d: ProjectDetail, u: UnitView, now: number): { text: 
     case "rejected":
     case "failed": {
       const manager = d.units.find((x) => x.type === "manager" && x.targetUnitId === u.id && !["done", "abandoned"].includes(x.state));
-      if (manager) return { text: `Attempt ${u.state}; its manager is deciding what happens next.`, tone: "lamp" };
+      if (manager) return { text: `Attempt ${u.state}; its unit lead is deciding what happens next.`, tone: "lamp" };
       const ask = openGateFor(d, u);
-      if (ask) return { text: `Attempt ${u.state}; the manager asks you: ${ask.question}`, tone: "bell" };
+      if (ask) return { text: `Attempt ${u.state}; the unit lead asks you: ${ask.question}`, tone: "bell" };
       return { text: `Attempt ${u.state}; yagura is deciding whether to retry.`, tone: "muted" };
     }
     case "abandoned":

@@ -291,7 +291,7 @@ export function Project({ id }: { id: string }) {
         {!work.length && (
           <div className="empty">
             {d.planning
-              ? "The planner is thinking about the first units."
+              ? "The project lead is thinking about the first units."
               : p.state === "framing"
                 ? `Dark until ${p.after.join(", ")} closes.`
                 : "No units yet."}

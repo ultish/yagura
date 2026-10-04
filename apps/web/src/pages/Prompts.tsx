@@ -23,14 +23,14 @@ interface PromptsView {
 }
 
 const LABEL: Record<string, string> = {
-  planner: "Planner",
+  planner: "Project lead",
   worker: "Worker",
   verifier: "Verifier",
   reviewer: "Reviewer",
-  "review-triage": "Review triage",
+  "review-triage": "Arbiter",
   rebase: "Rebase",
   pack: "Pack writer",
-  manager: "Manager",
+  manager: "Unit lead",
   watchman: "Watchman",
 };
 const SOURCE: Record<Source, { text: string; color: string }> = {
