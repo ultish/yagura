@@ -80,6 +80,21 @@ const post = (path: string, body: unknown) =>
   app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("daemon API", () => {
+  it("wakes a stuck unit's unit lead with the developer's note, and says why when it cannot", async () => {
+    const url = `/api/projects/${project}/units/1/wake`;
+    db.prepare("UPDATE units SET state = 'running' WHERE seq = 1").run();
+    const refused = await post(url, { note: "look" });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: string }).error).toBe("U1 is running; the unit lead looks at blocked, failed, or rejected units");
+    db.prepare("UPDATE units SET state = 'blocked' WHERE seq = 1").run();
+    expect((await post(url, { note: "I want emojis" })).status).toBe(200);
+    const manager = db.prepare("SELECT context_json FROM units WHERE type = 'manager'").get() as { context_json: string };
+    expect(JSON.parse(manager.context_json)).toEqual(["The developer asked you to look at U1 now: I want emojis. Answer what they wrote first.", "asked"]);
+    const twice = await post(url, {});
+    expect(twice.status).toBe(409);
+    expect(((await twice.json()) as { error: string }).error).toBe("U1's unit lead is already deciding");
+  });
+
   it("imports, lists, exports, and deletes environment templates, all in the store", async () => {
     const post = (path: string, body: object) =>
       app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });

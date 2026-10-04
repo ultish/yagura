@@ -31,6 +31,7 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
   const action = useAction();
   const [retrying, setRetrying] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [waking, setWaking] = useState(false);
   const status = statusLine(d, u, now);
   const gate = openGateFor(d, u);
   const last = latestAttempt(u);
@@ -77,6 +78,14 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
               onDone={() => setRetrying(false)}
             />
           )}
+          {waking && (
+            <NoteForm
+              label="Ask the unit lead"
+              placeholder="What should the unit lead look at? (optional)"
+              submit={(note) => api(`${base}/wake`, { body: { note } })}
+              onDone={() => setWaking(false)}
+            />
+          )}
           {stopping && running && (
             <NoteForm
               label="Stop"
@@ -94,6 +103,7 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
       }
       actions={
         !retrying &&
+        !waking &&
         !stopping && (
           <>
             {gate &&
@@ -111,6 +121,11 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
             {u.state === "blocked" && (
               <button className="btn" type="button" onClick={() => setRetrying(true)}>
                 Retry with a note
+              </button>
+            )}
+            {u.type === "work" && ["blocked", "failed", "rejected"].includes(u.state) && (
+              <button className="btn" type="button" onClick={() => setWaking(true)}>
+                Ask the unit lead
               </button>
             )}
             {(running || verifying) && (

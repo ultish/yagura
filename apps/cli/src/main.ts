@@ -41,6 +41,7 @@ import {
   evidenceCli,
   agentRefusal,
   retryState,
+  wakeManager,
   gitRead,
   landUnit,
   listEvidenceRuns,
@@ -150,6 +151,7 @@ const USAGE = `yagura — agent orchestration
   yagura andon <project> --reason <text> | --clear
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
+  yagura unit wake <project> <unit#> [--note <text>]   ask a blocked, failed, or rejected unit's unit lead to look at it now
   yagura unit reject|requeue <project> <unit#> [--note <text>]   requeue lands a blocked unit that is still verified again
   yagura run <project> <unit#>           run a ready work unit
   yagura verify <project> <unit#>        run the queued verify unit for a unit in verifying
@@ -365,6 +367,12 @@ async function main() {
         description: { type: "string" },
       });
       const projectId = positionals[1] as ProjectId | undefined;
+      if (positionals[0] === "wake" && projectId && positionals[2]) {
+        const woken = wakeManager(db, getUnitBySeq(db, projectId, Number(positionals[2])), values.note ?? "");
+        if (!woken.ok) fail(woken.reason);
+        console.log(`U${positionals[2]}: its unit lead is looking at it (the daemon runs it)`);
+        return;
+      }
       if ((positionals[0] === "reject" || positionals[0] === "requeue") && projectId && positionals[2]) {
         const u = getUnitBySeq(db, projectId, Number(positionals[2]));
         if (values.note) addUnitNote(db, u.id, values.note);

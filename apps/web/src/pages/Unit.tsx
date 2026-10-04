@@ -8,7 +8,7 @@ import { DiffPanel, type DiffData } from "../ui/evidence";
 import { Link } from "../ui/Link";
 import { RunningDot } from "../ui/Running";
 import { DisagreeButton, DisagreeForm as Disagreement } from "../ui/Disagree";
-import { useAction } from "../ui/rows";
+import { NoteForm, useAction } from "../ui/rows";
 
 const JUDGMENT: Record<string, string> = { chose: "choice", noted: "note" };
 
@@ -158,6 +158,28 @@ function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
         rebases that targeted it. Dimmed rows did not count.
       </p>
     </div>
+  );
+}
+
+// Wakes the unit lead of a stuck unit now, with the developer's note.
+function AskUnitLead({ projectId, seq, reload }: { projectId: string; seq: number; reload: () => void }) {
+  const [open, setOpen] = useState(false);
+  if (open)
+    return (
+      <NoteForm
+        label="Ask the unit lead"
+        placeholder="What should the unit lead look at? (optional)"
+        submit={(note) => api(`/api/projects/${projectId}/units/${seq}/wake`, { body: { note } })}
+        onDone={() => {
+          setOpen(false);
+          reload();
+        }}
+      />
+    );
+  return (
+    <button className="btn" type="button" onClick={() => setOpen(true)} style={{ marginTop: 8 }}>
+      Ask the unit lead
+    </button>
   );
 }
 
@@ -345,6 +367,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
         {story.started && <span>{when(story.started, story.ended, false)}</span>}
         {u.state === "running" && running?.attempt && <Link to={`/a/${running.attempt.id}`}>running now · watch it live</Link>}
       </div>
+      {u.type === "work" && ["blocked", "failed", "rejected"].includes(u.state) && <AskUnitLead projectId={projectId} seq={u.seq} reload={reload} />}
       <OpenGates gates={story.gates} reload={reload} />
       <div className="hub-tabs" role="tablist">
         {(

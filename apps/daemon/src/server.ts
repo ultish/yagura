@@ -22,6 +22,7 @@ import {
   readTurnCalls,
   bumpMaxAttempts,
   retryState,
+  wakeManager,
   logTimesPath,
   threadsForProject,
   transitionUnit,
@@ -327,6 +328,15 @@ export function createApp(opts: ServerOptions): Hono {
     const next = retryState(db, unit);
     if (next === "ready") bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).length + 1);
     transitionUnit(db, unit.id, next, { by: "operator", note: note || null });
+    return c.json(unitView(db, getUnit(db, unit.id)));
+  });
+
+  // The developer asks a stuck unit's unit lead to look at it now, with a note.
+  app.post("/api/projects/:id/units/:seq/wake", async (c) => {
+    const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
+    const note = String(((await c.req.json().catch(() => ({}))) as { note?: unknown }).note ?? "").trim();
+    const woken = wakeManager(db, unit, note);
+    if (!woken.ok) return c.json({ error: woken.reason }, 409);
     return c.json(unitView(db, getUnit(db, unit.id)));
   });
 

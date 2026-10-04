@@ -11,7 +11,17 @@ import { Engine } from "./engine.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
-import { applyAskAnswer, listManagerDecisions, managerForcesFresh, managerNeed, parseDecision, queueManager, runManagerUnit, wakeOnNote } from "./manager.js";
+import {
+  applyAskAnswer,
+  listManagerDecisions,
+  managerForcesFresh,
+  managerNeed,
+  parseDecision,
+  queueManager,
+  runManagerUnit,
+  wakeManager,
+  wakeOnNote,
+} from "./manager.js";
 import { runInvestigateUnit } from "./investigate.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
@@ -291,6 +301,58 @@ describe("a manager deciding about a rejected unit", () => {
     const u = await rejectedUnit();
     expect(managerNeed(db, u)).toBeNull();
   }, 60_000);
+});
+
+describe("the developer waking the unit lead", () => {
+  const stuck = async () => {
+    const u = await rejectedUnit();
+    transitionUnit(db, u.id, "blocked", { reason: "its review raised findings; it needs you" });
+    return getUnit(db, u.id);
+  };
+
+  it("lets the unit lead look at a blocked unit with the developer's note, and acts on its choice", async () => {
+    const u = await stuck();
+    const woken = wakeManager(db, u, "I want emojis; the acceptance criteria are stale");
+    expect(woken).toMatchObject({ ok: true });
+    const unit = (woken as { unit: ReturnType<typeof getUnit> }).unit;
+    expect(unit.context[1]).toBe("asked");
+    expect(wakeManager(db, u, "again")).toEqual({ ok: false, reason: "U1's unit lead is already deciding" });
+    process.env.FAKE_MANAGER = "fresh";
+    await runManagerUnit(ctx, unit.id);
+    const brief = readFileSync(layout(ctx.boot).brief(project, unit.seq, 1), "utf8");
+    expect(brief).toContain("The developer asked you to look at U1 now: I want emojis; the acceptance criteria are stale. Answer what they wrote first.");
+    expect(listManagerDecisions(db, u.id).map((d) => d.action)).toEqual(["fresh"]);
+    expect(getUnit(db, u.id).state).toBe("ready");
+  }, 60_000);
+
+  it("keeps a blocked unit blocked when the unit lead stops it, and writes why on the unit", async () => {
+    const u = await stuck();
+    const unit = (wakeManager(db, u, "") as { unit: ReturnType<typeof getUnit> }).unit;
+    process.env.FAKE_MANAGER = "stop";
+    await runManagerUnit(ctx, unit.id);
+    expect(getUnit(db, u.id).state).toBe("blocked");
+    expect(getUnit(db, u.id).notes.at(-1)).toMatch(/^the unit lead stopped it: /);
+  }, 60_000);
+
+  it("is refused for a unit that is not stuck, a unit with no unit lead, and a unit whose lead is already deciding", async () => {
+    const u = await stuck();
+    transitionUnit(db, u.id, "ready", {});
+    expect(wakeManager(db, getUnit(db, u.id), "x")).toEqual({ ok: false, reason: "U1 is ready; the unit lead looks at blocked, failed, or rejected units" });
+    transitionUnit(db, u.id, "blocked", {});
+    setSetting(db, "project", project, "manager.enabled", false);
+    expect(wakeManager(db, getUnit(db, u.id), "x")).toEqual({ ok: false, reason: "the unit lead is switched off for this project (manager.enabled)" });
+  }, 60_000);
+
+  it("is woken again with the findings when it asked for an investigation of a blocked unit", async () => {
+    const u = await stuck();
+    const unit = (wakeManager(db, u, "why does it keep failing?") as { unit: ReturnType<typeof getUnit> }).unit;
+    process.env.FAKE_MANAGER = "investigate";
+    await runManagerUnit(ctx, unit.id);
+    const inv = listUnits(db, project).find((x) => x.type === "investigate")!;
+    expect(managerNeed(db, getUnit(db, u.id))).toEqual({ kind: "waiting" });
+    await runInvestigateUnit(ctx, inv.id);
+    expect(managerNeed(db, getUnit(db, u.id))).toMatchObject({ kind: "wake", wake: expect.stringContaining("has finished") });
+  }, 90_000);
 });
 
 describe("a manager that asks for an investigation", () => {

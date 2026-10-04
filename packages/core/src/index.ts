@@ -4,6 +4,7 @@ export * from "./handoff.js";
 export * from "./scope.js";
 export * from "./git.js";
 export * from "./store.js";
+export { wakeManager } from "./manager.js";
 export * from "./config.js";
 export * from "./paths.js";
 export * from "./runner.js";

@@ -80,6 +80,9 @@ const spent = (ds: ManagerDecision[]) => ds.filter((d) => d.action !== "fallback
 // A manager woken by a worker's note, not by a failure, has only `relay` and `ignore` to choose from.
 const NOTE_ACTIONS: readonly ManagerAction[] = ["relay", "ignore"];
 export const isNoteWake = (manager: Unit) => manager.context[1] === "note";
+// The developer asked the unit lead to look at a stuck unit, with a note.
+export const isAskedWake = (manager: Unit) => manager.context[1] === "asked";
+const STUCK = new Set(["failed", "rejected", "blocked"]);
 const failureDecisions = (ds: ManagerDecision[]) => ds.filter((d) => !NOTE_ACTIONS.includes(d.action));
 
 const liveSiblings = (db: Db, target: Unit) =>
@@ -89,7 +92,10 @@ export type ManagerNeed = { kind: "wake"; wake: string } | { kind: "waiting" } |
 
 // What a failed or rejected build unit needs from its unit lead now, or null when the fixed rules should decide.
 export function managerNeed(db: Db, target: Unit): ManagerNeed | null {
-  if (!managerOn(db, target) || (target.state !== "failed" && target.state !== "rejected")) return null;
+  if (!managerOn(db, target)) return null;
+  // A unit blocked after the developer asked for a look is also woken once more for the findings of an investigation it asked for.
+  const continuing = target.state === "blocked" && listManagerDecisions(db, target.id).at(-1)?.action === "investigate";
+  if (target.state !== "failed" && target.state !== "rejected" && !continuing) return null;
   if (liveManagerUnit(db, target)) return { kind: "waiting" };
   const ds = failureDecisions(listManagerDecisions(db, target.id));
   const last = ds.at(-1);
@@ -125,7 +131,7 @@ export function managerNeed(db: Db, target: Unit): ManagerNeed | null {
   return { kind: "wake", wake: `U${target.seq} was ${target.state}${reason ? `: ${reason}` : ""}` };
 }
 
-export function queueManager(db: Db, target: Unit, wake: string, kind: "failure" | "note" = "failure"): Unit {
+export function queueManager(db: Db, target: Unit, wake: string, kind: "failure" | "note" | "asked" = "failure"): Unit {
   const unit = addUnit(db, {
     projectId: target.projectId,
     type: "manager",
@@ -135,13 +141,30 @@ export function queueManager(db: Db, target: Unit, wake: string, kind: "failure"
     writeScope: [],
     acceptance: [],
     verify: null,
-    context: kind === "note" ? [wake, "note"] : [wake],
+    context: kind === "failure" ? [wake] : [wake, kind],
     timeboxSeconds: resolveSetting(db, "timebox.verify_seconds", { projectId: target.projectId, repoId: target.repoId }).value,
     maxAttempts: 1,
   });
   transitionUnit(db, unit.id, "ready", { target: target.seq });
   recordEvent(db, "manager.queued", { projectId: target.projectId, unitId: target.id }, { wake, managerUnit: unit.seq });
   return getUnit(db, unit.id);
+}
+
+// The developer asks the unit lead to look at a stuck unit now, with a note; it answers with the usual menu. Not limited by the decision cap.
+export function wakeManager(db: Db, target: Unit, note: string): { ok: true; unit: Unit } | { ok: false; reason: string } {
+  if (target.type !== "work") return { ok: false, reason: `U${target.seq} is a ${target.type} unit; only work units have a unit lead` };
+  if (!managerOn(db, target)) return { ok: false, reason: "the unit lead is switched off for this project (manager.enabled)" };
+  if (!STUCK.has(target.state)) return { ok: false, reason: `U${target.seq} is ${target.state}; the unit lead looks at blocked, failed, or rejected units` };
+  if (liveManagerUnit(db, target)) return { ok: false, reason: `U${target.seq}'s unit lead is already deciding` };
+  return {
+    ok: true,
+    unit: queueManager(
+      db,
+      target,
+      `The developer asked you to look at U${target.seq} now${note.trim() ? `: ${note.trim().replace(/[.!?]+$/, "")}. Answer what they wrote first.` : "."}`,
+      "asked",
+    ),
+  };
 }
 
 // A fresh builder was chosen for this very state of the unit, so the runner does not resume the last session.
@@ -187,7 +210,16 @@ export function settleManagerUnit(db: Db, manager: Unit): void {
   const target = getUnit(db, manager.targetUnitId);
   const has = db.prepare("SELECT 1 FROM manager_decisions WHERE manager_unit_id = ?").get(manager.id);
   if (!has)
-    recordDecision(db, target, manager, null, isNoteWake(manager) ? "ignore" : "fallback", "the unit lead session failed before it decided", null, null);
+    recordDecision(
+      db,
+      target,
+      manager,
+      null,
+      isNoteWake(manager) || isAskedWake(manager) ? "ignore" : "fallback",
+      "the unit lead session failed before it decided",
+      null,
+      null,
+    );
   transitionUnit(db, manager.id, "abandoned", { reason: "the unit lead session failed; the fixed rules decide" });
 }
 
@@ -437,11 +469,13 @@ function applyDecision(
       return { problem: null, gateId: null };
     }
     case "stop":
-      transitionUnit(db, target.id, "blocked", { by: "manager", reason: `the unit lead stopped it: ${d.reason}` });
+    case "planner": {
+      const reason = d.action === "stop" ? `the unit lead stopped it: ${d.reason}` : `the unit lead sent it to the project lead: ${d.reason}`;
+      // A unit the developer asked about may already be blocked: it stays so, and the reason goes on its notes for the next reader.
+      if (target.state === "blocked") addUnitNote(db, target.id, reason);
+      else transitionUnit(db, target.id, "blocked", { by: "manager", reason });
       return { problem: null, gateId: null };
-    case "planner":
-      transitionUnit(db, target.id, "blocked", { by: "manager", reason: `the unit lead sent it to the project lead: ${d.reason}` });
-      return { problem: null, gateId: null };
+    }
     case "ask": {
       const gateId = addGate(db, {
         projectId: target.projectId,
@@ -495,7 +529,7 @@ export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<A
     transitionUnit(db, unit.id, "handed_off", {});
     transitionUnit(db, unit.id, "done", {});
   };
-  if (!isNoteWake(unit) && target.state !== "failed" && target.state !== "rejected") {
+  if (!isNoteWake(unit) && !(isAskedWake(unit) ? STUCK.has(target.state) : target.state === "failed" || target.state === "rejected")) {
     transitionUnit(db, unit.id, "running", { target: target.seq });
     recordEvent(db, "manager.skipped", { projectId: unit.projectId, unitId: target.id }, { reason: `U${target.seq} is ${target.state}` });
     finish();
@@ -581,7 +615,7 @@ export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<A
     ...(text ? {} : { failureMode: "unknown" as const }),
   });
 
-  let action: ManagerAction = isNoteWake(unit) ? "ignore" : "fallback";
+  let action: ManagerAction = isNoteWake(unit) || isAskedWake(unit) ? "ignore" : "fallback";
   let reason = "";
   let note: string | null = null;
   let gateId: number | null = null;
