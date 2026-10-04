@@ -15,6 +15,7 @@ import {
   importStandingFiles,
   importTemplateFiles,
 } from "@yagura/core";
+import { daemonLog } from "./log.js";
 import { createApp } from "./server.js";
 
 export { createApp } from "./server.js";
@@ -34,7 +35,7 @@ export async function startDaemon(cli: string[]): Promise<void> {
   const db = openStore(layout(boot).db);
   const release = acquireDaemonLock(boot);
   const token = LOOPBACK.has(boot.bind) ? null : loadOrCreateToken(boot);
-  const log = (line: string) => console.log(`${new Date().toISOString().slice(11, 19)} ${line}`);
+  const log = daemonLog(layout(boot).daemonLog);
   for (const path of importStandingFiles(db, boot)) log(`moved ${path} into the store (Prompts page notes)`);
   for (const path of importSpecFiles(db, boot)) log(`moved ${path} into the store (the project's spec page)`);
   const templates = importTemplateFiles(db, boot);
