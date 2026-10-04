@@ -335,12 +335,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
           </a>
         )}
         <span className="mono">${story.costUsd.toFixed(2)}</span>
-        {story.started && (
-          <span>
-            {clock(story.started)}
-            {story.ended ? ` → ${clock(story.ended)}` : ""}
-          </span>
-        )}
+        {story.started && <span>{when(story.started, story.ended, false)}</span>}
         {u.state === "running" && running?.attempt && <Link to={`/a/${running.attempt.id}`}>running now · watch it live</Link>}
       </div>
       <OpenGates gates={story.gates} reload={reload} />
