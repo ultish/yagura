@@ -1,6 +1,6 @@
 # yagura status archive
 
-Moved out of `docs/STATUS.md` on 2026-10-04 so the status file stays short. Nothing here is queued work; it is history, real-run findings, and phase checklists, kept as written. `docs/DESIGN.md` is the spec; `docs/STATUS.md` is where the build is.
+Moved out of `docs/STATUS.md` on 2026-10-04 so the status file stays short. Nothing here is queued work; it is history, real-run findings, and phase checklists, kept as written. A "not yet" or "still to do" in an entry here may have been built since; `docs/STATUS.md` is the authority on what is left. `docs/DESIGN.md` is the spec; `docs/STATUS.md` is where the build is.
 
 ## Contents
 

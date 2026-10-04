@@ -34,7 +34,12 @@ Nothing is queued as a task; ask the developer which to take. What was decided n
 
 - **A `manager.review` gate**: ask the developer before a manager's choice takes effect. Not built because the choices take effect at once and can be Disagreed with afterwards; build it only if real manager runs show poor decisions.
 
-Nothing else is known to be missing from the design.
+### Small items the spec marks "not yet" (never decided either way)
+
+- **Classify a failure outside the diff, on a stale base, as a rebase** (DESIGN §15 "Rebase units"): today only a conflict at landing queues a rebase.
+- **Resolve review threads on GitHub after a fix** (§15): yagura replies in the thread, but the thread stays open.
+- **Turn the repo's conventions into pack checks** (§11).
+- **A shared git repo of templates** (§12): templates move by hand with Export and Import YAML today.
 
 ### Proofs left to run
 
