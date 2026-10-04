@@ -18,7 +18,7 @@ import {
 } from "./config.js";
 import { IllegalTransition, PACK_EDIT_STATES, type ProjectId, type RepoId } from "./domain.js";
 import { addProject, addRepo, addUnit, createAttempt, getUnit, openStore, schemaVersion, transitionUnit, updateAttempt, getAttempt, type Db } from "./store.js";
-import { LATEST_VERSION } from "./migrations.js";
+import { LATEST_VERSION, MIGRATIONS } from "./migrations.js";
 import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 
@@ -117,6 +117,25 @@ describe("store", () => {
     expect(schemaVersion(upgraded)).toBe(LATEST_VERSION);
     expect(upgraded.prepare("SELECT id FROM repos").all()).toEqual([{ id: "old" }]);
     expect(upgraded.prepare("SELECT COUNT(*) AS n FROM evidence_runs").get()).toEqual({ n: 0 });
+  });
+
+  it("rebuilds the units table for the manager and investigate types when SQLite stored its name quoted", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "yagura-quoted-")), "yagura.db");
+    const old = openStore(path);
+    old.pragma("foreign_keys = OFF");
+    const { sql } = old.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'units'").get() as { sql: string };
+    const before = sql
+      .replace("'review', 'manager', 'investigate', 'land'", "'review', 'land'")
+      .replace("'review-triage', 'review', 'manager', 'investigate') OR", "'review-triage', 'review') OR")
+      .replace(/^CREATE TABLE units\b/, "CREATE TABLE units_before");
+    old.exec(before);
+    old.exec("DROP TABLE units");
+    old.exec("ALTER TABLE units_before RENAME TO units");
+    expect(old.prepare("SELECT sql FROM sqlite_master WHERE name = 'units'").get()).toMatchObject({ sql: expect.stringContaining('CREATE TABLE "units"') });
+    for (const version of [35, 38]) MIGRATIONS.find((m) => m.version === version)!.rebuild!(old);
+    const after = (old.prepare("SELECT sql FROM sqlite_master WHERE name = 'units'").get() as { sql: string }).sql;
+    expect(after).toContain("'manager'");
+    expect(after).toContain("'investigate'");
   });
 
   it("numbers units per project and round-trips their fields", () => {

@@ -7,6 +7,9 @@ export interface Migration {
   rebuild?: (db: BetterSqlite3.Database) => void;
 }
 
+// SQLite stores a renamed table's name quoted ("units"), which is how every database that went through migration 24 has it.
+const UNITS_DDL_NAME = /^CREATE TABLE "?units"?(?=\s|\()/;
+
 // Adds the review unit type to the units table's CHECKs, whatever columns earlier migrations gave it.
 function addReviewUnitType(db: BetterSqlite3.Database): void {
   const { sql } = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'units'").get() as { sql: string };
@@ -14,7 +17,7 @@ function addReviewUnitType(db: BetterSqlite3.Database): void {
   const next = sql
     .replace("'review-triage', 'land'", "'review-triage', 'review', 'land'")
     .replace("type NOT IN ('verify', 'rebase', 'ci-fix', 'review-triage')", "type NOT IN ('verify', 'rebase', 'ci-fix', 'review-triage', 'review')")
-    .replace(/^CREATE TABLE units\b/, "CREATE TABLE units_next");
+    .replace(UNITS_DDL_NAME, "CREATE TABLE units_next");
   if (!next.includes("'review', 'land'") || !next.includes("'review-triage', 'review')"))
     throw new Error("migration 24: the units table is not in the expected shape");
   const indexes = (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'units' AND sql IS NOT NULL").all() as { sql: string }[]).map(
@@ -33,7 +36,7 @@ function addManagerUnitType(db: BetterSqlite3.Database): void {
   const next = sql
     .replace("'review', 'land'", "'review', 'manager', 'land'")
     .replace("'review-triage', 'review') OR", "'review-triage', 'review', 'manager') OR")
-    .replace(/^CREATE TABLE units\b/, "CREATE TABLE units_next");
+    .replace(UNITS_DDL_NAME, "CREATE TABLE units_next");
   if (!next.includes("'manager', 'land'") || !next.includes("'review', 'manager') OR"))
     throw new Error("migration 35: the units table is not in the expected shape");
   const indexes = (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'units' AND sql IS NOT NULL").all() as { sql: string }[]).map(
@@ -52,7 +55,7 @@ function addInvestigateUnitType(db: BetterSqlite3.Database): void {
     const next = sql
       .replace("'manager', 'land'", "'manager', 'investigate', 'land'")
       .replace("'review', 'manager') OR", "'review', 'manager', 'investigate') OR")
-      .replace(/^CREATE TABLE units\b/, "CREATE TABLE units_next");
+      .replace(UNITS_DDL_NAME, "CREATE TABLE units_next");
     if (!next.includes("'investigate', 'land'") || !next.includes("'manager', 'investigate') OR"))
       throw new Error("migration 38: the units table is not in the expected shape");
     const indexes = (
