@@ -21,6 +21,18 @@ describe("parseAmendments", () => {
   });
 });
 
+describe("parseAmendments verify lines", () => {
+  it("keeps only the command when the model wraps it in backticks or explains it after a dash", () => {
+    const text = '## Amendments\n- T1: verify: `node -e "process.exit(0)"` — checks the output has emojis.\n- T2: verify: node check.js \u2014 prose\n';
+    expect(parseAmendments(text, 2)).toEqual(
+      new Map([
+        [1, [{ kind: "verify", command: 'node -e "process.exit(0)"' }]],
+        [2, [{ kind: "verify", command: "node check.js" }]],
+      ]),
+    );
+  });
+});
+
 describe("applyOps", () => {
   it("replaces, adds, and removes criteria by their wording, ignoring case and spacing, and refuses one the unit does not have", () => {
     const next = applyOps(["A  works", "B works"], "run it", [

@@ -38,6 +38,9 @@ export const listAmendments = (db: Db, unitId: UnitId): Amendment[] =>
 
 const norm = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
 
+// The model sometimes wraps the command in backticks or follows it with an explanation; only the command is a VERIFY.
+const shellCommand = (body: string) => /`([^`]+)`/.exec(body)?.[1]?.trim() ?? body.split(/\s+[—–]\s+/)[0]!.trim();
+
 // "- T3: replace: old => new", "- T3: add: …", "- T3: remove: …", "- T3: verify: command", per thread, from the arbiter's "## Amendments" section.
 export function parseAmendments(text: string, count: number): Map<number, AmendOp[]> {
   const section = [...text.matchAll(/^##\s+Amendments\s*$([\s\S]*?)(?=^##\s|\s*$(?![\s\S]))/gim)].map((m) => m[1]).join("\n");
@@ -50,7 +53,7 @@ export function parseAmendments(text: string, count: number): Map<number, AmendO
     let op: AmendOp | null = null;
     if (kind === "add") op = { kind: "add", text: body };
     else if (kind === "remove") op = { kind: "remove", text: body };
-    else if (kind === "verify") op = { kind: "verify", command: body };
+    else if (kind === "verify") op = { kind: "verify", command: shellCommand(body) };
     else {
       const [from, to] = body.split(/\s*=>\s*/);
       if (from && to) op = { kind: "replace", from: from.trim(), to: to.trim() };
