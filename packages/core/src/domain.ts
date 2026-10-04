@@ -374,6 +374,7 @@ export interface Handoff {
   verification: Tier | "not-verified" | null;
   evidence: string[];
   notes: string;
+  forOthers: string;
   followUps: string;
   packChanges: string;
   findings: string;

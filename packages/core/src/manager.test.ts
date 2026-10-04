@@ -370,6 +370,15 @@ describe("a manager told of a worker's note", () => {
     expect(wakeOnNote(db, ctx.boot, a)).toBeNull();
   }, 60_000);
 
+  it("is not woken by ordinary notes, only by what the worker says other units must know", async () => {
+    const { a } = await handedOffWithNote("none");
+    const file = layout(ctx.boot).handoff(project, a.seq, 1);
+    writeFileSync(file, `${readFileSync(file, "utf8")}\n## Notes, concerns, deviations\n- all acceptance criteria met; used the laziness protocol\n`);
+    expect(wakeOnNote(db, ctx.boot, a)).toBeNull();
+    writeFileSync(file, readFileSync(file, "utf8").replace("## For other units\n- none", "## For other units\n- renamed helper.py to util.py"));
+    expect(wakeOnNote(db, ctx.boot, a)?.context[0]).toContain("says other units must know: renamed helper.py to util.py");
+  }, 60_000);
+
   it("is not woken when nobody else is live in the repo", async () => {
     const { a, b } = await handedOffWithNote("a real note");
     transitionUnit(db, b.id, "abandoned", {});

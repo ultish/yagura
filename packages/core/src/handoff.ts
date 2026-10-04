@@ -9,6 +9,7 @@ const SECTIONS = {
   verification: "verification",
   evidence: "evidence",
   notes: "notes",
+  forOthers: "for other units",
   followUps: "suggested follow-ups",
   packChanges: "pack changes",
   findings: "findings",
@@ -52,6 +53,7 @@ export function parseHandoff(finalMessage: string): Handoff | null {
       .map((l) => l.replace(/^-\s*/, "").trim())
       .filter(Boolean),
     notes: s.get("notes") ?? "",
+    forOthers: s.get("forOthers") ?? "",
     followUps: s.get("followUps") ?? "",
     packChanges: s.get("packChanges") ?? "",
     findings: s.get("findings") ?? "",

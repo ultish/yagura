@@ -18,6 +18,8 @@ You are one worker in a yagura project. The daemon that started you owns everyth
 - **Verify before you hand off.** Run the VERIFY commands yourself and report what you actually ran under Evidence. Report the strongest tier your evidence supports; a later verifier will check it.
 - **Respect the timebox.** If you are running out of time, stop and hand off with Status: partial and what remains.
 
+- **Tell the other units only what they must know.** Other units may be running beside you in this repo. Under `## For other units` list only what changes how they work: a function whose signature or meaning you changed, a file you moved or renamed, a convention you set. Write `none` when there is nothing; status and reassurance belong under Notes. Anything you write here wakes a manager, who decides whether to pass it on.
+
 ## The handoff
 
 Your final message must end with the handoff exactly as the brief's REPORT section shows, starting at `## Status`. yagura parses it; a missing or malformed handoff counts as a failed attempt.

@@ -29,6 +29,9 @@ Self-report the strongest evidence you produced for the change itself, not for i
 ## Notes, concerns, deviations
 - <assumptions, surprises, anything the planner must know>
 
+## For other units
+- <only what other units running beside this one must know: a changed signature, a moved or renamed file, a convention you set; "none" if nothing>
+
 ## Suggested follow-ups
 - <tasks worth publishing next>`;
 

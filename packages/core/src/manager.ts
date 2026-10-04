@@ -151,14 +151,14 @@ export function managerForcesFresh(db: Db, unit: Unit): boolean {
 
 const NO_NOTE = new Set(["", "none", "n/a", "nothing", "no notes"]);
 
-// The note a work unit's latest handoff left for others, or null when it left none.
+// What a work unit's latest handoff says other units must know, or null when it says nothing.
 function handoffNote(db: Db, boot: RunContext["boot"], target: Unit): { attempt: Attempt; note: string } | null {
   const attempt = listAttempts(db, target.id)
     .filter((a) => a.state === "handed_off")
     .at(-1);
   const file = attempt ? layout(boot).handoff(target.projectId, target.seq, attempt.n) : null;
   const handoff = file && existsSync(file) ? parseHandoff(readFileSync(file, "utf8")) : null;
-  const lines = (handoff?.notes ?? "")
+  const lines = (handoff?.forOthers ?? "")
     .split("\n")
     .map((l) => l.replace(/^[-*]\s*/, "").trim())
     .filter((l) => !NO_NOTE.has(l.replace(/[.()]/g, "").toLowerCase()));
@@ -177,7 +177,7 @@ export function wakeOnNote(db: Db, boot: RunContext["boot"], target: Unit): Unit
     .get(target.id, found.attempt.id);
   if (seen) return null;
   recordEvent(db, "manager.note_woken", { projectId: target.projectId, unitId: target.id }, { attemptId: found.attempt.id });
-  return queueManager(db, target, `The worker of U${target.seq} left a note: ${excerpt(found.note, 600)}`, "note");
+  return queueManager(db, target, `The worker of U${target.seq} says other units must know: ${excerpt(found.note, 600)}`, "note");
 }
 
 // A manager unit that failed or crashed before deciding: the fixed rules decide, and the record says so.
