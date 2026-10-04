@@ -8,6 +8,7 @@ import type { RunContext } from "./agent.js";
 import type { Bootstrap } from "./config.js";
 import { REBASE_HARNESS, spendsAttempt, type EnvironmentId, type ProjectId, type RepoId, type Unit } from "./domain.js";
 import { setSetting } from "./config.js";
+import { pauseEnvironment, resumeVerifications } from "./envpause.js";
 import { listEvidenceRuns } from "./evidence.js";
 import { reapKept } from "./leases.js";
 import { commitAll, ensureMirror, git } from "./git.js";
@@ -22,11 +23,13 @@ import {
   addProject,
   addRepo,
   addUnit,
+  answerGate,
   createAttempt,
   getRepo,
   getUnit,
   getUnitBySeq,
   listAttempts,
+  listGates,
   listUnits,
   openStore,
   setProjectEnvironment,
@@ -75,7 +78,10 @@ beforeEach(async () => {
   setSetting(db, "global", "", "manager.enabled", false);
 });
 
-async function workThenVerify(verifierMode: string): Promise<{ target: Unit; verify: Unit; result: Awaited<ReturnType<typeof runVerifyUnit>> }> {
+async function workThenVerify(
+  verifierMode: string,
+  beforeVerify?: (target: Unit) => void,
+): Promise<{ target: Unit; verify: Unit; result: Awaited<ReturnType<typeof runVerifyUnit>> }> {
   const work = addUnit(db, {
     projectId: project,
     type: "work",
@@ -93,6 +99,7 @@ async function workThenVerify(verifierMode: string): Promise<{ target: Unit; ver
   await runWorkUnit(ctx, work.id);
   const verify = getUnitBySeq(db, project, 2);
   process.env.FAKE_MODE = verifierMode;
+  beforeVerify?.(getUnit(db, work.id));
   const result = await runVerifyUnit(ctx, verify.id);
   return { target: getUnit(db, work.id), verify: getUnit(db, verify.id), result };
 }
@@ -287,6 +294,19 @@ describe("pack lifecycle scripts", () => {
     });
     expect(listPackEdits(db, target.id)).toEqual([]);
     expect(target.state).toBe("verifying");
+  });
+
+  it("does not start a verifier session when the environment was paused while it waited for a slot", async () => {
+    const { target, verify, result } = await workThenVerify("verify-pass", (t) => pauseEnvironment(db, t, "the registry refused the connection"));
+    expect(verify.state).toBe("abandoned");
+    expect(result.attempt.state).toBe("stopped");
+    expect(target.state).toBe("verifying");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'attempt.started' AND attempt_id = ?").get(result.attempt.id)).toEqual({ n: 0 });
+    expect(db.prepare("SELECT state FROM leases").all()).toEqual([{ state: "released" }]);
+    expect(resumeVerifications(db, project)).toEqual([]);
+    const gate = listGates(db, project, "open").find((g) => g.kind === "environment")!;
+    answerGate(db, gate.id, "fixed");
+    expect(resumeVerifications(db, project).map((u) => u.type)).toEqual(["verify"]);
   });
 
   it("blocks a unit whose verifier reached no verdict in its allowed tries when no manager is on", async () => {

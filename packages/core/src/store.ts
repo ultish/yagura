@@ -34,6 +34,14 @@ export function openStore(path: string): Db {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
+  // The evidence CLI and agent commands write to this file from their own processes. A deferred transaction that reads and then
+  // writes fails at once with "database is locked" when another process commits in between (busy_timeout does not apply), so
+  // every transaction takes the write lock first and waits its turn.
+  const deferred = db.transaction.bind(db);
+  db.transaction = ((fn: (...args: never[]) => unknown) => {
+    const t = deferred(fn);
+    return Object.assign((...args: never[]) => t.immediate(...args), { deferred: t.deferred, immediate: t.immediate, exclusive: t.exclusive });
+  }) as typeof db.transaction;
   const initialized = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'").get();
   if (!initialized) db.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
   migrate(db);

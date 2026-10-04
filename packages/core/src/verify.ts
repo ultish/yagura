@@ -22,7 +22,7 @@ import { addDetachedWorktree, diffText, ensureMirror, patchId, resolveRef } from
 import { parseHandoff } from "./handoff.js";
 import { loadPack, type VerifyPack } from "./pack.js";
 import { commitPackEdit, discardWorkspace, openPackWorkspace, stagePackChanges } from "./packedits.js";
-import { pauseEnvironment } from "./envpause.js";
+import { pausedBy, pauseEnvironment } from "./envpause.js";
 import { verifierNotes } from "./disagreements.js";
 import { acquireLease, keepable, keepLease, releaseLease } from "./leases.js";
 import { notePackStale, proveTrunkPack, syncPackStatus } from "./repos.js";
@@ -278,6 +278,21 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     updateAttempt(db, attempt.id, { state: "failed", endedAt: now(), failureMode: "tool-error" });
     const reason = `yagura could not get a slot on ${project.environmentId}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`;
     return finish({ outcome: "env-blocked", tier: "verifier-blocked", reason, trunkOutcome: null, headOutcome: null, citedRunIds: [] }, false);
+  }
+  // A slot can be a long wait; another verifier may have paused the environment meanwhile, and starting a session on it would spend what the pause exists to save.
+  const pausedGate = pausedBy(db, project.environmentId);
+  if (pausedGate) {
+    await releaseLease(db, boot, lease.id);
+    if (workspace) await discard(workspace).catch(() => undefined);
+    updateAttempt(db, attempt.id, { state: "stopped", endedAt: now() });
+    const reason = `verification on ${project.environmentId} was paused (gate ${pausedGate}) while this verifier waited for a slot`;
+    transitionUnit(db, unit.id, "abandoned", { reason });
+    recordEvent(db, "verify.paused_in_queue", { projectId: project.id, unitId: target.id, attemptId: attempt.id }, { gate: pausedGate });
+    return {
+      attempt: getAttempt(db, attempt.id),
+      decision: { outcome: "env-blocked", tier: "verifier-blocked", reason, trunkOutcome: null, headOutcome: null, citedRunIds: [] },
+      verdictId: null,
+    };
   }
   const keepPolicy = resolveSetting(db, "lease.keep", { projectId: project.id, environmentId: project.environmentId }).value;
   let kept: string | null = null;

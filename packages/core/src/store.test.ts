@@ -65,6 +65,26 @@ describe("store", () => {
     expect(second.prepare("SELECT COUNT(*) AS n FROM repos").get()).toEqual({ n: 1 });
   });
 
+  it("takes the write lock before a transaction reads, so another process cannot commit between its read and its write", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "yagura-db-")), "yagura.db");
+    const mine = openStore(path);
+    addRepo(mine, { id: "r", url: "file:///r", defaultBranch: "main" });
+    const other = new Database(path);
+    other.pragma("busy_timeout = 0");
+    let otherWrite = "committed";
+    mine.transaction(() => {
+      mine.prepare("SELECT COUNT(*) AS n FROM repos").get();
+      try {
+        other.prepare("INSERT INTO repos (id, url, default_branch, created_at) VALUES ('x', 'file:///x', 'main', 't')").run();
+      } catch (e) {
+        otherWrite = (e as Error).message;
+      }
+      mine.prepare("INSERT INTO repos (id, url, default_branch, created_at) VALUES ('y', 'file:///y', 'main', 't')").run();
+    })();
+    expect(otherWrite).toBe("database is locked");
+    expect(mine.prepare("SELECT id FROM repos ORDER BY id").all()).toEqual([{ id: "r" }, { id: "y" }]);
+  });
+
   it("brings a fresh database to the latest schema version", () => {
     expect(schemaVersion(db)).toBe(LATEST_VERSION);
   });
