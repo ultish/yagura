@@ -160,7 +160,17 @@ describe("agent records", () => {
     expect((await lead.call("decide", "merge", "--reason", "x")).output).toMatch(/action: Invalid enum value/);
     expect((await lead.call("decide", "fresh", "--reason", "the first try misread the spec", "--note", "read SPEC.md")).code).toBe(0);
     const planner = session(
-      addUnit(db, { projectId: project, type: "plan", goal: "plan", writeScope: [], acceptance: [], timeboxSeconds: 60, maxAttempts: 1 }),
+      addUnit(db, {
+        projectId: project,
+        type: "plan",
+        repoId: null,
+        goal: "plan",
+        writeScope: [],
+        acceptance: [],
+        verify: null,
+        timeboxSeconds: 60,
+        maxAttempts: 1,
+      }),
       "planner",
     );
     const viaStdin = (json: string) => recordCli(["plan", "--file", "-"], planner.env, () => json);

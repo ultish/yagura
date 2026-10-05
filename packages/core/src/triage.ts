@@ -3,13 +3,15 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
 import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
+import { recordInstructions } from "./record-cli.js";
 import { resolveSetting } from "./config.js";
 import { type Attempt, type IsoTime, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
 import { amendmentContext, applyOps, autoApproveAmendment, describeOps, parseAmendments, proposeAmendment, settleAmendment } from "./amend.js";
 import { forgeFor, getMergeRequest, postOnce, signed, type ForgeAdapter, type PrThread, type ThreadKind, prRef } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha } from "./git.js";
-import { parseHandoff } from "./handoff.js";
+import { ensureRecorded, readHandoff, reportOf } from "./finish.js";
+import { hasRecords, noteFallback, recordedAmendments, recordedRulings } from "./records.js";
 import { verifiedHead } from "./land.js";
 import { layout, unitRef } from "./paths.js";
 import { addVerifyUnit } from "./runner.js";
@@ -159,23 +161,16 @@ export function parseDecisions(text: string, count: number): Map<number, { decis
 }
 
 // The worker template's own Decisions section is where every thread's decision goes, one T-line each.
-const TRIAGE_REPORT = HANDOFF_TEMPLATE.replace(
-  /^## Decisions\n.*$/m,
-  `## Decisions
-- T1: fix — what a worker must change in the code, specific enough to do without asking you
-- T2: dismissed — the concrete disproof yagura posts as the reply (a test, a line of code, a spec reference)
-- T3: asked — the question the developer must decide
-(one line per thread, every thread; then any other choice you made, as for any handoff. You change nothing: a worker makes the changes you rule necessary.)
-
-## Amendments
-- T3: replace: <an acceptance criterion exactly as ACCEPTANCE words it> => <what it becomes>
-- T3: add: <a new criterion>
-- T3: verify: <the new VERIFY command, only when the old one would fail the amended criteria>
-(Only when a reviewer's comment would change what the unit must do, so that ACCEPTANCE no longer holds. Mark that thread asked: the developer approves or rejects the change, and nothing is applied before they do. Leave the section out otherwise.)`,
+const TRIAGE_REPORT = recordInstructions(
+  ["rule", "amend"],
+  [
+    "- Rule on every thread, once: fix (say exactly what a worker must change in the code), dismiss (the concrete disproof yagura posts as the reply), or ask (the question only the developer can decide). You change nothing: a worker makes the changes you rule necessary.",
+    "- Amend only when a reviewer's comment would change what the unit must do, so that ACCEPTANCE no longer holds: rule that thread ask, and record each change with yagura amend (replace names a criterion exactly as ACCEPTANCE words it; add verify only when the old VERIFY would fail the amended criteria). Nothing is applied until the developer approves.",
+  ],
 );
 
 export function renderScopeAsk(paths: string[]): string {
-  return `# yagura: your triage handoff was not accepted\n\nYou changed ${paths.join(", ")} outside SCOPE without saying why. You are in the same worktree on the same branch. Either revert the path and commit, or keep it and list it with the reason the fix needs it under "## Outside scope". Then end with the complete handoff again, in the same format as before.`;
+  return `# yagura: your triage handoff was not accepted\n\nYou changed ${paths.join(", ")} outside SCOPE without saying why. You are in the same worktree on the same branch. Either revert the path and commit, or keep it and record the reason the fix needs it: run yagura handoff again with --outside-scope "<path>=<why>" for each such path (it replaces your earlier handoff, so repeat the rest of it). Then end with your report again.`;
 }
 
 export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt> {
@@ -255,7 +250,13 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   type Phase = { attempt: Attempt; role: "review-triage" | "worker"; adapter: typeof judgeAdapter; harness: string; model: string | null };
   const run = (phase: Phase, prompt: string, resume?: string) =>
     runAgentSession(ctx, {
-      recorder: attemptRecorder(db, { attempt: phase.attempt, unit, projectId: project.id, role: phase.role }),
+      recorder: attemptRecorder(db, {
+        attempt: phase.attempt,
+        unit,
+        projectId: project.id,
+        role: phase.role,
+        inheritedSkills: resume ? getAttempt(db, phase.attempt.id).skills : undefined,
+      }),
       adapter: phase.adapter,
       run: {
         prompt,
@@ -276,17 +277,23 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     });
   const judging: Phase = { attempt: judgeAttempt, role: "review-triage", adapter: judgeAdapter, harness: judgeHarness, model: setting("role.reviewer.model") };
 
-  // 1. The arbiter's rulings.
-  const ruled = await run(judging, judgeBrief);
+  // 1. The arbiter's rulings, read from what it recorded with yagura rule and yagura amend.
+  const firstRuling = await run(judging, judgeBrief);
+  const ruled = await ensureRecorded(db, judgeAttempt.id, "review-triage", firstRuling, (prompt, sessionId) => run(judging, prompt, sessionId));
   await discardLeftovers(worktree);
   const judgeHead = await headSha(worktree);
-  const rulingFinal = ruled.final;
-  const rulingHandoff = rulingFinal && !rulingFinal.isError && !ruled.timedOut ? parseHandoff(rulingFinal.text) : null;
-  if (rulingHandoff) write(paths.handoff(project.id, unit.seq, judgeAttempt.n), rulingFinal!.text);
-  const decisions = rulingHandoff ? parseDecisions(rulingFinal!.text, rows.length) : new Map();
+  const rulingReport = reportOf(ruled) ?? reportOf(firstRuling);
+  if (rulingReport) write(paths.handoff(project.id, unit.seq, judgeAttempt.n), rulingReport);
+  const fromRecords = hasRecords(db, judgeAttempt.id);
+  // While roles move over, an arbiter that only wrote its rulings is read from its reports (after a reminder the last one may be short).
+  const proseReports = [reportOf(ruled), reportOf(firstRuling)].filter((r): r is string => !!r);
+  const proseReport = proseReports.find((r) => parseDecisions(r, rows.length).size) ?? null;
+  const decisions = fromRecords ? recordedRulings(db, judgeAttempt.id) : proseReport ? parseDecisions(proseReport, rows.length) : new Map();
+  if (!fromRecords && rulingReport) noteFallback(db, judgeAttempt.id, "parseDecisions", decisions.size > 0);
+  const rulingHandoff = fromRecords || decisions.size ? { status: "success" as const } : null;
   const missing = rows.map((_, i) => i + 1).filter((i) => !decisions.has(i));
   const judgeProblem = !rulingHandoff
-    ? "the arbiter ended without a handoff"
+    ? "the arbiter ended without recording its rulings"
     : judgeHead !== verdict.head_sha
       ? "the arbiter changed the code; it only rules, and a worker makes the changes"
       : missing.length
@@ -302,7 +309,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   });
 
   // A trusted author's requirement change is approved by the developer's standing setting: it is applied now, so the worker builds to it.
-  const amendments = rulingHandoff ? parseAmendments(rulingFinal!.text, rows.length) : new Map();
+  const amendments = fromRecords ? recordedAmendments(db, judgeAttempt.id) : proseReport ? parseAmendments(proseReport, rows.length) : new Map();
   const autoApplied = new Set<number>();
   if (!judgeProblem)
     for (const [i, row] of rows.entries()) {
@@ -360,12 +367,13 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     });
     write(paths.brief(project.id, unit.seq, fixAttempt.n), fixBrief);
     const fixing: Phase = { attempt: fixAttempt, role: "worker", adapter: workAdapter, harness: workHarness, model: setting("role.worker.model") };
-    const judgeWork = async (session: Awaited<ReturnType<typeof run>>) => {
+    const judgeWork = async (first: Awaited<ReturnType<typeof run>>) => {
+      const session = await ensureRecorded(db, fixAttempt.id, "worker", first, (prompt, sessionId) => run(fixing, prompt, sessionId));
       await discardLeftovers(worktree);
       const newHead = await headSha(worktree);
-      const final = session.final;
-      const parsed = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
-      if (parsed) write(paths.handoff(project.id, unit.seq, fixAttempt.n), final!.text);
+      const report = reportOf(session) ?? reportOf(first);
+      if (report) write(paths.handoff(project.id, unit.seq, fixAttempt.n), report);
+      const parsed = readHandoff(db, fixAttempt.id, [reportOf(session), reportOf(first)]);
       const didChange = newHead !== verdict.head_sha;
       const assessed = didChange
         ? assessScope(
@@ -388,11 +396,11 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     }
     const violations = [...done.assessed.hard, ...done.assessed.unjustified];
     workProblem = !done.parsed
-      ? "the worker ended without a handoff"
+      ? "the worker ended without recording its handoff"
       : !done.didChange
         ? "the arbiter ruled a thread needs a fix but nothing was committed"
         : violations.length
-          ? `the fix touched paths outside U${target.seq}'s scope without saying why: ${violations.map((v) => v.path).join(", ")} (list them under "## Outside scope" with the reason)`
+          ? `the fix touched paths outside U${target.seq}'s scope without saying why: ${violations.map((v) => v.path).join(", ")} (record each with yagura handoff --outside-scope "<path>=<why>")`
           : null;
     updateAttempt(db, fixAttempt.id, {
       state: done.parsed ? "handed_off" : "failed",

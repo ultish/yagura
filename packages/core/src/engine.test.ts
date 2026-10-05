@@ -136,6 +136,27 @@ describe("Engine", () => {
       expect(getProject(db, project).state).toBe("closed");
     }, 60_000);
 
+    it("reads the arbiter's rulings from its records, never its report, and reminds it once in the same session when it forgot them", async () => {
+      const events = (type: string) => db.prepare("SELECT data_json FROM events WHERE type = ?").all(type) as { data_json: string }[];
+      const arbiterAttempts = () =>
+        (db.prepare("SELECT a.id FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.type = 'review-triage' AND a.n = 1").all() as { id: number }[]).map(
+          (r) => r.id,
+        );
+      process.env.FAKE_REVIEW = "blocking:please fix: the empty case is not handled";
+      process.env.FAKE_FORGET = "review-triage";
+      try {
+        await run();
+      } finally {
+        delete process.env.FAKE_FORGET;
+      }
+      expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
+      const reminded = events("records.reminded").map((e) => JSON.parse(e.data_json) as { role: string; missing: string[] });
+      expect(reminded.filter((r) => r.role === "review-triage").length).toBe(arbiterAttempts().length);
+      expect(reminded.find((r) => r.role === "review-triage")!.missing).toEqual([expect.stringMatching(/^no ruling for T1: run `yagura rule T1/)]);
+      const fallbacks = db.prepare("SELECT attempt_id FROM events WHERE type = 'parse.fallback'").all() as { attempt_id: number }[];
+      expect(fallbacks.filter((f) => arbiterAttempts().includes(f.attempt_id))).toEqual([]);
+    }, 60_000);
+
     it("asks a triage agent that wrote outside the unit's scope to explain it in its own session, then lands", async () => {
       process.env.FAKE_REVIEW = "blocking:please fix: the empty case is not handled";
       process.env.FAKE_TRIAGE_OUTSIDE = "1";

@@ -97,8 +97,9 @@ export function attemptRecorder(
     cost: (usd) => db.prepare("UPDATE attempts SET cost_usd = cost_usd + ? WHERE id = ?").run(usd, s.attempt.id),
     steers: steerChannel(db, s.attempt.id),
     finished: (skills) => {
-      const missing = getAttempt(db, s.attempt.id).stopNote !== null ? [] : missingSkills(s.role, [...(s.inheritedSkills ?? []), ...skills], s.projectSkills);
-      updateAttempt(db, s.attempt.id, { skills, missingSkills: missing });
+      const loaded = [...new Set([...(s.inheritedSkills ?? []), ...skills])];
+      const missing = getAttempt(db, s.attempt.id).stopNote !== null ? [] : missingSkills(s.role, loaded, s.projectSkills);
+      updateAttempt(db, s.attempt.id, { skills: loaded, missingSkills: missing });
       if (missing.length) recordEvent(db, "attempt.method_miss", refs, { role: s.role, missing, loaded: skills });
       return missing;
     },

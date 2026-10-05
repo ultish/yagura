@@ -1,10 +1,27 @@
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync, execSync, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const mode = process.env.FAKE_MODE;
 const emit = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
+
+// Records work the way a real agent does (§27): yagura commands through the CLI on PATH. A session without the CLI (tests of the
+// old parsers) gets null and reports in prose. FAKE_FORGET=<role> skips the commands until yagura's reminder resumes the session.
+const yg = (...args) => {
+  if (!process.env.YAGURA_CLI) return null;
+  const r = spawnSync(process.env.YAGURA_CLI, args, { encoding: "utf8" });
+  return { code: r.status, out: r.stdout };
+};
+const pendingFile = () => join(tmpdir(), `fake-records-${process.env.YAGURA_HOME?.replace(/\W/g, "_")}-${process.env.YAGURA_ATTEMPT}.json`);
+const canRecord = () => !!process.env.YAGURA_CLI && process.env.FAKE_RECORDS !== "prose";
+function record(calls) {
+  if (process.env.FAKE_FORGET === process.env.YAGURA_ROLE) return writeFileSync(pendingFile(), JSON.stringify(calls));
+  for (const c of calls) {
+    const r = yg(...c);
+    if (r && r.code !== 0) throw new Error(`yagura ${c.join(" ")} failed: ${r.out}`);
+  }
+}
 let brief = "";
 const resumeAt = process.argv.indexOf("--resume");
 // Like claude -p --input-format stream-json: the first line is the prompt, later lines are messages taken in between steps, and the process exits only once stdin closes.
@@ -116,6 +133,11 @@ function resumed(sessionId) {
     process.exit(1);
   }
   emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
+  if (brief.startsWith("# yagura: you have not recorded your work")) {
+    const calls = existsSync(pendingFile()) ? JSON.parse(readFileSync(pendingFile(), "utf8")) : [];
+    for (const c of calls) yg(...c);
+    return finish("Recorded what I had only written down.");
+  }
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
   if (process.env.YAGURA_ROLE === "manager") return manager();
   // A resumed fixer (asked to explain a path outside scope) answers again with what it handed off, plus the reason.
@@ -195,8 +217,20 @@ function triage() {
         .map((l) => `- ${/^- (T\d+)/.exec(l)[1]}: replace: ${accept} => celebration emojis are part of the output`)
     : [];
   const sections = `## Decisions\n${lines.join("\n")}\n${amendments.length ? `\n## Amendments\n${amendments.join("\n")}\n` : ""}`;
+  if (canRecord() && !process.env.FAKE_TRIAGE_SECTIONS_FIRST) {
+    const word = { fix: "fix", asked: "ask", dismissed: "dismiss" };
+    record([
+      ...lines.map((l) => {
+        const [, n, decision, reason] = /^- T(\d+): (fix|asked|dismissed) — (.+)$/.exec(l);
+        return ["rule", `T${n}`, word[decision], "--reason", reason];
+      }),
+      ...amendments.map((a) => ["amend", /^- (T\d+)/.exec(a)[1], "replace", "--from", accept, "--to", "celebration emojis are part of the output"]),
+    ]);
+    // The report is for the developer and may say anything, headings included; yagura reads only the records.
+    return finish(`I ruled on ${lines.length} thread(s).\n\n## Status\nblocked\n\n${sections}`);
+  }
   const status = "## Status\nsuccess\n\n## Verification\nunit-verified\n\n";
-  // FAKE_TRIAGE_SECTIONS_FIRST: a real model sometimes writes the rulings ahead of the handoff.
+  // FAKE_TRIAGE_SECTIONS_FIRST: a real model sometimes writes the rulings ahead of the handoff, in prose only.
   finish(process.env.FAKE_TRIAGE_SECTIONS_FIRST ? `${sections}\n${status}` : `${status}${sections}`);
 }
 
