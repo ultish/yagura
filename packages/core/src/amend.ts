@@ -139,6 +139,11 @@ export function settleAmendment(db: Db, unitId: UnitId, threadId: string, answer
   const before = { acceptance: unit.acceptance, verify: unit.verify ?? "" };
   amendUnit(db, unitId, { acceptance: applied.acceptance, verify: applied.verify });
   db.prepare("UPDATE unit_amendments SET state = 'approved', before_json = ?, decided_at = ? WHERE id = ?").run(JSON.stringify(before), now(), amendment.id);
+  // A verifier's pack edit was written for the criteria as they stood; carried on, its checks fail the amended work on both sides and read as a broken environment.
+  db.prepare("UPDATE pack_edits SET state = 'dropped', reason = ? WHERE target_unit_id = ? AND state = 'pending'").run(
+    "the unit's acceptance was amended after this edit was written",
+    unitId,
+  );
   recordEvent(db, "amendment.approved", refs, { amendment: amendment.id, by, changes: describeOps(amendment.changes) });
   return toAmendment({ ...row, state: "approved", before_json: JSON.stringify(before) });
 }

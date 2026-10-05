@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { amendmentContext, applyOps, listAmendments, parseAmendments, proposeAmendment, settleAmendment } from "./amend.js";
 import type { ProjectId, RepoId } from "./domain.js";
-import { addGate, addProject, addRepo, addUnit, getUnit, openStore, type Db } from "./store.js";
+import { addGate, addProject, addRepo, addUnit, createAttempt, getUnit, openStore, type Db } from "./store.js";
 
 describe("parseAmendments", () => {
   it("reads replace, add, remove, and verify lines for the threads they name", () => {
@@ -99,6 +99,25 @@ describe("an amendment's life", () => {
       `mina's comment "make it louder": change "greets plainly" to "greets loudly"; the verify command becomes: node loud.js.`,
     );
     expect(settleAmendment(db, u.id, "T", "fix")).toBeNull();
+  });
+
+  it("drops the unit's pending pack edits when an amendment is approved, and keeps them when it is not", () => {
+    const u = newUnit();
+    const attempt = createAttempt(db, u.id, "claude", null);
+    const edit = () =>
+      db
+        .prepare(
+          "INSERT INTO pack_edits (attempt_id, target_unit_id, base_sha, sha, branch, summary, created_at) VALUES (?, ?, 'b', 's', 'br', 'check for the old wording', 't')",
+        )
+        .run(attempt.id, u.id);
+    const states = () => (db.prepare("SELECT state FROM pack_edits ORDER BY id").all() as { state: string }[]).map((r) => r.state);
+    edit();
+    propose(u.id, [{ kind: "add", text: "greets loudly" }]);
+    settleAmendment(db, u.id, "T", "dismiss");
+    expect(states()).toEqual(["pending"]);
+    propose(u.id, [{ kind: "add", text: "greets loudly" }]);
+    settleAmendment(db, u.id, "T", "fix");
+    expect(states()).toEqual(["dropped"]);
   });
 
   it("leaves the unit alone on dismiss, and refuses a proposal that does not fit the unit", () => {
