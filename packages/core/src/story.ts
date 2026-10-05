@@ -1,7 +1,7 @@
 import { listSteers } from "./steer.js";
 import type { Bootstrap } from "./config.js";
 import { listDisagreements, type Disagreement } from "./disagreements.js";
-import { spendsAttempt, type ManagerAction, type Attempt, type Handoff, type IsoTime, type Unit, type UnitId } from "./domain.js";
+import { ROLE_NAMES, spendsAttempt, type ManagerAction, type Attempt, type Handoff, type IsoTime, type Unit, type UnitId } from "./domain.js";
 import { getMergeRequest } from "./forge.js";
 import { liveVerdict } from "./land.js";
 import { landWait } from "./publish.js";
@@ -14,6 +14,7 @@ import { describeOps, listAmendments } from "./amend.js";
 import { dependencyEdges, type DepEdge } from "./chain.js";
 import { listManagerDecisions, managerOn } from "./manager.js";
 import { savedHandoff } from "./finish.js";
+import { recordedAmendments, recordedRulings } from "./records.js";
 
 // A unit's page reads as one story: who did what, what each chose, and what yagura checked about it. Agents' lines are
 // judgment unless a check sits beside them; a check is something yagura proved from its own records.
@@ -369,21 +370,26 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     if (!last) continue;
     const h = handoffOf(t, last);
     const ref = `a${last.id}`;
+    // A wave's rulings are the arbiter's own records, which a later wave on the same thread cannot overwrite; the thread table
+    // holds only each thread's latest state, so it gives the reply check while the thread is still this wave's.
+    const current = threads.filter((r) => r.waveUnitId === t.id);
+    const judge = attempts.find((a) => a.n === 1);
+    const rulings = judge ? [...recordedRulings(db, judge.id).entries()].sort(([a], [b]) => a - b) : [];
+    const replyCheck = (r: (typeof threads)[number] | undefined): StoryCheck[] =>
+      !r || (r.decision !== "fixed" && r.decision !== "dismissed") || isReviewThread(r.threadId)
+        ? []
+        : [{ ok: !!r.repliedAt, text: r.repliedAt ? "reply posted on the thread" : "reply pending" }];
     const lines: StoryLine[] =
-      t.type === "review-triage"
-        ? threads
-            .filter((r) => r.waveUnitId === t.id && r.decision)
-            .map((r, i) =>
-              line(
-                `${ref}:thread:${i}`,
-                "claimed",
-                `${r.decision}: ${r.reason}`,
-                r.decision === "asked" || isReviewThread(r.threadId)
-                  ? []
-                  : [{ ok: !!r.repliedAt, text: r.repliedAt ? "reply posted on the thread" : "reply pending" }],
+      t.type !== "review-triage"
+        ? [line(`${ref}:claimed:0`, "claimed", "Rebased onto the moved trunk.")]
+        : rulings.length
+          ? [
+              ...rulings.map(([n, r], i) => line(`${ref}:thread:${i}`, "claimed", `T${n} ${r.decision}: ${r.reason}`, replyCheck(current[n - 1]))),
+              ...[...recordedAmendments(db, judge!.id).entries()].map(([n, ops], i) =>
+                line(`${ref}:amend:${i}`, "claimed", `T${n} would change what U${unit.seq} must do: ${describeOps(ops).join("; ")}`),
               ),
-            )
-        : [line(`${ref}:claimed:0`, "claimed", "Rebased onto the moved trunk.")];
+            ]
+          : current.filter((r) => r.decision).map((r, i) => line(`${ref}:thread:${i}`, "claimed", `${r.decision}: ${r.reason}`, replyCheck(r)));
     if (h) lines.push(...judgment(ref, h));
     entries.push({
       at: last.startedAt ?? t.createdAt,
@@ -411,7 +417,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
         entries.push({
           at: st.createdAt,
           actor: "person",
-          who: `You told ${ROLE[u.type] ?? u.type} A${a.agentNo}`,
+          who: `You told ${roleName(u, a)} A${a.agentNo}`,
           attempt: { id: a.id, unitSeq: u.seq, n: a.n, agentNo: a.agentNo, model: a.model, costUsd: 0 },
           status:
             st.state === "delivered"
@@ -653,18 +659,26 @@ const ROLE: Partial<Record<string, string>> = {
   investigate: "Investigator",
 };
 
+// The stored role names every agent; only attempts from before roles were stored fall back to the unit's type.
+const roleName = (u: Unit, a: Attempt) => {
+  if (u.type === "investigate") return "Investigator";
+  const name = a.role ? ROLE_NAMES[a.role] : null;
+  return name ? name[0]!.toUpperCase() + name.slice(1) : (ROLE[u.type] ?? u.type);
+};
+
 function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, handoffOf: (u: Unit, a: Attempt) => Handoff | null, events: Ev[]): StoryAgent[] {
   const rows: StoryAgent[] = [];
   const add = (u: Unit, a: Attempt, shared: boolean) => {
     if (a.harness.startsWith("yagura-") || !a.startedAt) return;
     const h = a.state === "handed_off" ? handoffOf(u, a) : null;
     const rejected = events.find((e) => e.unit_id === u.id && e.type === "unit.state" && e.data.to === "rejected" && sameAttempt(events, e, a.n));
-    // A triage or rebase session counts only if its unit finished on it; otherwise say what stopped it.
+    // A triage or rebase session counts only if its unit finished on it; otherwise say what stopped it. While the unit is still
+    // running (the arbiter has ruled and its fix worker is at work) nothing has stopped yet.
     const finishes = u.type === "review-triage" || u.type === "rebase";
     const next = listAttempts(db, u.id).find((x) => x.startedAt && x.startedAt > a.startedAt!)?.startedAt ?? "9999";
     const finished =
       finishes && events.some((e) => e.unit_id === u.id && (e.type === "triage.done" || e.type === "rebase.done") && e.ts >= a.startedAt! && e.ts < next);
-    const failedAfter = finishes && !finished ? { data: { reason: failReason(events, u, a) } } : undefined;
+    const failedAfter = finishes && !finished && u.state !== "running" ? { data: { reason: failReason(events, u, a) } } : undefined;
     const verdict = u.type === "verify" ? events.find((e) => e.type === "verify.outcome" && e.data.verifyUnit === u.seq) : undefined;
     const counted = a.state === "handed_off" && !rejected && !failedAfter && spendsAttempt(a);
     const outcome = rejected
@@ -696,7 +710,8 @@ function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, ha
                 : (bullets(h?.whatIDid ?? "")[0] ?? (a.failureMode ? `failed: ${a.failureMode}` : null));
     rows.push({
       attemptId: a.id,
-      role: ROLE[u.type] ?? u.type,
+      // A triage unit's first agent is the arbiter; a later one is the worker making the fix it ruled.
+      role: roleName(u, a),
       unitSeq: u.seq,
       n: a.n,
       agentNo: a.agentNo,

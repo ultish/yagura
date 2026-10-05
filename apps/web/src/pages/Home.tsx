@@ -69,7 +69,7 @@ function TalkBox() {
 function Lanterns({ now }: { now: number }) {
   const agents = useApi<{ attempts: AgentRow[]; caps: { maxParallelAgents: number; running: number } }>("/api/agents?recent=0");
   const running = agents.data?.attempts.filter((a) => a.state === "running") ?? [];
-  const role = (a: AgentRow) => roleOf(a.unit.type, a.harness, a.n);
+  const role = (a: AgentRow) => roleOf(a.unit.type, a.harness, a.n, a.role);
   return (
     <section aria-labelledby="lanterns">
       <div className="gh">

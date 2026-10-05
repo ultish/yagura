@@ -650,6 +650,7 @@ describe("landing through a GitHub pull request (fake gh over a real origin)", (
       ["yagura-review-triage"],
       ["yagura-worker"],
     ]);
+    expect(runs.map((a) => a.role)).toEqual(["review-triage", "worker"]);
     expect(runs[0]!.headSha).toBe(runs[0]!.baseSha);
     expect(runs[1]!.headSha).not.toBe(runs[0]!.headSha);
     const fixBrief = readFileSync(layout(ctx.boot).brief(project, 3, 2), "utf8");

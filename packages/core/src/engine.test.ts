@@ -217,6 +217,42 @@ describe("Engine", () => {
       expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
     }, 120_000);
 
+    it("asks the developer before any worker builds a fix whose ruling also changes what the unit must do", async () => {
+      const { listGates } = await import("./store.js");
+      process.env.FAKE_REVIEW = "blocking:please fix: add celebration emojis";
+      process.env.FAKE_TRIAGE_AMEND = "fix";
+      await run();
+      const asks = listGates(db, project, "open").filter((g) => g.kind === "review");
+      expect(asks.length).toBeGreaterThan(0);
+      expect(asks[0]!.question).toMatch(/Approving also changes U\d+'s acceptance/);
+      const fixWorkers = db
+        .prepare("SELECT COUNT(*) AS n FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.type = 'review-triage' AND a.n > 1")
+        .get() as { n: number };
+      expect(fixWorkers.n).toBe(0);
+      expect(units("review-triage").every((t) => t.state === "done")).toBe(true);
+    }, 120_000);
+
+    it("keeps each arbiter's rulings on its own story entry after a later wave takes the thread over", async () => {
+      const { listGates, answerGate } = await import("./store.js");
+      const { unitStory } = await import("./story.js");
+      process.env.FAKE_REVIEW = "blocking:please fix: add celebration emojis";
+      process.env.FAKE_TRIAGE_AMEND = "1";
+      await run();
+      const asks = () => listGates(db, project, "open").filter((g) => g.kind === "review");
+      for (let i = 0; i < 6 && asks().length; i++) {
+        for (const g of asks()) answerGate(db, g.id, "fix");
+        await run();
+      }
+      const target = units("work").find((u) => units("review-triage").filter((t) => t.targetUnitId === u.id).length >= 2)!;
+      const arbiters = unitStory(db, ctx.boot, target).entries.filter((e) => e.actor === "review-triage");
+      expect(arbiters.length).toBeGreaterThanOrEqual(2);
+      expect(arbiters[0]!.lines.map((l) => l.text)).toEqual([
+        "T1 asked: should this change what the unit must do?",
+        expect.stringMatching(/^T1 would change what U\d+ must do: change "[^"]+" to "celebration emojis are part of the output"$/),
+      ]);
+      expect(arbiters[1]!.lines[0]!.text).toMatch(/^T1 fixed: /);
+    }, 120_000);
+
     it("applies a trusted author's requirement change at once, with no gate, and the worker builds to the amended acceptance", async () => {
       const { listGates } = await import("./store.js");
       const { listAmendments } = await import("./amend.js");

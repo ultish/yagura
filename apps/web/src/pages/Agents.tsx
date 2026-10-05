@@ -69,9 +69,9 @@ export function Agents() {
   const [outcome, setOutcome] = useState("");
   const outcomeOf = (a: AgentRow) => (a.state === "handed_off" ? "handed off" : a.state);
   const shown = (a: AgentRow) =>
-    (!project || a.unit.projectId === project) && (!role || roleOf(a.unit.type, a.harness, a.n) === role) && (!outcome || outcomeOf(a) === outcome);
+    (!project || a.unit.projectId === project) && (!role || roleOf(a.unit.type, a.harness, a.n, a.role) === role) && (!outcome || outcomeOf(a) === outcome);
   const projects = [...new Set(all.map((a) => a.unit.projectId))].sort();
-  const roles = [...new Set(all.map((a) => roleOf(a.unit.type, a.harness, a.n)))].sort();
+  const roles = [...new Set(all.map((a) => roleOf(a.unit.type, a.harness, a.n, a.role)))].sort();
   const outcomes = [...new Set(all.map(outcomeOf))].sort();
   const past = all.filter((a) => a.state !== "running" && shown(a));
   const row = (a: AgentRow) => {
@@ -91,7 +91,7 @@ export function Agents() {
         key={a.id}
         seq={
           <Link to={`/a/${a.id}`}>
-            {a.unit.projectId} · <RoleLabel role={roleOf(a.unit.type, a.harness, a.n)} /> A{a.agentNo}
+            {a.unit.projectId} · <RoleLabel role={roleOf(a.unit.type, a.harness, a.n, a.role)} /> A{a.agentNo}
           </Link>
         }
         goal={<Inline text={a.target?.goal ?? a.unit.goal} />}

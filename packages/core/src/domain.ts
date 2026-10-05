@@ -54,6 +54,18 @@ export const BUILD_TYPES_SQL = `(${[...BUILD_TYPES].map((t) => `'${t}'`).join(",
 
 export const ROLES = ["planner", "worker", "verifier", "pack", "rebase", "ci-fix", "review-triage", "reviewer", "manager", "watchman"] as const;
 export type Role = (typeof ROLES)[number];
+export const ROLE_NAMES: Record<Role, string> = {
+  planner: "project lead",
+  worker: "worker",
+  verifier: "verifier",
+  pack: "pack writer",
+  rebase: "rebase",
+  "ci-fix": "ci fix",
+  "review-triage": "arbiter",
+  reviewer: "reviewer",
+  manager: "unit lead",
+  watchman: "watchman",
+};
 
 export const ROLE_OF: Record<UnitType, Role | null> = {
   plan: "planner",
@@ -311,6 +323,8 @@ export interface Attempt {
   unitId: UnitId;
   n: number;
   agentNo: number;
+  // The role yagura started this agent as, stored when it starts: every label reads it rather than guessing from the unit.
+  role: Role | null;
   guidanceSha: string | null;
   state: AttemptState;
   harness: string;

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
-import { canTransition, IllegalTransition } from "./domain.js";
+import { canTransition, IllegalTransition, type Role } from "./domain.js";
 import { MIGRATIONS } from "./migrations.js";
 import type {
   Attempt,
@@ -324,6 +324,7 @@ function toAttempt(r: Record<string, unknown>): Attempt {
     n: r.n as number,
     agentNo: r.agent_no as number,
     guidanceSha: (r.guidance_sha as string | null) ?? null,
+    role: (r.role as Role | null) ?? null,
     state: r.state as Attempt["state"],
     harness: r.harness as string,
     model: (r.model as string | null) ?? null,
@@ -423,6 +424,7 @@ const ATTEMPT_COLUMNS = {
   resumesAttemptId: "resumes_attempt_id",
   sources: "sources_json",
   rejection: "rejection",
+  role: "role",
 } as const satisfies Partial<Record<keyof Attempt, string>>;
 
 export function updateAttempt(db: Db, id: AttemptId, patch: Partial<Pick<Attempt, keyof typeof ATTEMPT_COLUMNS>>): void {

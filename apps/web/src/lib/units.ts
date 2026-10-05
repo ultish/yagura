@@ -15,7 +15,22 @@ const ROLES: Record<string, string> = {
   investigate: "investigator",
 };
 // A triage unit's first agent is the arbiter; any later one is the worker that makes the fix it ruled necessary.
-export const roleOf = (unitType: string, harness?: string, attemptN?: number) =>
+// The role yagura stored when it started the agent decides its name; the unit's type is only for attempts from before roles were stored.
+const STORED: Record<string, string> = {
+  planner: "project lead",
+  worker: "worker",
+  verifier: "verifier",
+  pack: "pack writer",
+  rebase: "rebase",
+  "ci-fix": "ci fix",
+  "review-triage": "arbiter",
+  reviewer: "reviewer",
+  manager: "unit lead",
+  watchman: "watchman",
+};
+export const roleOf = (unitType: string, harness?: string, attemptN?: number, role?: string | null) =>
+  role && unitType !== "investigate" && STORED[role] ? STORED[role] : roleOfUnit(unitType, harness, attemptN);
+const roleOfUnit = (unitType: string, harness?: string, attemptN?: number) =>
   harness === "yagura-proof"
     ? "pack proof"
     : harness === "yagura-rebase"

@@ -262,6 +262,8 @@ function triage() {
   const accept = /## ACCEPTANCE\n- (.+)/.exec(brief)?.[1];
   const lines = threads.map((t) => {
     if (amend && /The developer trusts/.test(brief)) return `- T${t.n}: fix — make the greeting celebrate`;
+    // FAKE_TRIAGE_AMEND=fix: rules fix and records the change to the criteria in the same wave, as Haiku did on 2026-10-05.
+    if (amend === "fix" && !/The developer decided: (fix|dismiss)/.test(t.text)) return `- T${t.n}: fix — make the greeting celebrate`;
     if (amend && !/The developer decided: (fix|dismiss)/.test(t.text)) return `- T${t.n}: asked — should this change what the unit must do?`;
     const fix = /please fix|The developer decided: fix/.test(t.text) && !/The developer decided: dismiss/.test(t.text);
     return fix ? `- T${t.n}: fix — added the review fix to ${file}` : `- T${t.n}: dismissed — the existing test covers this case`;

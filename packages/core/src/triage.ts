@@ -333,7 +333,11 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   let changed = false;
   let scope: ReturnType<typeof assessScope> = { hard: [], justified: [], unjustified: [] };
   let workProblem: string | null = null;
-  const fixRows = rows.filter((_, i) => decisions.get(i + 1)?.decision === "fixed");
+  // A thread whose ruling comes with a change to what the unit must do waits for the developer before any worker touches it: the
+  // worker builds to ACCEPTANCE, which that change has not reached yet.
+  const awaitsApproval = (i: number) =>
+    !autoApplied.has(i) && (amendments.get(i + 1) ?? []).length > 0 && !("problem" in applyOps(target.acceptance, target.verify ?? "", amendments.get(i + 1)!));
+  const fixRows = rows.filter((_, i) => decisions.get(i + 1)?.decision === "fixed" && !awaitsApproval(i));
   if (!judgeProblem && fixRows.length) {
     const fixAttempt = createAttempt(db, unit.id, workHarness, setting("role.worker.model"));
     attempt = fixAttempt;

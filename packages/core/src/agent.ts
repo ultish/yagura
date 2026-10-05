@@ -89,7 +89,7 @@ export function attemptRecorder(
       YAGURA_ROLE: s.role,
     },
     started: (pid) => {
-      updateAttempt(db, s.attempt.id, { pid });
+      updateAttempt(db, s.attempt.id, { pid, role: s.role });
       recordEvent(db, "attempt.started", refs, { pid, role: s.role });
     },
     session: (e) => updateAttempt(db, s.attempt.id, { pluginVersions: e.plugins, model: e.model, sessionId: e.sessionId }),

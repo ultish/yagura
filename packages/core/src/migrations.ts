@@ -599,6 +599,10 @@ CREATE TABLE agent_records (
 CREATE INDEX agent_records_attempt ON agent_records (attempt_id);
 `,
   },
+  {
+    version: 41,
+    sql: `ALTER TABLE attempts ADD COLUMN role TEXT CHECK (role IN ('planner', 'worker', 'verifier', 'pack', 'rebase', 'ci-fix', 'review-triage', 'reviewer', 'manager', 'watchman'));`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;
