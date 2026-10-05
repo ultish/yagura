@@ -6,6 +6,7 @@ import { generateStatus } from "./status.js";
 import { lastDrainEventId } from "./planner.js";
 import { getProject, getRepo, getUnitBySeq, listAttempts, type Db } from "./store.js";
 import type { Unit } from "./domain.js";
+import { attemptAccount } from "./finish.js";
 
 export interface Mention {
   kind: MentionKind;
@@ -161,8 +162,8 @@ function describeUnit(db: Db, boot: Bootstrap, unit: Unit, onlyAttempt: number |
   }
   const last = attempts.filter((a) => a.endedAt).at(-1);
   const path = last ? layout(boot).handoff(unit.projectId, unit.seq, last.n) : null;
-  if (path && existsSync(path)) {
-    const text = readFileSync(path, "utf8");
+  const text = last ? attemptAccount(db, last.id, path) : null;
+  if (text) {
     lines.push(`- handoff of attempt ${last!.n}:\n${text.length > HANDOFF_LIMIT ? `${text.slice(0, HANDOFF_LIMIT)}\n… (truncated; ${path})` : text}`);
   }
   if (last) lines.push(`- log: ${layout(boot).log(unit.projectId, unit.seq, last.n)}`);

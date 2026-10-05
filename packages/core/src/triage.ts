@@ -2,7 +2,7 @@ import { promptPlugin, standingFor } from "./prompts.js";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
-import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
+import { WORKER_REPORT, renderBrief } from "./brief.js";
 import { recordInstructions } from "./record-cli.js";
 import { resolveSetting } from "./config.js";
 import { type Attempt, type IsoTime, type Sha, type Unit, type UnitId } from "./domain.js";
@@ -362,7 +362,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
       forbidden: ["no git push, rebase, merge, or branch switching", "nothing outside SCOPE", "no reply to reviewers yourself; yagura posts the replies"],
       method:
         "Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode, pstack:principle-prove-it-works, and pstack:principle-test-behavior-not-implementation with the Skill tool (all required) and follow the bug-fix playbook for each thread, proving the fault with a failing check first.",
-      report: HANDOFF_TEMPLATE,
+      report: WORKER_REPORT,
       standing: standingFor(db, project.id, "worker"),
     });
     write(paths.brief(project.id, unit.seq, fixAttempt.n), fixBrief);

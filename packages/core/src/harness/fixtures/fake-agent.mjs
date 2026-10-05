@@ -11,15 +11,38 @@ const emit = (o) => process.stdout.write(`${JSON.stringify(o)}\n`);
 const yg = (...args) => {
   if (!process.env.YAGURA_CLI) return null;
   const r = spawnSync(process.env.YAGURA_CLI, args, { encoding: "utf8" });
-  return { code: r.status, out: r.stdout };
+  return { code: r.status, out: r.stdout, err: r.stderr };
 };
 const pendingFile = () => join(tmpdir(), `fake-records-${process.env.YAGURA_HOME?.replace(/\W/g, "_")}-${process.env.YAGURA_ATTEMPT}.json`);
 const canRecord = () => !!process.env.YAGURA_CLI && process.env.FAKE_RECORDS !== "prose";
+// yagura handoff with the flags a builder records; h: { tier, did[], evidence[], outsideScope: [[path, why]], forOthers[], followUps[], notes[], findings[] }.
+const handoffCall = (status, h = {}) => [
+  "handoff",
+  status,
+  ...(h.tier ? ["--tier", h.tier] : []),
+  ...(h.did ?? []).flatMap((d) => ["--did", d]),
+  ...(h.evidence ?? []).flatMap((d) => ["--evidence", d]),
+  ...(h.outsideScope ?? []).flatMap(([path, why]) => ["--outside-scope", `${path}=${why}`]),
+  ...(h.forOthers ?? []).flatMap((d) => ["--for-others", d]),
+  ...(h.followUps ?? []).flatMap((d) => ["--follow-up", d]),
+  ...(h.notes ?? []).flatMap((d) => ["--note", d]),
+  ...(h.findings ?? []).flatMap((d) => ["--finding", d]),
+];
+// A builder's ending: the handoff recorded through yagura when it can, else the old prose report (tests without the CLI).
+function handOff(status, h, prose) {
+  if (!canRecord()) return finish(prose);
+  record([handoffCall(status, h)]);
+  finish(`Handing off ${status}.${h.did?.length ? `\n\n${h.did.map((d) => `- ${d}`).join("\n")}` : ""}\n\n## Status\nblocked`);
+}
+
 function record(calls) {
   if (process.env.FAKE_FORGET === process.env.YAGURA_ROLE) return writeFileSync(pendingFile(), JSON.stringify(calls));
   for (const c of calls) {
     const r = yg(...c);
-    if (r && r.code !== 0) throw new Error(`yagura ${c.join(" ")} failed: ${r.out}`);
+    if (r && r.code !== 0) {
+      process.stderr.write(`yagura ${c.slice(0, 2).join(" ")} failed (exit ${r.code}): ${r.out}${r.err ?? ""}\n`);
+      process.exit(1);
+    }
   }
 }
 let brief = "";
@@ -83,11 +106,13 @@ async function main() {
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
   if (process.env.YAGURA_ROLE === "manager") return manager();
   if (brief.startsWith("# yagura investigation brief"))
-    return finish(
-      process.env.FAKE_INVESTIGATE === "garbage"
-        ? "## Status\nsuccess\n\nNothing to report.\n"
-        : "## Status\nsuccess\n\n## Findings\n- the failing test depends on the clock: it passes before noon\n\n## Notes, concerns, deviations\n- none\n",
-    );
+    return process.env.FAKE_INVESTIGATE === "garbage"
+      ? handOff("success", {}, "## Status\nsuccess\n\nNothing to report.\n")
+      : handOff(
+          "success",
+          { findings: ["the failing test depends on the clock: it passes before noon"] },
+          "## Status\nsuccess\n\n## Findings\n- the failing test depends on the clock: it passes before noon\n\n## Notes, concerns, deviations\n- none\n",
+        );
   if (process.env.YAGURA_ROLE === "rebase") return rebase();
   if (/Apply the arbiter's rulings/.test(brief)) return fixer();
   if (process.env.YAGURA_ROLE === "review-triage") return triage();
@@ -117,11 +142,19 @@ async function main() {
     message: { content: [{ type: "tool_use", id: "t1", name: "Edit", input: { file_path: file } }], usage: { input_tokens: 1200, output_tokens: 30 } },
   });
   emit({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] } });
-  const handoff =
-    mode === "nohandoff"
-      ? "DONE"
-      : `## Status\n${mode === "blocked" ? "blocked" : "success"}\n\n## Branch\n\`b\`\n\n## What I did\n- edited ${file}\n\n## Verification\nunit-verified\n\n## Evidence\n- python3 -m unittest -> ok\n${process.env.FAKE_WORKER_NOTE ? `\n## For other units\n- ${process.env.FAKE_WORKER_NOTE}\n` : ""}${mode === "scope-justified" ? "\n## Outside scope\n- README.md: the new flag needs a line in the docs\n" : ""}`;
-  finish(handoff);
+  if (mode === "nohandoff") return finish("DONE");
+  const handoff = `## Status\n${mode === "blocked" ? "blocked" : "success"}\n\n## Branch\n\`b\`\n\n## What I did\n- edited ${file}\n\n## Verification\nunit-verified\n\n## Evidence\n- python3 -m unittest -> ok\n${process.env.FAKE_WORKER_NOTE ? `\n## For other units\n- ${process.env.FAKE_WORKER_NOTE}\n` : ""}${mode === "scope-justified" ? "\n## Outside scope\n- README.md: the new flag needs a line in the docs\n" : ""}`;
+  handOff(
+    mode === "blocked" ? "blocked" : "success",
+    {
+      tier: "unit-verified",
+      did: [`edited ${file}`],
+      evidence: ["python3 -m unittest -> ok"],
+      forOthers: process.env.FAKE_WORKER_NOTE ? [process.env.FAKE_WORKER_NOTE] : [],
+      outsideScope: mode === "scope-justified" ? [["README.md", "the new flag needs a line in the docs"]] : [],
+    },
+    handoff,
+  );
 }
 
 // Mirrors real claude -p --resume (fixtures claude-resume*.jsonl): same session id, no replay, no fresh skill loads.
@@ -144,7 +177,12 @@ function resumed(sessionId) {
   const savedFix = join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`);
   if (existsSync(savedFix)) {
     const before = readFileSync(savedFix, "utf8");
-    return finish(`${before}\n## Outside scope\n- outside/extra.txt: the fix needs a test that proves it\n`);
+    const did = /^- (fixed .+)$/m.exec(before)?.[1] ?? "fixed it";
+    return handOff(
+      "success",
+      { tier: "unit-verified", did: [did], outsideScope: [["outside/extra.txt", "the fix needs a test that proves it"]] },
+      `${before}\n## Outside scope\n- outside/extra.txt: the fix needs a test that proves it\n`,
+    );
   }
   const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
   appendFileSync(file, `# fixed after findings: ${/run:\d+/.test(brief)}\n`);
@@ -152,11 +190,20 @@ function resumed(sessionId) {
   g("add", file);
   g("commit", "-q", "-m", "fix after findings");
   emit({ type: "assistant", message: { content: [{ type: "text", text: "Fixed." }], usage: { input_tokens: 900, output_tokens: 20 } } });
+  const prose = `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file}\n\n## Verification\nunit-verified\n${process.env.FAKE_RESUME_JUSTIFY ? `\n## Outside scope\n- ${file}: the docs needed the new flag\n` : ""}`;
+  if (canRecord())
+    record([
+      handoffCall("success", {
+        tier: "unit-verified",
+        did: [`fixed ${file}`],
+        outsideScope: process.env.FAKE_RESUME_JUSTIFY ? [[file, "the docs needed the new flag"]] : [],
+      }),
+    ]);
   emit({
     type: "result",
     subtype: "success",
     is_error: false,
-    result: `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file}\n\n## Verification\nunit-verified\n${process.env.FAKE_RESUME_JUSTIFY ? `\n## Outside scope\n- ${file}: the docs needed the new flag\n` : ""}`,
+    result: canRecord() ? `Fixed ${file}.` : prose,
     terminal_reason: "completed",
     total_cost_usd: 0.01,
   });
@@ -255,7 +302,7 @@ function fixer() {
   execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-qam", "review fixes"]);
   const handoff = `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file} for ${threads.map((n) => `T${n}`).join(", ")}\n\n## Verification\nunit-verified\n`;
   writeFileSync(join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`), handoff);
-  finish(handoff);
+  handOff("success", { tier: "unit-verified", did: [`fixed ${file} for ${threads.map((n) => `T${n}`).join(", ")}`] }, handoff);
 }
 
 // FAKE_REVIEW: unset or "none" → no findings; "<severity>[:text]" → one finding on the first changed file; "write" → edits the worktree.
@@ -277,9 +324,17 @@ function reviewer() {
 function rebase() {
   const onto = /git rebase ([0-9a-f]{40})/.exec(brief)[1];
   if (process.env.FAKE_REBASE === "fail")
-    return finish("## Status\nblocked\n\n## Verification\nnot-verified\n\n## Notes, concerns, deviations\n- could not resolve\n");
+    return handOff(
+      "blocked",
+      { tier: "not-verified", notes: ["could not resolve"] },
+      "## Status\nblocked\n\n## Verification\nnot-verified\n\n## Notes, concerns, deviations\n- could not resolve\n",
+    );
   execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "rebase", "-X", "theirs", onto]);
-  finish("## Status\nsuccess\n\n## Verification\nunit-verified\n\n## What I did\n- rebased and kept both changes\n");
+  handOff(
+    "success",
+    { tier: "unit-verified", did: ["rebased and kept both changes"] },
+    "## Status\nsuccess\n\n## Verification\nunit-verified\n\n## What I did\n- rebased and kept both changes\n",
+  );
 }
 
 function verify(mode) {
@@ -380,7 +435,11 @@ async function engine(role) {
     writeFileSync(".agents/verify/verify.json", `${JSON.stringify(pack, null, 2)}\n`);
     execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "add", "-A"]);
     execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-q", "-m", "verify pack"]);
-    return finish("## Status\nsuccess\n\n## Verification\nunit-verified\n\n## What I did\n- wrote .agents/verify/verify.json\n");
+    return handOff(
+      "success",
+      { tier: "unit-verified", did: ["wrote .agents/verify/verify.json"] },
+      "## Status\nsuccess\n\n## Verification\nunit-verified\n\n## What I did\n- wrote .agents/verify/verify.json\n",
+    );
   }
   if (role === "worker") {
     const base = /Expected to write:\n- ([^*\n]+?)\/?\*\*/.exec(brief)[1];
@@ -404,7 +463,14 @@ async function engine(role) {
     const followUps = process.env.FAKE_FOLLOWUPS ? `\n## Suggested follow-ups\n- ${process.env.FAKE_FOLLOWUPS}\n` : "\n## Suggested follow-ups\n- None.\n";
     return setTimeout(
       () =>
-        finish(
+        handOff(
+          "success",
+          {
+            tier: "unit-verified",
+            did: [`wrote ${base}/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`],
+            followUps: process.env.FAKE_FOLLOWUPS ? [process.env.FAKE_FOLLOWUPS] : [],
+            forOthers: process.env.FAKE_WORKER_NOTE ? [process.env.FAKE_WORKER_NOTE] : [],
+          },
           `## Status\nsuccess\n\n## Verification\nunit-verified\n${followUps}${process.env.FAKE_WORKER_NOTE ? `\n## For other units\n- ${process.env.FAKE_WORKER_NOTE}\n` : ""}`,
         ),
       400,

@@ -1,4 +1,4 @@
-import { HANDOFF_TEMPLATE } from "./brief.js";
+import { WORKER_REPORT } from "./brief.js";
 import type { PromptRole } from "./prompts.js";
 import { renderResumePrompt } from "./resume.js";
 import { scopeNote } from "./runner.js";
@@ -39,7 +39,7 @@ export function followUps(role: PromptRole): FollowUp[] {
         : [],
       verifierReport: runs ? "<the verifier's report>" : null,
       timeboxMinutes: 30,
-      report: HANDOFF_TEMPLATE,
+      report: WORKER_REPORT,
     });
   switch (role) {
     case "worker":

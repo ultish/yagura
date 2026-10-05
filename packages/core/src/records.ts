@@ -253,3 +253,75 @@ export function noteFallback(db: Db, attemptId: AttemptId, parser: string, ok: b
   const unit = getUnit(db, a.unitId);
   recordEvent(db, "parse.fallback", { projectId: unit.projectId, unitId: unit.id, attemptId }, { parser, ok });
 }
+
+const section = (title: string, items: string[]) => (items.length ? [`${title}:`, ...items.map((i) => `- ${i}`)] : []);
+
+// What an attempt recorded, as text for the agents and pages that show it (unit lead, planner, a resumed worker); null when it recorded nothing.
+export function describeRecords(db: Db, attemptId: AttemptId): string | null {
+  const out: string[] = [];
+  const h = getRecord(db, attemptId, "handoff");
+  if (h)
+    out.push(
+      `Handoff: ${h.status}${h.tier ? `, self-reported ${h.tier}` : ""}`,
+      ...section("What it did", h.did),
+      ...section("Evidence it ran", h.evidence),
+      ...section("Findings", h.findings),
+      ...section("Decisions", h.decisions),
+      ...section(
+        "Outside scope",
+        h.outsideScope.map((o) => `${o.path}: ${o.reason}`),
+      ),
+      ...section("For other units", h.forOthers),
+      ...section("Notes", h.notes),
+      ...section("Suggested follow-ups", h.followUps),
+    );
+  const v = getRecord(db, attemptId, "verdict");
+  if (v) {
+    const findings = listRecords(db, attemptId, "finding")
+      .map((r) => r.data)
+      .sort((a, b) => a.criterion - b.criterion);
+    out.push(
+      `Verdict: ${v.tier}${v.runs.length ? ` (${v.runs.map((id) => `run:${id}`).join(", ")})` : ""}`,
+      ...section(
+        "Findings",
+        findings.map(
+          (f) =>
+            `criterion ${f.criterion} ${f.met ? "met" : "not met"}${f.runs.length ? ` (${f.runs.map((id) => `run:${id}`).join(", ")})` : ""}${f.note ? `: ${f.note}` : ""}`,
+        ),
+      ),
+      ...section("Pack changes", v.packChanges),
+      ...section("Decisions", v.decisions),
+      ...section("Notes", v.notes),
+    );
+  }
+  const rulings = listRecords(db, attemptId, "ruling").map((r) => r.data);
+  if (rulings.length)
+    out.push(
+      ...section(
+        "Rulings",
+        rulings.sort((a, b) => a.thread - b.thread).map((r) => `T${r.thread}: ${r.decision}: ${r.reason}`),
+      ),
+    );
+  const amendments = listRecords(db, attemptId, "amendment").map((r) => r.data);
+  if (amendments.length)
+    out.push(
+      ...section(
+        "Amendments",
+        amendments.flatMap((a) => a.ops.map((op) => `T${a.thread}: ${JSON.stringify(op)}`)),
+      ),
+    );
+  const findings = listRecords(db, attemptId, "review-finding").map((r) => r.data);
+  if (findings.length)
+    out.push(
+      ...section(
+        "Review findings",
+        findings.map((f) => `F${f.n} [${f.severity}] ${f.path}${f.line ? `:${f.line}` : ""}: ${f.text}`),
+      ),
+    );
+  const d = getRecord(db, attemptId, "decision");
+  if (d)
+    out.push(
+      `Decision: ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}${d.question ? ` (question: ${d.question})` : ""}${d.to ? ` (to: ${d.to})` : ""}`,
+    );
+  return out.length ? out.join("\n") : null;
+}

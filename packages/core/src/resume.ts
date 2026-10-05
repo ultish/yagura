@@ -4,6 +4,7 @@ import type { Attempt, Rejection, Unit } from "./domain.js";
 import { listEvidenceRuns, readArtifact, type EvidenceRun } from "./evidence.js";
 import { layout } from "./paths.js";
 import { getProject, listAttempts, type Db } from "./store.js";
+import { attemptAccount } from "./finish.js";
 
 export function contextWindow(model: string | null): number {
   return /1m|\[1m\]/.test(model ?? "") ? 1_000_000 : 200_000;
@@ -139,6 +140,6 @@ export function rejectionFindings(db: Db, boot: Bootstrap, unit: Unit, rejected:
       };
     });
   const reportPath = layout(boot).handoff(getProject(db, unit.projectId).id, verify.seq, attempt.n);
-  const report = existsSync(reportPath) ? readFileSync(reportPath, "utf8").trim() : null;
+  const report = attemptAccount(db, attempt.id, reportPath);
   return { why, runs, verifierReport: report ? report.slice(0, REPORT_CHARS) : null };
 }

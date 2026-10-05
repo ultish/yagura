@@ -31,7 +31,7 @@ import {
 } from "./store.js";
 import { WATCHMAN_DENIED_TOOLS } from "./watchman.js";
 import { watchmanGuardSettings } from "./watchman-guard.js";
-import { ensureRecorded, savedHandoff, sessionReport } from "./finish.js";
+import { attemptAccount, ensureRecorded, savedHandoff, sessionReport } from "./finish.js";
 import { getRecord, noteFallback } from "./records.js";
 import { recordInstructions } from "./record-usage.js";
 
@@ -318,7 +318,7 @@ function record(db: Db, ctx: RunContext, target: Unit, afterAttemptId: number): 
   for (const { u, a } of rows) {
     const role = ROLE_OF_UNIT[u.type] ?? u.type;
     const file = paths.handoff(u.projectId, u.seq, a.n);
-    const handoff = existsSync(file) ? readFileSync(file, "utf8") : null;
+    const handoff = attemptAccount(db, a.id, file);
     const facts = [
       `${a.state}${a.failureMode ? ` (${a.failureMode})` : ""}`,
       a.handoffStatus ? `handoff ${a.handoffStatus}` : null,

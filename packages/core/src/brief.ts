@@ -36,6 +36,23 @@ Self-report the strongest evidence you produced for the change itself, not for i
 ## Suggested follow-ups
 - <tasks worth publishing next>`;
 
+// What a builder (worker, pack writer, rebase, fix worker) records when it finishes (§27).
+export const WORKER_REPORT = recordInstructions(
+  ["handoff"],
+  [
+    "- Status: success when the work is done, partial when you ran out of time with work left, blocked when you could not go on (say why with --note). Running it again replaces your handoff, so repeat everything you recorded before.",
+    '- --did once per line of what you did. --tier: the strongest evidence you produced for the change itself, not for it compiling (deployed-verified, live-local-verified, e2e-verified, unit-verified, build-only, or not-verified). --evidence: what you ran and its outcome. --decision: each choice the brief did not settle, what you deliberately did not do, and why. --outside-scope "<path>=<why>": each path you changed that SCOPE did not list. --note: assumptions, surprises, anything the planner must know. --for-others: only what units running beside you must know (a changed signature, a moved file, a convention you set); leave it out when there is nothing. --follow-up: tasks worth doing next.',
+  ],
+);
+
+// What an investigator records: its findings are the whole result (§26).
+export const INVESTIGATION_REPORT = recordInstructions(
+  ["handoff"],
+  [
+    "- --finding once per finding: what you found that answers the question, with the file, line, or command output that shows it; say plainly what you could not establish. --note: anything else the unit lead should know. Status: success, partial (out of time), or blocked.",
+  ],
+);
+
 export class UnfillableBrief extends Error {
   constructor(readonly missing: string[]) {
     super(`brief cannot be spawned; missing: ${missing.join(", ")}`);

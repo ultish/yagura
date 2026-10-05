@@ -2,12 +2,12 @@ import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
-import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
+import { WORKER_REPORT, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { REBASE_HARNESS, type Attempt, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, git, headSha, resolveRef } from "./git.js";
-import { parseHandoff } from "./handoff.js";
+import { ensureRecorded, readHandoff, reportOf, sessionReport } from "./finish.js";
 import { liveVerdict } from "./land.js";
 import { layout, unitRef } from "./paths.js";
 import { addVerifyUnit } from "./runner.js";
@@ -94,37 +94,47 @@ export async function runRebaseUnit(ctx: RunContext, unitId: UnitId): Promise<At
       "no change beyond resolving the conflicts",
     ],
     method: "Load the yagura-rebase skill first and follow it. Then use cursor-team-kit:fix-merge-conflicts to resolve the conflicts.",
-    report: HANDOFF_TEMPLATE,
+    report: WORKER_REPORT,
     standing: standingFor(db, project.id, "rebase"),
   });
   write(paths.brief(project.id, unit.seq, attempt.n), briefText);
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, target: target.seq });
   updateAttempt(db, attempt.id, { state: "running", startedAt: now(), worktreePath: worktree, branch, baseSha: verdict.head_sha });
 
-  const session = await runAgentSession(ctx, {
-    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "rebase" }),
-    adapter,
-    run: {
-      prompt: briefText,
-      bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
-      model: setting("role.worker.model"),
-      permissionMode: setting("harness.claude.permission_mode"),
-      pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "rebase" })],
-      addDirs: [],
-      extraArgs: setting("harness.claude.extra_args"),
-    },
-    cwd: worktree,
-    env: envValues,
-    timeboxSeconds: unit.timeboxSeconds,
-    logPath: paths.log(project.id, unit.seq, attempt.n),
-  });
+  const rebaseRun = (prompt: string, resume?: string) =>
+    runAgentSession(ctx, {
+      recorder: attemptRecorder(db, {
+        attempt,
+        unit,
+        projectId: project.id,
+        role: "rebase",
+        inheritedSkills: resume ? getAttempt(db, attempt.id).skills : undefined,
+      }),
+      adapter,
+      run: {
+        prompt,
+        resume,
+        bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
+        model: setting("role.worker.model"),
+        permissionMode: setting("harness.claude.permission_mode"),
+        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "rebase" })],
+        addDirs: [],
+        extraArgs: setting("harness.claude.extra_args"),
+      },
+      cwd: worktree,
+      env: envValues,
+      timeboxSeconds: unit.timeboxSeconds,
+      logPath: resume ? paths.log(project.id, unit.seq, attempt.n).replace(/\.jsonl$/, ".resume.jsonl") : paths.log(project.id, unit.seq, attempt.n),
+    });
+  const first = await rebaseRun(briefText);
+  const session = await ensureRecorded(db, attempt.id, "rebase", first, (prompt, sessionId) => rebaseRun(prompt, sessionId));
 
   await git(["rebase", "--abort"], { cwd: worktree }).catch(() => undefined);
   await discardLeftovers(worktree);
   const head = await headSha(worktree);
-  const final = session.final;
-  const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
-  if (handoff) write(paths.handoff(project.id, unit.seq, attempt.n), final!.text);
+  const report = sessionReport(first, session);
+  if (report) write(paths.handoff(project.id, unit.seq, attempt.n), report);
+  const handoff = readHandoff(db, attempt.id, [reportOf(session), reportOf(first)]);
   const onTrunk = await git(["merge-base", "--is-ancestor", trunk, head], { cwd: worktree }).then(
     () => true,
     () => false,

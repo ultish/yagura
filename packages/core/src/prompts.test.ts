@@ -98,7 +98,7 @@ describe("follow-up messages", () => {
       "You send it a message while it runs (any agent that can take one)",
     ]);
     expect(worker[0]!.text).toMatch(/^# yagura: your handoff was rejected/);
-    expect(worker[1]!.text).toContain('list it under "## Outside scope"');
+    expect(worker[1]!.text).toContain('yagura handoff --outside-scope "<path>=<why>"');
     expect(followUps("review-triage")[0]!.text).toMatch(/^# yagura: your triage handoff was not accepted/);
     expect(followUps("watchman").map((f) => f.text.split("\n")[0])).toEqual([
       "# yagura: the next message in this thread",

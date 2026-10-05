@@ -2,7 +2,7 @@ import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
-import { HANDOFF_TEMPLATE, packContract, renderBrief } from "./brief.js";
+import { WORKER_REPORT, packContract, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import {
   isBuild,
@@ -25,7 +25,8 @@ import { environmentNotes, listValues, valueMap } from "./envvalues.js";
 import { LEASE_VARS } from "./leases.js";
 import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
 import { amendmentContext } from "./amend.js";
-import { classifyFailure, parseHandoff, syntheticFailureHandoff } from "./handoff.js";
+import { ensureRecorded, readHandoff, reportOf, sessionReport } from "./finish.js";
+import { classifyFailure, syntheticFailureHandoff } from "./handoff.js";
 import { layout, unitRef } from "./paths.js";
 import { assessScope } from "./scope.js";
 import {
@@ -97,7 +98,7 @@ async function referenceCheckouts(ctx: RunContext, projectId: ProjectId, seq: nu
 export function scopeNote(attempt: number, paths: string[], hard: boolean): string {
   return hard
     ? `Attempt ${attempt} wrote ${paths.join(", ")}, which yagura never allows (the verify pack). Leave it alone.`
-    : `Attempt ${attempt} changed ${paths.join(", ")} outside SCOPE without saying why. If the path is not needed, revert it and commit; if it is, list it under "## Outside scope" in your handoff with the reason the work needs it.`;
+    : `Attempt ${attempt} changed ${paths.join(", ")} outside SCOPE without saying why. If the path is not needed, revert it and commit; if it is, record it with the reason the work needs it: yagura handoff --outside-scope "<path>=<why>" (running it again replaces your handoff, so repeat the rest).`;
 }
 
 function releasedUpstreams(db: Db, unit: Unit): string[] {
@@ -201,7 +202,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         : `Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and follow its ${unit.playbook ?? "feature"} playbook. Then load pstack:principle-prove-it-works and pstack:principle-test-behavior-not-implementation, and write the test that proves the change before the change itself. All four are required: an attempt that does not load them is rejected.`) +
       (unit.scaffold ? " This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more." : "") +
       skillMethod(projectSkills),
-    report: HANDOFF_TEMPLATE,
+    report: WORKER_REPORT,
     standing: standingFor(db, project.id, isPack ? "pack" : "worker"),
   };
   const briefText = from
@@ -212,7 +213,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         branch,
         ...rejectionFindings(db, boot, unit, from),
         timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
-        report: HANDOFF_TEMPLATE,
+        report: WORKER_REPORT,
       })
     : renderBrief(brief);
   write(paths.brief(project.id, unit.seq, attempt.n), briefText);
@@ -221,30 +222,41 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, ...(from ? { resumes: from.n } : {}) });
   updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base, resumesAttemptId: from?.id ?? null, sources });
 
-  const session = await runAgentSession(ctx, {
-    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: isPack ? "pack" : "worker", inheritedSkills: from?.skills, projectSkills }),
-    adapter,
-    run: {
-      prompt: briefText,
-      bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
-      model: setting("role.worker.model"),
-      permissionMode: setting("harness.claude.permission_mode"),
-      pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: isPack ? "pack" : "worker" })],
-      addDirs: [...sources.map((s) => s.path), ...references.map((r) => r.path)],
-      extraArgs: setting("harness.claude.extra_args"),
-      resume: from?.sessionId ?? undefined,
-    },
-    cwd: worktree,
-    env: { ...envValues, ...sourceEnv(sources) },
-    timeboxSeconds: unit.timeboxSeconds,
-    logPath: paths.log(project.id, unit.seq, attempt.n),
-  });
+  const role = isPack ? "pack" : "worker";
+  const work = (prompt: string, resume: string | undefined, reminder = false) =>
+    runAgentSession(ctx, {
+      recorder: attemptRecorder(db, {
+        attempt,
+        unit,
+        projectId: project.id,
+        role,
+        inheritedSkills: reminder ? getAttempt(db, attempt.id).skills : from?.skills,
+        projectSkills,
+      }),
+      adapter,
+      run: {
+        prompt,
+        bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
+        model: setting("role.worker.model"),
+        permissionMode: setting("harness.claude.permission_mode"),
+        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: isPack ? "pack" : "worker" })],
+        addDirs: [...sources.map((s) => s.path), ...references.map((r) => r.path)],
+        extraArgs: setting("harness.claude.extra_args"),
+        resume,
+      },
+      cwd: worktree,
+      env: { ...envValues, ...sourceEnv(sources) },
+      timeboxSeconds: unit.timeboxSeconds,
+      logPath: reminder ? paths.log(project.id, unit.seq, attempt.n).replace(/\.jsonl$/, ".resume.jsonl") : paths.log(project.id, unit.seq, attempt.n),
+    });
+  const first = await work(briefText, from?.sessionId ?? undefined);
+  let session = first;
   const endedAt = now();
 
   const stop = stopRequested(db, attempt.id);
   if (stop.stopped) {
     await discardLeftovers(worktree);
-    updateAttempt(db, attempt.id, { state: "stopped", endedAt, exitCode: session.exitCode });
+    updateAttempt(db, attempt.id, { state: "stopped", endedAt, exitCode: first.exitCode });
     if (stop.note) addUnitNote(db, unit.id, `Operator stopped attempt ${attempt.n}: ${stop.note}`);
     transitionUnit(db, unit.id, "ready", { reason: "stopped by operator", attempt: attempt.n });
     recordEvent(db, "attempt.ended", { projectId: project.id, unitId: unit.id, attemptId: attempt.id }, { stopped: true });
@@ -259,6 +271,8 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     return runWorkUnit(ctx, unitId);
   }
 
+  // The handoff comes from what the agent recorded with yagura handoff; a clean session that recorded nothing is asked once.
+  session = await ensureRecorded(db, attempt.id, role, first, (prompt, sessionId) => work(prompt, sessionId, true));
   const leftovers = await discardLeftovers(worktree);
   if (leftovers.paths.length) write(paths.leftovers(project.id, unit.seq, attempt.n), leftovers.patch);
   const head = await headSha(worktree);
@@ -268,11 +282,12 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     transitionUnit(db, unit.id, "rejected", data);
   };
   const final = session.final;
-  const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
+  const report = sessionReport(first, session);
+  const handoff = readHandoff(db, attempt.id, [reportOf(session), reportOf(first)]);
 
   if (handoff) {
-    write(paths.handoff(project.id, unit.seq, attempt.n), final!.text);
-    db.prepare("INSERT INTO search (body, kind, ref_id, project_id) VALUES (?, 'handoff', ?, ?)").run(final!.text, String(attempt.id), project.id);
+    write(paths.handoff(project.id, unit.seq, attempt.n), report ?? "");
+    db.prepare("INSERT INTO search (body, kind, ref_id, project_id) VALUES (?, 'handoff', ?, ?)").run(report ?? "", String(attempt.id), project.id);
     updateAttempt(db, attempt.id, {
       state: "handed_off",
       endedAt,

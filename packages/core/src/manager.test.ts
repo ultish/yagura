@@ -26,6 +26,7 @@ import { runInvestigateUnit } from "./investigate.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
 import { runWorkUnit } from "./runner.js";
+import { getRecord, putRecord } from "./records.js";
 import {
   addEnvironment,
   addProject,
@@ -379,7 +380,7 @@ describe("a manager that asks for an investigation", () => {
 
     const attempt = await runInvestigateUnit(ctx, inv.id);
     expect(getUnit(db, inv.id).state).toBe("done");
-    expect(readFileSync(layout(ctx.boot).handoff(project, inv.seq, attempt!.n), "utf8")).toContain("depends on the clock");
+    expect(getRecord(db, attempt!.id, "handoff")!.findings).toEqual(["the failing test depends on the clock: it passes before noon"]);
     const need = managerNeed(db, getUnit(db, u.id));
     expect(need).toMatchObject({
       kind: "wake",
@@ -454,12 +455,13 @@ describe("a manager told of a worker's note", () => {
     expect(wakeOnNote(db, ctx.boot, a)).toBeNull();
   }, 60_000);
 
-  it("is not woken by ordinary notes, only by what the worker says other units must know", async () => {
+  it("is not woken by ordinary notes, only by what the worker records other units must know", async () => {
     const { a } = await handedOffWithNote("none");
-    const file = layout(ctx.boot).handoff(project, a.seq, 1);
-    writeFileSync(file, `${readFileSync(file, "utf8")}\n## Notes, concerns, deviations\n- all acceptance criteria met; used the laziness protocol\n`);
+    const attempt = listAttempts(db, a.id)[0]!;
+    const handoff = getRecord(db, attempt.id, "handoff")!;
+    putRecord(db, attempt.id, "handoff", "", { ...handoff, forOthers: [], notes: ["all acceptance criteria met; used the laziness protocol"] });
     expect(wakeOnNote(db, ctx.boot, a)).toBeNull();
-    writeFileSync(file, readFileSync(file, "utf8").replace("## For other units\n- none", "## For other units\n- renamed helper.py to util.py"));
+    putRecord(db, attempt.id, "handoff", "", { ...handoff, forOthers: ["renamed helper.py to util.py"] });
     expect(wakeOnNote(db, ctx.boot, a)?.context[0]).toContain("says other units must know: renamed helper.py to util.py");
   }, 60_000);
 

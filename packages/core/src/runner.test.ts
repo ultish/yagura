@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import { setSetting, type Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
@@ -13,6 +14,7 @@ import { unitStory } from "./story.js";
 import { layout } from "./paths.js";
 import { runWorkUnit } from "./runner.js";
 import { setEnvironmentNotes, setValue } from "./envvalues.js";
+import { getRecord } from "./records.js";
 import {
   addEnvironment,
   addProject,
@@ -28,6 +30,9 @@ import {
 } from "./store.js";
 
 const fakeAgent = fileURLToPath(new URL("./harness/fixtures/fake-agent.mjs", import.meta.url));
+const tsx = pathToFileURL(join(dirname(createRequire(import.meta.url).resolve("tsx/package.json")), "dist/loader.mjs")).href;
+// The yagura CLI on each session's PATH, as the daemon gives it, so the fake agent records its work through it.
+const cli = [process.execPath, "--import", tsx, fileURLToPath(new URL("./harness/fixtures/evidence-shim.ts", import.meta.url))];
 const fake: HarnessAdapter = {
   id: "claude",
   canResume: true,
@@ -47,7 +52,7 @@ beforeEach(async () => {
   await git(["init", "--quiet", "-b", "main"], { cwd: origin });
   await commitAll(origin, "init", { name: "t", email: "t@t" });
   boot = { home: join(root, "home"), packsDir: "", skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
-  db = openStore(":memory:");
+  db = openStore(layout(boot).db);
   addRepo(db, { id: "testbed", url: origin, defaultBranch: "main" });
   addProject(db, { id: project, name: "P", goal: "g", predicate: "pred", minTier: "unit-verified", repos: ["testbed" as RepoId] });
 });
@@ -66,7 +71,7 @@ async function run(mode: string, timeboxSeconds = 60) {
     maxAttempts: 2,
   });
   transitionUnit(db, unit.id, "ready");
-  const attempt = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli: [] }, unit.id);
+  const attempt = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
   return { unit: getUnit(db, unit.id), attempt, paths: layout(boot) };
 }
 
@@ -94,7 +99,8 @@ describe("runWorkUnit", () => {
     expect(attempt.headSha).not.toBe(attempt.baseSha);
     expect(readFileSync(join(attempt.worktreePath!, "app/orders.py"), "utf8")).toContain("brief had GOAL: true");
     expect(readFileSync(paths.brief(project, 1, 1), "utf8")).toContain("## ACCEPTANCE\n- SAVE10 takes 10% off");
-    expect(readFileSync(paths.handoff(project, 1, 1), "utf8")).toMatch(/^## Status\nsuccess/);
+    expect(getRecord(db, attempt.id, "handoff")).toMatchObject({ status: "success", tier: "unit-verified", did: ["edited app/orders.py"] });
+    expect(readFileSync(paths.handoff(project, 1, 1), "utf8")).toMatch(/^Handing off success\./);
     expect(
       readFileSync(paths.log(project, 1, 1), "utf8")
         .trim()
@@ -127,7 +133,7 @@ describe("runWorkUnit", () => {
     process.env.FAKE_RESUME_JUSTIFY = "1";
     try {
       transitionUnit(db, unit.id, "ready");
-      const second = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli: [] }, unit.id);
+      const second = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
       expect(second.resumesAttemptId).toBe(first.id);
       expect(getUnit(db, unit.id).state).toBe("verifying");
     } finally {
@@ -185,7 +191,7 @@ describe("runWorkUnit", () => {
       timeboxSeconds: 60,
       maxAttempts: 1,
     });
-    await expect(runWorkUnit({ db, boot, adapters: { claude: fake }, cli: [] }, unit.id)).rejects.toThrow(/draft, not ready/);
+    await expect(runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id)).rejects.toThrow(/draft, not ready/);
     expect(existsSync(layout(boot).mirror("testbed" as RepoId))).toBe(false);
   });
 
@@ -222,7 +228,7 @@ describe("runWorkUnit", () => {
       maxAttempts: 1,
     });
     transitionUnit(db, unit.id, "ready");
-    const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli: [] }, unit.id);
+    const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
     let attempt = listAttempts(db, unit.id)[0];
     for (let i = 0; i < 50 && !attempt?.pid; i++) {
       await new Promise((r) => setTimeout(r, 50));
@@ -251,7 +257,7 @@ describe("runWorkUnit", () => {
         maxAttempts: 1,
       });
       transitionUnit(db, unit.id, "ready");
-      return { unit, running: runWorkUnit({ db, boot, adapters: { claude: claudeAdapter }, cli: [] }, unit.id) };
+      return { unit, running: runWorkUnit({ db, boot, adapters: { claude: claudeAdapter }, cli }, unit.id) };
     };
     const runningAttempt = async (unitId: number) => {
       let attempt = listAttempts(db, unitId as never)[0];
@@ -306,7 +312,7 @@ describe("runWorkUnit", () => {
   });
 
   describe("project skills and reference repos", () => {
-    const ctx = () => ({ db, boot, adapters: { claude: fake }, cli: [] });
+    const ctx = () => ({ db, boot, adapters: { claude: fake }, cli });
     const unitWith = (scaffold: boolean) => {
       const u = addUnit(db, {
         projectId: project,

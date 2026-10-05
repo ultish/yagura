@@ -5,6 +5,7 @@ import { layout } from "./paths.js";
 import { readiness } from "./schedule.js";
 import { listDisagreements } from "./disagreements.js";
 import { getProject, getUnit, listAttempts, listDeps, listGates, listUnits, projectRepos, type Db } from "./store.js";
+import { attemptAccount } from "./finish.js";
 
 const HANDOFF_LIMIT = 3000;
 const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
@@ -68,9 +69,8 @@ export function generateStatus(db: Db, boot: Bootstrap, projectId: ProjectId, si
       const last = listAttempts(db, u.id)
         .filter((a) => a.endedAt)
         .at(-1);
-      const path = last ? paths.handoff(projectId, u.seq, last.n) : null;
-      if (!path || !existsSync(path)) return null;
-      const text = readFileSync(path, "utf8");
+      const text = last ? attemptAccount(db, last.id, paths.handoff(projectId, u.seq, last.n)) : null;
+      if (!text) return null;
       return `### U${u.seq} attempt ${last!.n} (${u.type})\n${text.length > HANDOFF_LIMIT ? `${text.slice(0, HANDOFF_LIMIT)}\n… (truncated)` : text}`;
     })
     .filter(Boolean);

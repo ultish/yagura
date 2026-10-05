@@ -27,4 +27,4 @@ You write the verify pack that yagura uses to judge every later change to this r
 
 - Change nothing outside the pack directory. Code that the pack verifies is not yours to fix; if the repo does not build or its tests fail as it is, say so precisely under Notes and hand off with Status: blocked.
 - Commit to your branch only; no push, rebase, merge, or branch switch. yagura lands the pack after the proof passes.
-- End with the handoff exactly as the brief's REPORT section shows. Under Evidence, list each pack command you ran and its exit code.
+- Record your handoff with `yagura handoff` and the flags the brief's REPORT lists, with one `--evidence` per pack command you ran and its exit code. yagura reads only that; then end with a short report in any form.

@@ -366,6 +366,9 @@ describe("Engine", () => {
     expect(readdirSync(checkouts)).toEqual([]);
     expect(await git(["worktree", "list", "--porcelain"], { gitDir: layout(ctx.boot).mirror("testbed" as RepoId) })).not.toContain("worktree " + checkouts);
     expect(sweep[0]).toMatch(/^ {2}removed \d+ checkout\(s\) of finished units$/);
+    // Every role that has moved to records was read from them, never from its final message.
+    const fallbacks = db.prepare("SELECT data_json FROM events WHERE type = 'parse.fallback'").all() as { data_json: string }[];
+    expect(fallbacks.map((f) => JSON.parse(f.data_json).parser)).toEqual([]);
   }, 60_000);
 
   it("writes, proves, and lands a verify pack first on a repo without one, then verifies work with it", async () => {

@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import type { SessionResult } from "./agent.js";
 import type { AttemptId, Handoff, Role } from "./domain.js";
 import { parseHandoff } from "./handoff.js";
-import { missingRecords, noteFallback, recordedHandoff } from "./records.js";
+import { describeRecords, missingRecords, noteFallback, recordedHandoff } from "./records.js";
 import { getAttempt, getUnit, recordEvent, type Db } from "./store.js";
 
 // How an agent's session is closed out (§27): its final message is kept as the report for the developer, anything its role
@@ -36,6 +36,14 @@ export async function ensureRecorded(
   const unit = getUnit(db, getAttempt(db, attemptId).unitId);
   recordEvent(db, "records.reminded", { projectId: unit.projectId, unitId: unit.id, attemptId }, { role, missing });
   return resume(renderRecordReminder(missing), sessionId);
+}
+
+// What another agent or the developer is shown of a finished attempt: what it recorded, then the report it wrote.
+export function attemptAccount(db: Db, attemptId: AttemptId, reportPath: string | null): string | null {
+  const recorded = describeRecords(db, attemptId);
+  const report = reportPath && existsSync(reportPath) ? readFileSync(reportPath, "utf8").trim() : null;
+  if (!recorded) return report;
+  return report ? `${recorded}\n\nIts report:\n${report}` : recorded;
 }
 
 // A finished attempt's handoff read again later (story, audit, follow-ups, notes to other units): its records, else its saved report.

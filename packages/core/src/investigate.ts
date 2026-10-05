@@ -5,7 +5,8 @@ import { resolveSetting } from "./config.js";
 import type { Attempt, Sha, Unit, UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
 import { addDetachedWorktree, discardLeftovers, ensureMirror, headSha, removeWorktree, resolveRef } from "./git.js";
-import { parseHandoff } from "./handoff.js";
+import { INVESTIGATION_REPORT } from "./brief.js";
+import { ensureRecorded, readHandoff, reportOf, sessionReport } from "./finish.js";
 import { layout } from "./paths.js";
 import { promptPlugin, standingFor } from "./prompts.js";
 import {
@@ -101,51 +102,52 @@ ${Math.round(unit.timeboxSeconds / 60)} minutes. If you run out, stop and report
 ${FORBIDDEN.map((f) => `- ${f}`).join("\n")}
 
 ## REPORT
-End your final message with:
-
-## Status
-success | partial | blocked
-
-## Findings
-- <what you found that answers the question, each with the file, line, or command output that shows it; say plainly what you could not establish>
-
-## Notes, concerns, deviations
-- <anything else the manager should know>
+${INVESTIGATION_REPORT}
 ${standing ? `\n## STANDING ORDERS\n${standing}\n` : ""}
 ## METHOD
-Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and follow its investigation playbook. Both are required. This is an investigation: nothing is committed, and the findings in your handoff are the whole result.
+Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and follow its investigation playbook. Both are required. This is an investigation: nothing is committed, and the findings you record are the whole result.
 `;
   write(paths.brief(project.id, unit.seq, attempt.n), brief);
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, target: target.seq });
   updateAttempt(db, attempt.id, { state: "running", startedAt: now(), worktreePath: worktree, baseSha: at });
 
-  const session = await runAgentSession(ctx, {
-    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "worker" }),
-    adapter,
-    run: {
-      prompt: brief,
-      bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
-      model: setting("role.worker.model"),
-      permissionMode: setting("harness.claude.permission_mode"),
-      pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "worker" })],
-      addDirs: [],
-      extraArgs: setting("harness.claude.extra_args"),
-    },
-    cwd: worktree,
-    env: valueMap(db, project.environmentId),
-    timeboxSeconds: unit.timeboxSeconds,
-    logPath: paths.log(project.id, unit.seq, attempt.n),
-  });
+  const investigate = (prompt: string, resume?: string) =>
+    runAgentSession(ctx, {
+      recorder: attemptRecorder(db, {
+        attempt,
+        unit,
+        projectId: project.id,
+        role: "worker",
+        inheritedSkills: resume ? getAttempt(db, attempt.id).skills : undefined,
+      }),
+      adapter,
+      run: {
+        prompt,
+        resume,
+        bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
+        model: setting("role.worker.model"),
+        permissionMode: setting("harness.claude.permission_mode"),
+        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "worker" })],
+        addDirs: [],
+        extraArgs: setting("harness.claude.extra_args"),
+      },
+      cwd: worktree,
+      env: valueMap(db, project.environmentId),
+      timeboxSeconds: unit.timeboxSeconds,
+      logPath: resume ? paths.log(project.id, unit.seq, attempt.n).replace(/\.jsonl$/, ".resume.jsonl") : paths.log(project.id, unit.seq, attempt.n),
+    });
+  const first = await investigate(brief);
+  const session = await ensureRecorded(db, attempt.id, "worker", first, (prompt, sessionId) => investigate(prompt, sessionId));
 
   const leftovers = await discardLeftovers(worktree);
   const after = await headSha(worktree);
-  const final = session.final;
-  const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
-  if (handoff) write(paths.handoff(project.id, unit.seq, attempt.n), final!.text);
+  const report = sessionReport(first, session);
+  if (report) write(paths.handoff(project.id, unit.seq, attempt.n), report);
+  const handoff = readHandoff(db, attempt.id, [reportOf(session), reportOf(first)]);
   const problem = !handoff
     ? session.timedOut
       ? "the investigator ran out of time"
-      : "the investigator ended without a handoff"
+      : "the investigator ended without recording its findings"
     : after !== at || leftovers.paths.length
       ? `the investigator changed the worktree (${after !== at ? "committed" : leftovers.paths.join(", ")}); an investigation changes nothing`
       : session.missingSkills.length
