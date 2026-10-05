@@ -96,7 +96,7 @@ const bullets = (text: string) =>
     .map((l) => l.replace(/^\s*[-*]\s*/, "").trim())
     .filter((l) => l && !/^\(?(none|n\/a|nothing)\.?\)?$/i.test(l));
 
-type Ev = { id: number; ts: IsoTime; type: string; unit_id: number | null; data: Record<string, unknown> };
+type Ev = { id: number; ts: IsoTime; type: string; unit_id: number | null; attempt_id: number | null; data: Record<string, unknown> };
 
 export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
   const project = getProject(db, unit.projectId);
@@ -104,11 +104,14 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
   const related = listUnits(db, project.id).filter((u) => u.targetUnitId === unit.id && u.type !== "plan");
   const unitIds = [unit.id, ...related.map((u) => u.id)];
   const events = (
-    db.prepare(`SELECT id, ts, type, unit_id, data_json FROM events WHERE unit_id IN (${unitIds.map(() => "?").join(", ")}) ORDER BY id`).all(...unitIds) as {
+    db
+      .prepare(`SELECT id, ts, type, unit_id, attempt_id, data_json FROM events WHERE unit_id IN (${unitIds.map(() => "?").join(", ")}) ORDER BY id`)
+      .all(...unitIds) as {
       id: number;
       ts: IsoTime;
       type: string;
       unit_id: number | null;
+      attempt_id: number | null;
       data_json: string;
     }[]
   ).map((e): Ev => ({ ...e, data: JSON.parse(e.data_json) }));
@@ -539,6 +542,34 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       folded: null,
     });
 
+  // What yagura had to do about an agent's records (§27), on that agent's entry (or its unit's, when the agent has none of its own,
+  // as the arbiter shares the triage unit's entry): a reminder, a refused command, a read of its prose.
+  const unitOfAttempt = (id: number) => (db.prepare("SELECT unit_id FROM attempts WHERE id = ?").get(id) as { unit_id: number } | undefined)?.unit_id;
+  const entryFor = (attemptId: number) =>
+    entries.find((e) => e.attempt?.id === attemptId) ?? entries.filter((e) => e.attempt && unitOfAttempt(e.attempt.id) === unitOfAttempt(attemptId)).at(-1);
+  const refusedSoFar = new Map<StoryEntry, number>();
+  for (const x of events) {
+    if (!x.attempt_id || !["command.rejected", "records.reminded", "parse.fallback"].includes(x.type)) continue;
+    const e = entryFor(x.attempt_id);
+    if (!e) continue;
+    const ref = `a${x.attempt_id}:records:${x.id}`;
+    if (x.type === "command.rejected") {
+      const n = (refusedSoFar.get(e) ?? 0) + 1;
+      refusedSoFar.set(e, n);
+      if (n <= 3) e.lines.push(line(ref, "noted", `Tried yagura ${String(x.data.command)}`, [{ ok: false, text: `refused: ${String(x.data.problem)}` }]));
+    } else if (x.type === "records.reminded")
+      e.lines.push(
+        line(ref, "noted", `Ended without recording: ${(x.data.missing as string[]).join("; ")}`, [
+          { ok: false, text: "yagura asked for it once, in the same session" },
+        ]),
+      );
+    else
+      e.lines.push(
+        line(ref, "noted", `Read from its report, not its records (${String(x.data.parser)})`, [
+          { ok: false, text: x.data.ok ? "yagura fell back to parsing its prose" : "yagura fell back to parsing its prose and found nothing" },
+        ]),
+      );
+  }
   entries.sort((a, b) => a.at.localeCompare(b.at));
   const allAttempts = unitIds.flatMap((id) => listAttempts(db, id));
   const mr = getMergeRequest(db, unit.id);

@@ -155,6 +155,15 @@ describe("Engine", () => {
       expect(reminded.find((r) => r.role === "review-triage")!.missing).toEqual([expect.stringMatching(/^no ruling for T1: run `yagura rule T1/)]);
       const fallbacks = db.prepare("SELECT attempt_id FROM events WHERE type = 'parse.fallback'").all() as { attempt_id: number }[];
       expect(fallbacks.filter((f) => arbiterAttempts().includes(f.attempt_id))).toEqual([]);
+      const { unitStory } = await import("./story.js");
+      const reviewed = units("work").find((u) => units("review-triage").some((t) => t.targetUnitId === u.id))!;
+      const lines = unitStory(db, ctx.boot, reviewed).entries.flatMap((e) => e.lines);
+      expect(lines).toContainEqual(
+        expect.objectContaining({
+          text: expect.stringMatching(/^Ended without recording: no ruling for T1/),
+          checks: [{ ok: false, text: "yagura asked for it once, in the same session" }],
+        }),
+      );
     }, 60_000);
 
     it("asks a triage agent that wrote outside the unit's scope to explain it in its own session, then lands", async () => {
