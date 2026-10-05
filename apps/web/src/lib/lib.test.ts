@@ -311,7 +311,12 @@ describe("mentions and formatting", () => {
       "rebase",
       "project lead",
     ]);
-    expect([roleOf("manager"), roleOf("review-triage")]).toEqual(["unit lead", "arbiter"]);
+    expect([roleOf("manager"), roleOf("review-triage"), roleOf("review-triage", "claude", 1), roleOf("review-triage", "claude", 2)]).toEqual([
+      "unit lead",
+      "arbiter",
+      "arbiter",
+      "worker",
+    ]);
     expect(["work", "pack", "verify", "plan"].map((type) => isBuild({ type }))).toEqual([true, true, false, false]);
   });
 });

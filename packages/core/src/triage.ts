@@ -467,6 +467,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     if (changed) {
       // The fixes are the target's to verify, on a head yagura records as one of its tries: a worker's change counts the same whoever sent it back.
       const onTarget = createAttempt(db, target.id, workHarness, setting("role.worker.model"));
+      recordEvent(db, "triage.fix_recorded", { projectId: project.id, unitId: target.id, attemptId: onTarget.id }, { from: attempt.id });
       updateAttempt(db, onTarget.id, { state: "handed_off", baseSha: work.baseSha, headSha: head, branch, startedAt: now(), endedAt: now() });
       const reason = `review fixes from ${jobLabel(db, unit)} on ${ref}`;
       db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(now(), reason, verdict.id);

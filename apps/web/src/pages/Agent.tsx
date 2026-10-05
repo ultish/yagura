@@ -361,7 +361,7 @@ function AgentFlow({ d }: { d: AttemptDetail }) {
 
 function statusOf(d: AttemptDetail, now: number, lastActivity: string | null): { text: string; tone: string } {
   const a = d.attempt;
-  const lower = roleOf(d.unit.type, d.attempt.harness);
+  const lower = roleOf(d.unit.type, d.attempt.harness, d.attempt.n);
   const role = lower[0]!.toUpperCase() + lower.slice(1);
   const took = a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "";
   switch (a.state) {
@@ -420,15 +420,19 @@ export function Agent({ attemptId }: { attemptId: number }) {
     );
   const a = d.attempt;
   const u = d.unit;
-  const role = roleOf(u.type, d.attempt.harness);
-  const byYagura =
-    a.harness === "yagura-proof"
-      ? "yagura ran this proof itself, with no agent: the pack's doctor, deploy, checks, and teardown on the pack's own head. Its runs are in the grid."
-      : a.harness === "yagura-rebase"
-        ? "yagura rebased the verified head onto the moved trunk; the patch changed, so this head is verified again. No agent ran."
-        : a.harness === "yagura-repin"
-          ? "yagura moved this change's pinned test versions of its sources to their current versions (the upstream landed and was released, or was published again); the new head is verified again. No agent ran."
-          : null;
+  const role = roleOf(u.type, d.attempt.harness, d.attempt.n);
+  const byYagura = d.recordedFrom ? (
+    <>
+      yagura recorded the review fixes that <Link to={`/a/${d.recordedFrom.id}`}>A{d.recordedFrom.agentNo}</Link> (a worker, in U{d.recordedFrom.unitSeq})
+      committed as this unit's try, so the verifier can check that head. No agent ran here: look at A{d.recordedFrom.agentNo} for the work.
+    </>
+  ) : a.harness === "yagura-proof" ? (
+    "yagura ran this proof itself, with no agent: the pack's doctor, deploy, checks, and teardown on the pack's own head. Its runs are in the grid."
+  ) : a.harness === "yagura-rebase" ? (
+    "yagura rebased the verified head onto the moved trunk; the patch changed, so this head is verified again. No agent ran."
+  ) : a.harness === "yagura-repin" ? (
+    "yagura moved this change's pinned test versions of its sources to their current versions (the upstream landed and was released, or was published again); the new head is verified again. No agent ran."
+  ) : null;
   const status = statusOf(d, now, timeline.lastActivity);
   const start = a.startedAt ? Date.parse(a.startedAt) : timeline.startedAt;
   const elapsed = a.startedAt ? (a.endedAt ? Date.parse(a.endedAt) : now) - Date.parse(a.startedAt) : 0;

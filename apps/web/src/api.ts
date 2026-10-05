@@ -176,6 +176,7 @@ export interface AttemptDetail {
   verifications: { unit: { id: number; seq: number; state: string }; attempts: { id: number; n: number; state: string; runs: EvidenceRun[] }[] }[];
   kept: KeptSlot[];
   waiting: string | null;
+  recordedFrom: { id: number; agentNo: number; unitSeq: number } | null;
 }
 
 export interface LogLine {

@@ -190,7 +190,19 @@ export function attemptDetail(db: Db, paths: { brief: string; handoff: string; l
     verifications,
     waiting: readiness(db, unit.projectId).waiting.find((w) => w.unit.id === unit.id)?.reason ?? null,
     kept: keptSlots(db, { attemptId: attempt.id }),
+    recordedFrom: recordedFrom(db, attempt.id),
   };
+}
+
+// A review fix is made by the worker inside a triage unit, then recorded as a try on the unit it fixes; that record has no run of its own.
+function recordedFrom(db: Db, attemptId: number) {
+  const e = db.prepare("SELECT data_json FROM events WHERE type = 'triage.fix_recorded' AND attempt_id = ?").get(attemptId) as
+    { data_json: string } | undefined;
+  if (!e) return null;
+  const from = db
+    .prepare("SELECT a.id, a.agent_no, u.seq FROM attempts a JOIN units u ON u.id = a.unit_id WHERE a.id = ?")
+    .get((JSON.parse(e.data_json) as { from: number }).from) as { id: number; agent_no: number; seq: number } | undefined;
+  return from ? { id: from.id, agentNo: from.agent_no, unitSeq: from.seq } : null;
 }
 
 export async function repoView(db: Db, boot: Bootstrap, repoId: RepoId) {

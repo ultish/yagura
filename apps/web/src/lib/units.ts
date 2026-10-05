@@ -14,8 +14,17 @@ const ROLES: Record<string, string> = {
   manager: "unit lead",
   investigate: "investigator",
 };
-export const roleOf = (unitType: string, harness?: string) =>
-  harness === "yagura-proof" ? "pack proof" : harness === "yagura-rebase" ? "rebase" : harness === "yagura-repin" ? "re-pin" : (ROLES[unitType] ?? unitType);
+// A triage unit's first agent is the arbiter; any later one is the worker that makes the fix it ruled necessary.
+export const roleOf = (unitType: string, harness?: string, attemptN?: number) =>
+  harness === "yagura-proof"
+    ? "pack proof"
+    : harness === "yagura-rebase"
+      ? "rebase"
+      : harness === "yagura-repin"
+        ? "re-pin"
+        : unitType === "review-triage" && (attemptN ?? 1) > 1
+          ? "worker"
+          : (ROLES[unitType] ?? unitType);
 
 export type StageName = "plan" | "work" | "verify" | "land";
 export type Light = "lit" | "flame" | "bell" | "ember" | "wait" | "off";
