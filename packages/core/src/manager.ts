@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { parseHandoff } from "./handoff.js";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { MANAGER_ACTIONS, TERMINAL_STATES, spendsAttempt, type Attempt, type AttemptId, type ManagerAction, type Unit, type UnitId } from "./domain.js";
@@ -32,6 +31,7 @@ import {
 } from "./store.js";
 import { WATCHMAN_DENIED_TOOLS } from "./watchman.js";
 import { watchmanGuardSettings } from "./watchman-guard.js";
+import { savedHandoff } from "./finish.js";
 
 export interface ManagerDecision {
   id: number;
@@ -181,7 +181,7 @@ function handoffNote(db: Db, boot: RunContext["boot"], target: Unit): { attempt:
     .filter((a) => a.state === "handed_off")
     .at(-1);
   const file = attempt ? layout(boot).handoff(target.projectId, target.seq, attempt.n) : null;
-  const handoff = file && existsSync(file) ? parseHandoff(readFileSync(file, "utf8")) : null;
+  const handoff = attempt ? savedHandoff(db, attempt.id, file) : null;
   const lines = (handoff?.forOthers ?? "")
     .split("\n")
     .map((l) => l.replace(/^[-*]\s*/, "").trim())

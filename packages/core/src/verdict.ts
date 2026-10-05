@@ -35,7 +35,9 @@ const firstLine = (text: string) =>
     .map((l) => l.replace(/^[-*]\s*/, "").trim())
     .find(Boolean) ?? "";
 
+// A recorded verdict names its runs as ids the store checked when they were recorded; only a prose fallback is searched for them.
 export function citedRuns(handoff: Handoff): number[] {
+  if (handoff.citedRunIds) return [...handoff.citedRunIds];
   const ids = new Set<number>();
   for (const m of `${handoff.evidence.join("\n")}\n${handoff.notes}`.matchAll(/\brun:(\d+)\b/g)) ids.add(Number(m[1]));
   return [...ids];

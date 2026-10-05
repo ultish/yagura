@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import type { SessionResult } from "./agent.js";
 import type { AttemptId, Handoff, Role } from "./domain.js";
 import { parseHandoff } from "./handoff.js";
@@ -8,6 +9,12 @@ import { getAttempt, getUnit, recordEvent, type Db } from "./store.js";
 // still has to record is asked for once in the same session, and the engine reads the records.
 export const cleanEnd = (s: SessionResult) => !!s.final && !s.final.isError && !s.timedOut;
 export const reportOf = (s: SessionResult): string | null => (cleanEnd(s) ? s.final!.text : null);
+
+// What the developer reads on the agent page: the report it ended with and, after a reminder, what it said then.
+export const sessionReport = (first: SessionResult, last: SessionResult): string | null => {
+  const reports = [reportOf(first), last === first ? null : reportOf(last)].filter((r): r is string => !!r);
+  return reports.length ? reports.join("\n\n---\n\n_After yagura's reminder to record its work:_\n\n") : null;
+};
 
 export const renderRecordReminder = (missing: string[]) =>
   `# yagura: you have not recorded your work\n\nyagura reads only what you record with its commands, never your final message. Still missing:\n${missing
@@ -29,6 +36,12 @@ export async function ensureRecorded(
   const unit = getUnit(db, getAttempt(db, attemptId).unitId);
   recordEvent(db, "records.reminded", { projectId: unit.projectId, unitId: unit.id, attemptId }, { role, missing });
   return resume(renderRecordReminder(missing), sessionId);
+}
+
+// A finished attempt's handoff read again later (story, audit, follow-ups, notes to other units): its records, else its saved report.
+export function savedHandoff(db: Db, attemptId: AttemptId, reportPath: string | null): Handoff | null {
+  const report = reportPath && existsSync(reportPath) ? readFileSync(reportPath, "utf8") : null;
+  return recordedHandoff(db, attemptId, report ?? "") ?? (report ? parseHandoff(report) : null);
 }
 
 // The handoff the engine acts on: from the records, or, while the roles move over, from the reports the session ended with

@@ -289,6 +289,23 @@ describe("Engine", () => {
     }, 60_000);
   });
 
+  it("takes each verdict from what the verifier recorded, and reminds a verifier that forgot it in the same session", async () => {
+    const verifierAttempts = () =>
+      (db.prepare("SELECT a.id FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.type = 'verify'").all() as { id: number }[]).map((r) => r.id);
+    process.env.FAKE_FORGET = "verifier";
+    try {
+      await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    } finally {
+      delete process.env.FAKE_FORGET;
+    }
+    expect(getProject(db, project).state).toBe("closed");
+    const reminded = (db.prepare("SELECT attempt_id FROM events WHERE type = 'records.reminded'").all() as { attempt_id: number }[]).map((r) => r.attempt_id);
+    expect(verifierAttempts().length).toBeGreaterThan(0);
+    expect(verifierAttempts().every((id) => reminded.includes(id))).toBe(true);
+    const fallbacks = (db.prepare("SELECT attempt_id FROM events WHERE type = 'parse.fallback'").all() as { attempt_id: number }[]).map((r) => r.attempt_id);
+    expect(fallbacks.filter((id) => verifierAttempts().includes(id))).toEqual([]);
+  }, 60_000);
+
   it("plans, runs disjoint units in parallel, serializes overlapping ones, verifies, lands, and closes", async () => {
     const log: string[] = [];
     await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();

@@ -300,6 +300,33 @@ function verify(mode) {
   const head = run("head");
   const tier = mode === "verify-fail" ? "verifier-failed" : "unit-verified";
   const cite = mode === "verify-lie" ? "run:999" : `run:${head}`;
+  // A lie cannot be recorded (yagura verdict refuses a run it did not record), so verify-lie reports in prose to exercise the fallback.
+  if (canRecord() && mode !== "verify-lie") {
+    record([
+      ["finding", "1", mode === "verify-fail" ? "unmet" : "met", "--runs", `${head},${base}`],
+      [
+        "verdict",
+        tier,
+        "--runs",
+        `${head},${base}`,
+        ...packChanges
+          .split("\n")
+          .filter((l) => l.startsWith("- "))
+          .flatMap((l) => ["--pack-change", l.slice(2)]),
+        "--decision",
+        "tested the edited file directly",
+      ],
+    ]);
+    emit({
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: `Verified ${tier} with run:${head} and run:${base}.\n\n## Verification\nverifier-failed`,
+      terminal_reason: "completed",
+      total_cost_usd: 0.01,
+    });
+    return;
+  }
   const handoff = `## Status\nsuccess\n\n## Verification\n${tier}\n\n## Evidence\n- ${cite} scenario on head\n- run:${base} scenario on base\n\n## Findings\n- [x] criterion: ${cite}\n\n## Pack changes\n${packChanges}\n\n## Decisions\n- tested the edited file directly\n`;
   emit({ type: "result", subtype: "success", is_error: false, result: handoff, terminal_reason: "completed", total_cost_usd: 0.01 });
 }
@@ -403,14 +430,36 @@ async function engine(role) {
       exits[at] = exit === "0";
       return Number(id);
     };
-    if (process.env.FAKE_VERIFY_BLOCKED)
+    const changes = packChanges
+      .split("\n")
+      .filter((l) => l.startsWith("- "))
+      .flatMap((l) => ["--pack-change", l.slice(2)]);
+    if (process.env.FAKE_VERIFY_BLOCKED) {
+      if (canRecord()) {
+        record([["verdict", "verifier-blocked", "--note", process.env.FAKE_VERIFY_BLOCKED]]);
+        return finish(`I could not verify it: ${process.env.FAKE_VERIFY_BLOCKED}`);
+      }
       return finish(`## Status\nblocked\n\n## Verification\nverifier-blocked\n\n## Notes, concerns, deviations\n- ${process.env.FAKE_VERIFY_BLOCKED}\n`);
+    }
     const base = run("base");
     const head = run("head");
-    if (!exits.head) return finish(`## Status\nsuccess\n\n## Verification\nverifier-failed\n\n## Evidence\n- run:${head} fails on head\n- run:${base}\n`);
+    if (!exits.head) {
+      if (canRecord()) {
+        record([["verdict", "verifier-failed", "--runs", `${head},${base}`, ...changes]]);
+        return finish(`It fails on head: run:${head}.`);
+      }
+      return finish(`## Status\nsuccess\n\n## Verification\nverifier-failed\n\n## Evidence\n- run:${head} fails on head\n- run:${base}\n`);
+    }
     const order = ["deployed-verified", "live-local-verified", "e2e-verified", "unit-verified", "build-only"];
     const listed = [...brief.matchAll(/^- [\w-]+ \(([\w-]+)\): base/gm)].map((m) => m[1]);
     const tier = order.find((t) => listed.includes(t)) ?? "unit-verified";
+    if (canRecord()) {
+      record([
+        ["finding", "1", "met", "--runs", `${head},${base}`],
+        ["verdict", tier, "--runs", `${head},${base}`, ...changes],
+      ]);
+      return finish(`Verified at ${tier}: run:${head} passes on head, run:${base} fails on trunk.`);
+    }
     return finish(`## Status\nsuccess\n\n## Verification\n${tier}\n\n## Evidence\n- run:${head}\n- run:${base}\n\n## Pack changes\n${packChanges}\n`);
   }
 }

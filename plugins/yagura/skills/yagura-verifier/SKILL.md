@@ -27,12 +27,12 @@ The verify pack is the repo's standing instructions for checking changes. You ha
 - When this repo publishes what other repos build on and the pack has no `publish` block, or its `publish` commands are wrong, fix that too (the pack contract is in `yagura-pack`).
 - For a pack that has drifted a long way, follow `pstack:maintain-verification-skill`, writing only inside your pack copy.
 - Edit files only; do not run git. yagura re-runs the doctor and every check on both sides with your copy when you finish, commits your edit on its own, and lands it after this unit.
-- Under `## Pack changes`, list each change and why. If you remove or loosen a check, say why; the developer reads this.
+- Record each pack change and why with `--pack-change` on `yagura verdict`. If you remove or loosen a check, say why; the developer reads this.
 
 ## Rules
 
 - Never edit the checkouts, commit, or run git. Runs start from clean checkouts; edits are discarded and marked as tampering, which voids your verdict. Your pack copy is the one thing you may edit.
-- Cite every run you rely on as `run:<id>` under Evidence and Findings. Citing an id yagura did not record voids your verdict.
-- Under `## Decisions`, say what you chose to test and how, what you deliberately did not test, and why. The developer reads this later to decide whether they agree.
+- Record your answer with yagura's commands; yagura reads only those, never your final message. `yagura finding <n> met|unmet --runs <id,…>` for each ACCEPTANCE criterion, then `yagura verdict <tier> --runs <id,…>`. `--runs` takes only the ids your `yagura evidence run` calls printed, and the command refuses any other. `yagura check-done` says what is still missing.
+- Record what you chose to test and how, what you deliberately did not test, and why, with `--decision` on `yagura verdict`. The developer reads this later to decide whether they agree.
 - Do not load pstack playbooks that open PRs, loop, or hand work to a human; yagura owns those steps. `pstack:principle-prove-it-works` and `cursor-team-kit:verify-this` are good guides for scenario design.
-- End with the verdict exactly as the brief's REPORT section shows, starting at `## Status`.
+- When everything is recorded, end with a short report for the developer in any form.

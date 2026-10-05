@@ -1,5 +1,5 @@
 import { promptPlugin, standingFor } from "./prompts.js";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
 import { HANDOFF_TEMPLATE, renderBrief } from "./brief.js";
@@ -10,7 +10,7 @@ import { valueMap } from "./envvalues.js";
 import { amendmentContext, applyOps, autoApproveAmendment, describeOps, parseAmendments, proposeAmendment, settleAmendment } from "./amend.js";
 import { forgeFor, getMergeRequest, postOnce, signed, type ForgeAdapter, type PrThread, type ThreadKind, prRef } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha } from "./git.js";
-import { ensureRecorded, readHandoff, reportOf } from "./finish.js";
+import { ensureRecorded, readHandoff, reportOf, sessionReport } from "./finish.js";
 import { hasRecords, noteFallback, recordedAmendments, recordedRulings } from "./records.js";
 import { verifiedHead } from "./land.js";
 import { layout, unitRef } from "./paths.js";
@@ -282,7 +282,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const ruled = await ensureRecorded(db, judgeAttempt.id, "review-triage", firstRuling, (prompt, sessionId) => run(judging, prompt, sessionId));
   await discardLeftovers(worktree);
   const judgeHead = await headSha(worktree);
-  const rulingReport = reportOf(ruled) ?? reportOf(firstRuling);
+  const rulingReport = sessionReport(firstRuling, ruled);
   if (rulingReport) write(paths.handoff(project.id, unit.seq, judgeAttempt.n), rulingReport);
   const fromRecords = hasRecords(db, judgeAttempt.id);
   // While roles move over, an arbiter that only wrote its rulings is read from its reports (after a reminder the last one may be short).
@@ -371,7 +371,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
       const session = await ensureRecorded(db, fixAttempt.id, "worker", first, (prompt, sessionId) => run(fixing, prompt, sessionId));
       await discardLeftovers(worktree);
       const newHead = await headSha(worktree);
-      const report = reportOf(session) ?? reportOf(first);
+      const report = sessionReport(first, session);
       if (report) write(paths.handoff(project.id, unit.seq, fixAttempt.n), report);
       const parsed = readHandoff(db, fixAttempt.id, [reportOf(session), reportOf(first)]);
       const didChange = newHead !== verdict.head_sha;

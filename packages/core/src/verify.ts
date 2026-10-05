@@ -19,7 +19,7 @@ import {
 import { baseWorktree, listEvidenceRuns, PACK_LABEL, packForAttempt, runEvidence, teardownDeployed } from "./evidence.js";
 import { environmentNotes, listValues } from "./envvalues.js";
 import { addDetachedWorktree, diffText, ensureMirror, patchId, resolveRef } from "./git.js";
-import { parseHandoff } from "./handoff.js";
+import { ensureRecorded, readHandoff, reportOf, sessionReport } from "./finish.js";
 import { loadPack, type VerifyPack } from "./pack.js";
 import { commitPackEdit, discardWorkspace, openPackWorkspace, stagePackChanges } from "./packedits.js";
 import { pausedBy, pauseEnvironment } from "./envpause.js";
@@ -360,37 +360,46 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
     });
     write(paths.brief(project.id, unit.seq, attempt.n), briefText);
 
-    const session = await runAgentSession(ctx, {
-      recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "verifier", projectSkills }),
-      adapter,
-      run: {
-        prompt: briefText,
-        bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
-        model: setting("role.verifier.model"),
-        permissionMode: setting("harness.claude.permission_mode"),
-        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "verifier" })],
-        addDirs: [head, baseWorktree(head), workspace!.path, ...sources.map((s) => s.path)],
-        extraArgs: setting("harness.claude.extra_args"),
-      },
-      cwd: scenarioDir,
-      env: {
-        ...lease.vars,
-        ...sourceEnv(sources),
-        YAGURA_HEAD: head,
-        YAGURA_BASE: baseWorktree(head),
-        YAGURA_PACK: join(workspace!.path, repo.verifyPackPath),
-        YAGURA_SCENARIOS: scenarioDir,
-      },
-      timeboxSeconds: unit.timeboxSeconds,
-      logPath: paths.log(project.id, unit.seq, attempt.n),
-    });
+    const runVerifier = (prompt: string, resume?: string) =>
+      runAgentSession(ctx, {
+        recorder: attemptRecorder(db, {
+          attempt,
+          unit,
+          projectId: project.id,
+          role: "verifier",
+          projectSkills,
+          inheritedSkills: resume ? getAttempt(db, attempt.id).skills : undefined,
+        }),
+        adapter,
+        run: {
+          prompt,
+          resume,
+          bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
+          model: setting("role.verifier.model"),
+          permissionMode: setting("harness.claude.permission_mode"),
+          pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "verifier" })],
+          addDirs: [head, baseWorktree(head), workspace!.path, ...sources.map((s) => s.path)],
+          extraArgs: setting("harness.claude.extra_args"),
+        },
+        cwd: scenarioDir,
+        env: {
+          ...lease.vars,
+          ...sourceEnv(sources),
+          YAGURA_HEAD: head,
+          YAGURA_BASE: baseWorktree(head),
+          YAGURA_PACK: join(workspace!.path, repo.verifyPackPath),
+          YAGURA_SCENARIOS: scenarioDir,
+        },
+        timeboxSeconds: unit.timeboxSeconds,
+        logPath: resume ? paths.log(project.id, unit.seq, attempt.n).replace(/\.jsonl$/, ".resume.jsonl") : paths.log(project.id, unit.seq, attempt.n),
+      });
+    const first = await runVerifier(briefText);
 
-    const final = session.final;
     const stop = stopRequested(db, attempt.id);
     if (stop.stopped) {
       await discard(workspace!);
       await endSlot("stopped");
-      updateAttempt(db, attempt.id, { state: "stopped", endedAt: now(), exitCode: session.exitCode });
+      updateAttempt(db, attempt.id, { state: "stopped", endedAt: now(), exitCode: first.exitCode });
       const decision: VerdictDecision = {
         outcome: "invalid",
         tier: null,
@@ -401,8 +410,11 @@ export async function runVerifyUnit(ctx: RunContext, verifyUnitId: UnitId): Prom
       };
       return finish(decision, false);
     }
-    const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
-    if (final?.text) write(paths.handoff(project.id, unit.seq, attempt.n), final.text);
+    // The verdict comes from what the verifier recorded (yagura verdict, yagura finding); its report is only kept for the developer.
+    const session = await ensureRecorded(db, attempt.id, "verifier", first, (prompt, sessionId) => runVerifier(prompt, sessionId));
+    const report = sessionReport(first, session) ?? session.final?.text ?? first.final?.text ?? null;
+    if (report) write(paths.handoff(project.id, unit.seq, attempt.n), report);
+    const handoff = readHandoff(db, attempt.id, [reportOf(session), reportOf(first)]);
     const settled = handoff ? await settlePackEdit({ attemptId: attempt.id, target, workspace: workspace!, handoff, runPack }) : await discard(workspace!);
     const verdict = decideVerdict({
       handoff,

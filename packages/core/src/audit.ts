@@ -1,10 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
 import { BUILD_TYPES_SQL, isBuild, type Attempt, type Project, type Unit, type VerdictId } from "./domain.js";
 import { listEvidenceRuns } from "./evidence.js";
-import { parseHandoff } from "./handoff.js";
 import { layout } from "./paths.js";
 import { getAttempt, getProject, getUnit, listAttempts, listUnits, type Db } from "./store.js";
+import { savedHandoff } from "./finish.js";
 
 const SUBJECT_MAX = 72;
 const BODY_MAX = 1500;
@@ -41,7 +41,7 @@ export function landMessage(
 ): string {
   const project = getProject(db, p.unit.projectId);
   const handoffPath = layout(boot).handoff(project.id, p.unit.seq, p.work.n);
-  const handoff = existsSync(handoffPath) ? parseHandoff(readFileSync(handoffPath, "utf8")) : null;
+  const handoff = savedHandoff(db, p.work.id, handoffPath);
   const body = handoff?.whatIDid.trim() ?? "";
   const verifyAttempt = getAttempt(db, p.verdict.attemptId as never);
   const verifyUnit = getUnit(db, verifyAttempt.unitId);

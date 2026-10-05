@@ -1,10 +1,8 @@
 import { listSteers } from "./steer.js";
-import { existsSync, readFileSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
 import { listDisagreements, type Disagreement } from "./disagreements.js";
 import { spendsAttempt, type ManagerAction, type Attempt, type Handoff, type IsoTime, type Unit, type UnitId } from "./domain.js";
 import { getMergeRequest } from "./forge.js";
-import { parseHandoff } from "./handoff.js";
 import { liveVerdict } from "./land.js";
 import { landWait } from "./publish.js";
 import { listPackEdits } from "./packedits.js";
@@ -15,6 +13,7 @@ import { findingFates } from "./review.js";
 import { describeOps, listAmendments } from "./amend.js";
 import { dependencyEdges, type DepEdge } from "./chain.js";
 import { listManagerDecisions, managerOn } from "./manager.js";
+import { savedHandoff } from "./finish.js";
 
 // A unit's page reads as one story: who did what, what each chose, and what yagura checked about it. Agents' lines are
 // judgment unless a check sits beside them; a check is something yagura proved from its own records.
@@ -122,8 +121,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     disagreements: disagreements.filter((d) => d.ref === ref),
   });
   const handoffOf = (u: Unit, a: Attempt): Handoff | null => {
-    const p = paths.handoff(project.id, u.seq, a.n);
-    return existsSync(p) ? parseHandoff(readFileSync(p, "utf8")) : null;
+    return savedHandoff(db, a.id, paths.handoff(project.id, u.seq, a.n));
   };
   const judgment = (ref: string, h: Handoff) => [
     ...bullets(h.decisions)

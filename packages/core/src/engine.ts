@@ -1,9 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
 import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { TERMINAL_STATES, isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
 import { markMergeChecked, openMergeRequests, prNoun, prRef } from "./forge.js";
-import { parseHandoff } from "./handoff.js";
 import { landUnit, liveVerdict, watchMergeRequest, type LandResult } from "./land.js";
 import { layout } from "./paths.js";
 import { projectSkillChecks } from "./skills.js";
@@ -45,6 +43,7 @@ import { postReport, reportKey, type ReportKind } from "./report.js";
 import { listThreads } from "./threads.js";
 import { runVerifyUnit } from "./verify.js";
 import { sweepWorktrees } from "./worktrees.js";
+import { savedHandoff } from "./finish.js";
 
 export interface EngineOptions {
   projectId?: ProjectId;
@@ -65,7 +64,7 @@ function suggestsFollowUps(db: Db, boot: RunContext["boot"], unitId: UnitId): bo
     .filter((a) => a.state === "handed_off")
     .at(-1);
   const path = last ? layout(boot).handoff(unit.projectId, unit.seq, last.n) : null;
-  const handoff = path && existsSync(path) ? parseHandoff(readFileSync(path, "utf8")) : null;
+  const handoff = last ? savedHandoff(db, last.id, path) : null;
   return (handoff?.followUps ?? "")
     .split("\n")
     .map((l) =>

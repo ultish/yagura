@@ -388,7 +388,7 @@ describe("resume on rejection", () => {
     expect(prompt).toMatch(
       /- run:\d+ scenario on your head: exit 1 \(trunk: exit 1\)\n  command: sh (\S+scenario\.sh)\n  \1:\n  ```\n  grep -q 'never there' app\/orders\.py\n  ```\n  \(no output\)/,
     );
-    expect(prompt).toContain("## VERIFIER'S REPORT\n## Status\nsuccess\n\n## Verification\nverifier-failed");
+    expect(prompt).toMatch(/## VERIFIER'S REPORT\nVerified verifier-failed with run:\d+ and run:\d+\./);
     expect(prompt).not.toContain("## GOAL");
     expect(readFileSync(join(first.worktreePath!, "app/orders.py"), "utf8")).toContain("# fixed after findings: true");
     expect(getUnit(db, target.id).state).toBe("verifying");

@@ -1,4 +1,5 @@
 import type { RenderedBrief } from "./domain.js";
+import { recordInstructions } from "./record-usage.js";
 import { skillMethod } from "./skills.js";
 
 export const HANDOFF_TEMPLATE = `## Status
@@ -112,28 +113,14 @@ ${b.standing.trim() || "(none)"}
 `;
 }
 
-export const VERIFIER_HANDOFF_TEMPLATE = `## Status
-success | blocked
-(success = you reached a verdict; blocked = you could not)
-
-## Verification
-<one of: deployed-verified | live-local-verified | e2e-verified | unit-verified | build-only | verifier-failed | verifier-blocked>
-
-## Evidence
-- run:<id> <what this run shows>
-
-## Findings
-- [x] <acceptance criterion>: met, run:<id>
-- [ ] <acceptance criterion>: not met, run:<id>, <what is wrong>
-
-## Pack changes
-- <each change you made to the verify pack and why, or "none">
-
-## Decisions
-- <what you chose to test and how, what you deliberately did not test, and why>
-
-## Notes, concerns, deviations
-- <anything the planner or the next worker must know>`;
+export const VERIFIER_REPORT = recordInstructions(
+  ["finding", "verdict"],
+  [
+    "- One finding per ACCEPTANCE criterion (numbered 1, 2, … in the order ACCEPTANCE lists them), met or unmet, with the runs that show it.",
+    "- The verdict: a pass tier (deployed-verified, live-local-verified, e2e-verified, unit-verified, build-only) with the runs that prove it, verifier-failed with the head run that shows the failure, or verifier-blocked with a --note saying exactly what you could not reach. Record each change you made to the verify pack with --pack-change, and what you chose to test and not test with --decision.",
+    "- --runs takes only ids your yagura evidence run calls printed; the command refuses any other.",
+  ],
+);
 
 export function packContract(p: { packPath: string; provider: string; leaseVars: string[]; minTier: string; reason: string }): string[] {
   return [
@@ -231,9 +218,7 @@ ${v.timeboxMinutes} minutes.
 Load the yagura-verifier skill first and follow it.${skillMethod(v.skills)}
 
 ## REPORT
-Your final message is your verdict; nothing else you write is read. Use exactly this structure:
-
-${VERIFIER_HANDOFF_TEMPLATE}
+${VERIFIER_REPORT}
 
 ## STANDING ORDERS
 ${v.standing.trim() || "(none)"}
