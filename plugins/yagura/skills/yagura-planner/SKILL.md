@@ -5,7 +5,7 @@ description: Use when a prompt is a yagura plan brief (starts with "# yagura pla
 
 # yagura planner
 
-You own the plan, never the code. Your only output is the plan delta at the end of your final message.
+You own the plan, never the code. Your only output is the plan delta you record with `yagura plan --file <path>`; yagura reads only that, never your final message, and checks it the way applying it would when you record it.
 
 ## Work the state, not a fresh plan
 

@@ -10,7 +10,9 @@ import { addDetachedWorktree, ensureMirror, removeWorktree, resolveRef } from ".
 import { layout } from "./paths.js";
 import { applyDelta, extractDelta, PlanRejected, WORK_PLAYBOOKS, type PlanDelta } from "./plan.js";
 import { generateStatus } from "./status.js";
-import { addUnit, createAttempt, getProject, now, projectRepos, recordEvent, setAndon, transitionUnit, updateAttempt, type Db } from "./store.js";
+import { addUnit, createAttempt, getAttempt, getProject, now, projectRepos, recordEvent, setAndon, transitionUnit, updateAttempt, type Db } from "./store.js";
+import { ensureRecorded, reportOf, sessionReport } from "./finish.js";
+import { getRecord, noteFallback } from "./records.js";
 
 export interface PlanResult {
   drainId: number;
@@ -116,31 +118,38 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
     transitionUnit(db, unit.id, "running", { attempt: attempt.n });
     updateAttempt(db, attempt.id, { state: "running", startedAt: now() });
 
-    const session = await runAgentSession(ctx, {
-      recorder: attemptRecorder(db, { attempt, unit, projectId, role: "planner" }),
-      adapter,
-      run: {
-        prompt: briefText,
-        bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
-        model: setting("role.planner.model"),
-        permissionMode: setting("harness.claude.permission_mode"),
-        pluginDirs: [promptPlugin(db, boot, projectId, { attemptId: attempt.id, role: "planner" })],
-        addDirs: checkouts.slice(1).map((c) => c.path),
-        extraArgs: setting("harness.claude.extra_args"),
-      },
-      cwd: checkouts[0]?.path ?? join(boot.home, "projects", projectId),
-      env: {},
-      timeboxSeconds: unit.timeboxSeconds,
-      logPath: paths.log(projectId, unit.seq, attempt.n),
-    });
+    const plan = (prompt: string, resume?: string) =>
+      runAgentSession(ctx, {
+        recorder: attemptRecorder(db, { attempt, unit, projectId, role: "planner", inheritedSkills: resume ? getAttempt(db, attempt.id).skills : undefined }),
+        adapter,
+        run: {
+          prompt,
+          resume,
+          bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
+          model: setting("role.planner.model"),
+          permissionMode: setting("harness.claude.permission_mode"),
+          pluginDirs: [promptPlugin(db, boot, projectId, { attemptId: attempt.id, role: "planner" })],
+          addDirs: checkouts.slice(1).map((c) => c.path),
+          extraArgs: setting("harness.claude.extra_args"),
+        },
+        cwd: checkouts[0]?.path ?? join(boot.home, "projects", projectId),
+        env: {},
+        timeboxSeconds: unit.timeboxSeconds,
+        logPath: resume ? paths.log(projectId, unit.seq, attempt.n).replace(/\.jsonl$/, ".resume.jsonl") : paths.log(projectId, unit.seq, attempt.n),
+      });
+    const first = await plan(briefText);
     if (stopRequested(db, attempt.id).stopped) {
-      updateAttempt(db, attempt.id, { state: "stopped", endedAt: now(), exitCode: session.exitCode });
+      updateAttempt(db, attempt.id, { state: "stopped", endedAt: now(), exitCode: first.exitCode });
       transitionUnit(db, unit.id, "failed", { drain: drainId, reason: "stopped by operator" });
       transitionUnit(db, unit.id, "abandoned", { drain: drainId });
       return finish("failed", STOPPED, null);
     }
-    const text = session.final && !session.final.isError && !session.timedOut ? session.final.text : null;
-    if (text) write(paths.handoff(projectId, unit.seq, attempt.n), text);
+    // The plan comes from yagura plan, checked against the store when it was recorded; the report is kept for the developer.
+    const session = await ensureRecorded(db, attempt.id, "planner", first, (prompt, sessionId) => plan(prompt, sessionId));
+    const recorded = getRecord(db, attempt.id, "plan");
+    const report = sessionReport(first, session);
+    const text = report ?? (recorded ? "" : null);
+    if (report) write(paths.handoff(projectId, unit.seq, attempt.n), report);
     updateAttempt(db, attempt.id, {
       state: text ? "handed_off" : "failed",
       endedAt: now(),
@@ -154,7 +163,11 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
     transitionUnit(db, unit.id, "handed_off", { drain: drainId });
     transitionUnit(db, unit.id, "done", { drain: drainId });
 
-    const extracted = extractDelta(text);
+    const proseReports = [reportOf(session), reportOf(first)].filter((r): r is string => !!r);
+    const extracted = recorded
+      ? ({ ok: true, delta: recorded } as const)
+      : (proseReports.map((r) => extractDelta(r)).find((x) => x.ok) ?? extractDelta(proseReports[0] ?? ""));
+    if (!recorded) noteFallback(db, attempt.id, "extractDelta", extracted.ok);
     if (!extracted.ok) return finish("rejected", extracted.reason, null);
     try {
       const applied = applyDelta(db, projectId, extracted.delta, drainId);

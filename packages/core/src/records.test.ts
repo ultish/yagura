@@ -178,4 +178,28 @@ describe("agent records", () => {
     expect((await viaStdin('{"gates":[{"key":"x"}]}')).output).toMatch(/^yagura plan was not recorded: /);
     expect((await viaStdin('{"add":[]}')).code).toBe(0);
   });
+
+  it("checks a plan the way applying it would, while the planner can still fix it, and leaves nothing behind", async () => {
+    const planner = session(
+      addUnit(db, {
+        projectId: project,
+        type: "plan",
+        repoId: null,
+        goal: "plan",
+        writeScope: [],
+        acceptance: [],
+        verify: null,
+        timeboxSeconds: 60,
+        maxAttempts: 1,
+      }),
+      "planner",
+    );
+    const before = (db.prepare("SELECT COUNT(*) AS n FROM units").get() as { n: number }).n;
+    const unitIn = (repo: string) => ({ key: "a", repo, goal: "g", write: ["app/**"], accept: ["works"], verify: "true", playbook: "feature" });
+    const refused = await planner.call("plan", "--json", JSON.stringify({ add: [unitIn("elsewhere")] }));
+    expect(refused.code).toBe(1);
+    expect(refused.output).toMatch(/^yagura plan was not recorded: .*elsewhere/);
+    expect((await planner.call("plan", "--json", JSON.stringify({ add: [unitIn("r")] }))).code).toBe(0);
+    expect((db.prepare("SELECT COUNT(*) AS n FROM units").get() as { n: number }).n).toBe(before);
+  });
 });

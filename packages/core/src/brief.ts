@@ -293,7 +293,12 @@ ${p.status}
 Load the yagura-planner skill first and follow it.
 
 ## REPORT
-End your final message with exactly one fenced json block holding the delta:
+${recordInstructions(
+  ["plan"],
+  [
+    "- Write the delta to a file in your scratch directory and record it with `yagura plan --file <path>`. yagura checks it the way applying it would (schema, repos, scopes, dependencies) and says at once what to fix; run it again with the corrected file. The delta has this shape:",
+  ],
+)}
 
 \`\`\`json
 {

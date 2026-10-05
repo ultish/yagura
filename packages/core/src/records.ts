@@ -14,7 +14,7 @@ import {
   type Severity,
   type UnitId,
 } from "./domain.js";
-import { PlanDelta } from "./plan.js";
+import { applyDelta, PlanDelta, PlanRejected } from "./plan.js";
 import type { PrThreadDecision } from "./triage.js";
 import { getAttempt, getUnit, now, recordEvent, type Db } from "./store.js";
 
@@ -142,6 +142,19 @@ export function recordProblem<K extends RecordKind>(db: Db, attemptId: AttemptId
     const f = data as RecordData<"finding">;
     if (f.criterion > target.acceptance.length) return `criterion ${f.criterion} does not exist; ACCEPTANCE has ${target.acceptance.length}`;
     return unknownRuns(f.runs);
+  }
+  if (kind === "plan") {
+    // Applied for real and rolled back, so a delta yagura would refuse after the session is refused now, while the agent can fix it.
+    const rollback = new Error("dry run");
+    try {
+      db.transaction(() => {
+        applyDelta(db, unit.projectId, data as RecordData<"plan">, null);
+        throw rollback;
+      })();
+    } catch (e) {
+      if (e instanceof PlanRejected) return e.message;
+      if (e !== rollback) throw e;
+    }
   }
   if (kind === "ruling" || kind === "amendment") {
     const n = waveThreadCount(db, unit.id);

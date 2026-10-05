@@ -416,15 +416,15 @@ async function engine(role) {
     const repo = /^## CODE[^\n]*\n- ([\w-]+):/m.exec(brief)[1];
     const unit = (key, write) => ({ key, repo, goal: `write ${key}`, write: [write], accept: [`${key} file exists`], verify: "true", playbook: "feature" });
     const disagreed = [...brief.matchAll(/^- D(\d+) on U\d+/gm)].map((m) => Number(m[1]));
-    if (disagreed.length)
-      return finish(
-        "Plan:\n```json\n" +
-          JSON.stringify({ add: disagreed.map((n) => ({ ...unit(`fix-d${n}`, `app/fix${n}/**`), disagreement: n })), summary: "fix forward" }) +
-          "\n```",
-      );
-    const delta = !workRows.length
-      ? { add: [unit("a", "app/a/**"), unit("b", "app/b/**"), unit("c", "app/a/extra/**")], summary: "three units" }
-      : { done: workRows.every((s) => s === "landed"), summary: workRows.every((s) => s === "landed") ? "all landed" : "waiting" };
+    const delta = disagreed.length
+      ? { add: disagreed.map((n) => ({ ...unit(`fix-d${n}`, `app/fix${n}/**`), disagreement: n })), summary: "fix forward" }
+      : !workRows.length
+        ? { add: [unit("a", "app/a/**"), unit("b", "app/b/**"), unit("c", "app/a/extra/**")], summary: "three units" }
+        : { done: workRows.every((s) => s === "landed"), summary: workRows.every((s) => s === "landed") ? "all landed" : "waiting" };
+    if (canRecord()) {
+      record([["plan", "--json", JSON.stringify(delta)]]);
+      return finish(`Plan: ${delta.summary}.\n\n\`\`\`json\n{"add": [{"key": "decoy"}]}\n\`\`\``);
+    }
     return finish("Plan:\n```json\n" + JSON.stringify(delta) + "\n```");
   }
   if (role === "pack") {
