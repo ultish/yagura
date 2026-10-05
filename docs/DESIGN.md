@@ -66,7 +66,7 @@ draft → ready → running → handed_off ─┬→ verifying → verified → 
           └──────── blocked (gate open) ──── abandoned
 ```
 
-Transitions are daemon-only. Agents never set state; they produce handoffs, and the daemon classifies them. A work attempt that skipped a required skill of its role (e.g. `pstack:poteto-mode` for workers) is rejected with a note naming the skills, even if its change is good; `method.enforce_required_skills` switches this off.
+Transitions are daemon-only. Agents never set state; they produce handoffs, and the daemon classifies them. A work attempt that skipped a required skill of its role (for workers: `pstack:poteto-mode`, `pstack:principle-prove-it-works`, and `pstack:principle-test-behavior-not-implementation`; a worker writes the proving test first, and the verifier runs that test itself on trunk and head instead of taking the worker's word) is rejected with a note naming the skills, even if its change is good; `method.enforce_required_skills` switches this off.
 
 ## 4. Architecture
 

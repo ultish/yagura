@@ -95,8 +95,12 @@ describe("verify pack", () => {
   });
 
   it("reports required skills a role did not load", () => {
-    expect(missingSkills("worker", ["yagura:yagura-worker"])).toEqual(["pstack:poteto-mode"]);
-    expect(missingSkills("worker", ["yagura-worker", "pstack:poteto-mode"])).toEqual([]);
+    expect(missingSkills("worker", ["yagura:yagura-worker"])).toEqual([
+      "pstack:poteto-mode",
+      "pstack:principle-prove-it-works",
+      "pstack:principle-test-behavior-not-implementation",
+    ]);
+    expect(missingSkills("worker", ["yagura-worker", "poteto-mode", "principle-prove-it-works", "principle-test-behavior-not-implementation"])).toEqual([]);
     expect(missingSkills("planner", [])).toEqual(["yagura:yagura-planner"]);
     expect(missingSkills("pack", [])).toEqual(["yagura:yagura-pack"]);
     expect(missingSkills("rebase", [])).toEqual(["yagura:yagura-rebase"]);

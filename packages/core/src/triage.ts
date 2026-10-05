@@ -354,7 +354,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
       timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
       forbidden: ["no git push, rebase, merge, or branch switching", "nothing outside SCOPE", "no reply to reviewers yourself; yagura posts the replies"],
       method:
-        "Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool (required) and follow its bug-fix playbook for each thread, proving the fault with a failing check first.",
+        "Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode, pstack:principle-prove-it-works, and pstack:principle-test-behavior-not-implementation with the Skill tool (all required) and follow the bug-fix playbook for each thread, proving the fault with a failing check first.",
       report: HANDOFF_TEMPLATE,
       standing: standingFor(db, project.id, "worker"),
     });

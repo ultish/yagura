@@ -75,7 +75,12 @@ describe("runWorkUnit", () => {
     const { unit, attempt, paths } = await run("success");
     expect(unit.state).toBe("verifying");
     expect(getUnitBySeq(db, project, 2)).toMatchObject({ type: "verify", state: "ready", targetUnitId: unit.id });
-    expect(attempt.skills).toEqual(["yagura:yagura-worker", "pstack:poteto-mode"]);
+    expect(attempt.skills).toEqual([
+      "yagura:yagura-worker",
+      "pstack:poteto-mode",
+      "pstack:principle-prove-it-works",
+      "pstack:principle-test-behavior-not-implementation",
+    ]);
     expect(attempt.missingSkills).toEqual([]);
     expect(attempt).toMatchObject({
       state: "handed_off",
@@ -94,7 +99,7 @@ describe("runWorkUnit", () => {
       readFileSync(paths.log(project, 1, 1), "utf8")
         .trim()
         .split("\n"),
-    ).toHaveLength(6);
+    ).toHaveLength(8);
     expect(await git(["log", "-1", "--format=%s"], { cwd: attempt.worktreePath! })).toBe("fake agent work");
     expect(await git(["diff", "--name-only", attempt.baseSha!, "HEAD"], { cwd: attempt.worktreePath! })).toBe("app/orders.py");
     expect(await git(["status", "--porcelain"], { cwd: attempt.worktreePath! })).toBe("");
@@ -186,9 +191,14 @@ describe("runWorkUnit", () => {
 
   it("rejects an otherwise good attempt that skipped required skills, with a note for the retry", async () => {
     const { unit, attempt } = await run("noskills");
-    expect(attempt.missingSkills).toEqual(["yagura:yagura-worker", "pstack:poteto-mode"]);
+    expect(attempt.missingSkills).toEqual([
+      "yagura:yagura-worker",
+      "pstack:poteto-mode",
+      "pstack:principle-prove-it-works",
+      "pstack:principle-test-behavior-not-implementation",
+    ]);
     expect(unit.state).toBe("rejected");
-    expect(unit.notes[0]).toMatch(/skipped required skills \(yagura:yagura-worker, pstack:poteto-mode\)/);
+    expect(unit.notes[0]).toMatch(/skipped required skills \(yagura:yagura-worker, pstack:poteto-mode, /);
   });
 
   it("lets a skipped skill through when enforcement is switched off", async () => {

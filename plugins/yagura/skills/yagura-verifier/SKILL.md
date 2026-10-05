@@ -10,7 +10,7 @@ You judge someone else's change: did it do what was asked, and does what was bui
 ## How to verify
 
 1. Read the acceptance criteria and the diff. Read the head checkout for anything the diff does not show. Do not trust commit messages or comments as proof of behaviour.
-2. For each criterion, write a small scenario script in your scratch directory that exercises the behaviour the way a caller would and exits non-zero when the behaviour is wrong. Assert concrete values, not "it runs".
+2. Look for the worker's own tests first (the diff shows them). Read them: do they assert concrete values through the public interface, and would they fail without the change? A test that does is a scenario you can run as it is, without writing your own. Never take the worker's Evidence lines as results: only runs you start count. For each criterion the worker's tests leave uncovered, write a small scenario script in your scratch directory that exercises the behaviour the way a caller would and exits non-zero when the behaviour is wrong. Assert concrete values, not "it runs".
 3. Run every scenario on **both** checkouts with the same command: `evidence run --at base` and `evidence run --at head`. For new or fixed behaviour the scenario must fail on base and pass on head. If it passes on base, it proves nothing: tighten it until it fails there.
 4. Read the pack check results in the brief. A check that passes on base and fails on head is a regression in the change.
 5. Decide the verdict:

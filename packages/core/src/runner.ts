@@ -198,7 +198,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     method:
       (isPack
         ? "Load the yagura-pack skill first and follow it."
-        : `Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and follow its ${unit.playbook ?? "feature"} playbook. Both are required: an attempt that does not load them is rejected.`) +
+        : `Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and follow its ${unit.playbook ?? "feature"} playbook. Then load pstack:principle-prove-it-works and pstack:principle-test-behavior-not-implementation, and write the test that proves the change before the change itself. All four are required: an attempt that does not load them is rejected.`) +
       (unit.scaffold ? " This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more." : "") +
       skillMethod(projectSkills),
     report: HANDOFF_TEMPLATE,

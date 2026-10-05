@@ -50,7 +50,7 @@ async function main() {
   emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
   const skills =
     {
-      worker: ["yagura:yagura-worker", "pstack:poteto-mode"],
+      worker: ["yagura:yagura-worker", "pstack:poteto-mode", "pstack:principle-prove-it-works", "pstack:principle-test-behavior-not-implementation"],
       pack: ["yagura:yagura-pack"],
       rebase: ["yagura:yagura-rebase"],
       "review-triage": ["yagura:yagura-review-triage"],
