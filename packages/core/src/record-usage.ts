@@ -7,7 +7,7 @@ export const RECORD_USAGE: Record<RecordCommand, string> = {
     'yagura handoff <success|partial|blocked> [--tier <tier>] --did "…" [--did "…"] [--evidence "…"] [--outside-scope "<path>=<why>"] [--for-others "…"] [--decision "…"] [--note "…"] [--follow-up "…"] [--finding "…"]',
   verdict: 'yagura verdict <tier> --runs <id,…> [--pack-change "…"] [--decision "…"] [--note "…"]',
   finding: 'yagura finding <criterion number> <met|unmet> --runs <id,…> [--note "…"]',
-  rule: 'yagura rule T<n> <fix|dismiss|ask> --reason "…"',
+  rule: 'yagura rule T<n> <fix|dismiss|ask> --reason "…"   (an ask also takes --changes-acceptance yes|no)',
   amend:
     'yagura amend T<n> replace --from "<criterion exactly as ACCEPTANCE words it>" --to "…" | add --text "…" | remove --text "…" | verify --command "…" | clear',
   "review-finding": 'yagura review-finding <blocking|should|nit> <path>[:<line>] --text "…"',

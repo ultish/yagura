@@ -279,7 +279,8 @@ function triage() {
     record([
       ...lines.map((l) => {
         const [, n, decision, reason] = /^- T(\d+): (fix|asked|dismissed) — (.+)$/.exec(l);
-        return ["rule", `T${n}`, word[decision], "--reason", reason];
+        const changes = word[decision] === "ask" ? ["--changes-acceptance", amendments.some((a) => a.startsWith(`- T${n}:`)) ? "yes" : "no"] : [];
+        return ["rule", `T${n}`, word[decision], "--reason", reason, ...changes];
       }),
       ...amendments.map((a) => ["amend", /^- (T\d+)/.exec(a)[1], "replace", "--from", accept, "--to", "celebration emojis are part of the output"]),
     ]);

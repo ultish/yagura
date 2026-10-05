@@ -122,7 +122,10 @@ describe("agent records", () => {
     const s = session(wave, "review-triage");
     expect((await s.call("rule", "T3", "fix", "--reason", "x")).output).toMatch(/T3 does not exist; this wave has 2 threads \(T1–T2\)/);
     expect((await s.call("rule", "T1", "ask", "--reason", "emojis contradict criterion 1")).output).toMatch(
-      /recorded ruling T1\nstill to record:\n- no ruling for T2/,
+      /an ask must say whether it changes what the unit must do/,
+    );
+    expect((await s.call("rule", "T1", "ask", "--reason", "emojis contradict criterion 1", "--changes-acceptance", "yes")).output).toMatch(
+      /recorded ruling T1\nstill to record:\n- no ruling for T2[^\n]*\n- T1 changes what the unit must do but has no amendment/,
     );
     expect((await s.call("amend", "T1", "replace", "--from", "no such criterion", "--to", "x")).output).toMatch(
       /no acceptance criterion reads "no such criterion"/,

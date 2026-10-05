@@ -47,7 +47,15 @@ export const VerdictRecord = z
   .object({ tier: z.enum([...PASS_TIERS, ...FAIL_TIERS]), runs: runIds, packChanges: lines, decisions: lines, notes: lines })
   .strict();
 export const FindingRecord = z.object({ criterion: z.number().int().positive(), met: z.boolean(), runs: runIds, note: text.nullable().default(null) }).strict();
-export const RulingRecord = z.object({ thread: threadNo, decision: z.enum(["fix", "dismiss", "ask"]), reason: text }).strict();
+// An ask must say whether doing what the comment asks would change what the unit must do; yes makes the amendment a required record,
+// so the developer's one answer can approve the change itself.
+export const RulingRecord = z
+  .object({ thread: threadNo, decision: z.enum(["fix", "dismiss", "ask"]), reason: text, changesAcceptance: z.boolean().nullable().default(null) })
+  .strict()
+  .refine((r) => r.decision !== "ask" || r.changesAcceptance !== null, {
+    message: "an ask must say whether it changes what the unit must do: --changes-acceptance yes|no",
+    path: ["changesAcceptance"],
+  });
 const AmendOpRecord = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("replace"), from: text, to: text }).strict(),
   z.object({ kind: z.literal("add"), text }).strict(),
@@ -176,10 +184,20 @@ export function missingRecords(db: Db, attemptId: AttemptId, role: Role): string
       return has("verdict") ? [] : ["no verdict: run `yagura verdict <tier> --runs <id,…>` (and `yagura finding` for each criterion)"];
     case "review-triage": {
       const unit = getUnit(db, getAttempt(db, attemptId).unitId);
-      const ruled = new Set(listRecords(db, attemptId, "ruling").map((r) => r.data.thread));
-      return Array.from({ length: waveThreadCount(db, unit.id) }, (_, i) => i + 1)
-        .filter((t) => !ruled.has(t))
-        .map((t) => `no ruling for T${t}: run \`yagura rule T${t} <fix|dismiss|ask> --reason "…"\``);
+      const rulings = listRecords(db, attemptId, "ruling").map((r) => r.data);
+      const ruled = new Set(rulings.map((r) => r.thread));
+      const amended = new Set(listRecords(db, attemptId, "amendment").map((r) => r.data.thread));
+      return [
+        ...Array.from({ length: waveThreadCount(db, unit.id) }, (_, i) => i + 1)
+          .filter((t) => !ruled.has(t))
+          .map((t) => `no ruling for T${t}: run \`yagura rule T${t} <fix|dismiss|ask> --reason "…"\``),
+        ...rulings
+          .filter((r) => r.changesAcceptance && !amended.has(r.thread))
+          .map(
+            (r) =>
+              `T${r.thread} changes what the unit must do but has no amendment: run \`yagura amend T${r.thread} replace --from "<criterion exactly as ACCEPTANCE words it>" --to "<the concrete new criterion>"\` (and verify --command when the old VERIFY would fail)`,
+          ),
+      ];
     }
     case "manager":
       return has("decision") ? [] : [`no decision: run \`yagura decide <${MENU.join("|")}> --reason "…"\``];

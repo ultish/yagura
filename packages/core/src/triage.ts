@@ -165,7 +165,7 @@ const TRIAGE_REPORT = recordInstructions(
   ["rule", "amend"],
   [
     "- Rule on every thread, once: fix (say exactly what a worker must change in the code), dismiss (the concrete disproof yagura posts as the reply), or ask (the question only the developer can decide). You change nothing: a worker makes the changes you rule necessary.",
-    "- Amend only when a reviewer's comment would change what the unit must do, so that ACCEPTANCE no longer holds: rule that thread ask, and record each change with yagura amend (replace names a criterion exactly as ACCEPTANCE words it; add verify only when the old VERIFY would fail the amended criteria). Nothing is applied until the developer approves.",
+    "- Every ask says --changes-acceptance yes or no: would doing what the comment asks make a criterion in ACCEPTANCE false, or the VERIFY command fail? When yes, record the change with yagura amend in the same session (replace names a criterion exactly as ACCEPTANCE words it and gives the concrete new one; add verify when the old VERIFY would fail): the developer approves the change with their one answer. Nothing is applied until they do.",
   ],
 );
 

@@ -395,7 +395,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       at: last.startedAt ?? t.createdAt,
       actor: t.type === "review-triage" ? "review-triage" : "rebase",
       who: t.type === "review-triage" ? "Arbiter" : "Rebase",
-      attempt: attemptOf(t, last),
+      attempt: attemptOf(t, t.type === "review-triage" && judge ? judge : last),
       status: { text: "done", tone: "pine" },
       body: null,
       lines,
@@ -670,12 +670,15 @@ function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, ha
   const rows: StoryAgent[] = [];
   const add = (u: Unit, a: Attempt, shared: boolean) => {
     if (a.harness.startsWith("yagura-") || !a.startedAt) return;
+    // The try a review fix is recorded as on the unit it fixes ran no agent; its worker is listed under the triage unit.
+    if (events.some((e) => e.type === "triage.fix_recorded" && e.attempt_id === a.id)) return;
     const h = a.state === "handed_off" ? handoffOf(u, a) : null;
     const rejected = events.find((e) => e.unit_id === u.id && e.type === "unit.state" && e.data.to === "rejected" && sameAttempt(events, e, a.n));
     // A triage or rebase session counts only if its unit finished on it; otherwise say what stopped it. While the unit is still
     // running (the arbiter has ruled and its fix worker is at work) nothing has stopped yet.
     const finishes = u.type === "review-triage" || u.type === "rebase";
-    const next = listAttempts(db, u.id).find((x) => x.startedAt && x.startedAt > a.startedAt!)?.startedAt ?? "9999";
+    // A triage unit's arbiter and its fix worker are one run of the unit, so the arbiter's run ends with the unit's, not when the worker starts.
+    const next = u.type === "review-triage" ? "9999" : (listAttempts(db, u.id).find((x) => x.startedAt && x.startedAt > a.startedAt!)?.startedAt ?? "9999");
     const finished =
       finishes && events.some((e) => e.unit_id === u.id && (e.type === "triage.done" || e.type === "rebase.done") && e.ts >= a.startedAt! && e.ts < next);
     const failedAfter = finishes && !finished && u.state !== "running" ? { data: { reason: failReason(events, u, a) } } : undefined;

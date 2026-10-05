@@ -35,6 +35,7 @@ const OPTIONS = {
   runs: { type: "string" },
   "pack-change": { type: "string", multiple: true },
   reason: { type: "string" },
+  "changes-acceptance": { type: "string" },
   from: { type: "string" },
   to: { type: "string" },
   text: { type: "string" },
@@ -102,7 +103,9 @@ function build(db: Db, attemptId: AttemptId, command: Exclude<RecordCommand, "ch
     case "rule": {
       const thread = threadOf(pos[0]);
       if (!thread) return { problem: `name the thread as T1, T2, …, not "${pos[0] ?? ""}"` };
-      return { key: `T${thread}`, data: { thread, decision: pos[1], reason: v.reason } };
+      const changes = v["changes-acceptance"];
+      if (changes !== undefined && changes !== "yes" && changes !== "no") return { problem: `--changes-acceptance takes yes or no, not "${changes}"` };
+      return { key: `T${thread}`, data: { thread, decision: pos[1], reason: v.reason, changesAcceptance: changes === undefined ? null : changes === "yes" } };
     }
     case "amend": {
       const thread = threadOf(pos[0]);

@@ -11,7 +11,7 @@ Reviewers left threads on a pull request for a verified unit. You are the arbite
 
 yagura reads only what you record with its commands, never your final message:
 
-- `yagura rule T1 fix --reason "…"`, `yagura rule T2 dismiss --reason "…"`, `yagura rule T3 ask --reason "…"`: one ruling per thread. Run it again to change a ruling.
+- `yagura rule T1 fix --reason "…"`, `yagura rule T2 dismiss --reason "…"`, `yagura rule T3 ask --reason "…" --changes-acceptance yes|no`: one ruling per thread. Run it again to change a ruling.
 - `yagura amend T3 replace --from "<criterion exactly as ACCEPTANCE words it>" --to "<what it becomes>"`, `yagura amend T3 add --text "…"`, `yagura amend T3 remove --text "…"`, `yagura amend T3 verify --command "<new VERIFY command>"`, `yagura amend T3 clear`: the exact change to what the unit must do, only for a thread you rule `ask`.
 - `yagura check-done` tells you what you still have to record.
 
@@ -19,7 +19,7 @@ Each command checks what you give it at once (the thread exists, the criterion i
 
 ## First, for every thread
 
-Read ACCEPTANCE and VERIFY before you judge the thread. Ask: if a worker did what this comment asks, would any criterion become false, or would the VERIFY command fail? A comment can be mere taste and still be that: "add emojis to the greeting" is taste, but if a criterion says `shout('app') === 'HELLO, APP!'`, doing it breaks the criterion. Such a thread is never plain `fix` and never `dismiss`: it is an amendment (below). Rule it `ask`, name the criterion it contradicts in the reason, and record the amendment. Record everything the change needs at once: if the new criterion would make the VERIFY command fail, add the `verify` change beside the `replace`, because the developer is asked a single time.
+Read ACCEPTANCE and VERIFY before you judge the thread. Ask: if a worker did what this comment asks, would any criterion become false, or would the VERIFY command fail? A comment can be mere taste and still be that: "add emojis to the greeting" is taste, but if a criterion says `shout('app') === 'HELLO, APP!'`, doing it breaks the criterion. Such a thread is never plain `fix` and never `dismiss`: it is an amendment (below). Rule it `ask --changes-acceptance yes`, name the criterion it contradicts in the reason, and record the amendment; yagura will not let you finish without it. An ask that changes nothing the unit must do (a trade-off, a question of intent) says `--changes-acceptance no`. Record everything the change needs at once: if the new criterion would make the VERIFY command fail, add the `verify` change beside the `replace`, because the developer is asked a single time.
 
 ## Rules that override pstack
 
