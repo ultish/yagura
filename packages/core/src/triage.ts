@@ -283,7 +283,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const rulingFinal = ruled.final;
   const rulingHandoff = rulingFinal && !rulingFinal.isError && !ruled.timedOut ? parseHandoff(rulingFinal.text) : null;
   if (rulingHandoff) write(paths.handoff(project.id, unit.seq, judgeAttempt.n), rulingFinal!.text);
-  const decisions = rulingHandoff ? parseDecisions(rulingHandoff.raw, rows.length) : new Map();
+  const decisions = rulingHandoff ? parseDecisions(rulingFinal!.text, rows.length) : new Map();
   const missing = rows.map((_, i) => i + 1).filter((i) => !decisions.has(i));
   const judgeProblem = !rulingHandoff
     ? "the arbiter ended without a handoff"
@@ -302,7 +302,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   });
 
   // A trusted author's requirement change is approved by the developer's standing setting: it is applied now, so the worker builds to it.
-  const amendments = rulingHandoff ? parseAmendments(rulingHandoff.raw, rows.length) : new Map();
+  const amendments = rulingHandoff ? parseAmendments(rulingFinal!.text, rows.length) : new Map();
   const autoApplied = new Set<number>();
   if (!judgeProblem)
     for (const [i, row] of rows.entries()) {

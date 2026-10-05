@@ -194,9 +194,10 @@ function triage() {
         .filter((l) => l.includes("asked") || l.includes("make the greeting celebrate"))
         .map((l) => `- ${/^- (T\d+)/.exec(l)[1]}: replace: ${accept} => celebration emojis are part of the output`)
     : [];
-  finish(
-    `## Status\nsuccess\n\n## Verification\nunit-verified\n\n## Decisions\n${lines.join("\n")}\n${amendments.length ? `\n## Amendments\n${amendments.join("\n")}\n` : ""}`,
-  );
+  const sections = `## Decisions\n${lines.join("\n")}\n${amendments.length ? `\n## Amendments\n${amendments.join("\n")}\n` : ""}`;
+  const status = "## Status\nsuccess\n\n## Verification\nunit-verified\n\n";
+  // FAKE_TRIAGE_SECTIONS_FIRST: a real model sometimes writes the rulings ahead of the handoff.
+  finish(process.env.FAKE_TRIAGE_SECTIONS_FIRST ? `${sections}\n${status}` : `${status}${sections}`);
 }
 
 // The worker the arbiter's rulings go to: it changes the code for each thread the arbiter ruled a fix, and commits.

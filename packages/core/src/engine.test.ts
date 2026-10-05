@@ -115,6 +115,7 @@ describe("Engine", () => {
     afterEach(() => {
       delete process.env.FAKE_REVIEW;
       delete process.env.FAKE_TRIAGE_AMEND;
+      delete process.env.FAKE_TRIAGE_SECTIONS_FIRST;
     });
 
     it("turns a blocking finding into a triage fix, verifies and re-reviews the fix, then lands", async () => {
@@ -160,6 +161,7 @@ describe("Engine", () => {
       const { listAmendments } = await import("./amend.js");
       process.env.FAKE_REVIEW = "blocking:please fix: add celebration emojis";
       process.env.FAKE_TRIAGE_AMEND = "1";
+      process.env.FAKE_TRIAGE_SECTIONS_FIRST = "1";
       await run();
       const originals = new Map(units("work").map((u) => [u.id, u.acceptance]));
       const asks = () => listGates(db, project, "open").filter((g) => g.kind === "review");
