@@ -10,6 +10,8 @@ export type Step =
       at: number | null;
       name: string;
       summary: string;
+      // The whole input, shown when the step is opened; null where the summary already says it all (a path).
+      full: string | null;
       diff: { old: string; new: string } | null;
       output: string | null;
       isError: boolean;
@@ -33,7 +35,7 @@ export function shortPath(p: string): string {
   return m ? p.slice(m.index + m[0].length) : p.replace(/^\/(?:Users|home)\/[^/]+\//, "~/");
 }
 
-function summarize(name: string, input: unknown): { summary: string; diff: { old: string; new: string } | null } {
+function summarize(name: string, input: unknown): { summary: string; full: string | null; diff: { old: string; new: string } | null } {
   const i = (input ?? {}) as Record<string, unknown>;
   const str = (v: unknown) => (typeof v === "string" ? v : "");
   switch (name) {
@@ -43,23 +45,28 @@ function summarize(name: string, input: unknown): { summary: string; diff: { old
           str(i.command)
             .split("\n")[0]!
             .replace(/\/\S*\/(worktrees\/\S+?\/)/g, "") + (str(i.command).includes("\n") ? " …" : ""),
+        full: str(i.command),
         diff: null,
       };
     case "Read":
     case "Write":
     case "NotebookEdit":
-      return { summary: shortPath(str(i.file_path)), diff: null };
+      return { summary: shortPath(str(i.file_path)), full: null, diff: null };
     case "Edit":
     case "MultiEdit":
-      return { summary: shortPath(str(i.file_path)), diff: typeof i.old_string === "string" ? { old: str(i.old_string), new: str(i.new_string) } : null };
+      return {
+        summary: shortPath(str(i.file_path)),
+        full: null,
+        diff: typeof i.old_string === "string" ? { old: str(i.old_string), new: str(i.new_string) } : null,
+      };
     case "Grep":
     case "Glob":
-      return { summary: `${str(i.pattern)}${i.path ? ` in ${shortPath(str(i.path))}` : ""}`, diff: null };
+      return { summary: `${str(i.pattern)}${i.path ? ` in ${shortPath(str(i.path))}` : ""}`, full: null, diff: null };
     case "Task":
     case "Agent":
-      return { summary: str(i.description) || str(i.prompt).slice(0, 80), diff: null };
+      return { summary: str(i.description) || str(i.prompt).slice(0, 80), full: str(i.prompt) || null, diff: null };
     default:
-      return { summary: JSON.stringify(input ?? {}).slice(0, 120), diff: null };
+      return { summary: JSON.stringify(input ?? {}).slice(0, 120), full: JSON.stringify(input ?? {}, null, 2), diff: null };
   }
 }
 
@@ -103,7 +110,18 @@ export function buildTimeline(lines: LogLine[]): Timeline {
             break;
           }
           const s = summarize(e.name, e.input);
-          const step: Step = { kind: "tool", id, at: line.at, name: e.name, summary: s.summary, diff: s.diff, output: null, isError: false, children: [] };
+          const step: Step = {
+            kind: "tool",
+            id,
+            at: line.at,
+            name: e.name,
+            summary: s.summary,
+            full: s.full,
+            diff: s.diff,
+            output: null,
+            isError: false,
+            children: [],
+          };
           calls.set(e.id, step);
           place(step, e.parentId);
           t.lastActivity = `${e.name} ${s.summary}`.slice(0, 120);

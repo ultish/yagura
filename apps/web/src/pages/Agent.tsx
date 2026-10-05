@@ -174,6 +174,24 @@ function StepRow({ step, start, live }: { step: Step; start: number | null; live
               </span>
             )}
           </summary>
+          {step.full && (
+            <pre
+              className="mono"
+              style={{
+                fontSize: 12,
+                margin: "6px 0 0",
+                padding: "6px 10px",
+                borderLeft: "2px solid var(--btnline)",
+                background: "var(--bg)",
+                maxHeight: 320,
+                overflow: "auto",
+                whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+              }}
+            >
+              {step.full}
+            </pre>
+          )}
           {step.diff && (
             <div
               className="mono"
@@ -361,7 +379,7 @@ function AgentFlow({ d }: { d: AttemptDetail }) {
 
 function statusOf(d: AttemptDetail, now: number, lastActivity: string | null): { text: string; tone: string } {
   const a = d.attempt;
-  const lower = roleOf(d.unit.type, d.attempt.harness, d.attempt.n);
+  const lower = roleOf(d.unit.type, d.attempt.harness, d.attempt.n, d.attempt.role);
   const role = lower[0]!.toUpperCase() + lower.slice(1);
   const took = a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "";
   switch (a.state) {
@@ -420,7 +438,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
     );
   const a = d.attempt;
   const u = d.unit;
-  const role = roleOf(u.type, d.attempt.harness, d.attempt.n);
+  const role = roleOf(u.type, d.attempt.harness, d.attempt.n, d.attempt.role);
   const byYagura = d.recordedFrom ? (
     <>
       yagura recorded the review fixes that <Link to={`/a/${d.recordedFrom.id}`}>A{d.recordedFrom.agentNo}</Link> (a worker, in U{d.recordedFrom.unitSeq})

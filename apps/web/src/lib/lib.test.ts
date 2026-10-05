@@ -38,6 +38,7 @@ describe("buildTimeline", () => {
     expect(t.startedAt).toBe(1000);
     expect(t.steps.map((s) => s.kind)).toEqual(["skill", "tool", "tool", "final"]);
     expect(t.steps[1]).toMatchObject({ name: "Bash", summary: "python3 -m unittest …", output: "OK", at: 3000 });
+    expect(t.steps[1]!.kind === "tool" && t.steps[1]!.full).toMatch(/^python3 -m unittest\n/);
     const agent = t.steps[2] as Extract<(typeof t.steps)[number], { kind: "tool" }>;
     expect(agent.children.map((c) => (c.kind === "tool" ? c.summary : c.kind))).toEqual(["app/x.py"]);
     expect(t.lastActivity).toBe("Read app/x.py");
