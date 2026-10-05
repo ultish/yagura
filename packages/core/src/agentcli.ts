@@ -5,12 +5,14 @@ import { promisify } from "node:util";
 import type { Bootstrap } from "./config.js";
 import type { RepoId } from "./domain.js";
 import { ensureMirror } from "./git.js";
+import { RECORD_COMMANDS } from "./record-cli.js";
 import { layout } from "./paths.js";
 import { getRepo, type Db } from "./store.js";
 
-// Agents reach the CLI through the shim on their PATH. They may look things up and record evidence; every change to yagura goes
-// through their handoff or records block, never the CLI. Fails closed: anything not recognised as a read is refused.
+// Agents reach the CLI through the shim on their PATH. They may look things up, record evidence, and record their own work with the
+// record commands (§27), which write only to their own attempt. Fails closed: anything else not recognised as a read is refused.
 const READS: Record<string, (args: string[]) => boolean> = {
+  ...Object.fromEntries(RECORD_COMMANDS.map((c) => [c, () => true])),
   show: () => true,
   logs: () => true,
   trace: () => true,
@@ -29,7 +31,7 @@ export function agentRefusal(argv: string[], env: NodeJS.ProcessEnv): string | n
   if (!role) return null;
   const [command = "", ...args] = argv;
   if (READS[command]?.(args)) return null;
-  return `yagura ${[command, ...args].join(" ").slice(0, 80)}: refused for the ${role} role. Agents may only read yagura (show, logs, trace, gates, settings, thread list|show|search|mentions, env values|presets|notes, template list, project skills, git); changes go through your handoff or your records block.\n`;
+  return `yagura ${[command, ...args].join(" ").slice(0, 80)}: refused for the ${role} role. Agents may only read yagura (show, logs, trace, gates, settings, thread list|show|search|mentions, env values|presets|notes, template list, project skills, git); record your work with the record commands (handoff, verdict, finding, rule, amend, review-finding, decide, plan).\n`;
 }
 
 export const GIT_READS = ["log", "show", "ls-tree", "diff", "grep", "blame"] as const;

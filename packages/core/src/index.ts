@@ -14,6 +14,8 @@ export * from "./verdict.js";
 export * from "./evidence.js";
 export * from "./evidence-cli.js";
 export * from "./agentcli.js";
+export * from "./records.js";
+export * from "./record-cli.js";
 export * from "./leases.js";
 export * from "./pack.js";
 export * from "./land.js";

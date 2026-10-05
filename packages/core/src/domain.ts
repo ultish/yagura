@@ -150,6 +150,13 @@ export type DepKind = (typeof DEP_KINDS)[number];
 export const ATTEMPT_STATES = ["queued", "running", "handed_off", "failed", "stopped"] as const;
 export type AttemptState = (typeof ATTEMPT_STATES)[number];
 
+// What an agent records through its yagura commands (§27); the engine reads these, never the final message.
+export const RECORD_KINDS = ["handoff", "verdict", "finding", "ruling", "amendment", "review-finding", "decision", "plan"] as const;
+export type RecordKind = (typeof RECORD_KINDS)[number];
+
+export const SEVERITIES = ["blocking", "should", "nit"] as const;
+export type Severity = (typeof SEVERITIES)[number];
+
 export const HANDOFF_STATUSES = ["success", "partial", "blocked"] as const;
 export type HandoffStatus = (typeof HANDOFF_STATUSES)[number];
 
@@ -381,6 +388,8 @@ export interface Handoff {
   decisions: string;
   outsideScope: string;
   raw: string;
+  // Set when the handoff came from recorded commands (§27): the runs the verifier cited, as stored ids rather than text.
+  citedRunIds?: number[];
 }
 
 export type HarnessEvent =

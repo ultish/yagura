@@ -35,8 +35,8 @@ import {
 import { listDecisions, threadsForProject } from "./threads.js";
 import { freshThreads, isReviewThread, listThreadRows, queueTriage } from "./triage.js";
 
-export const SEVERITIES = ["blocking", "should", "nit"] as const;
-export type Severity = (typeof SEVERITIES)[number];
+import { SEVERITIES, type Severity } from "./domain.js";
+export { SEVERITIES, type Severity };
 export interface Finding {
   n: number;
   severity: Severity;

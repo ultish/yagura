@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import {
+  RECORD_COMMANDS,
+  recordCli,
   messagesMentioning,
   addMessage,
   applyProposal,
@@ -175,6 +177,11 @@ const refusal = agentRefusal(process.argv.slice(2), process.env);
 if (refusal) {
   process.stderr.write(refusal);
   process.exit(2);
+}
+if ((RECORD_COMMANDS as readonly string[]).includes(command ?? "")) {
+  const result = await recordCli(process.argv.slice(2));
+  process.stdout.write(result.output);
+  process.exit(result.code);
 }
 if (command === "evidence") {
   const result = await evidenceCli(rest);

@@ -1,0 +1,6 @@
+{
+  "description": "Before an agent in a yagura session stops, check that it recorded what its role must record (§27).",
+  "hooks": {
+    "Stop": [{ "hooks": [{ "type": "command", "command": "yagura check-done --hook" }] }]
+  }
+}

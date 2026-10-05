@@ -584,6 +584,21 @@ CREATE TABLE unit_amendments (
 CREATE INDEX unit_amendments_unit ON unit_amendments (unit_id);
 `,
   },
+  {
+    version: 40,
+    sql: `
+CREATE TABLE agent_records (
+  id INTEGER PRIMARY KEY,
+  attempt_id INTEGER NOT NULL REFERENCES attempts (id),
+  kind TEXT NOT NULL CHECK (kind IN ('handoff', 'verdict', 'finding', 'ruling', 'amendment', 'review-finding', 'decision', 'plan')),
+  key TEXT NOT NULL DEFAULT '',
+  data_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (attempt_id, kind, key)
+);
+CREATE INDEX agent_records_attempt ON agent_records (attempt_id);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;
