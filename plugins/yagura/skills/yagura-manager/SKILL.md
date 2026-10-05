@@ -27,4 +27,4 @@ You may instead be woken because a worker's handoff left a note while other unit
 
 ## The answer
 
-End your final message with the handoff the brief's REPORT shows: `## Status`, then `## Decision` with `action:` and `reason:` lines (and `note:` or `question:` when the action takes one). For `split`, add the ```json plan delta block the brief describes. yagura checks the decision before acting; one it cannot use is recorded and yagura's fixed rules decide instead.
+Record your answer with `yagura decide <action> --reason "…"` (add `--note`, `--question`, or `--to` when the action takes one); yagura reads only that, never your final message. For `split`, first record the plan delta with `yagura plan --json '<delta>'`, on one line. Each command checks what you give it at once and says what to fix; `yagura check-done` says what is still missing. yagura checks the decision again before acting; one it cannot use is recorded and yagura's fixed rules decide instead. Then end with a short report in any form.

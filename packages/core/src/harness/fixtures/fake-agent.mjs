@@ -194,6 +194,14 @@ function manager() {
         }) +
         "\n```\n"
       : "";
+  if (canRecord()) {
+    const field = (k) => lines.find((l) => l.startsWith(`${k}: `))?.slice(k.length + 2);
+    const decide = ["decide", action, "--reason", field("reason")];
+    for (const k of ["note", "question", "to"]) if (field(k)) decide.push(`--${k}`, field(k));
+    const plan = action === "split" ? [["plan", "--json", delta.replace(/```json|```/g, "").trim()]] : [];
+    record([...plan, decide]);
+    return finish(`I chose ${action}.\n\n## Decision\naction: stop\n`);
+  }
   finish(`## Status\nsuccess\n\n## Decision\n${lines.join("\n")}\n${delta}`);
 }
 

@@ -31,7 +31,9 @@ import {
 } from "./store.js";
 import { WATCHMAN_DENIED_TOOLS } from "./watchman.js";
 import { watchmanGuardSettings } from "./watchman-guard.js";
-import { savedHandoff } from "./finish.js";
+import { ensureRecorded, savedHandoff, sessionReport } from "./finish.js";
+import { getRecord, noteFallback } from "./records.js";
+import { recordInstructions } from "./record-usage.js";
 
 export interface ManagerDecision {
   id: number;
@@ -393,7 +395,7 @@ ${
     : `## THE MENU (pick exactly one)
 - \`resume\`: the same worker session continues with the findings and your note. Only when resume is available above.
 - \`fresh\`: a new worker starts from trunk with your note. Use it when the old session went down a wrong path.
-- \`split\`: replace this unit with smaller ones. Add a \`\`\`json plan delta with only "add" (the new units); this unit is cancelled. Not possible when other units depend on it.
+- \`split\`: replace this unit with smaller ones. Record a plan delta with only "add" (the new units) with \`yagura plan --json\`; this unit is cancelled. Not possible when other units depend on it.
 - \`investigate\`: start an investigator, a worker that reads and runs things in a copy of the code, changes nothing, and reports findings. You are woken again with what it found, and decide then. Give \`question:\`, what it should find out. Use it when you cannot tell why the unit keeps failing.
 - \`planner\`: block the unit and hand it to the planner, with your reason. Use it when the plan is the problem.
 - \`ask\`: ask the developer; give a \`question:\`. They answer retry or stop.
@@ -401,20 +403,16 @@ ${
 }
 
 ## REPORT
-End your final message with:
-
-## Status
-success
-
-## Decision
-action: <one of the menu>
-reason: <one or two sentences the developer will read>
-note: <optional: what the next worker should do differently; for relay, what the other units should know>
-question: <only for ask and investigate>
-to: <only for relay: the U numbers>
+${recordInstructions(
+  ["decide", "plan"],
+  [
+    "- `yagura decide <action>` with the action from the menu and a --reason of one or two sentences the developer will read. Add --note for what the next worker should do differently (for relay, what the other units should know), --question for ask and investigate, and --to with the U numbers for relay.",
+    "- For split, record the plan delta first with `yagura plan --json '<delta>'` (one line of JSON), then `yagura decide split`.",
+  ],
+)}
 ${standing ? `\n## STANDING ORDERS\n${standing}\n` : ""}
 ## METHOD
-Load the yagura-manager skill first and follow it. You may read files and use read-only \`yagura\` commands; change nothing.
+Load the yagura-manager skill first and follow it. You may read files and use read-only \`yagura\` commands, and record your answer with \`yagura decide\` and \`yagura plan\`; change nothing.
 `;
 }
 
@@ -425,6 +423,7 @@ function applyDecision(
   manager: Unit,
   d: Extract<Decision, { ok: true }>,
   text: string,
+  attemptId: AttemptId,
 ): { problem: string | null; gateId: number | null } {
   const { db } = ctx;
   if (isNoteWake(manager) !== NOTE_ACTIONS.includes(d.action))
@@ -490,8 +489,10 @@ function applyDecision(
     case "split": {
       if (listDeps(db, target.projectId).some((x) => x.dependsOn === target.id && x.kind !== "scope-overlap"))
         return { problem: "other units depend on this one, so it cannot be split; send it to the project lead", gateId: null };
-      const extracted = extractDelta(text);
-      if (!extracted.ok) return { problem: extracted.reason, gateId: null };
+      const plan = getRecord(ctx.db, attemptId, "plan");
+      const extracted = plan ? ({ ok: true, delta: plan } as const) : extractDelta(text);
+      if (!plan) noteFallback(ctx.db, attemptId, "extractDelta", extracted.ok);
+      if (!extracted.ok) return { problem: `${extracted.reason} (record the split with yagura plan --json '<delta>')`, gateId: null };
       const delta = extracted.delta;
       if (!delta.add.length) return { problem: "a split must add at least one unit", gateId: null };
       if (delta.amend.length || delta.retry.length || delta.gates.length || delta.done || delta.cancel.some((c) => c.unit !== `U${target.seq}`))
@@ -558,16 +559,18 @@ export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<A
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, target: target.seq });
   updateAttempt(db, attempt.id, { state: "running", startedAt: now(), resumesAttemptId: resumeId ? previous!.id : null });
 
-  const ask = async (resume: string | undefined) => {
-    const prompt = managerBrief(db, ctx, unit, target, previous, Boolean(resume));
-    write(paths.brief(project.id, unit.seq, attempt.n), prompt);
+  // Its reads, plus the commands it records its answer with (§27).
+  const managerTools = [...setting("watchman.allowed_tools"), "Bash(yagura decide:*)", "Bash(yagura plan:*)", "Bash(yagura check-done:*)"];
+  const ask = async (resume: string | undefined, reminder?: string) => {
+    const prompt = reminder ?? managerBrief(db, ctx, unit, target, previous, Boolean(resume));
+    if (!reminder) write(paths.brief(project.id, unit.seq, attempt.n), prompt);
     let started = false;
     const base = attemptRecorder(db, {
       attempt,
       unit,
       projectId: project.id,
       role: "manager",
-      inheritedSkills: resume ? earlier.flatMap((a) => a.skills) : undefined,
+      inheritedSkills: reminder ? getAttempt(db, attempt.id).skills : resume ? earlier.flatMap((a) => a.skills) : undefined,
     });
     const result = await runAgentSession(ctx, {
       recorder: {
@@ -587,14 +590,14 @@ export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<A
         addDirs: [],
         extraArgs: setting("harness.claude.extra_args"),
         resume,
-        allowedTools: setting("watchman.allowed_tools"),
+        allowedTools: managerTools,
         disallowedTools: WATCHMAN_DENIED_TOOLS,
-        settings: watchmanGuardSettings(boot, setting("watchman.allowed_tools")),
+        settings: watchmanGuardSettings(boot, managerTools),
       },
       cwd: dir,
       env: valueMap(db, project.environmentId),
       timeboxSeconds: unit.timeboxSeconds,
-      logPath,
+      logPath: reminder ? logPath.replace(/\.jsonl$/, ".resume.jsonl") : logPath,
     });
     return { result, lost: Boolean(resume) && !started };
   };
@@ -604,8 +607,8 @@ export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<A
     recordEvent(db, "manager.session_lost", { projectId: project.id, unitId: target.id, attemptId: attempt.id }, { resumed: previous?.sessionId });
     run = await ask(undefined);
   }
-  const final = run.result.final;
-  const text = final && !final.isError && !run.result.timedOut ? final.text : null;
+  const answered = await ensureRecorded(db, attempt.id, "manager", run.result, async (prompt, sessionId) => (await ask(sessionId, prompt)).result);
+  const text = sessionReport(run.result, answered);
   if (text) write(paths.handoff(project.id, unit.seq, attempt.n), text);
   updateAttempt(db, attempt.id, {
     state: text ? "handed_off" : "failed",
@@ -619,13 +622,15 @@ export async function runManagerUnit(ctx: RunContext, unitId: UnitId): Promise<A
   let reason = "";
   let note: string | null = null;
   let gateId: number | null = null;
-  if (!text) reason = run.result.timedOut ? "the unit lead ran out of time" : "the unit lead ended without an answer";
-  else if (run.result.missingSkills.length) reason = `the unit lead skipped required skills: ${run.result.missingSkills.join(", ")}`;
+  const recorded = getRecord(db, attempt.id, "decision");
+  if (!text && !recorded) reason = run.result.timedOut ? "the unit lead ran out of time" : "the unit lead ended without an answer";
+  else if (answered.missingSkills.length) reason = `the unit lead skipped required skills: ${answered.missingSkills.join(", ")}`;
   else {
-    const parsed = parseDecision(text);
+    const parsed: Decision = recorded ? { ok: true, ...recorded } : parseDecision(text ?? "");
+    if (!recorded) noteFallback(db, attempt.id, "parseDecision", parsed.ok);
     if (!parsed.ok) reason = parsed.problem;
     else {
-      const applied = applyDecision(ctx, getUnit(db, target.id), unit, parsed, text);
+      const applied = applyDecision(ctx, getUnit(db, target.id), unit, parsed, text ?? "", attempt.id);
       if (applied.problem) reason = `${parsed.action} was not possible: ${applied.problem}`;
       else {
         action = parsed.action;

@@ -12,7 +12,7 @@ export const RECORD_USAGE: Record<RecordCommand, string> = {
     'yagura amend T<n> replace --from "<criterion exactly as ACCEPTANCE words it>" --to "…" | add --text "…" | remove --text "…" | verify --command "…" | clear',
   "review-finding": 'yagura review-finding <blocking|should|nit> <path>[:<line>] --text "…"',
   decide: 'yagura decide <action> --reason "…" [--note "…"] [--question "…"] [--to "…"]',
-  plan: "yagura plan --file <delta.json>   (or --file - to read it from stdin)",
+  plan: "yagura plan --file <delta.json>   (or --file - for stdin, or --json '<delta>' inline)",
   "check-done": "yagura check-done   (says what you still have to record)",
 };
 

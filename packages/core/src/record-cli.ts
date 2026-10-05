@@ -41,6 +41,7 @@ const OPTIONS = {
   command: { type: "string" },
   question: { type: "string" },
   file: { type: "string" },
+  json: { type: "string" },
   hook: { type: "boolean" },
 } as const;
 
@@ -127,8 +128,8 @@ function build(db: Db, attemptId: AttemptId, command: Exclude<RecordCommand, "ch
     case "decide":
       return { key: "", data: { action: pos[0], reason: v.reason, note: one(v.note), question: v.question ?? null, to: v.to ?? null } };
     case "plan": {
-      if (!v.file) return { problem: "give the plan delta as a JSON file: --file <path> (or --file - for stdin)" };
-      const raw = v.file === "-" ? stdin() : existsSync(v.file) ? readFileSync(v.file, "utf8") : null;
+      if (!v.file && !v.json) return { problem: "give the plan delta as a JSON file (--file <path>, or --file - for stdin) or inline (--json '<delta>')" };
+      const raw = v.json ?? (v.file === "-" ? stdin() : existsSync(v.file!) ? readFileSync(v.file!, "utf8") : null);
       if (raw === null) return { problem: `no file at ${v.file}` };
       try {
         return { key: "", data: JSON.parse(raw) };

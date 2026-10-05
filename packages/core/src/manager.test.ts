@@ -80,7 +80,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  for (const k of ["FAKE_MANAGER", "FAKE_VERIFY_NEEDS_FIX", "FAKE_RESUME"]) delete process.env[k];
+  for (const k of ["FAKE_MANAGER", "FAKE_VERIFY_NEEDS_FIX", "FAKE_RESUME", "FAKE_FORGET"]) delete process.env[k];
 });
 
 const unitDelta = (key: string, extra: Record<string, unknown> = {}) => ({
@@ -160,6 +160,18 @@ describe("a manager deciding about a rejected unit", () => {
     expect(managerForcesFresh(db, after)).toBe(true);
     await runWorkUnit(ctx, u.id);
     expect(listAttempts(db, u.id).map((a) => a.resumesAttemptId)).toEqual([null, null]);
+  }, 60_000);
+
+  it("takes its decision from yagura decide, not its report, and reminds it once in the same session when it forgot", async () => {
+    const u = await rejectedUnit();
+    process.env.FAKE_MANAGER = "fresh";
+    process.env.FAKE_FORGET = "manager";
+    await wake(u.id);
+    expect(listManagerDecisions(db, u.id)).toMatchObject([{ action: "fresh", note: "write it with care" }]);
+    const kinds = (db.prepare("SELECT type FROM events WHERE type IN ('records.reminded', 'parse.fallback') ORDER BY id").all() as { type: string }[]).map(
+      (r) => r.type,
+    );
+    expect(kinds).toEqual(["records.reminded"]);
   }, 60_000);
 
   it("resumes the builder's own session when it chooses resume and the rules allow it", async () => {
