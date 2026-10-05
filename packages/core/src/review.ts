@@ -9,7 +9,6 @@ import { TERMINAL_STATES, type Attempt, type Sha, type Unit, type UnitId } from 
 import { valueMap } from "./envvalues.js";
 import { getMergeRequest, postOnce, signed, type ForgeAdapter, type PrThread } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, git, headSha } from "./git.js";
-import { parseHandoff } from "./handoff.js";
 import { verifiedHead } from "./land.js";
 import { layout, unitRef } from "./paths.js";
 import { readSpec, renderSpec } from "./spec.js";
@@ -36,6 +35,9 @@ import { listDecisions, threadsForProject } from "./threads.js";
 import { freshThreads, isReviewThread, listThreadRows, queueTriage } from "./triage.js";
 
 import { SEVERITIES, type Severity } from "./domain.js";
+import { ensureRecorded, readHandoff, reportOf, sessionReport } from "./finish.js";
+import { getRecord, recordedReviewFindings } from "./records.js";
+import { recordInstructions } from "./record-usage.js";
 export { SEVERITIES, type Severity };
 export interface Finding {
   n: number;
@@ -207,18 +209,13 @@ export function queueReview(db: Db, target: Unit, since: Sha | null): Unit {
   return getUnit(db, unit.id);
 }
 
-const REVIEW_REPORT = `## Status
-success | blocked
-(success = you reviewed the change; blocked = you could not)
-
-## Findings
-- F1 [blocking] path/to/file.py:42 — what is wrong, why it matters, and what would fix it
-- F2 [should] path/to/other.py:7 — …
-- F3 [nit] path/to/file.py:3 — …
-(one line per finding, each at a file and line the change touches; write \`- none\` when there is nothing worth raising)
-
-## Notes, concerns, deviations
-- <anything else the developer should know>`;
+const REVIEW_REPORT = recordInstructions(
+  ["review-finding", "handoff"],
+  [
+    "- One yagura review-finding per finding, each at a file and line the change touches, with what is wrong, why it matters, and what would fix it. Severity: blocking = must not land as is; should = worth fixing before it lands; nit = a matter of taste. Record none when there is nothing worth raising.",
+    "- Then yagura handoff success when you reviewed the change (blocked, with --note saying why, when you could not). The findings you recorded are your review; the handoff says you are done.",
+  ],
+);
 
 function projectDecisions(db: Db, projectId: Unit["projectId"]): string[] {
   return threadsForProject(db, projectId).flatMap((t) => listDecisions(db, t, { activeOnly: true }).map((d) => `D${d.id}: ${d.text}`));
@@ -286,33 +283,45 @@ export async function runReviewUnit(ctx: RunContext, unitId: UnitId): Promise<At
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, target: target.seq });
   updateAttempt(db, attempt.id, { state: "running", startedAt: now(), worktreePath: worktree, branch, baseSha: head });
 
-  const session = await runAgentSession(ctx, {
-    recorder: attemptRecorder(db, { attempt, unit, projectId: project.id, role: "reviewer", projectSkills: setting("skills.review") }),
-    adapter,
-    run: {
-      prompt: briefText,
-      bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
-      model: setting("role.reviewer.model"),
-      permissionMode: setting("harness.claude.permission_mode"),
-      pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "reviewer" })],
-      addDirs: [],
-      extraArgs: setting("harness.claude.extra_args"),
-    },
-    cwd: worktree,
-    env: valueMap(db, project.environmentId),
-    timeboxSeconds: unit.timeboxSeconds,
-    logPath: paths.log(project.id, unit.seq, attempt.n),
-  });
+  const review = (prompt: string, resume?: string) =>
+    runAgentSession(ctx, {
+      recorder: attemptRecorder(db, {
+        attempt,
+        unit,
+        projectId: project.id,
+        role: "reviewer",
+        projectSkills: setting("skills.review"),
+        inheritedSkills: resume ? getAttempt(db, attempt.id).skills : undefined,
+      }),
+      adapter,
+      run: {
+        prompt,
+        resume,
+        bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
+        model: setting("role.reviewer.model"),
+        permissionMode: setting("harness.claude.permission_mode"),
+        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: "reviewer" })],
+        addDirs: [],
+        extraArgs: setting("harness.claude.extra_args"),
+      },
+      cwd: worktree,
+      env: valueMap(db, project.environmentId),
+      timeboxSeconds: unit.timeboxSeconds,
+      logPath: resume ? paths.log(project.id, unit.seq, attempt.n).replace(/\.jsonl$/, ".resume.jsonl") : paths.log(project.id, unit.seq, attempt.n),
+    });
+  const first = await review(briefText);
+  const session = await ensureRecorded(db, attempt.id, "reviewer", first, (prompt, sessionId) => review(prompt, sessionId));
 
   const leftovers = await discardLeftovers(worktree);
   const after = await headSha(worktree);
-  const final = session.final;
-  const handoff = final && !final.isError && !session.timedOut ? parseHandoff(final.text) : null;
-  if (handoff) write(paths.handoff(project.id, unit.seq, attempt.n), final!.text);
-  const parsed = handoff ? parseFindings(handoff.findings) : null;
+  const report = sessionReport(first, session);
+  if (report) write(paths.handoff(project.id, unit.seq, attempt.n), report);
+  const handoff = readHandoff(db, attempt.id, [reportOf(session), reportOf(first)]);
+  const recorded = getRecord(db, attempt.id, "handoff") !== null;
+  const parsed = handoff ? (recorded ? { findings: recordedReviewFindings(db, attempt.id), problem: null } : parseFindings(handoff.findings)) : null;
   const outside = parsed?.findings.filter((f) => !files.includes(f.path)) ?? [];
   const problem = !handoff
-    ? "the reviewer ended without a handoff"
+    ? "the reviewer ended without recording its review"
     : after !== head || leftovers.paths.length
       ? `the reviewer changed the worktree (${after !== head ? "committed" : leftovers.paths.join(", ")}); a review changes nothing`
       : session.missingSkills.length

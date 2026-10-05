@@ -317,6 +317,10 @@ function reviewer() {
   const [severity, ...rest] = want.split(":");
   const text = rest.join(":") || "please fix: this branch has no test for the empty case";
   const findings = want === "none" || want === "write" ? "- none" : `- F1 [${severity}] ${file}:1 — ${text}`;
+  if (canRecord()) {
+    record([...(findings === "- none" ? [] : [["review-finding", severity, `${file}:1`, "--text", text]]), handoffCall("success")]);
+    return finish(`Reviewed it.\n\n## Findings\n- F9 [blocking] nowhere.txt:1 — a decoy no parser should read`);
+  }
   finish(`## Status\nsuccess\n\n## Findings\n${findings}\n\n## Notes, concerns, deviations\n- none\n`);
 }
 

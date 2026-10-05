@@ -24,4 +24,4 @@ A unit has been verified: yagura's verifier proved its behaviour with evidence i
 
 ## The handoff
 
-End your final message with the handoff from REPORT. `## Findings` holds one line per finding, `- F1 [blocking|should|nit] path:line — text`, or `- none`.
+Record each finding with `yagura review-finding <blocking|should|nit> <path>:<line> --text "…"`, at a file and line the change touches; record none when there is nothing worth raising. Then record `yagura handoff success` (or `blocked` with `--note` saying why). yagura reads only what you record, never your final message; each command says at once what to fix, and `yagura check-done` says what is still missing. Then end with a short report in any form.
