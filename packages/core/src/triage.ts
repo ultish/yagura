@@ -693,14 +693,22 @@ export async function postReplies(db: Db, forge: ForgeAdapter, target: Unit, num
   advanceThreads(db, target);
   let posted = 0;
   // yagura's own reviewer findings are answered where they were posted on the forge; a finding not posted yet waits.
+  // The thread's state decides what goes out (§28): an ask is announced while it waits, and the final reply only once the thread
+  // reaches replying, so a fix is never reported before it is committed and verified.
   const pending = listThreadRows(db, target.id).filter(
-    (r) => r.decision !== null && !r.repliedAt && (!isReviewThread(r.threadId) || reviewPost(db, target.id, r.threadId)),
+    (r) =>
+      !r.repliedAt &&
+      ((r.state === "waiting" && r.decision === "asked") || (r.state === "replying" && r.decision !== null)) &&
+      (!isReviewThread(r.threadId) || reviewPost(db, target.id, r.threadId)),
   );
   if (!pending.length) return 0;
   const already = await forge.replyKeys(number);
   for (const row of pending) {
     const key = `${target.projectId}/U${target.seq}/w${row.waveUnitId}/${row.threadId}`;
-    const who = { role: "arbiter", run: row.waveUnitId ? firstAgentRef(db, getUnit(db, row.waveUnitId)) : `U${target.seq}` };
+    // Signed by whoever wrote the words: the arbiter that ruled, or, in a wave the developer already answered, its worker.
+    const wave = row.waveUnitId ? getUnit(db, row.waveUnitId) : null;
+    const ruledBy = wave ? (listAttempts(db, wave.id).find((a) => a.role === "review-triage") ?? listAttempts(db, wave.id)[0]) : undefined;
+    const who = { role: ruledBy?.role === "worker" ? "worker" : "arbiter", run: wave ? firstAgentRef(db, wave) : `U${target.seq}` };
     const text =
       row.decision === "fixed" && row.commitSha
         ? `**Fixed** in \`${row.commitSha.slice(0, 10)}\` \u2014 ${row.reason}`

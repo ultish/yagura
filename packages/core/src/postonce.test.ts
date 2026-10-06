@@ -42,7 +42,7 @@ describe("posting to a forge once", () => {
     });
     transitionUnit(db, unit.id, "ready");
     db.prepare(
-      "INSERT INTO mr_threads (unit_id, thread_id, kind, author, comments_json, decision, reason, wave_unit_id, created_at) VALUES (?, 'PRRT_1', 'review-thread', 'ultish', '[\"hi\"]', 'dismissed', 'the acceptance test forbids it', ?, 't')",
+      "INSERT INTO mr_threads (unit_id, thread_id, kind, author, comments_json, decision, reason, wave_unit_id, state, created_at) VALUES (?, 'PRRT_1', 'review-thread', 'ultish', '[\"hi\"]', 'dismissed', 'the acceptance test forbids it', ?, 'replying', 't')",
     ).run(unit.id, unit.id);
     const replies: string[] = [];
     // A forge whose reply is slow and whose keys lag behind what was just posted.
