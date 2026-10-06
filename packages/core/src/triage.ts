@@ -5,14 +5,15 @@ import { attemptRecorder, runAgentSession, write, type RunContext } from "./agen
 import { WORKER_REPORT, renderBrief } from "./brief.js";
 import { recordInstructions } from "./record-cli.js";
 import { resolveSetting } from "./config.js";
-import { type Attempt, type IsoTime, type Sha, type Unit, type UnitId } from "./domain.js";
+import { canMoveReviewThread, type Attempt, type ChangeKind, type IsoTime, type Sha, type ReviewThreadState, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
-import { amendmentContext, applyOps, autoApproveAmendment, describeOps, parseAmendments, proposeAmendment, settleAmendment } from "./amend.js";
+import { amendmentContext, applyOps, type AmendOp, autoApproveAmendment, describeOps, parseAmendments, proposeAmendment, settleAmendment } from "./amend.js";
 import { forgeFor, getMergeRequest, postOnce, signed, type ForgeAdapter, type PrThread, type ThreadKind, prRef } from "./forge.js";
 import { addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha } from "./git.js";
 import { ensureRecorded, readHandoff, reportOf, sessionReport } from "./finish.js";
-import { hasRecords, noteFallback, recordedAmendments, recordedRulings } from "./records.js";
-import { verifiedHead } from "./land.js";
+import { hasRecords, listRecords, noteFallback, recordedAmendments, recordedRulings, type RecordData } from "./records.js";
+import { liveVerdict, verifiedHead } from "./land.js";
+import { recordDisagreement } from "./disagreements.js";
 import { layout, unitRef } from "./paths.js";
 import { addVerifyUnit } from "./runner.js";
 import { assessScope } from "./scope.js";
@@ -21,6 +22,7 @@ import {
   addUnit,
   createAttempt,
   getAttempt,
+  listAttempts,
   getGate,
   getProject,
   getRepo,
@@ -60,6 +62,10 @@ export interface ThreadRow {
   directive: string | null;
   repliedAt: IsoTime | null;
   createdAt: IsoTime;
+  state: ReviewThreadState;
+  changes: ChangeKind[];
+  planNote: string | null;
+  instruction: string | null;
 }
 
 type Row = Record<string, unknown>;
@@ -79,7 +85,31 @@ const toRow = (r: Row): ThreadRow => ({
   directive: (r.directive as string | null) ?? null,
   repliedAt: (r.replied_at as IsoTime | null) ?? null,
   createdAt: r.created_at as IsoTime,
+  state: r.state as ReviewThreadState,
+  changes: JSON.parse((r.changes_json as string | undefined) ?? "[]") as ChangeKind[],
+  planNote: (r.plan_note as string | null) ?? null,
+  instruction: (r.instruction as string | null) ?? null,
 });
+
+export class IllegalThreadTransition extends Error {
+  constructor(threadId: string, from: ReviewThreadState, to: ReviewThreadState) {
+    super(`thread ${threadId}: illegal transition ${from} -> ${to}`);
+  }
+}
+
+// The only way a review thread changes state (§28): checked against REVIEW_THREAD_TRANSITIONS, recorded as an event. A reviewer's new
+// comment reopens it from anywhere.
+export function transitionThread(db: Db, target: Unit, threadId: string, to: ReviewThreadState, data: Record<string, unknown> = {}): void {
+  db.transaction(() => {
+    const row = db.prepare("SELECT state FROM mr_threads WHERE unit_id = ? AND thread_id = ?").get(target.id, threadId) as
+      { state: ReviewThreadState } | undefined;
+    if (!row) throw new Error(`thread ${threadId} not found on U${target.seq}`);
+    if (row.state === to) return;
+    if (to !== "open" && !canMoveReviewThread(row.state, to)) throw new IllegalThreadTransition(threadId, row.state, to);
+    db.prepare("UPDATE mr_threads SET state = ? WHERE unit_id = ? AND thread_id = ?").run(to, target.id, threadId);
+    recordEvent(db, "thread.state", { projectId: target.projectId, unitId: target.id }, { thread: threadId, from: row.state, to, ...data });
+  })();
+}
 
 export function listThreadRows(db: Db, unitId: UnitId): ThreadRow[] {
   return (db.prepare("SELECT * FROM mr_threads WHERE unit_id = ? ORDER BY rowid").all(unitId) as Row[]).map(toRow);
@@ -100,30 +130,138 @@ export function freshThreads(db: Db, unitId: UnitId, threads: PrThread[]): { thr
   return fresh;
 }
 
-export function queueTriage(db: Db, target: Unit, ref: string, fresh: { thread: PrThread; directive: string | null }[]): Unit {
+// The developer's answer to a thread whose ruling recorded what it changes (§28) is acted on here, with no arbiter: Dismiss
+// replies and settles; Fix applies the approved changes (criteria, VERIFY, scope), hands a plan note to the project lead, and
+// either queues a worker with the recorded instruction or, when no code changes, verifies the unit again. Everything else
+// (new comments, and asks from rulings that recorded nothing) goes to an arbiter, as before. Returns the wave queued, if any.
+export function queueTriage(db: Db, target: Unit, ref: string, fresh: { thread: PrThread; directive: string | null }[]): Unit | null {
+  const known = new Map(listThreadRows(db, target.id).map((r) => [r.threadId, r]));
+  const isAnswer = (f: { thread: PrThread; directive: string | null }) => {
+    const row = known.get(f.thread.id);
+    return f.directive !== null && row?.state === "waiting" && row.changes.length > 0 && f.thread.comments.length <= row.comments.length;
+  };
+  const answers = fresh.filter(isAnswer);
+  const rest = fresh.filter((f) => !isAnswer(f));
+  if (answers.length) {
+    const toFix = answerThreads(
+      db,
+      target,
+      answers.map((f) => ({ row: known.get(f.thread.id)!, answer: f.directive! })),
+    );
+    if (toFix.length)
+      return addWave(
+        db,
+        target,
+        ref,
+        toFix.map((row) => ({ row, thread: answers.find((f) => f.thread.id === row.threadId)!.thread })),
+      );
+    if (!rest.length) return null;
+  }
+  return rest.length
+    ? addWave(
+        db,
+        target,
+        ref,
+        rest.map((f) => ({ row: null, thread: f.thread, directive: f.directive })),
+      )
+    : null;
+}
+
+function answerThreads(db: Db, target: Unit, answers: { row: ThreadRow; answer: string }[]): ThreadRow[] {
+  const toFix: ThreadRow[] = [];
+  let reverify = false;
+  db.transaction(() => {
+    for (const { row, answer } of answers) {
+      const set = (decision: PrThreadDecision, reason: string) =>
+        db
+          .prepare("UPDATE mr_threads SET decision = ?, reason = ?, directive = ?, replied_at = NULL WHERE unit_id = ? AND thread_id = ?")
+          .run(decision, reason, answer, target.id, row.threadId);
+      if (answer !== "fix") {
+        settleAmendment(db, target.id, row.threadId, answer);
+        set("dismissed", `The developer decided against it. ${row.reason ?? ""}`.trim());
+        transitionThread(db, target, row.threadId, "replying", { answer });
+        continue;
+      }
+      transitionThread(db, target, row.threadId, "applying", { answer });
+      const amended = settleAmendment(db, target.id, row.threadId, "fix");
+      const needsCriteria = row.changes.some((c) => c === "acceptance" || c === "verify" || c === "scope");
+      if (needsCriteria && amended?.state !== "approved") {
+        set("asked", `The approved change could not be applied to U${target.seq} as it stands now.`);
+        transitionThread(db, target, row.threadId, "blocked", { reason: "the approved change no longer applies" });
+        continue;
+      }
+      if (row.changes.includes("plan") && row.planNote)
+        recordDisagreement(db, {
+          unitId: target.id,
+          ref: `review:${row.threadId}`,
+          about: row.comments.join("\n").slice(0, 400),
+          reason: row.planNote,
+          action: "follow-up",
+        });
+      if (row.changes.includes("code") && row.instruction) {
+        set("fixed", row.instruction);
+        toFix.push({ ...row, decision: "fixed", reason: row.instruction, directive: "fix" });
+      } else if (needsCriteria) {
+        set("fixed", `U${target.seq} now must: ${getUnit(db, target.id).acceptance.join("; ")}`);
+        transitionThread(db, target, row.threadId, "verifying");
+        reverify = true;
+      } else {
+        set("fixed", row.planNote ? `Planned as a follow-up: ${row.planNote}` : "Done.");
+        transitionThread(db, target, row.threadId, "replying");
+      }
+    }
+    // With nothing left to fix, the unit is verified again against what it must now do, or goes back to verified if nothing changed.
+    const current = getUnit(db, target.id);
+    const stillAsking = listThreadRows(db, target.id).some((r) => r.state === "waiting");
+    if (!toFix.length && !stillAsking && current.state === "blocked") {
+      if (reverify) {
+        const verdict = liveVerdict(db, target.id);
+        if (verdict)
+          db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE id = ?").run(
+            now(),
+            "the developer approved a change to what the unit must do",
+            verdict.id,
+          );
+        transitionUnit(db, target.id, "verifying", { reason: "the developer approved a change to what it must do" });
+        addVerifyUnit(db, getUnit(db, target.id));
+      } else transitionUnit(db, target.id, "verified", { reason: "the developer answered every open review question" });
+    }
+  })();
+  return toFix;
+}
+
+function addWave(db: Db, target: Unit, ref: string, threads: { row: ThreadRow | null; thread: PrThread; directive?: string | null }[]): Unit {
   const unit = addUnit(db, {
     projectId: target.projectId,
     type: "review-triage",
     repoId: target.repoId,
     targetUnitId: target.id,
-    goal: `Triage ${fresh.length} review thread(s) on ${ref} for U${target.seq}: ${target.goal}`,
-    writeScope: target.writeScope,
+    goal: threads.every((t) => t.row)
+      ? `Fix ${threads.length} review thread(s) on ${ref} for U${target.seq} as the developer approved: ${target.goal}`
+      : `Triage ${threads.length} review thread(s) on ${ref} for U${target.seq}: ${target.goal}`,
+    writeScope: getUnit(db, target.id).writeScope,
     forbidScope: target.forbidScope,
-    acceptance: target.acceptance,
-    verify: target.verify,
+    acceptance: getUnit(db, target.id).acceptance,
+    verify: getUnit(db, target.id).verify,
     timeboxSeconds: resolveSetting(db, "timebox.work_seconds", { projectId: target.projectId, repoId: target.repoId! }).value,
     maxAttempts: 1,
   });
   db.transaction(() => {
-    for (const { thread: t, directive } of fresh) {
-      if (directive !== null) settleAmendment(db, target.id, t.id, directive);
+    for (const { row, thread: t, directive } of threads) {
+      if (row) {
+        // Approved and ruled: the wave carries the recorded instruction, and its worker builds from it with no arbiter.
+        db.prepare("UPDATE mr_threads SET wave_unit_id = ? WHERE unit_id = ? AND thread_id = ?").run(unit.id, target.id, t.id);
+        continue;
+      }
+      if (directive !== null && directive !== undefined) settleAmendment(db, target.id, t.id, directive);
       db.prepare(
         `INSERT INTO mr_threads (unit_id, thread_id, kind, author, path, line, comments_json, wave_unit_id, directive, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (unit_id, thread_id) DO UPDATE SET comments_json = excluded.comments_json, wave_unit_id = excluded.wave_unit_id,
-           directive = excluded.directive, decision = NULL, reason = NULL, gate_id = NULL, replied_at = NULL`,
-      ).run(target.id, t.id, t.kind, t.author, t.path, t.line, JSON.stringify(t.comments), unit.id, directive, now());
+           directive = excluded.directive, decision = NULL, reason = NULL, gate_id = NULL, replied_at = NULL, changes_json = '[]', plan_note = NULL, instruction = NULL`,
+      ).run(target.id, t.id, t.kind, t.author, t.path, t.line, JSON.stringify(t.comments), unit.id, directive ?? null, now());
+      transitionThread(db, target, t.id, "open", { wave: unit.seq });
     }
-    transitionUnit(db, unit.id, "ready", { target: target.seq, threads: fresh.length });
+    transitionUnit(db, unit.id, "ready", { target: target.seq, threads: threads.length });
   })();
   return getUnit(db, unit.id);
 }
@@ -164,8 +302,9 @@ export function parseDecisions(text: string, count: number): Map<number, { decis
 const TRIAGE_REPORT = recordInstructions(
   ["rule", "amend"],
   [
-    "- Rule on every thread, once: fix (say exactly what a worker must change in the code), dismiss (the concrete disproof yagura posts as the reply), or ask (the question only the developer can decide). You change nothing: a worker makes the changes you rule necessary.",
-    "- Every ask says --changes-acceptance yes or no: would doing what the comment asks make a criterion in ACCEPTANCE false, or the VERIFY command fail? When yes, record the change with yagura amend in the same session (replace names a criterion exactly as ACCEPTANCE words it and gives the concrete new one; add verify when the old VERIFY would fail): the developer approves the change with their one answer. Nothing is applied until they do.",
+    "- Every ruling names what the thread needs changed with --changes: code (the unit's code, inside its scope), acceptance (a criterion), verify (the VERIFY command), scope (paths outside the unit's write scope), plan (bigger than this unit: a follow-up for the project lead), or none. The decision follows from it: none is a dismissal, code alone is a fix, and anything else is an ask, because it changes what the unit must do or plans.",
+    "- fix: --reason is what a worker must change and where. dismiss: --reason is the disproof posted as the reply. ask: --reason is the question for the developer; with code in --changes add --instruction, what the worker must change if they answer Fix (no second arbiter runs: the worker builds from it); with plan add --plan-note.",
+    "- For each of acceptance, verify, and scope, record the change with yagura amend in the same session: replace (a criterion exactly as ACCEPTANCE words it, with the concrete new one), add, remove, verify --command, scope --path. yagura refuses an amendment its ruling did not name, and will not let you finish while a named change is missing. Nothing is applied until the developer answers Fix.",
   ],
 );
 
@@ -203,9 +342,13 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   const all = listThreadRows(db, target.id);
   const rows = all.filter((r) => r.waveUnitId === unit.id);
 
-  const judgeAttempt = createAttempt(db, unit.id, judgeHarness, setting("role.reviewer.model"));
-  const branch = `${setting("git.branch_prefix")}/${project.id}/${unitRef(target.seq)}-review-${unitRef(unit.seq)}-${judgeAttempt.n}`;
-  const worktree = paths.worktree(repo.id, project.id, unit.seq, judgeAttempt.n);
+  // A wave of threads the developer already answered Fix on, from rulings that recorded what to change, needs no arbiter: its worker
+  // builds from those rulings (§28).
+  const preRuled = rows.length > 0 && rows.every((r) => r.directive === "fix" && r.decision === "fixed" && !!r.reason);
+  const firstN = listAttempts(db, unit.id).length + 1;
+  for (const r of rows) transitionThread(db, target, r.threadId, preRuled ? "applying" : "ruling", { wave: unit.seq });
+  const branch = `${setting("git.branch_prefix")}/${project.id}/${unitRef(target.seq)}-review-${unitRef(unit.seq)}-${firstN}`;
+  const worktree = paths.worktree(repo.id, project.id, unit.seq, firstN);
   mkdirSync(dirname(worktree), { recursive: true });
   await addWorktree(mirror, worktree, branch, verdict.head_sha);
   const envValues = valueMap(db, project.environmentId);
@@ -224,29 +367,6 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
         ]
       : []),
   ];
-  const judgeBrief = renderBrief({
-    goal: `Judge the review threads on ${ref} for U${target.seq} (${target.goal}). For each thread rule: fix (the fault is real and the code must change; say exactly what a worker must change), dismissed (the reviewer is wrong, and you can show why concretely), or asked (only the developer can decide). You change nothing.`,
-    repo: { id: repo.id, worktree, branch, baseSha: verdict.head_sha },
-    scope: { write: ["nothing: you rule, a worker changes code"], forbid: [], hard: ["**"] },
-    context: threadContext,
-    readonly: [],
-    acceptance: target.acceptance,
-    verify: target.verify ?? "(none)",
-    env: envValues,
-    timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
-    forbidden: [
-      "no edits, commits, or any other change to the worktree",
-      "no git push, rebase, merge, or branch switching",
-      "no reply to reviewers yourself; yagura posts your rulings",
-    ],
-    method: "Load the yagura-review-triage skill first and follow it. You may read and run the code to judge a thread; you change nothing.",
-    report: TRIAGE_REPORT,
-    standing: standingFor(db, project.id, "review-triage"),
-  });
-  write(paths.brief(project.id, unit.seq, judgeAttempt.n), judgeBrief);
-  transitionUnit(db, unit.id, "running", { attempt: judgeAttempt.n, target: target.seq });
-  updateAttempt(db, judgeAttempt.id, { state: "running", startedAt: now(), worktreePath: worktree, branch, baseSha: verdict.head_sha });
-
   type Phase = { attempt: Attempt; role: "review-triage" | "worker"; adapter: typeof judgeAdapter; harness: string; model: string | null };
   const run = (phase: Phase, prompt: string, resume?: string) =>
     runAgentSession(ctx, {
@@ -275,59 +395,102 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
         ? paths.log(project.id, unit.seq, phase.attempt.n).replace(/\.jsonl$/, ".resume.jsonl")
         : paths.log(project.id, unit.seq, phase.attempt.n),
     });
-  const judging: Phase = { attempt: judgeAttempt, role: "review-triage", adapter: judgeAdapter, harness: judgeHarness, model: setting("role.reviewer.model") };
-
-  // 1. The arbiter's rulings, read from what it recorded with yagura rule and yagura amend.
-  const firstRuling = await run(judging, judgeBrief);
-  const ruled = await ensureRecorded(db, judgeAttempt.id, "review-triage", firstRuling, (prompt, sessionId) => run(judging, prompt, sessionId));
-  await discardLeftovers(worktree);
-  const judgeHead = await headSha(worktree);
-  const rulingReport = sessionReport(firstRuling, ruled);
-  if (rulingReport) write(paths.handoff(project.id, unit.seq, judgeAttempt.n), rulingReport);
-  const fromRecords = hasRecords(db, judgeAttempt.id);
-  // While roles move over, an arbiter that only wrote its rulings is read from its reports (after a reminder the last one may be short).
-  const proseReports = [reportOf(ruled), reportOf(firstRuling)].filter((r): r is string => !!r);
-  const proseReport = proseReports.find((r) => parseDecisions(r, rows.length).size) ?? null;
-  const decisions = fromRecords ? recordedRulings(db, judgeAttempt.id) : proseReport ? parseDecisions(proseReport, rows.length) : new Map();
-  if (!fromRecords && rulingReport) noteFallback(db, judgeAttempt.id, "parseDecisions", decisions.size > 0);
-  const rulingHandoff = fromRecords || decisions.size ? { status: "success" as const } : null;
-  const missing = rows.map((_, i) => i + 1).filter((i) => !decisions.has(i));
-  const judgeProblem = !rulingHandoff
-    ? "the arbiter ended without recording its rulings"
-    : judgeHead !== verdict.head_sha
-      ? "the arbiter changed the code; it only rules, and a worker makes the changes"
-      : missing.length
-        ? `no ruling for ${missing.map((i) => `T${i}`).join(", ")}`
-        : null;
-  updateAttempt(db, judgeAttempt.id, {
-    state: rulingHandoff ? "handed_off" : "failed",
-    endedAt: now(),
-    exitCode: ruled.exitCode,
-    headSha: judgeHead,
-    handoffStatus: rulingHandoff?.status ?? null,
-    ...(rulingHandoff ? {} : { failureMode: "unknown" as const }),
-  });
-
-  // A trusted author's requirement change is approved by the developer's standing setting: it is applied now, so the worker builds to it.
-  const amendments = fromRecords ? recordedAmendments(db, judgeAttempt.id) : proseReport ? parseAmendments(proseReport, rows.length) : new Map();
+  let judgeAttempt: Attempt | null = null;
+  let decisions = new Map<number, { decision: PrThreadDecision; reason: string }>();
+  let amendments = new Map<number, AmendOp[]>();
+  let judgeProblem: string | null = null;
+  let rulingHandoff: { status: "success" } | null = null;
+  let judgeHead: Sha = verdict.head_sha as Sha;
+  let rulingDetail = new Map<number, RecordData<"ruling">>();
   const autoApplied = new Set<number>();
-  if (!judgeProblem)
-    for (const [i, row] of rows.entries()) {
-      const ops = amendments.get(i + 1) ?? [];
-      if (!ops.length || decisions.get(i + 1)?.decision !== "fixed" || !trusted.has(row.author.toLowerCase())) continue;
-      const problem = autoApproveAmendment(db, {
-        unitId: target.id,
-        threadId: row.threadId,
-        author: row.author,
-        quote: row.comments.join("\n").slice(0, 400),
-        changes: ops,
-      });
-      if (problem) recordEvent(db, "amendment.invalid", { projectId: project.id, unitId: unit.id }, { thread: `T${i + 1}`, problem });
-      else autoApplied.add(i);
-    }
+  if (preRuled) {
+    transitionUnit(db, unit.id, "running", { attempt: firstN, target: target.seq, ruled: "answered by the developer" });
+    decisions = new Map(rows.map((r, i) => [i + 1, { decision: "fixed" as const, reason: r.reason! }]));
+    rulingHandoff = { status: "success" };
+  } else {
+    judgeAttempt = createAttempt(db, unit.id, judgeHarness, setting("role.reviewer.model"));
+    const judgeBrief = renderBrief({
+      goal: `Judge the review threads on ${ref} for U${target.seq} (${target.goal}). For each thread rule: fix (the fault is real and the code must change; say exactly what a worker must change), dismissed (the reviewer is wrong, and you can show why concretely), or asked (only the developer can decide). You change nothing.`,
+      repo: { id: repo.id, worktree, branch, baseSha: verdict.head_sha },
+      scope: { write: ["nothing: you rule, a worker changes code"], forbid: [], hard: ["**"] },
+      context: threadContext,
+      readonly: [],
+      acceptance: target.acceptance,
+      verify: target.verify ?? "(none)",
+      env: envValues,
+      timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
+      forbidden: [
+        "no edits, commits, or any other change to the worktree",
+        "no git push, rebase, merge, or branch switching",
+        "no reply to reviewers yourself; yagura posts your rulings",
+      ],
+      method: "Load the yagura-review-triage skill first and follow it. You may read and run the code to judge a thread; you change nothing.",
+      report: TRIAGE_REPORT,
+      standing: standingFor(db, project.id, "review-triage"),
+    });
+    write(paths.brief(project.id, unit.seq, judgeAttempt.n), judgeBrief);
+    transitionUnit(db, unit.id, "running", { attempt: judgeAttempt.n, target: target.seq });
+    updateAttempt(db, judgeAttempt.id, { state: "running", startedAt: now(), worktreePath: worktree, branch, baseSha: verdict.head_sha });
+
+    const judging: Phase = {
+      attempt: judgeAttempt,
+      role: "review-triage",
+      adapter: judgeAdapter,
+      harness: judgeHarness,
+      model: setting("role.reviewer.model"),
+    };
+    // 1. The arbiter's rulings, read from what it recorded with yagura rule and yagura amend.
+    const firstRuling = await run(judging, judgeBrief);
+    const ruled = await ensureRecorded(db, judgeAttempt.id, "review-triage", firstRuling, (prompt, sessionId) => run(judging, prompt, sessionId));
+    await discardLeftovers(worktree);
+    judgeHead = await headSha(worktree);
+    const rulingReport = sessionReport(firstRuling, ruled);
+    if (rulingReport) write(paths.handoff(project.id, unit.seq, judgeAttempt.n), rulingReport);
+    const fromRecords = hasRecords(db, judgeAttempt.id);
+    // While roles move over, an arbiter that only wrote its rulings is read from its reports (after a reminder the last one may be short).
+    const proseReports = [reportOf(ruled), reportOf(firstRuling)].filter((r): r is string => !!r);
+    const proseReport = proseReports.find((r) => parseDecisions(r, rows.length).size) ?? null;
+    decisions = fromRecords ? recordedRulings(db, judgeAttempt.id) : proseReport ? parseDecisions(proseReport, rows.length) : new Map();
+    if (!fromRecords && rulingReport) noteFallback(db, judgeAttempt.id, "parseDecisions", decisions.size > 0);
+    rulingDetail = new Map(listRecords(db, judgeAttempt.id, "ruling").map((r) => [r.data.thread, r.data]));
+    rulingHandoff = fromRecords || decisions.size ? { status: "success" as const } : null;
+    const missing = rows.map((_, i) => i + 1).filter((i) => !decisions.has(i));
+    judgeProblem = !rulingHandoff
+      ? "the arbiter ended without recording its rulings"
+      : judgeHead !== verdict.head_sha
+        ? "the arbiter changed the code; it only rules, and a worker makes the changes"
+        : missing.length
+          ? `no ruling for ${missing.map((i) => `T${i}`).join(", ")}`
+          : null;
+    updateAttempt(db, judgeAttempt.id, {
+      state: rulingHandoff ? "handed_off" : "failed",
+      endedAt: now(),
+      exitCode: ruled.exitCode,
+      headSha: judgeHead,
+      handoffStatus: rulingHandoff?.status ?? null,
+      ...(rulingHandoff ? {} : { failureMode: "unknown" as const }),
+    });
+
+    // A trusted author's requirement change is approved by the developer's standing setting: it is applied now, so the worker builds to it.
+    amendments = fromRecords ? recordedAmendments(db, judgeAttempt.id) : proseReport ? parseAmendments(proseReport, rows.length) : new Map();
+    if (!judgeProblem)
+      for (const [i, row] of rows.entries()) {
+        const ops = amendments.get(i + 1) ?? [];
+        if (!ops.length || decisions.get(i + 1)?.decision !== "fixed" || !trusted.has(row.author.toLowerCase())) continue;
+        const problem = autoApproveAmendment(db, {
+          unitId: target.id,
+          threadId: row.threadId,
+          author: row.author,
+          quote: row.comments.join("\n").slice(0, 400),
+          changes: ops,
+        });
+        if (problem) recordEvent(db, "amendment.invalid", { projectId: project.id, unitId: unit.id }, { thread: `T${i + 1}`, problem });
+        else autoApplied.add(i);
+      }
+  }
 
   // 2. A worker makes the changes the arbiter ruled necessary, on the same branch.
-  let attempt = judgeAttempt;
+  let attempt: Attempt | null = judgeAttempt;
   let handoff = rulingHandoff;
   let head = judgeHead;
   let changed = false;
@@ -341,6 +504,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   if (!judgeProblem && fixRows.length) {
     const fixAttempt = createAttempt(db, unit.id, workHarness, setting("role.worker.model"));
     attempt = fixAttempt;
+    for (const r of fixRows) transitionThread(db, target, r.threadId, "fixing", { wave: unit.seq });
     updateAttempt(db, fixAttempt.id, { state: "running", startedAt: now(), worktreePath: worktree, branch, baseSha: verdict.head_sha });
     const instructions = rows
       .map((r, i) => ({ r, i, d: decisions.get(i + 1)! }))
@@ -418,9 +582,11 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
     changed = done.didChange;
     scope = done.assessed;
   }
+  if (!attempt) throw new Error(`U${unit.seq} ran no agent: a wave answered by the developer must have a thread to fix`);
   const problem = judgeProblem ?? workProblem;
   const refs = { projectId: project.id, unitId: unit.id, attemptId: attempt.id };
   if (problem) {
+    for (const r of rows) transitionThread(db, target, r.threadId, "blocked", { reason: problem });
     transitionUnit(db, unit.id, handoff ? "handed_off" : "failed", { reason: problem });
     transitionUnit(db, unit.id, "blocked", { reason: problem });
     recordEvent(db, "triage.failed", refs, { target: target.seq, reason: problem });
@@ -449,28 +615,31 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
       decision = "asked";
       reason = `This touches security, auth, or data, so yagura will not dismiss it without you. The triage said: ${reason}`;
     }
+    // What the thread needs, as its ruling declared it (§28); a ruling read from prose declares nothing, so it is derived from the decision.
+    const detail = rulingDetail.get(i + 1);
+    const changes: ChangeKind[] = detail?.changes ?? (decision === "fixed" ? ["code"] : ops.length ? ["code", "acceptance"] : []);
+    const instruction = detail?.instruction ?? (decision === "fixed" ? reason : null);
+    const planNote = detail?.planNote ?? null;
     let gateId: number | null = null;
     if (decision === "asked") {
       gateId = addGate(db, {
         projectId: project.id,
         unitId: target.id,
         kind: "review",
-        question: `On ${ref}, ${row.author} wrote: "${text.slice(0, 400)}". ${reason}${
+        question: `On ${ref}, ${row.author} wrote: "${text.slice(0, 400)}". ${reason}${changes.length ? ` It changes: ${changes.join(", ")}.` : ""}${
           ops.length ? ` Approving also changes U${target.seq}'s acceptance: ${describeOps(ops).join("; ")}.` : ""
+        }${planNote ? ` The project lead would plan: ${planNote}.` : ""}${
+          instruction && changes.includes("code") ? ` If you answer Fix, a worker will: ${instruction}` : ""
         }${unapplied ? ` The arbiter proposed a change to the acceptance that yagura could not apply (${unapplied}), so approving changes nothing there.` : ""} Fix it or dismiss it?`,
         options: ["fix", "dismiss"],
       });
       if (ops.length) proposeAmendment(db, { unitId: target.id, gateId, threadId: row.threadId, author: row.author, quote: text, changes: ops });
       asked.push(`T${i + 1}`);
     }
-    db.prepare("UPDATE mr_threads SET decision = ?, reason = ?, commit_sha = ?, gate_id = ? WHERE unit_id = ? AND thread_id = ?").run(
-      decision,
-      reason,
-      decision === "fixed" ? head : null,
-      gateId,
-      target.id,
-      row.threadId,
-    );
+    db.prepare(
+      "UPDATE mr_threads SET decision = ?, reason = ?, commit_sha = ?, gate_id = ?, changes_json = ?, plan_note = ?, instruction = ? WHERE unit_id = ? AND thread_id = ?",
+    ).run(decision, reason, decision === "fixed" ? head : null, gateId, JSON.stringify(changes), planNote, instruction, target.id, row.threadId);
+    transitionThread(db, target, row.threadId, decision === "asked" ? "waiting" : decision === "dismissed" ? "replying" : "verifying", { wave: unit.seq });
   }
 
   db.transaction(() => {
@@ -506,7 +675,22 @@ export function reviewPost(db: Db, unitId: UnitId, threadId: string): { ref: str
   return r ? { ref: r.forge_ref } : null;
 }
 
+// A fixed thread waits in verifying until the unit is verified again, then its reply goes out; once posted it is settled. Without
+// a forge there is no reply to wait for.
+export function advanceThreads(db: Db, target: Unit, waitsForReply = true): void {
+  const verified = ["verified", "landing", "landed"].includes(getUnit(db, target.id).state);
+  for (const r of listThreadRows(db, target.id)) {
+    let state = r.state;
+    if (state === "verifying" && verified) {
+      transitionThread(db, target, r.threadId, "replying");
+      state = "replying";
+    }
+    if (state === "replying" && (r.repliedAt || !waitsForReply)) transitionThread(db, target, r.threadId, "settled");
+  }
+}
+
 export async function postReplies(db: Db, forge: ForgeAdapter, target: Unit, number: number): Promise<number> {
+  advanceThreads(db, target);
   let posted = 0;
   // yagura's own reviewer findings are answered where they were posted on the forge; a finding not posted yet waits.
   const pending = listThreadRows(db, target.id).filter(
@@ -518,11 +702,13 @@ export async function postReplies(db: Db, forge: ForgeAdapter, target: Unit, num
     const key = `${target.projectId}/U${target.seq}/w${row.waveUnitId}/${row.threadId}`;
     const who = { role: "arbiter", run: row.waveUnitId ? firstAgentRef(db, getUnit(db, row.waveUnitId)) : `U${target.seq}` };
     const text =
-      row.decision === "fixed"
-        ? `**Fixed** in \`${row.commitSha!.slice(0, 10)}\` \u2014 ${row.reason}`
-        : row.decision === "asked"
-          ? `**Waiting for the developer** \u2014 ${row.reason}`
-          : `**No change** \u2014 ${row.reason}`;
+      row.decision === "fixed" && row.commitSha
+        ? `**Fixed** in \`${row.commitSha.slice(0, 10)}\` \u2014 ${row.reason}`
+        : row.decision === "fixed"
+          ? `**Done** \u2014 ${row.reason}`
+          : row.decision === "asked"
+            ? `**Waiting for the developer** \u2014 ${row.reason}`
+            : `**No change** \u2014 ${row.reason}`;
     const post = isReviewThread(row.threadId) ? reviewPost(db, target.id, row.threadId)! : null;
     const sent = await postOnce(key, async () => {
       const current = db.prepare("SELECT replied_at FROM mr_threads WHERE unit_id = ? AND thread_id = ?").get(target.id, row.threadId) as {
@@ -540,5 +726,6 @@ export async function postReplies(db: Db, forge: ForgeAdapter, target: Unit, num
     });
     if (sent?.posted) posted++;
   }
+  advanceThreads(db, target);
   return posted;
 }

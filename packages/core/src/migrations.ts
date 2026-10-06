@@ -603,6 +603,20 @@ CREATE INDEX agent_records_attempt ON agent_records (attempt_id);
     version: 41,
     sql: `ALTER TABLE attempts ADD COLUMN role TEXT CHECK (role IN ('planner', 'worker', 'verifier', 'pack', 'rebase', 'ci-fix', 'review-triage', 'reviewer', 'manager', 'watchman'));`,
   },
+  {
+    version: 42,
+    sql: `
+ALTER TABLE mr_threads ADD COLUMN state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'ruling', 'waiting', 'applying', 'fixing', 'verifying', 'replying', 'settled', 'blocked'));
+ALTER TABLE mr_threads ADD COLUMN changes_json TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE mr_threads ADD COLUMN plan_note TEXT;
+ALTER TABLE mr_threads ADD COLUMN instruction TEXT;
+UPDATE mr_threads SET state = CASE
+  WHEN decision = 'asked' THEN 'waiting'
+  WHEN decision IN ('fixed', 'dismissed') AND replied_at IS NOT NULL THEN 'settled'
+  WHEN decision IN ('fixed', 'dismissed') THEN 'replying'
+  ELSE 'open' END;
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

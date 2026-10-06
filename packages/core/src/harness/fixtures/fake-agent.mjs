@@ -262,8 +262,6 @@ function triage() {
   const accept = /## ACCEPTANCE\n- (.+)/.exec(brief)?.[1];
   const lines = threads.map((t) => {
     if (amend && /The developer trusts/.test(brief)) return `- T${t.n}: fix — make the greeting celebrate`;
-    // FAKE_TRIAGE_AMEND=fix: rules fix and records the change to the criteria in the same wave, as Haiku did on 2026-10-05.
-    if (amend === "fix" && !/The developer decided: (fix|dismiss)/.test(t.text)) return `- T${t.n}: fix — make the greeting celebrate`;
     if (amend && !/The developer decided: (fix|dismiss)/.test(t.text)) return `- T${t.n}: asked — should this change what the unit must do?`;
     const fix = /please fix|The developer decided: fix/.test(t.text) && !/The developer decided: dismiss/.test(t.text);
     return fix ? `- T${t.n}: fix — added the review fix to ${file}` : `- T${t.n}: dismissed — the existing test covers this case`;
@@ -279,8 +277,10 @@ function triage() {
     record([
       ...lines.map((l) => {
         const [, n, decision, reason] = /^- T(\d+): (fix|asked|dismissed) — (.+)$/.exec(l);
-        const changes = word[decision] === "ask" ? ["--changes-acceptance", amendments.some((a) => a.startsWith(`- T${n}:`)) ? "yes" : "no"] : [];
-        return ["rule", `T${n}`, word[decision], "--reason", reason, ...changes];
+        const amended = amendments.some((a) => a.startsWith(`- T${n}:`));
+        const changes = word[decision] === "dismiss" ? "none" : amended ? "code,acceptance" : "code";
+        const instruction = word[decision] === "ask" && changes.includes("code") ? ["--instruction", `make the greeting celebrate in ${file}`] : [];
+        return ["rule", `T${n}`, word[decision], "--changes", changes, "--reason", reason, ...instruction];
       }),
       ...amendments.map((a) => ["amend", /^- (T\d+)/.exec(a)[1], "replace", "--from", accept, "--to", "celebration emojis are part of the output"]),
     ]);

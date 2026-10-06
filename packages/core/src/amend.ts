@@ -3,7 +3,11 @@ import { amendUnit, getUnit, now, recordEvent, type Db } from "./store.js";
 
 // A change to what a unit must do, proposed by the arbiter from a review comment and applied only when the developer approves it (§ amendments).
 export type AmendOp =
-  { kind: "replace"; from: string; to: string } | { kind: "add"; text: string } | { kind: "remove"; text: string } | { kind: "verify"; command: string };
+  | { kind: "replace"; from: string; to: string }
+  | { kind: "add"; text: string }
+  | { kind: "remove"; text: string }
+  | { kind: "verify"; command: string }
+  | { kind: "scope"; path: string; why: string };
 
 export interface Amendment {
   id: number;
@@ -13,7 +17,7 @@ export interface Amendment {
   author: string;
   quote: string;
   changes: AmendOp[];
-  before: { acceptance: string[]; verify: string } | null;
+  before: { acceptance: string[]; verify: string; writeScope?: string[] } | null;
   state: "proposed" | "approved" | "rejected";
   createdAt: string;
   decidedAt: string | null;
@@ -75,6 +79,7 @@ export function applyOps(acceptance: string[], verify: string, ops: AmendOp[]): 
   let command = verify;
   const find = (text: string) => next.findIndex((a) => norm(a) === norm(text));
   for (const op of ops) {
+    if (op.kind === "scope") continue;
     if (op.kind === "add") next.push(op.text);
     else if (op.kind === "verify") command = op.command;
     else {
@@ -96,7 +101,9 @@ export const describeOps = (ops: AmendOp[]): string[] =>
         ? `add "${op.text}"`
         : op.kind === "remove"
           ? `remove "${op.text}"`
-          : `the verify command becomes: ${op.command}`,
+          : op.kind === "scope"
+            ? `it may also write ${op.path} (${op.why})`
+            : `the verify command becomes: ${op.command}`,
   );
 
 // The arbiter's proposal, held until the developer answers the gate that carries it. An unusable one returns its problem and is not stored.
@@ -136,8 +143,13 @@ export function settleAmendment(db: Db, unitId: UnitId, threadId: string, answer
     recordEvent(db, "amendment.failed", refs, { amendment: amendment.id, problem: applied.problem });
     return null;
   }
-  const before = { acceptance: unit.acceptance, verify: unit.verify ?? "" };
-  amendUnit(db, unitId, { acceptance: applied.acceptance, verify: applied.verify });
+  const before = { acceptance: unit.acceptance, verify: unit.verify ?? "", writeScope: unit.writeScope };
+  const widened = amendment.changes.flatMap((op) => (op.kind === "scope" && !unit.writeScope.includes(op.path) ? [op.path] : []));
+  amendUnit(db, unitId, {
+    acceptance: applied.acceptance,
+    verify: applied.verify,
+    ...(widened.length ? { writeScope: [...unit.writeScope, ...widened] } : {}),
+  });
   db.prepare("UPDATE unit_amendments SET state = 'approved', before_json = ?, decided_at = ? WHERE id = ?").run(JSON.stringify(before), now(), amendment.id);
   // A verifier's pack edit was written for the criteria as they stood; carried on, its checks fail the amended work on both sides and read as a broken environment.
   db.prepare("UPDATE pack_edits SET state = 'dropped', reason = ? WHERE target_unit_id = ? AND state = 'pending'").run(

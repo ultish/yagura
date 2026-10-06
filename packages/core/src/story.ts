@@ -373,7 +373,8 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     // A wave's rulings are the arbiter's own records, which a later wave on the same thread cannot overwrite; the thread table
     // holds only each thread's latest state, so it gives the reply check while the thread is still this wave's.
     const current = threads.filter((r) => r.waveUnitId === t.id);
-    const judge = attempts.find((a) => a.n === 1);
+    // A wave the developer already answered runs no arbiter (§28): only its worker, building from the recorded instruction.
+    const judge = attempts.find((a) => a.role === "review-triage") ?? attempts.find((a) => a.n === 1 && !a.role);
     const rulings = judge ? [...recordedRulings(db, judge.id).entries()].sort(([a], [b]) => a - b) : [];
     const replyCheck = (r: (typeof threads)[number] | undefined): StoryCheck[] =>
       !r || (r.decision !== "fixed" && r.decision !== "dismissed") || isReviewThread(r.threadId)
@@ -389,12 +390,14 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
                 line(`${ref}:amend:${i}`, "claimed", `T${n} would change what U${unit.seq} must do: ${describeOps(ops).join("; ")}`),
               ),
             ]
-          : current.filter((r) => r.decision).map((r, i) => line(`${ref}:thread:${i}`, "claimed", `${r.decision}: ${r.reason}`, replyCheck(r)));
+          : current
+              .filter((r) => r.decision)
+              .map((r, i) => line(`${ref}:thread:${i}`, "claimed", judge ? `${r.decision}: ${r.reason}` : `Fixed as you approved: ${r.reason}`, replyCheck(r)));
     if (h) lines.push(...judgment(ref, h));
     entries.push({
       at: last.startedAt ?? t.createdAt,
       actor: t.type === "review-triage" ? "review-triage" : "rebase",
-      who: t.type === "review-triage" ? "Arbiter" : "Rebase",
+      who: t.type !== "review-triage" ? "Rebase" : judge ? "Arbiter" : "Worker",
       attempt: attemptOf(t, t.type === "review-triage" && judge ? judge : last),
       status: { text: "done", tone: "pine" },
       body: null,

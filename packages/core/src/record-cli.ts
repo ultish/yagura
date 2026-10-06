@@ -35,7 +35,10 @@ const OPTIONS = {
   runs: { type: "string" },
   "pack-change": { type: "string", multiple: true },
   reason: { type: "string" },
-  "changes-acceptance": { type: "string" },
+  changes: { type: "string" },
+  "plan-note": { type: "string" },
+  instruction: { type: "string" },
+  path: { type: "string" },
   from: { type: "string" },
   to: { type: "string" },
   text: { type: "string" },
@@ -103,9 +106,14 @@ function build(db: Db, attemptId: AttemptId, command: Exclude<RecordCommand, "ch
     case "rule": {
       const thread = threadOf(pos[0]);
       if (!thread) return { problem: `name the thread as T1, T2, …, not "${pos[0] ?? ""}"` };
-      const changes = v["changes-acceptance"];
-      if (changes !== undefined && changes !== "yes" && changes !== "no") return { problem: `--changes-acceptance takes yes or no, not "${changes}"` };
-      return { key: `T${thread}`, data: { thread, decision: pos[1], reason: v.reason, changesAcceptance: changes === undefined ? null : changes === "yes" } };
+      const changes = (v.changes ?? "")
+        .split(/[,\s]+/)
+        .map((c) => c.trim())
+        .filter((c) => c && c !== "none");
+      return {
+        key: `T${thread}`,
+        data: { thread, decision: pos[1], reason: v.reason, changes, planNote: v["plan-note"] ?? null, instruction: v.instruction ?? null },
+      };
     }
     case "amend": {
       const thread = threadOf(pos[0]);
@@ -117,9 +125,11 @@ function build(db: Db, attemptId: AttemptId, command: Exclude<RecordCommand, "ch
             ? { kind: pos[1], text: v.text }
             : pos[1] === "verify"
               ? { kind: "verify", command: v.command }
-              : null;
+              : pos[1] === "scope"
+                ? { kind: "scope", path: v.path, why: v.text }
+                : null;
       if (pos[1] === "clear") return { key: `T${thread}`, data: null };
-      if (!op) return { problem: `the change is replace, add, remove, verify, or clear, not "${pos[1] ?? ""}"` };
+      if (!op) return { problem: `the change is replace, add, remove, verify, scope, or clear, not "${pos[1] ?? ""}"` };
       const earlier = listRecords(db, attemptId, "amendment").find((r) => r.data.thread === thread)?.data.ops ?? [];
       return { key: `T${thread}`, data: { thread, ops: [...earlier, op] } };
     }

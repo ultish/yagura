@@ -12,7 +12,7 @@ import { runInvestigateUnit } from "./investigate.js";
 import { applyAskAnswer, managerNeed, queueManager, runManagerUnit, settleManagerUnit, wakeOnNote } from "./manager.js";
 import { sourceDeps, staleSource } from "./sources.js";
 import { landWait, moveConsumer, publishJobs, repinIfStale, testBuildWait } from "./publish.js";
-import { queueTriage, runTriageUnit } from "./triage.js";
+import { queueTriage, runTriageUnit, advanceThreads } from "./triage.js";
 import { queueReview, reviewStatus, runReviewUnit } from "./review.js";
 import { checkRetroWatch, scanReverts, watchingFor } from "./retro.js";
 import { runWorkUnit } from "./runner.js";
@@ -220,6 +220,7 @@ export class Engine {
         continue;
       }
       const onForge = getRepo(this.db, u.repoId!).forge !== "none";
+      if (!onForge) advanceThreads(this.db, u, false);
       // One lander per repo: a unit whose pull request is open stays landing until it merges.
       const repoBusy = listUnits(this.db, project.id).some((x) => x.repoId === u.repoId && x.state === "landing" && x.id !== u.id);
       // On a forge the pull request opens first, so yagura's review happens on it; a repo busy with another landing reviews meanwhile.

@@ -1,12 +1,15 @@
 import { z } from "zod";
 import { applyOps, type AmendOp } from "./amend.js";
 import {
+  CHANGE_KINDS,
+  NEEDS_APPROVAL,
   FAIL_TIERS,
   HANDOFF_STATUSES,
   MANAGER_ACTIONS,
   PASS_TIERS,
   SEVERITIES,
   type AttemptId,
+  type ChangeKind,
   type Handoff,
   type ManagerAction,
   type RecordKind,
@@ -47,20 +50,38 @@ export const VerdictRecord = z
   .object({ tier: z.enum([...PASS_TIERS, ...FAIL_TIERS]), runs: runIds, packChanges: lines, decisions: lines, notes: lines })
   .strict();
 export const FindingRecord = z.object({ criterion: z.number().int().positive(), met: z.boolean(), runs: runIds, note: text.nullable().default(null) }).strict();
-// An ask must say whether doing what the comment asks would change what the unit must do; yes makes the amendment a required record,
-// so the developer's one answer can approve the change itself.
+// A ruling names every change the thread needs (§28), and the decision has to follow from that set: no changes is a dismissal,
+// code alone is a fix, and anything that changes what the unit must do or what the project plans is a question for the developer.
 export const RulingRecord = z
-  .object({ thread: threadNo, decision: z.enum(["fix", "dismiss", "ask"]), reason: text, changesAcceptance: z.boolean().nullable().default(null) })
+  .object({
+    thread: threadNo,
+    decision: z.enum(["fix", "dismiss", "ask"]),
+    reason: text,
+    changes: z.array(z.enum(CHANGE_KINDS)).default([]),
+    planNote: text.nullable().default(null),
+    instruction: text.nullable().default(null),
+  })
   .strict()
-  .refine((r) => r.decision !== "ask" || r.changesAcceptance !== null, {
-    message: "an ask must say whether it changes what the unit must do: --changes-acceptance yes|no",
-    path: ["changesAcceptance"],
+  .superRefine((r, ctx) => {
+    const issue = (message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: ["changes"] });
+    if (new Set(r.changes).size !== r.changes.length) issue("a change is named twice");
+    if (r.decision === "dismiss" && r.changes.length) issue("a dismissal changes nothing: --changes none");
+    if (r.decision !== "dismiss" && !r.changes.length)
+      issue(`${r.decision === "ask" ? "an ask" : "a fix"} must name what changes: --changes code,acceptance,verify,scope,plan`);
+    if (r.decision === "fix" && !r.changes.includes("code")) issue("a fix changes code: name code in --changes, or rule ask");
+    if (r.changes.includes("plan") && !r.planNote) issue("plan needs --plan-note: the follow-up the project lead should plan");
+    if (!r.changes.includes("plan") && r.planNote) issue("--plan-note only goes with plan in --changes");
+    // An ask's reason is the question for the developer, so the worker's instruction is recorded apart from it; a fix's reason is the instruction.
+    if (r.decision === "ask" && r.changes.includes("code") && !r.instruction)
+      issue("an ask that changes code needs --instruction: what the worker must change if the developer answers Fix");
+    if (r.instruction && !(r.decision === "ask" && r.changes.includes("code"))) issue("--instruction only goes with an ask that changes code");
   });
 const AmendOpRecord = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("replace"), from: text, to: text }).strict(),
   z.object({ kind: z.literal("add"), text }).strict(),
   z.object({ kind: z.literal("remove"), text }).strict(),
   z.object({ kind: z.literal("verify"), command: text }).strict(),
+  z.object({ kind: z.literal("scope"), path: text, why: text }).strict(),
 ]);
 export const AmendmentRecord = z.object({ thread: threadNo, ops: z.array(AmendOpRecord).min(1) }).strict();
 export const ReviewFindingRecord = z
@@ -168,12 +189,38 @@ export function recordProblem<K extends RecordKind>(db: Db, attemptId: AttemptId
     const n = waveThreadCount(db, unit.id);
     const t = (data as { thread: number }).thread;
     if (t > n) return `T${t} does not exist; this wave has ${n} thread${n === 1 ? "" : "s"} (T1${n > 1 ? `–T${n}` : ""})`;
+    if (kind === "ruling") {
+      const r = data as RecordData<"ruling">;
+      const needs = r.changes.filter((c) => NEEDS_APPROVAL.includes(c));
+      if (r.decision === "fix" && needs.length && !trustedAuthorOf(db, unit, t))
+        return `${needs.join(", ")} change${needs.length === 1 ? "s" : ""} what the unit must do or plans, so the developer decides: rule ask`;
+    }
     if (kind === "amendment") {
+      // An amendment carries only changes its ruling declared, so the gate and the record never disagree.
+      const ruling = listRecords(db, attemptId, "ruling").find((r) => r.data.thread === t)?.data;
+      if (!ruling) return `rule on T${t} first (yagura rule T${t} … --changes …), then record its amendment`;
+      for (const op of (data as RecordData<"amendment">).ops) {
+        const declared: ChangeKind = op.kind === "verify" ? "verify" : op.kind === "scope" ? "scope" : "acceptance";
+        if (!ruling.changes.includes(declared)) return `T${t}'s ruling does not name ${declared} in --changes; rule it again with ${declared} if it changes`;
+      }
       const applied = applyOps(target.acceptance, target.verify ?? "", (data as RecordData<"amendment">).ops as AmendOp[]);
       if ("problem" in applied) return applied.problem;
     }
   }
   return null;
+}
+
+// The thread's author is one the developer trusts, so a fix may carry its amendment without asking.
+function trustedAuthorOf(db: Db, wave: { id: UnitId; projectId: string; repoId: string | null }, t: number): boolean {
+  const row = db.prepare("SELECT author FROM mr_threads WHERE wave_unit_id = ? ORDER BY rowid LIMIT 1 OFFSET ?").get(wave.id, t - 1) as
+    { author: string } | undefined;
+  if (!row) return false;
+  const trusted = db
+    .prepare(
+      "SELECT value_json FROM settings WHERE key = 'review.trusted_authors' AND ((scope = 'project' AND scope_id = ?) OR (scope = 'repo' AND scope_id = ?) OR scope = 'global')",
+    )
+    .all(wave.projectId, wave.repoId ?? "") as { value_json: string }[];
+  return trusted.some((s) => (JSON.parse(s.value_json) as string[]).some((a) => a.toLowerCase() === row.author.toLowerCase()));
 }
 
 // What a role must have recorded before it finishes, as instructions it can act on. Empty means done.
@@ -186,17 +233,25 @@ export function missingRecords(db: Db, attemptId: AttemptId, role: Role): string
       const unit = getUnit(db, getAttempt(db, attemptId).unitId);
       const rulings = listRecords(db, attemptId, "ruling").map((r) => r.data);
       const ruled = new Set(rulings.map((r) => r.thread));
-      const amended = new Set(listRecords(db, attemptId, "amendment").map((r) => r.data.thread));
+      const ops = new Map(listRecords(db, attemptId, "amendment").map((r) => [r.data.thread, r.data.ops.map((o) => o.kind as string)]));
+      const has = (t: number, ...kinds: string[]) => (ops.get(t) ?? []).some((k) => kinds.includes(k));
       return [
         ...Array.from({ length: waveThreadCount(db, unit.id) }, (_, i) => i + 1)
           .filter((t) => !ruled.has(t))
-          .map((t) => `no ruling for T${t}: run \`yagura rule T${t} <fix|dismiss|ask> --reason "…"\``),
-        ...rulings
-          .filter((r) => r.changesAcceptance && !amended.has(r.thread))
-          .map(
-            (r) =>
-              `T${r.thread} changes what the unit must do but has no amendment: run \`yagura amend T${r.thread} replace --from "<criterion exactly as ACCEPTANCE words it>" --to "<the concrete new criterion>"\` (and verify --command when the old VERIFY would fail)`,
-          ),
+          .map((t) => `no ruling for T${t}: run \`yagura rule T${t} <fix|dismiss|ask> --changes <…> --reason "…"\``),
+        ...rulings.flatMap((r) => [
+          ...(r.changes.includes("acceptance") && !has(r.thread, "replace", "add", "remove")
+            ? [
+                `T${r.thread} names acceptance but records no criterion change: run \`yagura amend T${r.thread} replace --from "<criterion exactly as ACCEPTANCE words it>" --to "<the concrete new criterion>"\` (or add / remove)`,
+              ]
+            : []),
+          ...(r.changes.includes("verify") && !has(r.thread, "verify")
+            ? [`T${r.thread} names verify but records no new command: run \`yagura amend T${r.thread} verify --command "…"\``]
+            : []),
+          ...(r.changes.includes("scope") && !has(r.thread, "scope")
+            ? [`T${r.thread} names scope but records no path: run \`yagura amend T${r.thread} scope --path "<path>" --text "<why the fix needs it>"\``]
+            : []),
+        ]),
       ];
     }
     case "manager":
@@ -330,7 +385,7 @@ export function describeRecords(db: Db, attemptId: AttemptId): string | null {
     out.push(
       ...section(
         "Rulings",
-        rulings.sort((a, b) => a.thread - b.thread).map((r) => `T${r.thread}: ${r.decision}: ${r.reason}`),
+        rulings.sort((a, b) => a.thread - b.thread).map((r) => `T${r.thread}: ${r.decision} (changes: ${r.changes.join(", ") || "none"}): ${r.reason}`),
       ),
     );
   const amendments = listRecords(db, attemptId, "amendment").map((r) => r.data);

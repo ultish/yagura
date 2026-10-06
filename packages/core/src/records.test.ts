@@ -56,7 +56,7 @@ describe("agent records", () => {
       code: 2,
       output: "yagura handoff refused: YAGURA_EVIDENCE_TOKEN does not match this attempt's session\n",
     });
-    const r = await s.call("rule", "T1", "fix", "--reason", "x");
+    const r = await s.call("rule", "T1", "fix", "--changes", "code", "--reason", "x");
     expect(r.code).toBe(1);
     expect(r.output).toMatch(/^yagura rule was not recorded: the worker role does not record rulings\n/);
   });
@@ -120,19 +120,42 @@ describe("agent records", () => {
     thread.run(target.id, "A", wave.id);
     thread.run(target.id, "B", wave.id);
     const s = session(wave, "review-triage");
-    expect((await s.call("rule", "T3", "fix", "--reason", "x")).output).toMatch(/T3 does not exist; this wave has 2 threads \(T1–T2\)/);
-    expect((await s.call("rule", "T1", "ask", "--reason", "emojis contradict criterion 1")).output).toMatch(
-      /an ask must say whether it changes what the unit must do/,
+    expect((await s.call("rule", "T3", "fix", "--changes", "code", "--reason", "x")).output).toMatch(/T3 does not exist; this wave has 2 threads \(T1–T2\)/);
+    expect((await s.call("rule", "T1", "ask", "--reason", "emojis contradict criterion 1")).output).toMatch(/an ask must name what changes/);
+    expect((await s.call("rule", "T1", "dismiss", "--changes", "code", "--reason", "x")).output).toMatch(/a dismissal changes nothing/);
+    expect((await s.call("rule", "T1", "fix", "--changes", "code,acceptance", "--reason", "x")).output).toMatch(
+      /acceptance changes what the unit must do or plans, so the developer decides: rule ask/,
     );
-    expect((await s.call("rule", "T1", "ask", "--reason", "emojis contradict criterion 1", "--changes-acceptance", "yes")).output).toMatch(
-      /recorded ruling T1\nstill to record:\n- no ruling for T2[^\n]*\n- T1 changes what the unit must do but has no amendment/,
+    expect((await s.call("rule", "T1", "ask", "--changes", "code,plan", "--reason", "x")).output).toMatch(/plan needs --plan-note/);
+    expect((await s.call("rule", "T1", "ask", "--changes", "code,acceptance,verify", "--reason", "emojis contradict criterion 1")).output).toMatch(
+      /an ask that changes code needs --instruction/,
+    );
+    expect(
+      (
+        await s.call(
+          "rule",
+          "T1",
+          "ask",
+          "--changes",
+          "code,acceptance,verify",
+          "--reason",
+          "emojis contradict criterion 1",
+          "--instruction",
+          "append 🎉 in shout()",
+        )
+      ).output,
+    ).toMatch(
+      /recorded ruling T1\nstill to record:\n- no ruling for T2[^\n]*\n- T1 names acceptance but records no criterion change[^\n]*\n- T1 names verify but records no new command/,
+    );
+    expect((await s.call("amend", "T1", "scope", "--path", "docs/**", "--text", "the docs mention it")).output).toMatch(
+      /T1's ruling does not name scope in --changes/,
     );
     expect((await s.call("amend", "T1", "replace", "--from", "no such criterion", "--to", "x")).output).toMatch(
       /no acceptance criterion reads "no such criterion"/,
     );
     expect((await s.call("amend", "T1", "replace", "--from", "shout('app') === 'HELLO, APP!'", "--to", "shout('app') === 'HELLO, APP! 🎉'")).code).toBe(0);
     expect((await s.call("amend", "T1", "verify", "--command", "node check.js --emoji")).code).toBe(0);
-    expect((await s.call("rule", "T2", "dismiss", "--reason", "the test covers it")).output).toMatch(/nothing left to record/);
+    expect((await s.call("rule", "T2", "dismiss", "--changes", "none", "--reason", "the test covers it")).output).toMatch(/nothing left to record/);
     expect(recordedRulings(db, s.attempt.id)).toEqual(
       new Map([
         [1, { decision: "asked", reason: "emojis contradict criterion 1" }],

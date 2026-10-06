@@ -100,6 +100,29 @@ export const UNIT_STATES = [
 ] as const;
 export type UnitState = (typeof UNIT_STATES)[number];
 
+// A review thread on a unit's pull request (§28): where it stands, and the only moves between those states. A reviewer's new
+// comment reopens a thread from wherever it is.
+export const REVIEW_THREAD_STATES = ["open", "ruling", "waiting", "applying", "fixing", "verifying", "replying", "settled", "blocked"] as const;
+export type ReviewThreadState = (typeof REVIEW_THREAD_STATES)[number];
+export const REVIEW_THREAD_TRANSITIONS: Record<ReviewThreadState, readonly ReviewThreadState[]> = {
+  open: ["ruling", "applying"],
+  ruling: ["replying", "fixing", "waiting", "blocked", "open"],
+  waiting: ["applying", "replying", "open"],
+  applying: ["fixing", "verifying", "replying", "blocked", "open"],
+  fixing: ["verifying", "blocked", "open"],
+  verifying: ["fixing", "replying", "blocked", "open"],
+  replying: ["settled", "open"],
+  settled: ["open"],
+  blocked: ["open"],
+};
+export const canMoveReviewThread = (from: ReviewThreadState, to: ReviewThreadState) => REVIEW_THREAD_TRANSITIONS[from].includes(to);
+
+// What a ruling says must change for a thread to be resolved (§28). code is the worker's; the rest change what the unit must do
+// (acceptance, verify, scope) or what the project plans (plan), so they wait for the developer.
+export const CHANGE_KINDS = ["code", "acceptance", "verify", "scope", "plan"] as const;
+export type ChangeKind = (typeof CHANGE_KINDS)[number];
+export const NEEDS_APPROVAL: readonly ChangeKind[] = ["acceptance", "verify", "scope", "plan"];
+
 export const UNIT_TRANSITIONS: Record<UnitState, readonly UnitState[]> = {
   draft: ["ready", "abandoned"],
   ready: ["running", "blocked", "abandoned"],

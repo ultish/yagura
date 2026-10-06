@@ -217,21 +217,6 @@ describe("Engine", () => {
       expect(units("work").map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
     }, 120_000);
 
-    it("asks the developer before any worker builds a fix whose ruling also changes what the unit must do", async () => {
-      const { listGates } = await import("./store.js");
-      process.env.FAKE_REVIEW = "blocking:please fix: add celebration emojis";
-      process.env.FAKE_TRIAGE_AMEND = "fix";
-      await run();
-      const asks = listGates(db, project, "open").filter((g) => g.kind === "review");
-      expect(asks.length).toBeGreaterThan(0);
-      expect(asks[0]!.question).toMatch(/Approving also changes U\d+'s acceptance/);
-      const fixWorkers = db
-        .prepare("SELECT COUNT(*) AS n FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.type = 'review-triage' AND a.n > 1")
-        .get() as { n: number };
-      expect(fixWorkers.n).toBe(0);
-      expect(units("review-triage").every((t) => t.state === "done")).toBe(true);
-    }, 120_000);
-
     it("keeps each arbiter's rulings on its own story entry after a later wave takes the thread over", async () => {
       const { listGates, answerGate } = await import("./store.js");
       const { unitStory } = await import("./story.js");
@@ -250,7 +235,18 @@ describe("Engine", () => {
         "T1 asked: should this change what the unit must do?",
         expect.stringMatching(/^T1 would change what U\d+ must do: change "[^"]+" to "celebration emojis are part of the output"$/),
       ]);
-      expect(arbiters[1]!.lines[0]!.text).toMatch(/^T1 fixed: /);
+      // Answering Fix runs no second arbiter: the next wave is the worker, building from the first ruling's instruction.
+      expect(arbiters[1]!.who).toBe("Worker");
+      expect(arbiters[1]!.lines[0]!.text).toMatch(/^Fixed as you approved: make the greeting celebrate in /);
+      const arbiterRuns = db
+        .prepare("SELECT COUNT(*) AS n FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.target_unit_id = ? AND a.role = 'review-triage'")
+        .get(target.id) as { n: number };
+      expect(arbiterRuns.n).toBe(1);
+      expect(target.acceptance).toContain("celebration emojis are part of the output");
+      const moves = (
+        db.prepare("SELECT data_json FROM events WHERE type = 'thread.state' AND unit_id = ? ORDER BY id").all(target.id) as { data_json: string }[]
+      ).map((e) => JSON.parse(e.data_json).to as string);
+      expect(moves).toEqual(["ruling", "waiting", "applying", "fixing", "verifying", "replying", "settled"]);
     }, 120_000);
 
     it("applies a trusted author's requirement change at once, with no gate, and the worker builds to the amended acceptance", async () => {

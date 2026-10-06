@@ -156,7 +156,10 @@ async function squashOntoTrunk(l: Landing): Promise<Squash> {
 
 function queueTriageWave(l: Landing, number: number, fresh: Parameters<typeof queueTriage>[3]): LandResult {
   const triage = queueTriage(l.db, l.unit, prRef(l.repo.forge, number), fresh);
-  const reason = `${fresh.length} review thread(s) on ${prRef(l.repo.forge, number)}; the arbiter is queued`;
+  // Answers that needed no worker were acted on at once (§28): the unit is verified again, or back to verified.
+  if (!triage)
+    return { unit: getUnit(l.db, l.unit.id), outcome: "waiting", landedSha: null, reason: `acted on your answers on ${prRef(l.repo.forge, number)}` };
+  const reason = `${fresh.length} review thread(s) on ${prRef(l.repo.forge, number)}; ${triage.goal.startsWith("Fix ") ? "a worker is queued" : "the arbiter is queued"}`;
   if (l.unit.state === "landing") transitionUnit(l.db, l.unit.id, "blocked", { reason, reviewUnit: triage.seq });
   return { unit: getUnit(l.db, l.unit.id), outcome: "triaging", landedSha: null, reason };
 }
