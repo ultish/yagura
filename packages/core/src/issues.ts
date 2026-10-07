@@ -21,6 +21,8 @@ interface IssueRow {
   threadId: number;
   url: string;
   seen: string[];
+  // Thread messages that came from the issue; the developer's own messages in the dashboard are not among them and stay private.
+  fromIssue: number[];
   postedThrough: number;
   needsApproval: boolean;
 }
@@ -32,6 +34,7 @@ function toRow(r: Record<string, unknown>): IssueRow {
     threadId: r.thread_id as number,
     url: r.url as string,
     seen: JSON.parse(r.seen_json as string) as string[],
+    fromIssue: JSON.parse(r.issue_messages_json as string) as number[],
     postedThrough: r.posted_through as number,
     needsApproval: r.needs_approval === 1,
   };
@@ -76,11 +79,16 @@ const quote = (text: string) =>
 
 function addIssueMessage(db: Db, row: IssueRow, author: string, verb: string, body: string): void {
   const trusted = isTrusted(db, row.repoId, author);
-  addMessage(db, {
+  const m = addMessage(db, {
     threadId: row.threadId,
     role: "human",
     body: `@${author}${trusted ? " (trusted)" : ""} ${verb} on issue #${row.number}:\n\n${quote(body)}`,
   });
+  db.prepare("UPDATE forge_issues SET issue_messages_json = json_insert(issue_messages_json, '$[#]', ?) WHERE repo_id = ? AND number = ?").run(
+    m.id,
+    row.repoId,
+    row.number,
+  );
   if (!trusted) db.prepare("UPDATE forge_issues SET needs_approval = 1 WHERE repo_id = ? AND number = ?").run(row.repoId, row.number);
 }
 
@@ -151,7 +159,12 @@ async function decide(ctx: RunContext, forge: ForgeAdapter, row: IssueRow, propo
       role: "system",
       body: `Applied proposal ${proposal.id} (approved by ${who} on the issue): ${JSON.stringify(applied)}`,
     });
-    await post(forge, row, `p${proposal.id}`, `Approved by ${who}. Started ${describeApplied(applied)}; the change closes this issue when it merges.`);
+    await post(
+      forge,
+      row,
+      `p${proposal.id}`,
+      `${by ? `Approved by ${who}. ` : ""}Started ${describeApplied(applied)}; the change closes this issue when it merges.`,
+    );
   } catch (e) {
     const problem = e instanceof Error ? e.message : String(e);
     addMessage(db, { threadId: row.threadId, role: "system", body: `Proposal ${proposal.id} could not be applied: ${problem}` });
@@ -211,7 +224,14 @@ export async function answerIssue(ctx: RunContext, repo: Repo, number: number): 
   }
   row = getIssue(db, repo.id, number)!;
   const pending = pendingProposal(db, row.threadId);
-  const replies = listMessages(db, row.threadId).filter((m) => m.role === "watchman" && m.id > row!.postedThrough);
+  // A reply goes on the issue only when it answers something said there: a turn that read only the developer's dashboard
+  // messages stays in yagura.
+  const messages = listMessages(db, row.threadId);
+  const answersIssue = (reply: { id: number }) => {
+    const previous = messages.filter((m) => m.role === "watchman" && m.id < reply.id).at(-1)?.id ?? 0;
+    return messages.some((m) => m.role === "human" && m.id > previous && m.id < reply.id && row!.fromIssue.includes(m.id));
+  };
+  const replies = messages.filter((m) => m.role === "watchman" && m.id > row!.postedThrough);
   if (replies.length) {
     const keys = await forge.issueReplyKeys(number);
     for (const m of replies) {
@@ -219,7 +239,7 @@ export async function answerIssue(ctx: RunContext, repo: Repo, number: number): 
       const footer = asks
         ? `\n\n---\n**Proposed:** ${describeProposal(ProposalBody.parse(pending!.body)).split("\n")[0]}\n\nA trusted user can reply **yes** to go ahead, or **no** to decline.`
         : "";
-      await post(forge, row, `m${m.id}`, `${m.body}${footer}`, keys);
+      if (answersIssue(m)) await post(forge, row, `m${m.id}`, `${m.body}${footer}`, keys);
       db.prepare("UPDATE forge_issues SET posted_through = ? WHERE repo_id = ? AND number = ?").run(m.id, repo.id, number);
     }
   }

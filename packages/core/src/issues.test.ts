@@ -14,6 +14,7 @@ import { answerIssue, approvalOf, listIssues, pollIssues } from "./issues.js";
 import { layout } from "./paths.js";
 import { addProject, addRepo, getRepo, listUnits, openStore, setProjectState, setRepoForge, type Db } from "./store.js";
 import { getThread, listMessages, listProposals } from "./threads.js";
+import { runWatchmanTurn } from "./watchman.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
 const tsx = pathToFileURL(join(dirname(createRequire(import.meta.url).resolve("tsx/package.json")), "dist/loader.mjs")).href;
@@ -132,7 +133,7 @@ describe("forge issues (§30, fake gh)", () => {
     expect(listUnits(db, project).map((u) => u.goal)).toEqual(["write issue-3.txt"]);
     expect(posted(3).map((c) => c.body.split("\n\n")[1])).toEqual([
       "I can build that: one unit writing issue-3.txt.",
-      "Approved by the trusted author. Started U1 on project **p**; the change closes this issue when it merges.",
+      "Started U1 on project **p**; the change closes this issue when it merges.",
     ]);
 
     comment(3, "stranger", "also build a second one");
@@ -144,6 +145,26 @@ describe("forge issues (§30, fake gh)", () => {
     await cycle();
     expect(listUnits(db, project)).toHaveLength(1);
     expect(posted(3).at(-1)!.body.split("\n\n")[1]).toBe("Declined by @ultish: nothing will be built for this.");
+  }, 60_000);
+
+  it("keeps the developer's dashboard conversation off the issue, and posts again once the issue speaks", async () => {
+    await cycle();
+    open(5, "stranger", "what does it do?");
+    await cycle();
+    expect(posted(5)).toHaveLength(1);
+    const [row] = listIssues(db, "testbed" as RepoId);
+    await runWatchmanTurn(ctx, row!.threadId, "private note: never mind them");
+    await cycle();
+    expect(listMessages(db, row!.threadId).filter((m) => m.role === "watchman")).toHaveLength(2);
+    expect(posted(5)).toHaveLength(1);
+    comment(5, "stranger", "hello?");
+    await cycle();
+    expect(posted(5)).toHaveLength(2);
+    expect(
+      posted(5)
+        .map((c) => c.body)
+        .join("\n"),
+    ).not.toContain("never mind");
   }, 60_000);
 
   it("stops answering an issue for the day once it reaches its cap, keeping the comments for later", async () => {

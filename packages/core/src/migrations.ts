@@ -653,6 +653,16 @@ CREATE TABLE forge_issues (
 );
 `,
   },
+  {
+    version: 45,
+    sql: `
+ALTER TABLE forge_issues ADD COLUMN issue_messages_json TEXT NOT NULL DEFAULT '[]';
+UPDATE forge_issues SET issue_messages_json = (
+  SELECT json_group_array(m.id) FROM thread_messages m
+  WHERE m.thread_id = forge_issues.thread_id AND m.role = 'human' AND m.body LIKE '@% on issue #%'
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;
