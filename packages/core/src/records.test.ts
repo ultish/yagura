@@ -1,4 +1,5 @@
-import { mkdtempSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -48,6 +49,14 @@ describe("agent records", () => {
     const insert = db.prepare("INSERT INTO agent_records (attempt_id, kind, key, data_json, created_at) VALUES (?, ?, ?, '{}', 't')");
     RECORD_KINDS.forEach((k) => insert.run(s.attempt.id, k, "x"));
     expect(() => insert.run(s.attempt.id, "status", "y")).toThrow(/CHECK/);
+  });
+
+  it("skips the plugin's Stop hook in a session without an attempt, never starting yagura", () => {
+    const hooks = JSON.parse(readFileSync(new URL("../../../plugins/yagura/hooks/hooks.json", import.meta.url), "utf8"));
+    const command = hooks.hooks.Stop[0].hooks[0].command as string;
+    const run = spawnSync("sh", ["-c", command], { env: { PATH: "/usr/bin:/bin" }, encoding: "utf8" });
+    expect({ status: run.status, stdout: run.stdout, stderr: run.stderr }).toEqual({ status: 0, stdout: "", stderr: "" });
+    expect(spawnSync("sh", ["-c", command], { env: { PATH: "/usr/bin:/bin", YAGURA_ATTEMPT: "1" }, encoding: "utf8" }).status).toBe(127);
   });
 
   it("lets a session without an attempt (the watchman's) stop, while its record commands still refuse", async () => {

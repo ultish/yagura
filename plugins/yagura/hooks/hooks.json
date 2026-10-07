@@ -1,6 +1,15 @@
 {
-  "description": "Before an agent in a yagura session stops, check that it recorded what its role must record (§27).",
+  "description": "Before an agent in a yagura session stops, check that it recorded what its role must record (\u00a727). A session with no attempt (the watchman's) records in its reply, so the hook does nothing there.",
   "hooks": {
-    "Stop": [{ "hooks": [{ "type": "command", "command": "yagura check-done --hook" }] }]
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -z \"$YAGURA_ATTEMPT\" ] || yagura check-done --hook"
+          }
+        ]
+      }
+    ]
   }
 }
