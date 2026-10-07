@@ -84,10 +84,32 @@ const nextMessage = (ms) =>
         waiting = (text) => (clearTimeout(timer), (waiting = null), resolve(text));
       });
 
+// FAKE_LIMIT=<seconds>: an attempt's first session is refused by the account's usage limit, the way claude 2.1 reports it, with the
+// window resetting that many seconds later; the session yagura resumes after the reset works the original brief.
+const limitFile = () => join(tmpdir(), `fake-limit-${process.env.YAGURA_HOME?.replace(/\W/g, "_")}-${process.env.YAGURA_ATTEMPT}`);
+function refuse(sessionId) {
+  writeFileSync(limitFile(), brief);
+  const info = { status: "rejected", resetsAt: Math.ceil(Date.now() / 1000) + Number(process.env.FAKE_LIMIT), rateLimitType: "five_hour" };
+  const text = "You've hit your session limit · resets soon";
+  emit({
+    type: "assistant",
+    message: { content: [{ type: "text", text }] },
+    session_id: sessionId,
+    error: "rate_limit",
+    is_api_error_message: true,
+    api_error: "usage_limit_reached",
+    api_error_params: { rate_limit_info: info },
+  });
+  emit({ type: "result", subtype: "success", is_error: true, result: text, session_id: sessionId, total_cost_usd: 0 });
+}
+
 async function main() {
-  if (resumeAt > 0) return resumed(process.argv[resumeAt + 1]);
-  const sessionId = process.env.YAGURA_ROLE === "watchman" ? `w-${process.pid}-${Date.now()}` : "s1";
+  const continuing = resumeAt > 0 && process.env.FAKE_LIMIT && existsSync(limitFile());
+  if (continuing) brief = readFileSync(limitFile(), "utf8");
+  else if (resumeAt > 0) return resumed(process.argv[resumeAt + 1]);
+  const sessionId = continuing ? process.argv[resumeAt + 1] : process.env.YAGURA_ROLE === "watchman" ? `w-${process.pid}-${Date.now()}` : "s1";
   emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
+  if (process.env.FAKE_LIMIT && !continuing && !existsSync(limitFile())) return refuse(sessionId);
   const skills =
     {
       worker: ["yagura:yagura-worker", "pstack:poteto-mode", "pstack:principle-prove-it-works", "pstack:principle-test-behavior-not-implementation"],

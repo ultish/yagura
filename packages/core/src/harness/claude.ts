@@ -15,6 +15,14 @@ function stringifyContent(content: unknown): string {
   return JSON.stringify(content ?? "");
 }
 
+type RateLimitInfo = { status?: string; resetsAt?: number };
+const LIMIT_STATUSES = ["allowed", "allowed_warning", "rejected"] as const;
+
+function limitEvent(info: RateLimitInfo | undefined, refused: boolean): HarnessEvent {
+  const status = refused ? "rejected" : (LIMIT_STATUSES.find((s) => s === info?.status) ?? "allowed");
+  return { kind: "limit", status, resetsAt: typeof info?.resetsAt === "number" ? new Date(info.resetsAt * 1000).toISOString() : null };
+}
+
 export function parseClaudeLine(line: string): HarnessEvent[] {
   if (!line.trim()) return [];
   const o = JSON.parse(line) as Record<string, unknown>;
@@ -40,6 +48,8 @@ export function parseClaudeLine(line: string): HarnessEvent[] {
         outputTokens: u.output_tokens ?? 0,
         contextTokens: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0),
       });
+    // claude reports a refused request as an assistant message; a usage limit carries the window it hit.
+    if (o.error === "rate_limit") events.push(limitEvent((o.api_error_params as { rate_limit_info?: RateLimitInfo } | undefined)?.rate_limit_info, true));
     return events;
   }
 
@@ -68,6 +78,8 @@ export function parseClaudeLine(line: string): HarnessEvent[] {
         costUsd: typeof o.total_cost_usd === "number" ? o.total_cost_usd : null,
       },
     ];
+
+  if (o.type === "rate_limit_event") return [limitEvent(o.rate_limit_info as RateLimitInfo | undefined, false)];
 
   return [{ kind: "ignored", type: [o.type, o.subtype].filter(Boolean).join(":") }];
 }

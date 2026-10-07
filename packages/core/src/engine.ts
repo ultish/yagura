@@ -39,6 +39,7 @@ import {
   updateAttempt,
   type Db,
 } from "./store.js";
+import { activeHold } from "./limits.js";
 import { postReport, reportKey, type ReportKind } from "./report.js";
 import { listThreads } from "./threads.js";
 import { runVerifyUnit } from "./verify.js";
@@ -85,6 +86,7 @@ export class Engine {
   private readonly cutoffSaid = new Set<ProjectId>();
   private readonly pinsChecked = new Map<UnitId, string>();
   private readonly costSaid = new Set<ProjectId>();
+  private holdSaid: string | null = null;
   private readonly log: (line: string) => void;
 
   constructor(
@@ -512,6 +514,12 @@ export class Engine {
             true,
           );
     }
+    // While the account's usage limit holds, sessions already running wait it out and nothing new starts; landing carries on.
+    const hold = activeHold(this.db);
+    if (hold && hold.until !== this.holdSaid) {
+      this.holdSaid = hold.until;
+      this.log(`  usage limit on ${hold.harness}: no new agents until ${new Date(hold.until).toLocaleString()}`);
+    }
     for (const project of this.scope().filter((p) => p.state === "active")) {
       const missing = projectSkillChecks(this.db, this.ctx.boot, project.id).filter((c) => !c.installed);
       if (missing.length) {
@@ -556,6 +564,7 @@ export class Engine {
       if (this.maybeClose(project)) continue;
       if (project.andonReason) continue;
       this.land(project);
+      if (hold) continue;
       if (this.planNeeded(project))
         this.start(
           `plan:${project.id}`,
@@ -573,9 +582,10 @@ export class Engine {
     const projects = this.scope();
     if (projects.some((p) => this.activationDue(p)) || this.dueReports(projects).length) return false;
     if (projects.some((p) => publishJobs(this.db, p.id).length)) return false;
+    const held = activeHold(this.db) !== null;
     return projects.every((p) => {
       if (p.state !== "active") return true;
-      if (p.andonReason) return true;
+      if (p.andonReason || held) return true;
       if (this.planNeeded(p)) return false;
       if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
       if (listUnits(this.db, p.id).some((u) => u.state === "verified" && this.wouldMove(p, u))) return false;

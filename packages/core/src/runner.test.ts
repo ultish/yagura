@@ -240,6 +240,64 @@ describe("runWorkUnit", () => {
     expect(getUnit(db, unit.id)).toMatchObject({ state: "ready", notes: ["Operator stopped attempt 1: wrong approach; use the store"] });
   });
 
+  describe("the account's usage limit", () => {
+    const events = (type: string) =>
+      (db.prepare("SELECT data_json FROM events WHERE type = ? ORDER BY id").all(type) as { data_json: string }[]).map((r) => JSON.parse(r.data_json));
+
+    it("waits for the window to reset, resumes the same session, and does not spend a try", async () => {
+      process.env.FAKE_LIMIT = "1";
+      try {
+        const started = Date.now();
+        const { unit, attempt, paths } = await run("success");
+        const [held] = events("harness.limited");
+        expect(held).toMatchObject({ harness: "claude", reason: "You've hit your session limit · resets soon" });
+        expect(Date.now()).toBeGreaterThanOrEqual(Math.min(Date.parse(held.until), started + 1000));
+        expect(events("attempt.limited")).toEqual([{ until: held.until }]);
+        expect(unit.state).toBe("verifying");
+        expect(listAttempts(db, unit.id)).toHaveLength(1);
+        expect(attempt).toMatchObject({ state: "handed_off", handoffStatus: "success", limitedUntil: null, sessionId: "s1" });
+        expect(attempt.skills).toContain("pstack:poteto-mode");
+        expect(readFileSync(join(attempt.worktreePath!, "app/orders.py"), "utf8")).toContain("brief had GOAL: true");
+        const log = readFileSync(paths.log(project, 1, 1), "utf8");
+        expect(log.indexOf('"error":"rate_limit"')).toBeLessThan(log.lastIndexOf('"subtype":"init"'));
+      } finally {
+        delete process.env.FAKE_LIMIT;
+      }
+    });
+
+    it("ends a waiting attempt as stopped when the operator stops it, without spending a try", async () => {
+      const { stopAttempt } = await import("./agent.js");
+      process.env.FAKE_LIMIT = "600";
+      process.env.FAKE_MODE = "success";
+      try {
+        const unit = addUnit(db, {
+          projectId: project,
+          type: "work",
+          repoId: "testbed" as RepoId,
+          goal: "g",
+          writeScope: ["app/**"],
+          acceptance: ["a"],
+          verify: "v",
+          timeboxSeconds: 60,
+          maxAttempts: 1,
+        });
+        transitionUnit(db, unit.id, "ready");
+        const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
+        let attempt = listAttempts(db, unit.id)[0];
+        for (let i = 0; i < 100 && !attempt?.limitedUntil; i++) {
+          await new Promise((r) => setTimeout(r, 50));
+          attempt = listAttempts(db, unit.id)[0];
+        }
+        expect(Date.parse(attempt!.limitedUntil!)).toBeGreaterThan(Date.now() + 500_000);
+        expect(stopAttempt(db, attempt!.id, "not today")).toBe(true);
+        expect(await running).toMatchObject({ state: "stopped", limitedUntil: null });
+        expect(getUnit(db, unit.id).state).toBe("ready");
+      } finally {
+        delete process.env.FAKE_LIMIT;
+      }
+    });
+  });
+
   describe("steering", () => {
     const start = (timeboxSeconds = 60) => {
       const bin = join(mkdtempSync(join(tmpdir(), "yagura-bin-")), "claude");

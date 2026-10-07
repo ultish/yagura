@@ -6,6 +6,7 @@ import { createInterface } from "node:readline";
 import type { Bootstrap } from "./config.js";
 import type { Attempt, HarnessEvent, ProjectId, Role, Unit } from "./domain.js";
 import type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
+import { activeHold, holdHarness, limitUntil } from "./limits.js";
 import { missingSkills } from "./pack.js";
 import { steerChannel, type SteerChannel } from "./steer.js";
 import { logTimesPath } from "./paths.js";
@@ -63,6 +64,9 @@ export interface SessionRecorder {
   cost(usd: number): void;
   finished(skills: string[]): string[];
   steers?: SteerChannel;
+  // Present when the session may wait out a usage limit: told the reset time while it waits, then null when it resumes.
+  limited?(until: string | null): void;
+  stopRequested?(): boolean;
 }
 
 const STEER_POLL_MS = 1000;
@@ -96,6 +100,11 @@ export function attemptRecorder(
     usage: (contextPeak, tokensOut) => updateAttempt(db, s.attempt.id, { contextPeak, tokensOut }),
     cost: (usd) => db.prepare("UPDATE attempts SET cost_usd = cost_usd + ? WHERE id = ?").run(usd, s.attempt.id),
     steers: steerChannel(db, s.attempt.id),
+    limited: (until) => {
+      updateAttempt(db, s.attempt.id, { limitedUntil: until });
+      if (until) recordEvent(db, "attempt.limited", refs, { until });
+    },
+    stopRequested: () => getAttempt(db, s.attempt.id).stopNote !== null,
     finished: (skills) => {
       const loaded = [...new Set([...(s.inheritedSkills ?? []), ...skills])];
       const missing = getAttempt(db, s.attempt.id).stopNote !== null ? [] : missingSkills(s.role, loaded, s.projectSkills);
@@ -106,22 +115,64 @@ export function attemptRecorder(
   };
 }
 
-export async function runAgentSession(
-  ctx: RunContext,
-  s: {
-    recorder: SessionRecorder;
-    adapter: HarnessAdapter;
-    run: HarnessRun;
-    cwd: string;
-    env: Record<string, string>;
-    timeboxSeconds: number;
-    logPath: string;
-  },
-): Promise<SessionResult> {
+type SessionSpec = {
+  recorder: SessionRecorder;
+  adapter: HarnessAdapter;
+  run: HarnessRun;
+  cwd: string;
+  env: Record<string, string>;
+  timeboxSeconds: number;
+  logPath: string;
+};
+
+const LIMIT_POLL_MS = 1000;
+export const LIMIT_RESUME_PROMPT = "The account's usage limit has reset. Carry on from where you stopped.";
+
+// A session the account's usage limit refused holds every session on its harness until the window resets, then resumes where it
+// stopped; its attempt keeps going rather than failing a try. A recorder without `limited` (the watchman's chat turn) does not wait.
+export async function runAgentSession(ctx: RunContext, s: SessionSpec): Promise<SessionResult> {
   write(s.logPath, "");
   write(logTimesPath(s.logPath), "");
+  const usage = { contextPeak: 0, tokensOut: 0 };
+  const skills: string[] = [];
+  let run = s.run;
+  for (;;) {
+    const once = await runOnce(ctx, s, run, usage, skills);
+    if (!once.refused || !s.recorder.limited) {
+      const missing = s.recorder.finished(skills);
+      return { ...once.result, skills, missingSkills: missing };
+    }
+    const until = limitUntil(once.refused.resetsAt);
+    holdHarness(ctx.db, s.adapter.id, until, once.result.final?.text || "the account's usage limit");
+    s.recorder.limited(until);
+    const resumed = await waitOutHold(ctx.db, s.adapter.id, () => s.recorder.stopRequested?.() ?? false);
+    s.recorder.limited(null);
+    if (!resumed) {
+      const missing = s.recorder.finished(skills);
+      return { ...once.result, skills, missingSkills: missing };
+    }
+    run = once.sessionId && s.adapter.canResume ? { ...s.run, resume: once.sessionId, prompt: LIMIT_RESUME_PROMPT } : s.run;
+  }
+}
+
+async function waitOutHold(db: Db, harness: string, stopped: () => boolean): Promise<boolean> {
+  for (;;) {
+    const hold = activeHold(db, harness);
+    if (!hold) return true;
+    if (stopped()) return false;
+    await new Promise((r) => setTimeout(r, Math.max(10, Math.min(LIMIT_POLL_MS, Date.parse(hold.until) - Date.now()))));
+  }
+}
+
+async function runOnce(
+  ctx: RunContext,
+  s: SessionSpec,
+  run: HarnessRun,
+  usage: { contextPeak: number; tokensOut: number },
+  skills: string[],
+): Promise<{ result: Omit<SessionResult, "skills" | "missingSkills">; sessionId: string | null; refused: { resetsAt: string | null } | null }> {
   const bin = ctx.cli.length ? installCliShim(ctx) : null;
-  const { argv, stdin } = s.adapter.command(s.run);
+  const { argv, stdin } = s.adapter.command(run);
   const [cmd, ...args] = argv as [string, ...string[]];
   const child = spawn(cmd, args, {
     cwd: s.cwd,
@@ -163,10 +214,9 @@ export async function runAgentSession(
 
   let final: FinalEvent | null = null;
   let lastActivity: string | null = null;
-  let contextPeak = 0;
-  let tokensOut = 0;
+  let sessionId: string | null = null;
+  let refused: { resetsAt: string | null } | null = null;
   let stderr = "";
-  const skills: string[] = [];
   child.stderr.on("data", (d: Buffer) => {
     stderr = (stderr + d.toString()).slice(-4000);
   });
@@ -197,12 +247,16 @@ export async function runAgentSession(
       continue;
     }
     for (const e of events) {
-      if (e.kind === "session") s.recorder.session(e);
-      if (e.kind === "usage") {
-        contextPeak = Math.max(contextPeak, e.contextTokens);
-        tokensOut += e.outputTokens;
-        s.recorder.usage(contextPeak, tokensOut);
+      if (e.kind === "session") {
+        sessionId = e.sessionId;
+        s.recorder.session(e);
       }
+      if (e.kind === "usage") {
+        usage.contextPeak = Math.max(usage.contextPeak, e.contextTokens);
+        usage.tokensOut += e.outputTokens;
+        s.recorder.usage(usage.contextPeak, usage.tokensOut);
+      }
+      if (e.kind === "limit" && e.status === "rejected") refused = { resetsAt: e.resetsAt };
       if (e.kind === "tool_call") {
         lastActivity = describeCall(e);
         const skill = (e.input as { skill?: unknown } | null)?.skill;
@@ -229,8 +283,7 @@ export async function runAgentSession(
   for (const m of inFlight) s.recorder.steers?.undelivered(m.id, "the agent finished before reading it");
   for (const m of s.recorder.steers?.pending() ?? []) s.recorder.steers?.undelivered(m.id, "the agent had already finished");
 
-  const missing = s.recorder.finished(skills);
-  return { final, exitCode: exit.code, signal: exit.signal, timedOut, stderrTail: stderr, lastActivity, skills, missingSkills: missing };
+  return { result: { final, exitCode: exit.code, signal: exit.signal, timedOut, stderrTail: stderr, lastActivity }, sessionId, refused };
 }
 
 export function stopAttempt(db: Db, attemptId: AttemptId, note: string | null): boolean {

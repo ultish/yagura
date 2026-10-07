@@ -347,6 +347,7 @@ function toAttempt(r: Record<string, unknown>): Attempt {
     resumesAttemptId: (r.resumes_attempt_id as AttemptId | null) ?? null,
     sources: JSON.parse((r.sources_json as string | undefined) ?? "[]"),
     rejection: (r.rejection as Attempt["rejection"]) ?? null,
+    limitedUntil: (r.limited_until as string | null | undefined) ?? null,
     skills: JSON.parse((r.skills_json as string | undefined) ?? "[]"),
     missingSkills: JSON.parse((r.missing_skills_json as string | undefined) ?? "[]"),
     startedAt: (r.started_at as IsoTime | null) ?? null,
@@ -425,6 +426,7 @@ const ATTEMPT_COLUMNS = {
   sources: "sources_json",
   rejection: "rejection",
   role: "role",
+  limitedUntil: "limited_until",
 } as const satisfies Partial<Record<keyof Attempt, string>>;
 
 export function updateAttempt(db: Db, id: AttemptId, patch: Partial<Pick<Attempt, keyof typeof ATTEMPT_COLUMNS>>): void {

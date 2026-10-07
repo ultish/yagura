@@ -617,6 +617,18 @@ UPDATE mr_threads SET state = CASE
   ELSE 'open' END;
 `,
   },
+  {
+    version: 43,
+    sql: `
+CREATE TABLE usage_holds (
+  harness TEXT PRIMARY KEY,
+  until TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  since TEXT NOT NULL
+);
+ALTER TABLE attempts ADD COLUMN limited_until TEXT;
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

@@ -630,4 +630,19 @@ describe("Engine", () => {
     await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
     expect(listUnits(db, project)).toEqual([]);
   });
+
+  it("starts no agent while the account's usage limit holds, says so once, and carries on when it clears", async () => {
+    const { clearHold, holdHarness } = await import("./limits.js");
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    holdHarness(db, "claude", until, "You've hit your session limit");
+    const log: string[] = [];
+    const engine = new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) });
+    await engine.runUntilIdle();
+    await engine.tick();
+    expect(listUnits(db, project)).toEqual([]);
+    expect(log.filter((l) => l.includes("usage limit on claude: no new agents until"))).toHaveLength(1);
+    expect(clearHold(db, "claude")).toBe(true);
+    await engine.runUntilIdle();
+    expect(listUnits(db, project).length).toBeGreaterThan(0);
+  }, 60_000);
 });

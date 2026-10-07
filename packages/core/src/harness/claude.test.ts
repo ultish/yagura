@@ -74,6 +74,25 @@ describe("claude command", () => {
   });
 });
 
+describe("claude usage limit", () => {
+  // Built from claude 2.1.292's own stream-json writer, not captured: replace with a real transcript once yagura logs one.
+  it("reads the refused request as a limit until the window resets, and a warning as no refusal", () => {
+    const events = readFileSync(new URL("./fixtures/claude-usage-limit.from-source.jsonl", import.meta.url), "utf8")
+      .split("\n")
+      .flatMap(parseClaudeLine);
+    expect(events.filter((e) => e.kind === "limit")).toEqual([
+      { kind: "limit", status: "allowed_warning", resetsAt: "2026-10-08T03:00:00.000Z" },
+      { kind: "limit", status: "rejected", resetsAt: "2026-10-08T03:00:00.000Z" },
+    ]);
+    expect(events.at(-1)).toMatchObject({ kind: "final", isError: true, text: "You've hit your session limit · resets 2pm" });
+  });
+
+  it("reads a rate limit with no window (an API key's) as a refusal with no reset time", () => {
+    const line = JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "Rate limited" }] }, error: "rate_limit" });
+    expect(parseClaudeLine(line).at(-1)).toEqual({ kind: "limit", status: "rejected", resetsAt: null });
+  });
+});
+
 describe("claude resume (real transcripts)", () => {
   const read = (f: string) =>
     readFileSync(new URL(`./fixtures/${f}`, import.meta.url), "utf8")

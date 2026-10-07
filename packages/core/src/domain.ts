@@ -161,8 +161,15 @@ export const PROOF_HARNESS = "yagura-proof";
 export const PACK_EDIT_HARNESS = "yagura-pack-edit";
 export const REPIN_HARNESS = "yagura-repin";
 // A resume that never started a session (unknown or expired session id) falls back to a fresh attempt at no extra try.
-export const spendsAttempt = (a: { state: string; harness: string; resumesAttemptId?: AttemptId | null; sessionId?: string | null }) =>
+export const spendsAttempt = (a: {
+  state: string;
+  harness: string;
+  resumesAttemptId?: AttemptId | null;
+  sessionId?: string | null;
+  limitedUntil?: string | null;
+}) =>
   a.state !== "stopped" &&
+  !a.limitedUntil &&
   a.harness !== REBASE_HARNESS &&
   a.harness !== PACK_EDIT_HARNESS &&
   a.harness !== REPIN_HARNESS &&
@@ -370,6 +377,8 @@ export interface Attempt {
   sessionId: string | null;
   resumesAttemptId: AttemptId | null;
   sources: { unit: string; repoId: RepoId; sha: Sha; path: string; version?: string }[];
+  // Set while the session waits out the account's usage limit: a try the limit ended is not one the unit spent.
+  limitedUntil: string | null;
   rejection: Rejection | null;
   skills: string[];
   missingSkills: string[];
@@ -437,4 +446,6 @@ export type HarnessEvent =
   | { kind: "usage"; outputTokens: number; contextTokens: number }
   | { kind: "user_text"; text: string }
   | { kind: "final"; text: string; isError: boolean; stopReason: string | null; costUsd: number | null }
+  // The account's usage window: `rejected` means the harness refused the request until `resetsAt` (ISO; null when it did not say).
+  | { kind: "limit"; status: "allowed" | "allowed_warning" | "rejected"; resetsAt: string | null }
   | { kind: "ignored"; type: string };

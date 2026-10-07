@@ -114,6 +114,8 @@ import {
   setPromptText,
   standingFor,
   type PromptRole,
+  activeHold,
+  clearHold,
 } from "@yagura/core";
 
 const USAGE = `yagura — agent orchestration
@@ -151,6 +153,7 @@ const USAGE = `yagura — agent orchestration
   yagura daemon                          run yagura for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)
   yagura drive <project>                 plan, run, verify, and land until nothing is left to do (without a daemon)
   yagura andon <project> --reason <text> | --clear
+  yagura limit [--clear]                 whether the account's usage limit holds new agents back, and until when; --clear starts them now
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
   yagura unit wake <project> <unit#> [--note <text>]   ask a blocked, failed, or rejected unit's unit lead to look at it now
@@ -517,6 +520,19 @@ async function main() {
       if (!projectId || (!values.reason && !values.clear)) fail(USAGE);
       setAndon(db, projectId as ProjectId, values.clear ? null : values.reason!);
       console.log(values.clear ? `andon cleared on ${projectId}` : `andon raised on ${projectId}: ${values.reason}`);
+      return;
+    }
+    case "limit": {
+      const { values } = args({ clear: { type: "boolean" } });
+      const hold = activeHold(db);
+      if (!hold) return console.log("no usage limit holds agents back");
+      if (values.clear) {
+        clearHold(db, hold.harness);
+        return console.log(`usage limit on ${hold.harness} cleared; agents start on the next tick`);
+      }
+      console.log(
+        `usage limit on ${hold.harness} until ${new Date(hold.until).toLocaleString()} (since ${new Date(hold.since).toLocaleString()}): ${hold.reason}`,
+      );
       return;
     }
     case "gates": {
