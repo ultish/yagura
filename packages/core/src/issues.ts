@@ -7,7 +7,7 @@ import type { ProjectId, Repo, RepoId } from "./domain.js";
 import { YAGURA_MARK, forgeFor, postOnce, signed, type ForgeAdapter, type ForgeIssue } from "./forge.js";
 import { applyProposal, describeProposal, discardProposal, ProposalBody, type ApplyProposalResult } from "./proposal.js";
 import { getRepo, now, recordEvent, type Db } from "./store.js";
-import { addMessage, createThread, linkThreadProject, listMessages, listProposals, type Proposal } from "./threads.js";
+import { addMessage, createThread, issueRef, linkThreadProject, listDecisions, listMessages, listProposals, type Proposal } from "./threads.js";
 import { runningTurn } from "./turns.js";
 
 // Issues are read from a little before the last poll, so one updated while a poll ran is not missed; ids already read are skipped.
@@ -24,6 +24,8 @@ interface IssueRow {
   // Thread messages that came from the issue; the developer's own messages in the dashboard are not among them and stay private.
   fromIssue: number[];
   postedThrough: number;
+  // Milestones already told on the issue; null until the first look, which records what had already happened without posting it.
+  announced: string[] | null;
   needsApproval: boolean;
 }
 
@@ -36,6 +38,7 @@ function toRow(r: Record<string, unknown>): IssueRow {
     seen: JSON.parse(r.seen_json as string) as string[],
     fromIssue: JSON.parse(r.issue_messages_json as string) as number[],
     postedThrough: r.posted_through as number,
+    announced: r.announced_json === null ? null : (JSON.parse(r.announced_json as string) as string[]),
     needsApproval: r.needs_approval === 1,
   };
 }
@@ -104,7 +107,7 @@ function projectFor(db: Db, repoId: RepoId): ProjectId | null {
 function openIssueThread(db: Db, repo: Repo, issue: ForgeIssue): IssueRow {
   return db.transaction(() => {
     const thread = createThread(db, { title: `#${issue.number} ${issue.title}`, autonomy: "propose" });
-    db.prepare("INSERT INTO forge_issues (repo_id, number, thread_id, author, title, url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+    db.prepare("INSERT INTO forge_issues (repo_id, number, thread_id, author, title, url, announced_json, created_at) VALUES (?, ?, ?, ?, ?, ?, '[]', ?)").run(
       repo.id,
       issue.number,
       thread.id,
@@ -206,6 +209,48 @@ export async function pollIssues(ctx: RunContext, repo: Repo): Promise<void> {
   db.prepare("UPDATE issue_watches SET polled_at = ? WHERE repo_id = ?").run(started, repo.id);
 }
 
+// What the issue hears without anyone asking: each decision its thread records (on the issue or in the dashboard), and how the
+// work it started moves: its pull request, its landing, and a block that waits for the developer.
+function milestones(db: Db, row: IssueRow): { key: string; text: string }[] {
+  const decided = listDecisions(db, row.threadId).map((d) => ({ key: `d${d.id}`, text: `Decided: ${d.text}` }));
+  const units = db
+    .prepare(
+      `SELECT u.id, u.seq, u.repo_id, u.state, m.url FROM units u LEFT JOIN merge_requests m ON m.unit_id = u.id
+       WHERE EXISTS (SELECT 1 FROM json_each(u.refs_json) j WHERE j.value = ?) ORDER BY u.id`,
+    )
+    .all(issueRef(row.repoId, row.number)) as { id: number; seq: number; repo_id: string | null; state: string; url: string | null }[];
+  const work = units.flatMap((u) => {
+    const label = `U${u.seq}${u.repo_id && u.repo_id !== row.repoId ? ` (${u.repo_id})` : ""}`;
+    const blocks = (
+      db.prepare("SELECT COUNT(*) AS n FROM events WHERE unit_id = ? AND type = 'unit.state' AND json_extract(data_json, '$.to') = 'blocked'").get(u.id) as {
+        n: number;
+      }
+    ).n;
+    return [
+      ...(u.url ? [{ key: `u${u.id}-pr`, text: `${label} is up for review: ${u.url}` }] : []),
+      ...(u.state === "landed" ? [{ key: `u${u.id}-landed`, text: `${label} landed.` }] : []),
+      ...(u.state === "blocked" ? [{ key: `u${u.id}-blocked${blocks}`, text: `${label} is blocked and waits for the developer.` }] : []),
+    ];
+  });
+  return [...decided, ...work];
+}
+
+async function announce(db: Db, forge: ForgeAdapter, row: IssueRow): Promise<void> {
+  const all = milestones(db, row);
+  const save = (keys: string[]) =>
+    db.prepare("UPDATE forge_issues SET announced_json = ? WHERE repo_id = ? AND number = ?").run(JSON.stringify(keys), row.repoId, row.number);
+  if (row.announced === null) return void save(all.map((m) => m.key));
+  const told = [...row.announced];
+  const fresh = all.filter((m) => !told.includes(m.key));
+  if (!fresh.length) return;
+  const keys = await forge.issueReplyKeys(row.number);
+  for (const m of fresh) {
+    await post(forge, row, m.key, m.text, keys);
+    told.push(m.key);
+    save(told);
+  }
+}
+
 function turnsToday(db: Db, threadId: number): number {
   return (db.prepare("SELECT COUNT(*) AS n FROM watchman_turns WHERE thread_id = ? AND started_at >= ?").get(threadId, now().slice(0, 10)) as { n: number }).n;
 }
@@ -244,4 +289,5 @@ export async function answerIssue(ctx: RunContext, repo: Repo, number: number): 
     }
   }
   if (pending && !row.needsApproval) await decide(ctx, forge, row, pending, "yes", null);
+  await announce(db, forge, getIssue(db, repo.id, number)!);
 }

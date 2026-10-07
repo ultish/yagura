@@ -34,10 +34,14 @@ export function unitLink(url: string | null, project: Project, unit: Unit): stri
   return url ? `${url.replace(/\/$/, "")}/p/${project.id}/u/${unit.seq}` : null;
 }
 
-// A ref to an issue yagura is answering (§30) closes it when the change merges; other refs only point at their issue.
+// A ref to an issue yagura is answering (§30) closes it when a change to that issue's own repo merges; a change to another repo
+// of the project only refers to it.
 function watchedIssues(db: Db, unit: Unit, refs: string[]): number[] {
   if (!unit.repoId) return [];
-  const numbers = refs.flatMap((r) => (/^#(\d+)$/.exec(r) ? [Number(r.slice(1))] : []));
+  const numbers = refs.flatMap((r) => {
+    const m = /^(.+)#(\d+)$/.exec(r);
+    return m && m[1] === unit.repoId ? [Number(m[2])] : [];
+  });
   return numbers.filter((n) => db.prepare("SELECT 1 FROM forge_issues WHERE repo_id = ? AND number = ?").get(unit.repoId, n));
 }
 

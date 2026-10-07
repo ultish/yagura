@@ -197,18 +197,18 @@ describe("landUnit (forge none)", () => {
     expect(message).not.toContain("Closes");
   });
 
-  it("closes an issue yagura is answering when the change lands, and only that one", async () => {
+  it("closes an issue yagura is answering when a change to its own repo lands, and only that one", async () => {
     const { createThread } = await import("./threads.js");
     const { setProjectRefs } = await import("./store.js");
     const thread = createThread(db, { title: "#7 x" });
     db.prepare("INSERT INTO forge_issues (repo_id, number, thread_id, author, title, url, created_at) VALUES ('testbed', 7, ?, 'a', 'x', 'u', 't')").run(
       thread.id,
     );
-    setProjectRefs(db, project, ["#7", "#8", "gitlab#42"]);
+    setProjectRefs(db, project, ["testbed#7", "other#7", "testbed#8", "gitlab#42"]);
     const work = await verifiedUnit();
     await landUnit(ctx, work.id);
     const message = await git(["log", "-1", "--format=%B", "main"], { cwd: origin });
-    expect(message.trim().split("\n").slice(-4)).toEqual(["Refs: #7", "Refs: #8", "Refs: gitlab#42", "Closes #7"]);
+    expect(message.trim().split("\n").slice(-5)).toEqual(["Refs: testbed#7", "Refs: other#7", "Refs: testbed#8", "Refs: gitlab#42", "Closes #7"]);
   });
 
   it("rebases onto a moved trunk, squashes, and carries the verdict when the patch is unchanged", async () => {

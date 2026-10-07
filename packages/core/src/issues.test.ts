@@ -13,7 +13,7 @@ import { readGitlabIssue } from "./forge.js";
 import { answerIssue, approvalOf, listIssues, pollIssues } from "./issues.js";
 import { layout } from "./paths.js";
 import { addProject, addRepo, getRepo, listUnits, openStore, setProjectState, setRepoForge, type Db } from "./store.js";
-import { getThread, listMessages, listProposals } from "./threads.js";
+import { addDecision, getThread, listMessages, listProposals } from "./threads.js";
 import { runWatchmanTurn } from "./watchman.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
@@ -112,7 +112,7 @@ describe("forge issues (§30, fake gh)", () => {
 
     comment(2, "ultish", "Yes, go ahead");
     await cycle();
-    expect(listUnits(db, project).map((u) => ({ goal: u.goal, refs: u.refs }))).toEqual([{ goal: "write issue-2.txt", refs: ["#2"] }]);
+    expect(listUnits(db, project).map((u) => ({ goal: u.goal, refs: u.refs }))).toEqual([{ goal: "write issue-2.txt", refs: ["testbed#2"] }]);
     expect(posted(2).at(-1)!.body).toBe(
       "⚙️ **yagura**\n\nApproved by @ultish. Started U1 on project **p**; the change closes this issue when it merges.\n\n<!-- yagura -->\n<!-- yagura-reply:issue-testbed-2-p1 -->",
     );
@@ -155,16 +155,49 @@ describe("forge issues (§30, fake gh)", () => {
     const [row] = listIssues(db, "testbed" as RepoId);
     await runWatchmanTurn(ctx, row!.threadId, "private note: never mind them");
     await cycle();
-    expect(listMessages(db, row!.threadId).filter((m) => m.role === "watchman")).toHaveLength(2);
-    expect(posted(5)).toHaveLength(1);
+    const replies = listMessages(db, row!.threadId).filter((m) => m.role === "watchman");
+    expect(replies).toHaveLength(2);
+    // The private reply stays in yagura; the decision that turn recorded is still news for the issue.
+    expect(posted(5).map((c) => c.body.split("\n\n")[1])).toEqual(["Which file should change?", "Decided: Timestamps are ignored"]);
     comment(5, "stranger", "hello?");
     await cycle();
-    expect(posted(5)).toHaveLength(2);
+    expect(posted(5)).toHaveLength(3);
     expect(
       posted(5)
         .map((c) => c.body)
         .join("\n"),
-    ).not.toContain("never mind");
+    ).not.toContain(replies[1]!.body.split("\n")[0]);
+  }, 60_000);
+
+  it("tells the issue each decision and how its work moves, once, without being asked", async () => {
+    await cycle();
+    open(6, "ultish", "build it please");
+    await cycle();
+    const [row] = listIssues(db, "testbed" as RepoId);
+    const [unit] = listUnits(db, project);
+    addDecision(db, { threadId: row!.threadId, text: "The greeting names the developer", sourceMessageId: null });
+    db.prepare(
+      "INSERT INTO merge_requests (unit_id, forge, forge_repo, number, url, branch, head_sha, base_sha, created_at) VALUES (?, 'gh', 'ultish/sandbox', 9, 'https://github.com/ultish/sandbox/pull/9', 'b', 'h', 'b', 't')",
+    ).run(unit!.id);
+    await cycle();
+    await cycle();
+    expect(
+      posted(6)
+        .slice(2)
+        .map((c) => c.body.split("\n\n")[1]),
+    ).toEqual(["Decided: The greeting names the developer", "U1 is up for review: https://github.com/ultish/sandbox/pull/9"]);
+
+    // An issue yagura was answering before these updates existed starts from what had happened, and tells only what comes after.
+    db.prepare("UPDATE forge_issues SET announced_json = NULL").run();
+    addDecision(db, { threadId: row!.threadId, text: "Already decided before", sourceMessageId: null });
+    await cycle();
+    addDecision(db, { threadId: row!.threadId, text: "Decided after", sourceMessageId: null });
+    await cycle();
+    expect(
+      posted(6)
+        .slice(4)
+        .map((c) => c.body.split("\n\n")[1]),
+    ).toEqual(["Decided: Decided after"]);
   }, 60_000);
 
   it("stops answering an issue for the day once it reaches its cap, keeping the comments for later", async () => {

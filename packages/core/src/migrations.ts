@@ -663,6 +663,22 @@ UPDATE forge_issues SET issue_messages_json = (
 );
 `,
   },
+  {
+    version: 46,
+    sql: `
+ALTER TABLE forge_issues ADD COLUMN announced_json TEXT;
+UPDATE units SET refs_json = (
+  SELECT json_group_array(CASE WHEN j.value = '#' || fi.number THEN fi.repo_id || '#' || fi.number ELSE j.value END) FROM json_each(units.refs_json) j
+)
+FROM forge_issues fi JOIN thread_projects tp ON tp.thread_id = fi.thread_id
+WHERE tp.project_id = units.project_id AND EXISTS (SELECT 1 FROM json_each(units.refs_json) j WHERE j.value = '#' || fi.number);
+UPDATE projects SET refs_json = (
+  SELECT json_group_array(CASE WHEN j.value = '#' || fi.number THEN fi.repo_id || '#' || fi.number ELSE j.value END) FROM json_each(projects.refs_json) j
+)
+FROM forge_issues fi JOIN thread_projects tp ON tp.thread_id = fi.thread_id
+WHERE tp.project_id = projects.id AND EXISTS (SELECT 1 FROM json_each(projects.refs_json) j WHERE j.value = '#' || fi.number);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;
