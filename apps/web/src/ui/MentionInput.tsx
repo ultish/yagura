@@ -94,7 +94,9 @@ export function MentionInput({
             rows={1}
             aria-describedby={`${id}-hint`}
             value={value}
-            disabled={disabled}
+            // Read-only rather than disabled while sending: a disabled field drops focus, and the next reply means clicking back in.
+            readOnly={disabled}
+            aria-busy={disabled}
             autoFocus={autoFocus}
             placeholder={placeholder}
             onChange={(e) => {
@@ -112,7 +114,7 @@ export function MentionInput({
               }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                if (value.trim()) onSubmit();
+                if (canSend) onSubmit();
               }
             }}
             style={{
