@@ -194,6 +194,21 @@ describe("landUnit (forge none)", () => {
     expect(message).toMatch(/Yagura-Verdict: unit-verified by A\d+ \(run:\d+/);
     expect(message).toContain("Yagura-Link: http://devvm:7300/p/p/u/1");
     expect(message).toContain("Refs: gitlab#42");
+    expect(message).not.toContain("Closes");
+  });
+
+  it("closes an issue yagura is answering when the change lands, and only that one", async () => {
+    const { createThread } = await import("./threads.js");
+    const { setProjectRefs } = await import("./store.js");
+    const thread = createThread(db, { title: "#7 x" });
+    db.prepare("INSERT INTO forge_issues (repo_id, number, thread_id, author, title, url, created_at) VALUES ('testbed', 7, ?, 'a', 'x', 'u', 't')").run(
+      thread.id,
+    );
+    setProjectRefs(db, project, ["#7", "#8", "gitlab#42"]);
+    const work = await verifiedUnit();
+    await landUnit(ctx, work.id);
+    const message = await git(["log", "-1", "--format=%B", "main"], { cwd: origin });
+    expect(message.trim().split("\n").slice(-4)).toEqual(["Refs: #7", "Refs: #8", "Refs: gitlab#42", "Closes #7"]);
   });
 
   it("rebases onto a moved trunk, squashes, and carries the verdict when the patch is unchanged", async () => {

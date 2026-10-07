@@ -10,6 +10,7 @@ export * from "./paths.js";
 export * from "./runner.js";
 export * from "./agent.js";
 export * from "./limits.js";
+export * from "./issues.js";
 export * from "./verify.js";
 export * from "./verdict.js";
 export * from "./evidence.js";

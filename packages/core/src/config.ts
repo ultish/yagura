@@ -66,12 +66,22 @@ export const SETTINGS = {
   "role.reviewer.model": z.string().nullable().default(null).describe("Model for code reviewers (empty: the harness default)"),
   "role.manager.harness": z.string().default("claude").describe("Harness that runs unit managers"),
   "role.manager.model": z.string().nullable().default(null).describe("Model for unit managers (empty: the harness default)"),
-  "review.trusted_authors": z
+  "forge.trusted_authors": z
     .array(z.string())
     .default([])
     .describe(
-      "Forge logins whose review comments may change what a unit must do without asking you: the arbiter's amendment for their comment is applied at once",
+      "Forge logins whose word is yours: their review comments change what a unit must do without asking, their issues start work at once, and their yes on an issue approves the watchman's proposal",
     ),
+  "forge.watch_issues": z
+    .boolean()
+    .default(false)
+    .describe("Read issues opened on the repo from now on: the watchman answers each on the issue and proposes the work"),
+  "issues.max_turns_per_day": z
+    .number()
+    .int()
+    .positive()
+    .default(10)
+    .describe("Watchman turns one issue may start in a day; later comments wait for the next day"),
   "manager.enabled": z
     .boolean()
     .default(true)
@@ -181,7 +191,9 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "role.manager.harness": PR,
   "role.manager.model": PR,
   "manager.enabled": PR,
-  "review.trusted_authors": PR,
+  "forge.trusted_authors": PR,
+  "forge.watch_issues": R,
+  "issues.max_turns_per_day": R,
   "manager.max_decisions_per_unit": PR,
   "role.reviewer.harness": PR,
   "role.reviewer.model": PR,

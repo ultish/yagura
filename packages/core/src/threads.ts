@@ -98,6 +98,12 @@ export function linkThreadProject(db: Db, threadId: number, projectId: ProjectId
   db.prepare("INSERT OR IGNORE INTO thread_projects (thread_id, project_id) VALUES (?, ?)").run(threadId, projectId);
 }
 
+// A thread opened for a forge issue (§30); every project and unit made from it carries the issue's ref.
+export function issueOfThread(db: Db, threadId: number): { repoId: string; number: number; ref: string } | null {
+  const row = db.prepare("SELECT repo_id, number FROM forge_issues WHERE thread_id = ?").get(threadId) as { repo_id: string; number: number } | undefined;
+  return row ? { repoId: row.repo_id, number: row.number, ref: `#${row.number}` } : null;
+}
+
 export function threadsForProject(db: Db, projectId: ProjectId): number[] {
   return (db.prepare("SELECT thread_id FROM thread_projects WHERE project_id = ?").all(projectId) as { thread_id: number }[]).map((r) => r.thread_id);
 }

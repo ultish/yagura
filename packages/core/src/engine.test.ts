@@ -252,7 +252,7 @@ describe("Engine", () => {
     it("applies a trusted author's requirement change at once, with no gate, and the worker builds to the amended acceptance", async () => {
       const { listGates } = await import("./store.js");
       const { listAmendments } = await import("./amend.js");
-      setSetting(db, "project", project, "review.trusted_authors", ["yagura reviewer"]);
+      setSetting(db, "project", project, "forge.trusted_authors", ["yagura reviewer"]);
       process.env.FAKE_REVIEW = "blocking:please fix: add celebration emojis";
       process.env.FAKE_TRIAGE_AMEND = "1";
       await run();

@@ -35,6 +35,21 @@ export interface ForgeAdapter {
   // `plain` is the text to post instead when the forge refuses the line (it names the location itself).
   comment(number: number, at: { path: string; line: number; headSha: Sha } | null, body: string, key: string, plain?: string): Promise<string | null>;
   replyTo(number: number, ref: string, body: string, key: string): Promise<void>;
+  // Open issues (never pull or merge requests) updated at or after `since`, each with its comments oldest first.
+  issues(since: string): Promise<ForgeIssue[]>;
+  issueReplyKeys(number: number): Promise<Set<string>>;
+  commentOnIssue(number: number, body: string, key: string): Promise<void>;
+}
+
+// Issue text is untrusted like review text: it reaches the watchman only as quoted messages.
+export interface ForgeIssue {
+  number: number;
+  title: string;
+  author: string;
+  body: string;
+  url: string;
+  createdAt: string;
+  comments: { id: string; author: string; body: string; createdAt: string }[];
 }
 
 // What the forge calls a change under review: "pull request #4" on GitHub, "merge request !4" on GitLab.
@@ -337,6 +352,51 @@ export function githubForge(bin: string, repo: string): ForgeAdapter {
         JSON.stringify({ body: keyed(body, key) }),
       );
     },
+    async issues(since) {
+      const listed = JSON.parse(
+        await gh(bin, ["issue", "list", ...R, "--state", "open", "--limit", "100", "--json", "number,title,author,body,url,createdAt,updatedAt"]),
+      ) as { number: number; title: string; author: Author; body: string; url: string; createdAt: string; updatedAt: string }[];
+      return Promise.all(
+        listed
+          .filter((i) => i.updatedAt >= since)
+          .sort((a, b) => a.number - b.number)
+          .map(async (i) => ({
+            number: i.number,
+            title: i.title,
+            author: i.author?.login ?? "ghost",
+            body: i.body ?? "",
+            url: i.url,
+            createdAt: i.createdAt,
+            comments: readGithubIssueComments(JSON.parse(await gh(bin, ["issue", "view", String(i.number), ...R, "--json", "comments"]))),
+          })),
+      );
+    },
+    async issueReplyKeys(number) {
+      return readReplyKeys(JSON.parse(await gh(bin, ["issue", "view", String(number), ...R, "--json", "comments"])));
+    },
+    async commentOnIssue(number, body, key) {
+      await gh(bin, ["issue", "comment", String(number), ...R, "--body-file", "-"], keyed(body, key));
+    },
+  };
+}
+
+export function readGithubIssueComments(data: { comments?: { id: string; author: Author; body: string; createdAt: string }[] }): ForgeIssue["comments"] {
+  return (data.comments ?? []).map((c) => ({ id: c.id, author: c.author?.login ?? "ghost", body: c.body, createdAt: c.createdAt }));
+}
+
+type GlIssue = { iid: number; title: string; author: { username: string } | null; description: string | null; web_url: string; created_at: string };
+export function readGitlabIssue(issue: GlIssue, notes: GlNote[]): ForgeIssue {
+  return {
+    number: issue.iid,
+    title: issue.title,
+    author: issue.author?.username ?? "ghost",
+    body: issue.description ?? "",
+    url: issue.web_url,
+    createdAt: issue.created_at,
+    comments: notes
+      .filter((n) => !n.system)
+      .map((n) => ({ id: String(n.id), author: n.author?.username ?? "ghost", body: n.body, createdAt: n.created_at ?? "" }))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || Number(a.id) - Number(b.id)),
   };
 }
 
@@ -347,6 +407,7 @@ type GlNote = {
   body: string;
   system: boolean;
   author: { username: string } | null;
+  created_at?: string;
   resolvable?: boolean;
   resolved?: boolean;
   position?: { new_path?: string; old_path?: string; new_line?: number | null; old_line?: number | null } | null;
@@ -535,6 +596,20 @@ export function gitlabForge(bin: string, repo: string): ForgeAdapter {
     },
     async replyTo(iid, ref, body, key) {
       await api(["--method", "POST", `${project}/merge_requests/${iid}/discussions/${ref.slice(2)}/notes`], { body: keyed(body, key) });
+    },
+    async issues(since) {
+      const listed = JSON.parse(
+        await api([`${project}/issues?state=opened&updated_after=${encodeURIComponent(since)}&per_page=100&order_by=created_at&sort=asc`]),
+      ) as GlIssue[];
+      return Promise.all(
+        listed.map(async (i) => readGitlabIssue(i, JSON.parse(await api([`${project}/issues/${i.iid}/notes?per_page=100&sort=asc`])) as GlNote[])),
+      );
+    },
+    async issueReplyKeys(iid) {
+      return readReplyKeys(JSON.parse(await api([`${project}/issues/${iid}/notes?per_page=100`])));
+    },
+    async commentOnIssue(iid, body, key) {
+      await api(["--method", "POST", `${project}/issues/${iid}/notes`], { body: keyed(body, key) });
     },
   };
 }

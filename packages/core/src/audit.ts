@@ -34,6 +34,13 @@ export function unitLink(url: string | null, project: Project, unit: Unit): stri
   return url ? `${url.replace(/\/$/, "")}/p/${project.id}/u/${unit.seq}` : null;
 }
 
+// A ref to an issue yagura is answering (§30) closes it when the change merges; other refs only point at their issue.
+function watchedIssues(db: Db, unit: Unit, refs: string[]): number[] {
+  if (!unit.repoId) return [];
+  const numbers = refs.flatMap((r) => (/^#(\d+)$/.exec(r) ? [Number(r.slice(1))] : []));
+  return numbers.filter((n) => db.prepare("SELECT 1 FROM forge_issues WHERE repo_id = ? AND number = ?").get(unit.repoId, n));
+}
+
 export function landMessage(
   db: Db,
   boot: Bootstrap,
@@ -57,6 +64,7 @@ export function landMessage(
     `Yagura-Verdict: ${p.verdict.tier} by A${verifyAttempt.agentNo}${runs.length ? ` (${runs.map((r) => `run:${r}`).join(", ")})` : ""}`,
     ...(link ? [`Yagura-Link: ${link}`] : []),
     ...refs.map((r) => `Refs: ${r}`),
+    ...watchedIssues(db, p.unit, refs).map((n) => `Closes #${n}`),
   ];
   return `${commitSubject(p.unit.goal)}\n\n${body ? `${body.length > BODY_MAX ? `${body.slice(0, BODY_MAX)}\n…` : body}\n\n` : ""}${trailers.join("\n")}\n`;
 }

@@ -581,6 +581,27 @@ function watchman(sessionId) {
     const records = fixed ? { decisions: [{ text: "fixed on retry" }] } : { answered: [{ question: "Q99", answer: "x" }] };
     return finish(`${fixed ? "Corrected." : "First try."}\n\n\`\`\`yagura\n${JSON.stringify(records)}\n\`\`\``);
   }
+  // An issue thread (§30): "build" in the comment proposes a unit on FAKE_ISSUE_PROJECT, "never" refuses, anything else asks.
+  const issue = /^@\S+(?: \(trusted\))? (?:opened|commented) on issue #(\d+):$/.exec(asked);
+  if (issue) {
+    const said = current.slice(current.lastIndexOf(asked)).split("\n## ")[0];
+    const repo = /- forge issue #\d+ on repo (\S+):/.exec(brief)?.[1];
+    if (/build/i.test(said)) {
+      const n = issue[1];
+      const unit = {
+        key: `issue-${n}`,
+        repo,
+        goal: `write issue-${n}.txt`,
+        write: [`issue-${n}.txt`],
+        accept: [`issue-${n}.txt exists`],
+        verify: `test -f issue-${n}.txt`,
+      };
+      const proposal = { summary: `build what issue #${n} asks`, amend: [{ project: process.env.FAKE_ISSUE_PROJECT, units: [unit] }] };
+      return finish(`I can build that: one unit writing issue-${n}.txt.\n\n\`\`\`yagura\n${JSON.stringify({ proposal })}\n\`\`\``);
+    }
+    if (/never/i.test(said)) return finish("No: that is not something this project will do.");
+    return finish(`Which file should change?\n\n\`\`\`yagura\n${JSON.stringify({ questions: ["Which file should change?"] })}\n\`\`\``);
+  }
   const register = /^register (\S+) (.+)$/.exec(asked);
   if (register) {
     const [, id, existing] = register;

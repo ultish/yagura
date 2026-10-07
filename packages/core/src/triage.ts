@@ -352,7 +352,7 @@ export async function runTriageUnit(ctx: RunContext, unitId: UnitId): Promise<At
   mkdirSync(dirname(worktree), { recursive: true });
   await addWorktree(mirror, worktree, branch, verdict.head_sha);
   const envValues = valueMap(db, project.environmentId);
-  const trusted = new Set(setting("review.trusted_authors").map((a) => a.toLowerCase()));
+  const trusted = new Set(setting("forge.trusted_authors").map((a) => a.toLowerCase()));
   const trustedHere = [...new Set(rows.filter((r) => trusted.has(r.author.toLowerCase())).map((r) => r.author))];
   const threadContext = [
     ...triageContext(

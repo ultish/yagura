@@ -40,6 +40,7 @@ import {
   type Db,
 } from "./store.js";
 import { activeHold } from "./limits.js";
+import { answerIssue, listIssues, pollIssues, watchedRepos } from "./issues.js";
 import { postReport, reportKey, type ReportKind } from "./report.js";
 import { listThreads } from "./threads.js";
 import { runVerifyUnit } from "./verify.js";
@@ -82,6 +83,7 @@ export class Engine {
   private readonly inflight = new Map<string, Promise<void>>();
   private lastSweep = 0;
   private lastRevertScan = 0;
+  private readonly issuesPolledAt = new Map<string, number>();
   private readonly landingSaid = new Map<UnitId, string>();
   private readonly cutoffSaid = new Set<ProjectId>();
   private readonly pinsChecked = new Map<UnitId, string>();
@@ -501,6 +503,7 @@ export class Engine {
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
     for (const project of this.scope()) this.retro(project);
     for (const project of this.scope()) this.publishing(project);
+    if (!this.opts.projectId) this.issues();
     if (Date.now() - this.lastRevertScan > (this.opts.revertScanMs ?? REVERT_SCAN_MS)) {
       this.lastRevertScan = Date.now();
       const repos = this.db.prepare("SELECT DISTINCT repo_id AS id FROM units WHERE landed_sha IS NOT NULL").all() as { id: string }[];
@@ -591,6 +594,27 @@ export class Engine {
       if (listUnits(this.db, p.id).some((u) => u.state === "verified" && this.wouldMove(p, u))) return false;
       return !listUnits(this.db, p.id).some((u) => isBuild(u) && (u.state === "failed" || u.state === "rejected"));
     });
+  }
+
+  // Issues on watched repos (§30): one poll per repo at the forge poll rate, then each issue's waiting comments are answered.
+  // A usage-limit hold only delays the watchman's turns, which wait inside their sessions like any agent.
+  private issues(): void {
+    const poll = resolveSetting(this.db, "forge.poll_seconds").value * 1000;
+    for (const repo of watchedRepos(this.db)) {
+      const key = `issues:${repo.id}`;
+      if (this.inflight.has(key) || Date.now() - (this.issuesPolledAt.get(repo.id) ?? 0) < poll) continue;
+      this.issuesPolledAt.set(repo.id, Date.now());
+      this.start(
+        key,
+        `issues ${repo.id}`,
+        async () => {
+          await pollIssues(this.ctx, repo);
+          for (const issue of listIssues(this.db, repo.id)) await answerIssue(this.ctx, repo, issue.number);
+        },
+        () => undefined,
+        true,
+      );
+    }
   }
 
   // Landed commits are watched for a while, whatever state their project is in: trunk CI on the forge, and reverts.

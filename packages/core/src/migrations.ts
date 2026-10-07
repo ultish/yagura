@@ -629,6 +629,30 @@ CREATE TABLE usage_holds (
 ALTER TABLE attempts ADD COLUMN limited_until TEXT;
 `,
   },
+  {
+    version: 44,
+    sql: `
+UPDATE settings SET key = 'forge.trusted_authors' WHERE key = 'review.trusted_authors';
+CREATE TABLE issue_watches (
+  repo_id TEXT PRIMARY KEY REFERENCES repos (id),
+  since TEXT NOT NULL,
+  polled_at TEXT
+);
+CREATE TABLE forge_issues (
+  repo_id TEXT NOT NULL REFERENCES repos (id),
+  number INTEGER NOT NULL,
+  thread_id INTEGER NOT NULL UNIQUE REFERENCES threads (id),
+  author TEXT NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  seen_json TEXT NOT NULL DEFAULT '[]',
+  posted_through INTEGER NOT NULL DEFAULT 0,
+  needs_approval INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (repo_id, number)
+);
+`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

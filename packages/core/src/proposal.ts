@@ -16,7 +16,7 @@ import { parseSpec, writeSpec } from "./spec.js";
 import { ValueInvalid } from "./envvalues.js";
 import { addEnvironment, addProject, addRepo, getEnvironment, getProject, getRepo, recordEvent, setProjectState, type Db } from "./store.js";
 import { checkDraft, createEnvironment, draftFromTemplate, EnvironmentDraft, TemplateInvalid } from "./templates.js";
-import { getProposal, getThread, linkThreadProject, resolveProposal } from "./threads.js";
+import { getProposal, getThread, issueOfThread, linkThreadProject, resolveProposal } from "./threads.js";
 
 const Slug = z.string().regex(REPO_ID, "ids are lowercase words joined by dashes, e.g. kafka-diff");
 const NewRepo = z.object({ id: Slug, description: z.string().default(""), verifyPack: VerifyPack }).strict();
@@ -273,6 +273,8 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
     const existing = await inspectProposalRepos(body, (id) => layout(boot).mirror(id as RepoId));
     const bares = new Map<string, string>();
     for (const r of body.repos) if (!isExisting(r)) bares.set(r.id, await createLocalRepo(boot, db, r));
+    const issue = issueOfThread(db, proposal.threadId);
+    const withIssue = <T extends { refs?: string[] }>(x: T): T => (issue ? { ...x, refs: [...new Set([...(x.refs ?? []), issue.ref])] } : x);
     const result = db.transaction((): ApplyProposalResult => {
       const out: ApplyProposalResult = { repos: [], environments: created, projects: [], units: {} };
       for (const r of body.repos) {
@@ -295,7 +297,7 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
           predicate: p.predicate,
           minTier: p.minTier,
           repos: p.repos as RepoId[],
-          refs: p.refs,
+          refs: withIssue(p).refs,
           after: p.after as ProjectId[],
           phaseGate: p.phaseGate,
           mergePolicy: p.merge,
@@ -308,13 +310,16 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
           if (skills) setSetting(db, "project", project.id, `skills.${purpose}`, skills);
         }
         if (p.references.length) setSetting(db, "project", project.id, "project.reference_repos", p.references);
-        if (p.units.length) out.units[p.id] = applyDelta(db, project.id, PlanDelta.parse({ add: p.units }), null).added.map((u) => `U${u.seq}`);
+        if (p.units.length) out.units[p.id] = applyDelta(db, project.id, PlanDelta.parse({ add: p.units.map(withIssue) }), null).added.map((u) => `U${u.seq}`);
         out.projects.push(p.id);
       }
       for (const a of body.amend) {
         const id = a.project as ProjectId;
         if (getProject(db, id).state === "closed") setProjectState(db, id, "active");
-        out.units[a.project] = [...(out.units[a.project] ?? []), ...applyDelta(db, id, PlanDelta.parse({ add: a.units }), null).added.map((u) => `U${u.seq}`)];
+        out.units[a.project] = [
+          ...(out.units[a.project] ?? []),
+          ...applyDelta(db, id, PlanDelta.parse({ add: a.units.map(withIssue) }), null).added.map((u) => `U${u.seq}`),
+        ];
       }
       for (const p of body.projects) if (p.spec.trim()) writeSpec(db, p.id, parseSpec(p.spec), "watchman");
       resolveProposal(db, proposalId, "applied", out);

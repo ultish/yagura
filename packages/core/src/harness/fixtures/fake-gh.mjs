@@ -89,6 +89,21 @@ process.stdin.on("end", () => {
       return save();
     }
   }
+  // Issues in state.issues: { number, title, author: { login }, body, url, createdAt, updatedAt, comments: [{ id, author, body, createdAt }] }.
+  // A comment yagura posts gets the next id and moves updatedAt, as GitHub does.
+  if (group === "issue") {
+    const issues = state.issues ?? [];
+    if (verb === "list") return out(issues.filter((i) => (i.state ?? "OPEN") === "OPEN").map(({ comments, state: _, ...i }) => i));
+    const i = issues.find((x) => x.number === Number(rest[0]));
+    if (!i) fail(`no issue ${rest[0]}`);
+    if (verb === "view") return out({ comments: i.comments ?? [] });
+    if (verb === "comment") {
+      const at = new Date().toISOString();
+      i.comments = [...(i.comments ?? []), { id: `IC_y${(i.comments ?? []).length + 1}`, author: { login: "ultish" }, body: stdin, createdAt: at }];
+      i.updatedAt = at;
+      return save();
+    }
+  }
   if (group !== "pr") fail(`unknown command ${group}`);
   if (verb === "list") return out(state.prs.filter((p) => p.head === flag("--head") && p.state === "OPEN").map(({ number, url }) => ({ number, url })));
   if (verb === "create") {

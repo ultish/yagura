@@ -220,7 +220,7 @@ function trustedAuthorOf(db: Db, wave: { id: UnitId; projectId: string; repoId: 
   if (!row) return false;
   const trusted = db
     .prepare(
-      "SELECT value_json FROM settings WHERE key = 'review.trusted_authors' AND ((scope = 'project' AND scope_id = ?) OR (scope = 'repo' AND scope_id = ?) OR scope = 'global')",
+      "SELECT value_json FROM settings WHERE key = 'forge.trusted_authors' AND ((scope = 'project' AND scope_id = ?) OR (scope = 'repo' AND scope_id = ?) OR scope = 'global')",
     )
     .all(wave.projectId, wave.repoId ?? "") as { value_json: string }[];
   return trusted.some((s) => (JSON.parse(s.value_json) as string[]).some((a) => a.toLowerCase() === row.author.toLowerCase()));
