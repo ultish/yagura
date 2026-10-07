@@ -164,6 +164,12 @@ export const SETTINGS = {
   "forge.glab_bin": z.string().default("glab").describe("The glab CLI yagura runs for GitLab"),
   "forge.glab_hosts": z.array(z.string().min(1)).default([]).describe("GitLab hosts: a repo registered from one of them lands through merge requests"),
   "forge.poll_seconds": z.number().int().positive().default(30).describe("How often an open pull request is checked"),
+  "forge.timeout_seconds": z
+    .number()
+    .int()
+    .positive()
+    .default(120)
+    .describe("How long one gh or glab call may take before yagura gives up on it and tries again on the next check"),
 } satisfies Record<string, z.ZodTypeAny>;
 
 export type SettingKey = keyof typeof SETTINGS;
@@ -238,6 +244,7 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "forge.glab_bin": [],
   "forge.glab_hosts": [],
   "forge.poll_seconds": [],
+  "forge.timeout_seconds": [],
 };
 export type SettingValue<K extends SettingKey> = z.output<(typeof SETTINGS)[K]>;
 export type SettingSource = SettingScope | "default";

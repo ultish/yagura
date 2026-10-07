@@ -9,7 +9,7 @@ import { setSetting, type Bootstrap } from "./config.js";
 import type { ProjectId, RepoId } from "./domain.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
-import { readGitlabIssue } from "./forge.js";
+import { githubForge, readGitlabIssue } from "./forge.js";
 import { answerIssue, approvalOf, listIssues, pollIssues } from "./issues.js";
 import { layout } from "./paths.js";
 import { addProject, addRepo, getRepo, listUnits, openStore, setProjectState, setRepoForge, type Db } from "./store.js";
@@ -248,5 +248,20 @@ describe("readGitlabIssue", () => {
         { id: "12", author: "b", body: "second", createdAt: "2026-10-07T02:00:00Z" },
       ],
     });
+  });
+});
+
+describe("a forge call that never answers", () => {
+  it("fails after the timeout instead of holding its watcher", async () => {
+    process.env.FAKE_GH_HANG = "1";
+    try {
+      const started = Date.now();
+      await expect(githubForge(fixtures("fake-gh.mjs"), "ultish/sandbox", 500).issues("2026-01-01T00:00:00Z")).rejects.toThrow(
+        / issue list gave no answer in 0\.5 s$/,
+      );
+      expect(Date.now() - started).toBeLessThan(5000);
+    } finally {
+      delete process.env.FAKE_GH_HANG;
+    }
   });
 });

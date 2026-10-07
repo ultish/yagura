@@ -179,15 +179,27 @@ export class ForgeError extends Error {}
 const LOG_LINES = 60;
 
 // Titles, bodies, and comments go to gh and glab as arguments or stdin, never through a shell.
-function gh(bin: string, args: string[], stdin?: string, env: Record<string, string> = {}): Promise<string> {
+// A call the forge never answers (a connection dropped while the machine slept) would hold its watcher, and the daemon's
+// shutdown, forever; past the timeout it fails and the next check tries again.
+function runForge(bin: string, args: string[], stdin: string | undefined, env: Record<string, string>, timeout: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       bin,
       args,
       // Outside any checkout: glab mr create reads the working directory's git remotes even when --repo names the project.
-      { cwd: tmpdir(), env: { ...process.env, GH_PROMPT_DISABLED: "1", GLAB_NO_PROMPT: "1", NO_COLOR: "1", ...env }, maxBuffer: 16 * 1024 * 1024 },
-      (err, stdout, stderr) =>
-        err ? reject(new ForgeError(`${bin} ${args.slice(0, 2).join(" ")} failed: ${(stderr || err.message).trim().split("\n")[0]}`)) : resolve(stdout.trim()),
+      {
+        cwd: tmpdir(),
+        env: { ...process.env, GH_PROMPT_DISABLED: "1", GLAB_NO_PROMPT: "1", NO_COLOR: "1", ...env },
+        maxBuffer: 16 * 1024 * 1024,
+        timeout,
+        killSignal: "SIGKILL",
+      },
+      (err, stdout, stderr) => {
+        const what = `${bin} ${args.slice(0, 2).join(" ")}`;
+        if (err?.killed) return reject(new ForgeError(`${what} gave no answer in ${timeout / 1000} s`));
+        if (err) return reject(new ForgeError(`${what} failed: ${(stderr || err.message).trim().split("\n")[0]}`));
+        resolve(stdout.trim());
+      },
     );
     child.stdin?.end(stdin ?? "");
   });
@@ -228,7 +240,8 @@ const MERGE_STATES: Record<string, MergeState> = {
   DRAFT: "blocked",
 };
 
-export function githubForge(bin: string, repo: string): ForgeAdapter {
+export function githubForge(bin: string, repo: string, timeoutMs = 120_000): ForgeAdapter {
+  const gh = (b: string, args: string[], stdin?: string) => runForge(b, args, stdin, {}, timeoutMs);
   const R = ["--repo", repo];
   const repoParts = repo.split("/");
   const host = repoParts.length === 3 ? ["--hostname", repoParts[0]!] : [];
@@ -480,7 +493,8 @@ export function readableTrace(trace: string): string {
 }
 
 // forge.repo for GitLab is host/group/…/name; groups nest, so the first segment is always the host.
-export function gitlabForge(bin: string, repo: string): ForgeAdapter {
+export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): ForgeAdapter {
+  const gh = (b: string, args: string[], stdin?: string, env: Record<string, string> = {}) => runForge(b, args, stdin, env, timeoutMs);
   const [host, ...rest] = repo.split("/");
   const path = rest.join("/");
   // glab api --hostname refuses a host with a port (localhost:8080); GITLAB_HOST alone selects the host for every command.
@@ -627,11 +641,11 @@ export function forgeFor(db: Db, repo: Repo): ForgeAdapter | null {
     const name = resolveSetting(db, "forge.repo", at).value ?? gitlabRepoOf(repo.url);
     if (!name || name.split("/").length < 3)
       throw new ForgeError(`cannot tell which GitLab project ${repo.url} is; set forge.repo for repo ${repo.id} to host/group/name`);
-    return gitlabForge(resolveSetting(db, "forge.glab_bin").value, name);
+    return gitlabForge(resolveSetting(db, "forge.glab_bin").value, name, resolveSetting(db, "forge.timeout_seconds").value * 1000);
   }
   const name = resolveSetting(db, "forge.repo", at).value ?? forgeRepoOf(repo.url);
   if (!name) throw new ForgeError(`cannot tell which GitHub repo ${repo.url} is; set forge.repo for repo ${repo.id}`);
-  return githubForge(resolveSetting(db, "forge.gh_bin").value, name);
+  return githubForge(resolveSetting(db, "forge.gh_bin").value, name, resolveSetting(db, "forge.timeout_seconds").value * 1000);
 }
 
 export interface MergeRequest {

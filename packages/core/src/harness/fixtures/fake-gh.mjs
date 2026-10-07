@@ -17,6 +17,8 @@ const flag = (name) => {
 let stdin = "";
 process.stdin.on("data", (d) => (stdin += d));
 process.stdin.on("end", () => {
+  // FAKE_GH_HANG: a call the forge never answers, as when a connection drops while the machine sleeps.
+  if (process.env.FAKE_GH_HANG) return void setInterval(() => {}, 60_000);
   state.calls.push([group, verb, ...rest.filter((a) => !a.includes("\n"))].join(" "));
   const pr = () => state.prs.find((p) => p.number === Number(rest[0]));
   if (group === "api" && verb === "graphql") {
