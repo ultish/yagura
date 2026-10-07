@@ -785,7 +785,7 @@ async function main() {
       if (values.set === undefined) return void process.stdout.write(getSpec(db, project.id)?.text ?? "(no spec)\n");
       writeSpec(db, project.id, readFileSync(values.set === "-" ? 0 : values.set, "utf8"), "developer");
       recordEvent(db, "project.spec_changed", { projectId: project.id }, { by: "developer" });
-      console.log(`spec of ${project.id} saved; the planner looks again on its next drain`);
+      console.log(`spec of ${project.id} saved; the project lead reads it the next time it plans`);
       return;
     }
     case "prompt": {

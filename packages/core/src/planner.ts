@@ -63,7 +63,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
     projectId,
     type: "plan",
     repoId: null,
-    goal: `Plan drain ${drainId}`,
+    goal: `Planning round ${drainId}`,
     writeScope: [],
     acceptance: ["a valid plan delta"],
     verify: null,

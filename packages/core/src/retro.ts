@@ -86,7 +86,11 @@ export async function checkRetroWatch(ctx: { db: Db; boot: Bootstrap }, w: Retro
     const detail = `${reverted.sha.slice(0, 10)} reverted it on ${repo.defaultBranch}: ${reverted.subject}`;
     settle(db, unit, "reverted", detail);
     addUnitNote(db, unit.id, `Reverted on trunk after landing: ${detail}`);
-    tell(db, unit, `**${unit.projectId}/U${unit.seq} was reverted on ${repo.defaultBranch}** (${detail}). The planner will see it on its next drain.`);
+    tell(
+      db,
+      unit,
+      `**${unit.projectId}/U${unit.seq} was reverted on ${repo.defaultBranch}** (${detail}). The project lead will see it the next time it plans.`,
+    );
     return `U${unit.seq} was reverted: ${detail}`;
   }
   const forge = forgeFor(db, repo);
@@ -177,7 +181,7 @@ export async function scanReverts(ctx: { db: Db; boot: Bootstrap }, repoId: stri
         ).run(u.id, u.landedSha, now(), now());
         settle(db, u, "reverted", detail);
         addUnitNote(db, u.id, `Reverted on trunk after landing: ${detail}`);
-        tell(db, u, `**${u.projectId}/U${u.seq} was reverted on ${repo.defaultBranch}** (${detail}). The planner will see it on its next drain.`);
+        tell(db, u, `**${u.projectId}/U${u.seq} was reverted on ${repo.defaultBranch}** (${detail}). The project lead will see it the next time it plans.`);
         said.push(`${u.projectId}/U${u.seq} was reverted: ${detail}`);
       }
     }

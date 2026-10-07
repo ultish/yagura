@@ -148,7 +148,7 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     entries.push({
       at: created.ts,
       actor: "planner",
-      who: `Project lead · drain ${drain}`,
+      who: `Project lead · planning round ${drain}`,
       attempt: planUnit && planAttempt ? attemptOf(planUnit, planAttempt) : null,
       status: null,
       body: summary ? ((JSON.parse(summary.data_json) as { reason?: string }).reason ?? null) : null,
