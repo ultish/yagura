@@ -72,6 +72,9 @@ export function parseClaudeLine(line: string): HarnessEvent[] {
   return [{ kind: "ignored", type: [o.type, o.subtype].filter(Boolean).join(":") }];
 }
 
+// yagura alone pushes and opens PRs or MRs (§14, §15); a skill's landing steps must not reach the forge from any session.
+export const LANDING_DENIED_TOOLS = ["Bash(git push:*)", "Bash(gh pr:*)", "Bash(glab mr:*)"];
+
 const claudeMessage = (text: string) => `${JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "text", text }] } })}\n`;
 
 export const claudeAdapter: HarnessAdapter = {
@@ -92,7 +95,8 @@ export const claudeAdapter: HarnessAdapter = {
       ...run.pluginDirs.flatMap((d) => ["--plugin-dir", d]),
       ...run.addDirs.flatMap((d) => ["--add-dir", d]),
       ...(run.allowedTools?.length ? ["--allowed-tools", run.allowedTools.join(",")] : []),
-      ...(run.disallowedTools?.length ? ["--disallowed-tools", run.disallowedTools.join(",")] : []),
+      "--disallowed-tools",
+      [...(run.disallowedTools ?? []), ...LANDING_DENIED_TOOLS].join(","),
       ...(run.settings ? ["--settings", run.settings] : []),
       ...(run.model ? ["--model", run.model] : []),
       ...(run.resume ? ["--resume", run.resume] : []),
