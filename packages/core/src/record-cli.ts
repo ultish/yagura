@@ -160,6 +160,9 @@ export interface RecordCliResult {
 
 export async function recordCli(argv: string[], env: NodeJS.ProcessEnv = process.env, stdin = () => readFileSync(0, "utf8")): Promise<RecordCliResult> {
   const [command, ...rest] = argv as [RecordCommand, ...string[]];
+  // The plugin's Stop hook runs in every session it is loaded into, the watchman's too, which has no attempt to check; exit 2
+  // there would block the session from ending.
+  if (!env.YAGURA_ATTEMPT && command === "check-done" && rest.includes("--hook")) return { code: 0, output: "" };
   if (!env.YAGURA_ATTEMPT) return { code: 2, output: `yagura ${command} only works inside a yagura session (YAGURA_ATTEMPT is not set)\n` };
   let parsed: { values: Values; positionals: string[] };
   try {

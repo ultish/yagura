@@ -744,7 +744,7 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
       logPath: log,
     });
     const stopped = getTurn(db, turnId).state === "stopped";
-    if (result.final && !result.final.isError && !result.timedOut) return { text: result.final.text, problem: null, lost: false };
+    if (result.final?.text.trim() && !result.final.isError && !result.timedOut) return { text: result.final.text, problem: null, lost: false };
     return {
       text: null,
       lost: Boolean(resume) && !started && !stopped,

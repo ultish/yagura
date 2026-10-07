@@ -50,6 +50,14 @@ describe("agent records", () => {
     expect(() => insert.run(s.attempt.id, "status", "y")).toThrow(/CHECK/);
   });
 
+  it("lets a session without an attempt (the watchman's) stop, while its record commands still refuse", async () => {
+    expect(await recordCli(["check-done", "--hook"], {}, () => "{}")).toEqual({ code: 0, output: "" });
+    expect(await recordCli(["handoff", "success"], {}, () => "")).toEqual({
+      code: 2,
+      output: "yagura handoff only works inside a yagura session (YAGURA_ATTEMPT is not set)\n",
+    });
+  });
+
   it("refuses a caller without the attempt's token, and a role recording what is not its own", async () => {
     const s = session(unitOf("work"), "worker");
     expect(await recordCli(["handoff", "success"], { ...s.env, YAGURA_EVIDENCE_TOKEN: "0".repeat(48) })).toEqual({

@@ -576,6 +576,7 @@ function watchman(sessionId) {
   const current = brief;
   brief = earlier + brief;
   const asked = [...brief.matchAll(/## THE MESSAGE TO ANSWER\n\[human #\d+\]\n(.*)/g)].at(-1)[1];
+  if (asked === "say nothing") return finish("");
   if (asked.startsWith("typo")) {
     const fixed = asked === "typo once" && current.includes("## YOUR PREVIOUS REPLY WAS REJECTED");
     const records = fixed ? { decisions: [{ text: "fixed on retry" }] } : { answered: [{ question: "Q99", answer: "x" }] };

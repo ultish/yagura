@@ -130,6 +130,16 @@ describe("watchman turns", () => {
     expect(runs[0]!.prompt).toContain(`\`${join(boot.home, "projects")}/<project>/\` for each project in this thread`);
   });
 
+  it("reports a turn that ended with an empty reply as no reply, storing nothing", async () => {
+    const t = createThread(db, { title: "t" });
+    const out = await runWatchmanTurn(ctx, t.id, "say nothing");
+    expect(out).toMatchObject({ reply: null, problem: "the watchman ended without a reply (exit 0)" });
+    expect(listMessages(db, t.id).map((m) => [m.role, m.body])).toEqual([
+      ["human", "say nothing"],
+      ["system", "the watchman ended without a reply (exit 0)"],
+    ]);
+  });
+
   it("stores nothing when any record is invalid", () => {
     const t = createThread(db, { title: "t" });
     addRepo(db, { id: "r", url: "/nowhere", defaultBranch: "main" });
