@@ -303,7 +303,7 @@ const TRIAGE_REPORT = recordInstructions(
   ["rule", "amend"],
   [
     "- Every ruling names what the thread needs changed with --changes: code (the unit's code, inside its scope), acceptance (a criterion), verify (the VERIFY command), scope (paths outside the unit's write scope), plan (bigger than this unit: a follow-up for the project lead), or none. The decision follows from it: none is a dismissal, code alone is a fix, and anything else is an ask, because it changes what the unit must do or plans.",
-    "- fix: --reason is what a worker must change and where. dismiss: --reason is the disproof posted as the reply. ask: --reason is the question for the developer; with code in --changes add --instruction, what the worker must change if they answer Fix (no second arbiter runs: the worker builds from it); with plan add --plan-note.",
+    "- fix: --reason is what a worker must change and where. dismiss: --reason is the disproof posted as the reply. ask: --reason is the question for the developer; with code in --changes add --instruction, the command the worker follows once they answer Fix, written without 'if' because the PR reply quotes it (no second arbiter runs: the worker builds from it); with plan add --plan-note.",
     "- For each of acceptance, verify, and scope, record the change with yagura amend in the same session: replace (a criterion exactly as ACCEPTANCE words it, with the concrete new one), add, remove, verify --command, scope --path. yagura refuses an amendment its ruling did not name, and will not let you finish while a named change is missing. Nothing is applied until the developer answers Fix.",
   ],
 );

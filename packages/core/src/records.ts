@@ -75,6 +75,9 @@ export const RulingRecord = z
     if (r.decision === "ask" && r.changes.includes("code") && !r.instruction)
       issue("an ask that changes code needs --instruction: what the worker must change if the developer answers Fix");
     if (r.instruction && !(r.decision === "ask" && r.changes.includes("code"))) issue("--instruction only goes with an ask that changes code");
+    // The instruction is quoted in the PR's "Fixed in" reply after the developer answered, so a condition reads wrong there.
+    if (r.instruction && /^\W*(if|when|once|should|assuming|provided|in case)\b/i.test(r.instruction))
+      issue('--instruction is the order the worker follows after the developer answered Fix: write it as a command ("Append 🎉 to …"), with no "if"');
   });
 const AmendOpRecord = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("replace"), from: text, to: text }).strict(),

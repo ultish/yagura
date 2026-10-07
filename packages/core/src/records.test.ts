@@ -141,6 +141,21 @@ describe("agent records", () => {
           "--reason",
           "emojis contradict criterion 1",
           "--instruction",
+          "If the developer approves: append 🎉 in shout()",
+        )
+      ).output,
+    ).toMatch(/write it as a command \("Append 🎉 to …"\), with no "if"/);
+    expect(
+      (
+        await s.call(
+          "rule",
+          "T1",
+          "ask",
+          "--changes",
+          "code,acceptance,verify",
+          "--reason",
+          "emojis contradict criterion 1",
+          "--instruction",
           "append 🎉 in shout()",
         )
       ).output,
