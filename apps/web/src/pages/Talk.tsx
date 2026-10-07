@@ -1,5 +1,6 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, navigate, useApi, useQuery, type Proposal, type ProjectSummary, type Thread, type ThreadMessage, type ThreadView } from "../api";
+import { atEnd } from "../lib/follow";
 import { clock } from "../lib/format";
 import { Inline, Markdown } from "../lib/markdown";
 import { needsYou } from "../lib/scene";
@@ -358,7 +359,19 @@ function Ledger({ v }: { v: ThreadView }) {
   );
 }
 
-function Composer({ threadId, busy, initial, draftKey }: { threadId: number | null; busy: boolean; initial: string; draftKey: number }) {
+function Composer({
+  threadId,
+  busy,
+  initial,
+  draftKey,
+  onSent,
+}: {
+  threadId: number | null;
+  busy: boolean;
+  initial: string;
+  draftKey: number;
+  onSent: () => void;
+}) {
   const [text, setText] = useState(initial);
   const action = useAction();
   useEffect(() => {
@@ -371,6 +384,7 @@ function Composer({ threadId, busy, initial, draftKey }: { threadId: number | nu
         navigate(`/talk/${r.thread.id}`);
       } else await api(`/api/threads/${threadId}/messages`, { body: { message: text } });
       setText("");
+      onSent();
     });
   return (
     <div style={{ padding: "14px 32px 20px", borderTop: "1px solid var(--line)", position: "sticky", bottom: 0, background: "var(--bg2)" }}>
@@ -409,15 +423,33 @@ export function Talk({ threadId }: { threadId: number | null }) {
   const known = useMemo(() => new Set((projects.data ?? []).map((p) => p.project.id as string)), [projects.data]);
   const [draft, setDraft] = useState({ text: say, key: 0 });
   const [all, setAll] = useState(false);
-  const bottom = useRef<HTMLDivElement>(null);
-  const count = view.data?.messages.length ?? 0;
+  const column = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
   // A link to one message (from search) opens the thread at that message, not at its end.
   const target = Number(query.get("m")) || null;
-  useEffect(() => {
-    if (target) return;
-    bottom.current?.scrollIntoView({ block: "end" });
-  }, [count, threadId, target]);
   const loaded = !!view.data;
+  // The page scrolls, not the column: going to the page's end puts the composer below the last line instead of over it.
+  const toEnd = () => window.scrollTo({ top: document.documentElement.scrollHeight });
+  useEffect(() => {
+    const onScroll = () => {
+      following.current = atEnd({ scrollY: window.scrollY, viewport: window.innerHeight, height: document.documentElement.scrollHeight });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  // Every growth of the conversation (a reply, the watchman's live calls, a proposal) keeps the end in view while the reader follows it.
+  useEffect(() => {
+    following.current = !target;
+    if (target || !loaded || !column.current) return;
+    toEnd();
+    const watch = new ResizeObserver(() => following.current && toEnd());
+    watch.observe(column.current);
+    return () => watch.disconnect();
+  }, [threadId, target, loaded]);
+  // New data follows too: a background tab draws no frames, so the size watcher alone would only catch up when it is shown.
+  useLayoutEffect(() => {
+    if (following.current && !target) toEnd();
+  }, [view.data, target]);
   useEffect(() => {
     if (target && loaded) document.getElementById(`m${target}`)?.scrollIntoView({ block: "center" });
   }, [target, loaded]);
@@ -516,7 +548,7 @@ export function Talk({ threadId }: { threadId: number | null }) {
                 </span>
               )}
             </div>
-            <div style={{ flexGrow: 1, padding: "0 32px" }}>
+            <div ref={column} style={{ flexGrow: 1, padding: "0 32px" }}>
               {view.error && (
                 <div className="s-bell" style={{ padding: "12px 0" }}>
                   {view.error}
@@ -557,11 +589,19 @@ export function Talk({ threadId }: { threadId: number | null }) {
                   </div>
                 </div>
               )}
-              <div ref={bottom} />
             </div>
           </>
         )}
-        <Composer threadId={threadId} busy={busy} initial={draft.text} draftKey={draft.key} />
+        <Composer
+          threadId={threadId}
+          busy={busy}
+          initial={draft.text}
+          draftKey={draft.key}
+          onSent={() => {
+            following.current = true;
+            toEnd();
+          }}
+        />
       </section>
       {v && <Ledger v={v} />}
     </main>

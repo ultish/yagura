@@ -1,4 +1,5 @@
 import { byTime } from "./sort";
+import { atEnd } from "./follow";
 import { depLine } from "./units";
 import { AGENT_EMOJI } from "@yagura/core";
 import { ICONS } from "../ui/RoleIcon";
@@ -467,5 +468,14 @@ describe("depLine", () => {
     expect(depLine(base({ state: "running" }, { state: "running" }), dep)).toEqual({ tone: "amber", moving: false, label: "U2 builds on U1" });
     expect(depLine(base({ state: "landed" }, { state: "verified" }), dep)).toEqual({ tone: "pine", moving: false, label: "U2 builds on U1 (landed)" });
     expect(depLine(base({ state: "abandoned" }, { state: "ready" }), dep)).toMatchObject({ tone: "muted", moving: false });
+  });
+});
+
+describe("atEnd", () => {
+  it("follows the conversation at the end and within the slack, not once the reader scrolled up", () => {
+    expect(atEnd({ scrollY: 1000, viewport: 800, height: 1800 })).toBe(true);
+    expect(atEnd({ scrollY: 930, viewport: 800, height: 1800 })).toBe(true);
+    expect(atEnd({ scrollY: 900, viewport: 800, height: 1800 })).toBe(false);
+    expect(atEnd({ scrollY: 0, viewport: 800, height: 600 })).toBe(true);
   });
 });
