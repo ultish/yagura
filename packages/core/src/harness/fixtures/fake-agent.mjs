@@ -233,9 +233,11 @@ async function engine(role) {
     const delta = disagreed.length
       ? { add: disagreed.map((n) => ({ ...unit(`fix-d${n}`), disagreement: n })), summary: "fix forward" }
       : !workRows.length
-        ? process.env.FAKE_UNITS === "2"
-          ? { add: [unit("lib"), unit("app", { after: ["lib"] })], summary: "two units" }
-          : { add: [unit("a"), unit("b"), unit("c", { after: ["a"] })], summary: "three units" }
+        ? process.env.FAKE_UNITS === "0"
+          ? { summary: "nothing to plan yet" }
+          : process.env.FAKE_UNITS === "2"
+            ? { add: [unit("lib"), unit("app", { after: ["lib"] })], summary: "two units" }
+            : { add: [unit("a"), unit("b"), unit("c", { after: ["a"] })], summary: "three units" }
         : { done: workRows.every((s) => s === "merged"), summary: workRows.every((s) => s === "merged") ? "all merged" : "waiting" };
     if (canRecord()) {
       record([["plan", "--json", JSON.stringify(delta)]]);

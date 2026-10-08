@@ -21,7 +21,16 @@ import { applyProposal, proposalRoutes } from "./proposal.js";
 import { editSpec, parseSpec, relevantSections, renderSpec } from "./spec.js";
 import { addProject, addRepo, getEnvironment, getProject, getRepo, listGates, listUnits, openStore, type Db } from "./store.js";
 import { createThread, getProposal, getThread, linkThreadProject, listDecisions, listMessages, listProposals, listQuestions } from "./threads.js";
-import { assembleContext, clearWatchmanSession, parseReply, runWatchmanTurn, storeTurn, TurnRecords, type ContextParts } from "./watchman.js";
+import {
+  assembleContext,
+  clearWatchmanSession,
+  parseReply,
+  renderWatchmanBrief,
+  runWatchmanTurn,
+  storeTurn,
+  TurnRecords,
+  type ContextParts,
+} from "./watchman.js";
 import { listTurns, runningTurn, stopTurn, TurnBusy } from "./turns.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
@@ -77,6 +86,25 @@ describe("spec sections", () => {
     spec = editSpec(spec, "Open", null);
     expect(renderSpec(spec)).toBe("# kafka-diff\n\n## Scope\n\nnew scope\n\n## Ignored fields\n\n- *_ts\n");
     expect(relevantSections(spec, "also ignore the fields called seq").map((s) => s.heading)).toEqual(["Ignored fields"]);
+  });
+});
+
+describe("the watchman brief's REPORT example", () => {
+  it("is a turn the schema accepts, so a watchman that copies it is not refused", () => {
+    const brief = renderWatchmanBrief({
+      thread: { id: 1, title: "t", autonomy: "propose" },
+      decisions: "",
+      questions: "",
+      proposals: "",
+      catalog: "",
+      standing: "",
+      mentioned: "",
+      projectsDir: "/p",
+      context: { sections: { status: "", spec: "", history: "" }, dropped: { messages: 0, specSections: 0 } } as never,
+      message: { id: 1, body: "hi" },
+    });
+    const example = /```yagura\n([\s\S]*?)\n```/.exec(brief)![1]!;
+    expect(TurnRecords.safeParse(JSON.parse(example)).error?.issues ?? []).toEqual([]);
   });
 });
 

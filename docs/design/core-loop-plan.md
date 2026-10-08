@@ -279,40 +279,40 @@ Each live lane runs against its own isolated checkout, a worktree, or an `Agent`
 
 **Files.**
 
-- [ ] Edit `packages/core/src/plan.ts`, `planner.ts`, `proposal.ts`, `issues.ts`, and `watchman.ts`.
-- [ ] Rewrite `plugins/yagura/skills/yagura-planner/SKILL.md` and edit `yagura-watchman/SKILL.md`.
+- [x] Edit `packages/core/src/plan.ts`, `planner.ts`, `proposal.ts`, `issues.ts`, and `watchman.ts`. `plan.ts`, `planner.ts`, `proposal.ts`, and `issues.ts` were already on the new shape from CL2; `watchman.ts`'s REPORT example still showed the old unit and project fields, which the strict schema refused; now a test parses it. `status.ts` tells the planner a unit lead's replan request.
+- [x] Rewrite `plugins/yagura/skills/yagura-planner/SKILL.md` and edit `yagura-watchman/SKILL.md`.
 
 **Build.**
 
-- [ ] Accept units with `goal`, `acceptance`, `context`, `repo`, `base`, `after`, and `refs` in `PlanUnit`, with no scope fields.
-- [ ] Ask the project lead in its skill to check that the units fit together before it records the plan.
-- [ ] Keep issue refs as `<repo>#<n>` and `Closes #n` in the merge commit for the unit's own repo.
+- [x] Accept units with `goal`, `acceptance`, `context`, `repo`, `base`, `after`, and `refs` in `PlanUnit`, with no scope fields.
+- [x] Ask the project lead in its skill to check that the units fit together before it records the plan.
+- [x] Keep issue refs as `<repo>#<n>` and `Closes #n` in the merge commit for the unit's own repo.
 
 **You see.**
 
-- [ ] A watchman proposal from an issue becomes units that reach `merged`, and the fake issue is closed by its merge.
+- [x] A watchman proposal from an issue becomes units that reach `merged`, and the fake issue is closed by its merge.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] `plan.test.ts`, `issues.test.ts`, and `watchman.test.ts` assert the new unit fields and an issue closed by a merge. Run `caffeinate -is pnpm -r test`.
+- [x] `plan.test.ts`, `issues.test.ts`, and `watchman.test.ts` assert the new unit fields and an issue closed by a merge. Run `caffeinate -is pnpm -r test`. The fake `gh` closes an issue its merged pull request or merge message says it closes, as GitHub does. core 230, web 33, daemon 23.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. One lane at the step head, per the boot recipe, by the developer's one-agent limit.
 
-- [ ] Lane 1. Open a fake issue from a trusted author asking for a change. Save `cl6-issue.png`. Pass when the issue gets the watchman's reply, the work's pull request, and its close on merge.
+- [x] Lane 1. Open a fake issue from a trusted author asking for a change. Save `cl6-issue.png`. Pass when the issue gets the watchman's reply, the work's pull request, and its close on merge. Issue #2 got the reply, "Started U2", "U2 is up for review: …/pull/1", and "U2 merged.", and was closed by PR #1's merge (body `Closes #2`). Screenshot `/tmp/swarm-cl6/worker-1/cl6-issue.png` (JPEG data).
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] Metric. Agent sessions from issue to merge.
-- [ ] Probe. Count attempts and watchman turns in the lane 1 run.
-- [ ] Baseline. Record the CL5 head count for a one-unit project first.
-- [ ] Rule. At most one watchman turn, one project lead session, one worker, and one judge. Fail at more.
+- [x] Metric. Agent sessions from issue to merge.
+- [x] Probe. Count attempts and watchman turns in the lane 1 run.
+- [x] Baseline. Record the CL5 head count for a one-unit project first. CL5 lane: a unit right the first time cost one worker and one judge, plus the project's planning sessions.
+- [x] Rule. At most one watchman turn, one project lead session, one worker, and one judge. Fail at more. 1 watchman turn, 1 worker, 1 judge from the issue to the merge, and 1 project lead session after it (closing the project); the earlier one planned the empty project before the issue existed.
 
 **Review gate.** None. CL6 is not review-gated.
 
 **Merge.**
 
-- [ ] The step's gates, lane, and probe pass at its last commit on `core-loop`.
-- [ ] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
+- [x] The step's gates, lane, and probe pass at its last commit on `core-loop`.
+- [x] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
 
 ## Rebuild the unit page on the new events (CL7)
 

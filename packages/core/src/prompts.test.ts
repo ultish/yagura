@@ -23,7 +23,7 @@ beforeEach(() => {
 describe("role prompts", () => {
   it("uses the project's guidance over the global one over yagura's default, and resets back", () => {
     expect(effectiveGuidance(db, boot, "planner", project)).toMatchObject({ source: "default", text: defaultGuidance(boot, "planner") });
-    expect(defaultGuidance(boot, "planner")).toContain("# yagura planner");
+    expect(defaultGuidance(boot, "planner")).toContain("# yagura project lead");
     setPromptText(db, "global", "", "planner", "guidance", "Plan big units.");
     expect(effectiveGuidance(db, boot, "planner", project)).toMatchObject({ source: "global", text: "Plan big units.\n" });
     setPromptText(db, "project", project, "planner", "guidance", "Plan one unit per feature, with its tests.");
@@ -77,7 +77,7 @@ describe("role prompts", () => {
     const skill = readFileSync(join(dir, "skills", "yagura-worker", "SKILL.md"), "utf8");
     expect(skill).toMatch(/^---\nname: yagura-worker\n/);
     expect(skill).toContain("Write the test first.");
-    expect(readFileSync(join(dir, "skills", "yagura-planner", "SKILL.md"), "utf8")).toContain("# yagura planner");
+    expect(readFileSync(join(dir, "skills", "yagura-planner", "SKILL.md"), "utf8")).toContain("# yagura project lead");
     expect(promptPlugin(db, boot, project)).toBe(dir);
     const recorded = db.prepare("SELECT v.text FROM attempts a JOIN prompt_versions v ON v.sha = a.guidance_sha WHERE a.id = ?").get(attempt.id) as {
       text: string;

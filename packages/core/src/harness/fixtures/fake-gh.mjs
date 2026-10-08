@@ -158,6 +158,11 @@ process.stdin.on("end", () => {
       env,
     }).trim();
     git("update-ref", `refs/heads/${p.base}`, merged);
+    // Like GitHub: a merge into the default branch closes the issues its pull request or merge message says it closes.
+    for (const m of `${p.body ?? ""}\n${message}`.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #(\d+)/gi)) {
+      const issue = (state.issues ?? []).find((i) => i.number === Number(m[1]));
+      if (issue) issue.state = "CLOSED";
+    }
     Object.assign(p, { state: "MERGED", mergeCommit: merged, headRefOid: head });
     save();
     return;

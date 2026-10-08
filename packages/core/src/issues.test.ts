@@ -12,7 +12,9 @@ import { parseClaudeLine } from "./harness/claude.js";
 import { githubForge, readGitlabIssue } from "./forge.js";
 import { answerIssue, approvalOf, listIssues, pollIssues } from "./issues.js";
 import { layout } from "./paths.js";
-import { addProject, addRepo, getRepo, listUnits, openStore, setProjectState, setRepoForge, type Db } from "./store.js";
+import { addProject, addRepo, getRepo, getUnit, listUnits, openStore, setMergePolicy, setProjectState, setRepoForge, setRepoUrl, type Db } from "./store.js";
+import { Engine } from "./engine.js";
+import { commitAll, git } from "./git.js";
 import { addDecision, getThread, listMessages, listProposals } from "./threads.js";
 import { runWatchmanTurn } from "./watchman.js";
 
@@ -26,7 +28,17 @@ const fake: HarnessAdapter = {
 };
 
 type Comment = { id: string; author: { login: string }; body: string; createdAt: string };
-type Issue = { number: number; title: string; author: { login: string }; body: string; url: string; createdAt: string; updatedAt: string; comments: Comment[] };
+type Issue = {
+  state?: string;
+  number: number;
+  title: string;
+  author: { login: string };
+  body: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  comments: Comment[];
+};
 
 describe("forge issues (§30, fake gh)", () => {
   let db: Db;
@@ -198,6 +210,43 @@ describe("forge issues (§30, fake gh)", () => {
         .slice(4)
         .map((c) => c.body.split("\n\n")[1]),
     ).toEqual(["Decided: Decided after"]);
+  }, 60_000);
+
+  it("turns a trusted author's issue into a unit whose merge commit closes the issue", async () => {
+    const root = dirname(statePath);
+    const seed = join(root, "seed");
+    await git(["init", "--quiet", "-b", "main", seed]);
+    writeFileSync(join(seed, "README.md"), "seed\n");
+    await commitAll(seed, "init", { name: "t", email: "t@t" });
+    const origin = join(root, "origin.git");
+    await git(["clone", "--quiet", "--bare", seed, origin]);
+    setRepoUrl(db, "testbed" as RepoId, origin);
+    process.env.FAKE_GH_ORIGIN = origin;
+    process.env.FAKE_MODE = "engine";
+    setMergePolicy(db, project, "auto");
+    setSetting(db, "global", "", "forge.poll_seconds", 1);
+    await cycle();
+    open(7, "ultish", "build the greeting");
+    await cycle();
+    const [unit] = listUnits(db, project).filter((u) => u.type === "work");
+    expect(unit!.refs).toEqual(["testbed#7"]);
+
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    const merged = getUnit(db, unit!.id);
+    expect(merged.state).toBe("merged");
+    expect(issue(7).state).toBe("CLOSED");
+    expect(await git(["log", "-1", "--format=%B", merged.mergedSha!], { gitDir: origin })).toContain("\nCloses #7");
+    const pr = (JSON.parse(readFileSync(statePath, "utf8")) as { prs: { body: string }[] }).prs[0]!;
+    expect(pr.body).toContain("\n\nCloses #7\n");
+    await cycle();
+    expect(
+      posted(7)
+        .map((c) => c.body.split("\n\n")[1])
+        .slice(-2),
+    ).toEqual([
+      `U${merged.seq} is up for review: ${(JSON.parse(readFileSync(statePath, "utf8")) as { prs: { url: string }[] }).prs[0]!.url}`,
+      `U${merged.seq} merged.`,
+    ]);
   }, 60_000);
 
   it("stops answering an issue for the day once it reaches its cap, keeping the comments for later", async () => {

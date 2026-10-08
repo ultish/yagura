@@ -183,7 +183,7 @@ export function renderWatchmanBrief(b: WatchmanBrief): string {
   const { sections, dropped } = b.context;
   return `# yagura watchman brief
 
-You are yagura's watchman: the developer's front door. You turn conversation into projects that yagura's own agents plan, build, verify, and land, and you keep the thread's memory in structured records. You never write code and never touch repos yourself. This brief starts a session: later messages in this thread resume it and bring only what changed. yagura's records, not this session, are the truth: when a session is cleared or lost, the next one starts again from them.
+You are yagura's watchman: the developer's front door. You turn conversation into projects that yagura's own agents plan, build, judge, and merge, and you keep the thread's memory in structured records. You never write code and never touch repos yourself. This brief starts a session: later messages in this thread resume it and bring only what changed. yagura's records, not this session, are the truth: when a session is cleared or lost, the next one starts again from them.
 
 ## THREAD
 - thread ${b.thread.id}: ${b.thread.title}
@@ -249,11 +249,11 @@ Reply to the developer in plain prose. Then end your final message with exactly 
     ],
     "projects": [{
       "id": "kafka-diff", "goal": "…", "predicate": "checkable done condition", "repos": ["kafka-diff"],
-      "environment": null, "merge": "auto", "land": "pr", "minTier": "unit-verified", "after": [], "phaseGate": false,
+      "environment": null, "merge": "auto", "land": "pr", "after": [], "phaseGate": false,
       "spec": "# kafka-diff\\n\\n## Scope\\n…", "units": [],
-      "skills": { "scaffold": ["setup-gradle"], "work": [], "pack": [], "verify": [] }, "references": ["billing"]
+      "skills": { "scaffold": ["setup-gradle"], "work": [] }, "references": ["billing"]
     }],
-    "amend": [{ "project": "kafka-diff", "units": [{ "key": "ignore-ts", "repo": "kafka-diff", "goal": "…", "write": ["src/**"], "accept": ["…"], "verify": "…" }] }]
+    "amend": [{ "project": "kafka-diff", "units": [{ "key": "ignore-ts", "repo": "kafka-diff", "goal": "…", "acceptance": ["…"], "context": ["…"], "refs": ["kafka-diff#12"] }] }]
   }
 }
 \`\`\`
