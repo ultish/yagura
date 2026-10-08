@@ -2,6 +2,8 @@
 
 Updated 2026-10-07 (the §28 run's small items; handoff from 2026-10-06 below). Older material is in `docs/STATUS-ARCHIVE.md`; read it only when you need the history of something.
 
+**Agreed 2026-10-08: the core loop is being redesigned (`docs/design/core-loop.md`).** One judge instead of verifier, reviewer, and arbiter; goals instead of file lists; one draft pull request per unit, merged with a merge commit; the unit lead owns the pull request once it is ready; no verify pack. Built as if from scratch, not patched onto the current code. Next: a second document mapping it onto the code (what stays, what is rewritten, what is deleted), then the build. Until then, do not extend the parts it replaces.
+
 **Resume here (handoff, 2026-10-06, end of the §28 session):**
 
 - **State.** `main` is pushed (through the commit after `36fd573`). `pnpm -r test` passes (core 348, web 33, daemon 23), `pnpm -r typecheck` is clean, Node 26.7, database at migration 42.
