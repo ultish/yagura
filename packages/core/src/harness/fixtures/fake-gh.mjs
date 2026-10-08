@@ -48,33 +48,6 @@ process.stdin.on("end", () => {
       },
     });
   }
-  // REST: a line comment on a pull request, or a reply to one (yagura's own reviewer).
-  if (group === "api") {
-    const path = [verb, ...rest].find((a) => /^repos\//.test(a));
-    const m = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/comments(?:\/(\d+)\/replies)?$/.exec(path ?? "");
-    if (!m) fail(`unknown api ${path}`);
-    const p = state.prs.find((x) => x.number === Number(m[1]));
-    if (!p) fail(`no pull request ${m[1]}`);
-    const body = JSON.parse(stdin);
-    p.threads = p.threads ?? [];
-    if (m[2]) {
-      const t = p.threads.find((x) => x.restId === Number(m[2]));
-      if (!t) fail(`no comment ${m[2]}`);
-      t.comments.push({ author: { login: "ultish" }, body: body.body });
-      return out({ id: Number(m[2]) * 100 + t.comments.length });
-    }
-    if (process.env.FAKE_GH_LINE_REFUSED) fail("gh: Validation Failed (HTTP 422): pull_request_review_thread.line must be part of the diff");
-    const id = 1000 + p.threads.length;
-    p.threads.push({
-      id: `PRRT_${id}`,
-      restId: id,
-      isResolved: false,
-      path: body.path,
-      line: body.line,
-      comments: [{ author: { login: "ultish" }, body: body.body }],
-    });
-    return out({ id });
-  }
   if (group === "run") {
     const runs = state.runs ?? [];
     if (verb === "list")
@@ -111,7 +84,17 @@ process.stdin.on("end", () => {
   if (verb === "create") {
     const number = state.prs.length + 1;
     const url = `https://github.com/${flag("--repo")}/pull/${number}`;
-    state.prs.push({ number, url, head: flag("--head"), base: flag("--base"), title: flag("--title"), body: stdin, state: "OPEN", checks: [] });
+    state.prs.push({
+      number,
+      url,
+      head: flag("--head"),
+      base: flag("--base"),
+      title: flag("--title"),
+      body: stdin,
+      state: "OPEN",
+      isDraft: rest.includes("--draft"),
+      checks: [],
+    });
     save();
     return console.log(url);
   }
@@ -130,6 +113,7 @@ process.stdin.on("end", () => {
     }
     return out({
       state: p.state,
+      isDraft: p.isDraft ?? false,
       mergeable: merge === "DIRTY" ? "CONFLICTING" : "MERGEABLE",
       mergeStateStatus: merge,
       statusCheckRollup: p.checks,
@@ -137,13 +121,23 @@ process.stdin.on("end", () => {
       mergeCommit: p.mergeCommit ? { oid: p.mergeCommit } : null,
     });
   }
+  if (verb === "edit") {
+    p.body = stdin;
+    return save();
+  }
+  if (verb === "ready") {
+    p.isDraft = false;
+    return save();
+  }
   if (verb === "merge") {
+    if (!rest.includes("--merge")) fail("yagura merges only with a merge commit");
+    if (p.isDraft) fail("Pull request is still a draft");
     const head = git("rev-parse", `refs/heads/${p.head}`);
     if (flag("--match-head-commit") !== head) fail("head commit does not match");
-    // A rebase merge rewrites the commit: same tree and message, new committer, so a new SHA.
-    const message = git("log", "-1", "--format=%B", head);
+    const tree = execFileSync("git", ["--git-dir", origin, "merge-tree", "--write-tree", `refs/heads/${p.base}`, head], { encoding: "utf8" }).split("\n")[0];
     const env = { ...process.env, GIT_COMMITTER_NAME: "GitHub", GIT_COMMITTER_EMAIL: "noreply@github.com", GIT_COMMITTER_DATE: "2030-01-01T00:00:00Z" };
-    const merged = execFileSync("git", ["--git-dir", origin, "commit-tree", `${head}^{tree}`, "-p", `refs/heads/${p.base}`, "-m", message], {
+    const message = `${flag("--subject")}\n\n${stdin}`;
+    const merged = execFileSync("git", ["--git-dir", origin, "commit-tree", tree, "-p", `refs/heads/${p.base}`, "-p", head, "-m", message], {
       encoding: "utf8",
       env,
     }).trim();

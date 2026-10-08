@@ -75,7 +75,7 @@ Each change of state goes through one function that checks it is allowed and rec
 - yagura pushes the branch after each worker hand-off. The first push opens a **draft** pull request: the goal as title; the body holds the goal, the acceptance, the issues it closes (`Closes #12` for the unit's own repo), and a link to the unit in yagura. yagura keeps the body current as the unit moves.
 - While the pull request is a draft nothing is posted on it. The forge sees only commits.
 - **yagura takes it out of draft, the moment the judge's `approve` is recorded.** No agent has to remember to: the approval is a command, and yagura acts on it. A judge cannot end its session without one of its three commands; yagura's Stop hook sends it back to record one, and if it still ends without one, the unit is stuck and its unit lead decides.
-- A unit merges only when its **current head** is approved by the judge, CI on that head has passed, and, when the project asks for it, the developer merged it. yagura merges with a merge commit, never squash or rebase. The merge commit's message names the unit, its workers, and the judge's verdict.
+- A unit merges only when its **current head** is approved by the judge, CI on that head has passed, and, when the project asks for it, the developer merged it. yagura merges with a merge commit, never squash or rebase. The merge commit's message names the unit, its workers, and the judge's verdict. On GitLab the project's merge method decides this, so it must be "Merge commit".
 - A commit that changes what the worker wrote (a fix for a comment, a CI fix, a resolved conflict) sends the unit back through the judge, who looks at what changed since its approval. A clean merge of the base does not: if it breaks something, the tests catch it.
 
 ## Keeping up with the base branch
@@ -153,7 +153,7 @@ Each environment's settings say how a repo's tests run (`gradle test`, `npm test
 
 ## The few hard rules yagura enforces
 
-1. Agents push only their own unit's branch, and only forward: yagura's copy of the repo, which a worker's checkout pushes to, refuses a force-push or a push to any other branch, and yagura passes accepted pushes on to the forge. Only yagura opens, updates, readies, merges, and closes pull requests; agents cannot run `gh pr` or `glab mr`.
+1. Agents push only their own unit's branch, and only forward: yagura's copy of the repo, which a worker's checkout pushes to, refuses a force-push or a push to any other branch, and yagura passes accepted pushes on to the forge. A worker's checkout is its own clone of that copy, sharing its objects; a worktree would share the copy's branches and bypass the check. Only yagura opens, updates, readies, merges, and closes pull requests; agents cannot run `gh pr` or `glab mr`.
 2. A unit merges only with the judge's approval of its current head, CI passing on that head, and the developer's merge when the project asks for it.
 3. A unit's acceptance changes only with the developer's approval, or from a trusted author.
 4. Recorded runs are run by yagura; an agent cannot write one.

@@ -149,42 +149,42 @@ Each live lane runs against its own isolated checkout, a worktree, or an `Agent`
 
 **Files.**
 
-- [ ] Edit `packages/core/src/git.ts` and `forge.ts`.
-- [ ] Create `packages/core/src/branch.ts` and `packages/core/src/relay.ts`.
-- [ ] Edit `packages/core/src/harness/fixtures/fake-gh.mjs` and `fake-glab.mjs`.
+- [x] Edit `packages/core/src/git.ts` and `forge.ts`. `git.ts` needed no change; the branch helpers live in `branch.ts`.
+- [x] Create `packages/core/src/branch.ts` and `packages/core/src/relay.ts`.
+- [x] Edit `packages/core/src/harness/fixtures/fake-gh.mjs` and `fake-glab.mjs`. Both refuse to merge a draft or anything but a merge commit, as the forges do.
 
 **Build.**
 
-- [ ] Create the unit branch `yagura/<project>/u<n>` from the unit's base in `branch.ts`.
-- [ ] Install a `pre-receive` hook on yagura's mirror in `relay.ts` that accepts a push only to the pushing unit's branch, only when it fast-forwards, and passes it on to the forge.
-- [ ] Add `openDraft`, `updateBody`, `markReady`, and `mergeCommit` to `ForgeAdapter` for GitHub and GitLab.
-- [ ] Add `mergeWithBase` in `branch.ts` on `git merge-tree --write-tree`, returning clean with the tree or conflict with the files.
+- [x] Create the unit branch `yagura/<project>/u<n>` from the unit's base in `branch.ts`.
+- [x] Install a `pre-receive` hook on yagura's mirror in `relay.ts` that accepts a push only to the pushing unit's branch, only when it fast-forwards, and passes it on to the forge. A `post-receive` hook passes it on. The pushing unit is named by `YAGURA_PUSH_BRANCH` in the worker's environment, which a local push carries to the hook. A worker's checkout becomes a `--shared` clone of the mirror (`checkoutUnit`), since a worktree shares the mirror's refs and pushes to the forge directly.
+- [x] Add `openDraft`, `updateBody`, `markReady`, and `mergeCommit` to `ForgeAdapter` for GitHub and GitLab.
+- [x] Add `mergeWithBase` in `branch.ts` on `git merge-tree --write-tree`, returning clean with the tree or conflict with the files. It takes the two commits rather than ref names, and also returns `current` when the merge would change nothing.
 
 **You see.**
 
-- [ ] The fake `gh` state shows one draft pull request per unit, then ready, then merged with two parents.
+- [x] The fake `gh` state shows one draft pull request per unit, then ready, then merged with two parents. `forge.test.ts` checks this for fake `gh` and fake `glab`.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] `relay.test.ts` pushes from a worktree to the mirror and asserts a refused force-push, a refused push to another branch, and an accepted fast-forward. `branch.test.ts` asserts a clean merge-tree result and a conflict with its file list, on real repos. `forge.test.ts` asserts draft, ready, and a merge commit with two parents through fake `gh` and fake `glab`. Run `caffeinate -is pnpm -r test`.
+- [x] `relay.test.ts` pushes from a worktree to the mirror and asserts a refused force-push, a refused push to another branch, and an accepted fast-forward. `branch.test.ts` asserts a clean merge-tree result and a conflict with its file list, on real repos. `forge.test.ts` asserts draft, ready, and a merge commit with two parents through fake `gh` and fake `glab`. Run `caffeinate -is pnpm -r test`. core 210, web 33, daemon 22.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. One lane at the step head, per the boot recipe, by the developer's one-agent limit.
 
-- [ ] Lane 1. Against the scratch GitHub repo `ultish/yagura-demo-app`, open a draft from a test branch, mark it ready, and merge it with `yagura` internals through a test script. Save `cl3-pr.png` from the GitHub page. Pass when GitHub shows the draft, then ready, then a merge commit on `main`.
+- [x] Lane 1. Against the scratch GitHub repo `ultish/yagura-demo-app`, open a draft from a test branch, mark it ready, and merge it with `yagura` internals through a test script. Save `cl3-pr.png` from the GitHub page. Pass when GitHub shows the draft, then ready, then a merge commit on `main`. PR #5 on `ultish/yagura-demo-app` through the real `gh` and `githubForge`: draft, ready, then merged as `3785478` with parents `401fd4e` (old main) and `dac36fd` (the head), message `U1: CL3 probe (#5)`. Screenshots `/tmp/swarm-cl3/worker-1/cl3-pr-draft.png`, `cl3-pr-ready.png`, `cl3-pr.png` (JPEG data).
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] Metric. Time for `mergeWithBase` on the demo repo.
-- [ ] Probe. Run it 20 times against a real checkout.
-- [ ] Baseline. Record the time of `git merge --no-commit` in a scratch checkout, the old way, first.
-- [ ] Rule. `merge-tree` must not be slower. Fail at more than 10% slower.
+- [x] Metric. Time for `mergeWithBase` on the demo repo.
+- [x] Probe. Run it 20 times against a real checkout. A copy of the demo app mirror, a unit branch off `main~2` with one commit, 20 interleaved runs.
+- [x] Baseline. Record the time of `git merge --no-commit` in a scratch checkout, the old way, first. 17.2 ms median.
+- [x] Rule. `merge-tree` must not be slower. Fail at more than 10% slower. 9.7 ms (0.56 of the old way; 0.57 and 0.59 in repeats). The first version, four git processes in turn, was 2.1 times slower: each process costs about 8 ms here, more than the merge.
 
 **Review gate.** None. CL3 is not review-gated.
 
 **Merge.**
 
-- [ ] The step's gates, lane, and probe pass at its last commit on `core-loop`.
-- [ ] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
+- [x] The step's gates, lane, and probe pass at its last commit on `core-loop`.
+- [x] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
 
 ## Run workers and the judge to a merge (CL4)
 

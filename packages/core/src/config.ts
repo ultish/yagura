@@ -141,7 +141,7 @@ export const SETTINGS = {
   max_attempts: z.number().int().positive().default(2).describe("Tries a unit gets before it blocks"),
   "git.author_name": z.string().default("yagura").describe("Author name on landed commits"),
   "git.author_email": z.string().default("yagura@localhost").describe("Author email on landed commits"),
-  "git.branch_prefix": z.string().default("yg").describe("Prefix for unit branches"),
+  "git.branch_prefix": z.string().default("yagura").describe("Prefix for unit branches"),
   "yagura.url": z.string().url().nullable().default(null).describe("Dashboard URL linked from commit trailers"),
   "method.enforce_required_skills": z.boolean().default(true).describe("Reject work that skipped a required skill"),
   "lease.keep": z.enum(["never", "failed", "always"]).default("never").describe("Keep what a verification deployed afterwards"),

@@ -41,6 +41,7 @@ process.stdin.on("end", () => {
       target_branch: flag("--target-branch"),
       title: flag("--title"),
       description: stdin,
+      draft: rest.includes("--draft"),
       state: "opened",
       discussions: [],
     });
@@ -67,6 +68,7 @@ process.stdin.on("end", () => {
     return out({
       iid: m.iid,
       state: m.state,
+      draft: m.draft ?? false,
       detailed_merge_status: status,
       has_conflicts: status === "conflict",
       sha,
@@ -76,8 +78,14 @@ process.stdin.on("end", () => {
       web_url: m.web_url,
     });
   }
+  if (verb === "update") {
+    if (rest.includes("--ready")) m.draft = false;
+    if (rest.includes("--description-file")) m.description = stdin;
+    return save();
+  }
   if (verb === "merge") {
     if (!rest.includes("--auto-merge=false")) fail("yagura must not leave GitLab to merge on its own");
+    if (m.draft) fail("Merge request is still a draft");
     const sha = head();
     if (flag("--sha") !== sha) fail("SHA does not match HEAD of source branch");
     // A merge commit whose first parent is the target, as a GitLab project with the default merge method makes.
@@ -94,13 +102,13 @@ process.stdin.on("end", () => {
         "--git-dir",
         origin,
         "commit-tree",
-        `${sha}^{tree}`,
+        execFileSync("git", ["--git-dir", origin, "merge-tree", "--write-tree", `refs/heads/${m.target_branch}`, sha], { encoding: "utf8" }).split("\n")[0],
         "-p",
         `refs/heads/${m.target_branch}`,
         "-p",
         sha,
         "-m",
-        `Merge branch '${m.source_branch}' into '${m.target_branch}'`,
+        flag("--message") ?? `Merge branch '${m.source_branch}' into '${m.target_branch}'`,
       ],
       { encoding: "utf8", env },
     ).trim();
@@ -131,29 +139,6 @@ function api() {
     if (!m) fail(`404 merge request ${parts[mrAt + 1]}`);
     const tail = parts.slice(mrAt + 2);
     if (tail[0] === "discussions" && tail.length === 1 && method === "GET") return out(m.discussions);
-    if (tail.length === 0 && method === "GET")
-      return out({
-        ...m,
-        diff_refs: {
-          base_sha: git("rev-parse", `refs/heads/${m.target_branch}`),
-          start_sha: git("rev-parse", `refs/heads/${m.target_branch}`),
-          head_sha: git("rev-parse", `refs/heads/${m.source_branch}`),
-        },
-      });
-    if (tail[0] === "discussions" && tail.length === 1 && method === "POST") {
-      const id = `d${m.discussions.length + 1}`;
-      const note = {
-        id: Date.now(),
-        body: body.body,
-        system: false,
-        author: { username: "yagura-bot" },
-        resolvable: true,
-        resolved: false,
-        position: body.position,
-      };
-      m.discussions.push({ id, individual_note: false, notes: [note] });
-      return out({ id });
-    }
     if (tail[0] === "notes" && method === "POST") {
       const note = { id: Date.now(), body: body.body, system: false, author: { username: "yagura-bot" } };
       m.discussions.push({ id: `d${m.discussions.length + 1}`, individual_note: true, notes: [note] });
