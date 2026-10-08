@@ -105,43 +105,43 @@ Each live lane runs against its own isolated checkout, a worktree, or an `Agent`
 
 **Files.**
 
-- [ ] Create `packages/core/src/schema.sql` anew as the one starting schema.
-- [ ] Delete every entry in `packages/core/src/migrations.ts` and start it empty.
-- [ ] Edit `packages/core/src/domain.ts`, `store.ts`, and `records.ts`.
-- [ ] Create `packages/core/src/import.ts` and the CLI command `yagura import <old home>`.
+- [x] Create `packages/core/src/schema.sql` anew as the one starting schema.
+- [x] Delete every entry in `packages/core/src/migrations.ts` and start it empty.
+- [x] Edit `packages/core/src/domain.ts`, `store.ts`, and `records.ts`.
+- [x] Create `packages/core/src/import.ts` and the CLI command `yagura import <old home>`.
 
 **Build.**
 
-- [ ] Define `Unit` with `goal`, `acceptance`, `context`, `repo`, `base`, `after`, and `refs` in `domain.ts`.
-- [ ] Define `UNIT_STATES` as `waiting`, `building`, `judging`, `ready`, `merged`, `stuck`, and `dropped`, with `UNIT_TRANSITIONS` as the only table of allowed moves, enforced by `transitionUnit`.
-- [ ] Define the record schemas for `yagura handoff done|stuck`, `yagura judge approve|changes|ask`, and `yagura decide`, checked when called.
-- [ ] Copy settings, repos, environments, templates, and threads from an old home in `import.ts`.
+- [x] Define `Unit` with `goal`, `acceptance`, `context`, `repo`, `base`, `after`, and `refs` in `domain.ts`.
+- [x] Define `UNIT_STATES` as `waiting`, `building`, `judging`, `ready`, `merged`, `stuck`, and `dropped`, with `UNIT_TRANSITIONS` as the only table of allowed moves, enforced by `transitionUnit`.
+- [x] Define the record schemas for `yagura handoff done|stuck`, `yagura judge approve|changes|ask`, and `yagura decide`, checked when called.
+- [x] Copy settings, repos, environments, templates, and threads from an old home in `import.ts`. Also the watchman turns, which mark answered messages; without them the daemon answered imported messages again with a real model.
 
 **You see.**
 
-- [ ] `yagura import ~/.yagura` prints the counts it copied, and a fresh home starts at schema version 1.
+- [x] `yagura import ~/.yagura` prints the counts it copied, and a fresh home starts at schema version 1. Run on a copy of the demo home: settings 9, environments 1, repos 2, threads 1 (24 messages, 6 questions, 1 issue), 2 settings skipped; `schema_version` is 1.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] `store.test.ts` gains every allowed and refused transition, read from `UNIT_TRANSITIONS`. `schema.test.ts` still matches the TypeScript enums against the SQL `CHECK` lists. `import.test.ts` imports a copy of the demo home and asserts the copied rows. Run `caffeinate -is pnpm -r test`.
+- [x] `store.test.ts` gains every allowed and refused transition, read from `UNIT_TRANSITIONS`. `schema.test.ts` still matches the TypeScript enums against the SQL `CHECK` lists. `import.test.ts` imports a copy of the demo home and asserts the copied rows. Run `caffeinate -is pnpm -r test`. The test builds an old home from the demo home's real version 46 schema (`fixtures/old-home-v46.sql`) with synthetic rows, since a test cannot read `/tmp`. core 198, web 33, daemon 22.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. One lane at the step head, per the boot recipe, by the developer's one-agent limit.
 
-- [ ] Lane 1. Import a copy of `/tmp/yagura-real-gh-demo-npm/home` into a scratch home and open the dashboard's Settings, Repos, and Talk pages. Save `cl2-import.png`. Pass when the demo's repos, environment, and the issue #2 thread show.
+- [x] Lane 1. Import a copy of `/tmp/yagura-real-gh-demo-npm/home` into a scratch home and open the dashboard's Settings, Repos, and Talk pages. Save `cl2-import.png`. Pass when the demo's repos, environment, and the issue #2 thread show. Repos lists app and lib, Environments lists local (0 of 2 slots), Talk shows the issue #2 thread with its 5 open questions, Settings shows role.lead.model set; no watchman turn started. Screenshot `/tmp/swarm-cl2/worker-1/cl2-import.png` (JPEG data).
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] Metric. Time for a fresh `openStore`.
-- [ ] Probe. Open a new store 20 times at `main` and at the head, interleaved.
-- [ ] Baseline. Record the `main` median first.
-- [ ] Rule. The head must not be slower than `main`. Fail at more than 10% slower.
+- [x] Metric. Time for a fresh `openStore`.
+- [x] Probe. Open a new store 20 times at `main` and at the head, interleaved.
+- [x] Baseline. Record the `main` median first. main 18.77 ms.
+- [x] Rule. The head must not be slower than `main`. Fail at more than 10% slower. head 3.97 ms (0.21 of main; a second run 3.99 against 18.25): main runs 46 migrations on a fresh file.
 
 **Review gate.** None. CL2 is not review-gated.
 
 **Merge.**
 
-- [ ] The step's gates, lane, and probe pass at its last commit on `core-loop`.
-- [ ] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
+- [x] The step's gates, lane, and probe pass at its last commit on `core-loop`.
+- [x] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
 
 ## Give each unit a branch and a draft pull request (CL3)
 

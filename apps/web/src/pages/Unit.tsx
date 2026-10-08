@@ -154,16 +154,14 @@ function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
         </tbody>
       </table>
       <p className="muted hub-small">
-        Every session that worked on U{story.unit.seq}: the planner run that planned it, its own attempts, and the verifiers, reviewers, review triage, and
-        rebases that targeted it. Dimmed rows did not count.
+        Every session that worked on U{story.unit.seq}: the planner run that planned it, its own attempts, and the judges and unit leads that worked on it.
+        Dimmed rows did not count.
       </p>
     </div>
   );
 }
 
-const KIND: Record<string, string> = { "needs-source": "needs its code", "needs-landed": "needs it landed", "scope-overlap": "same files" };
-
-// What this unit depends on and what depends on it, under the title: each linked, with where it stands and the build it used.
+// What this unit depends on and what depends on it, under the title: each linked, with where it stands.
 function DepStrip({ story }: { story: UnitStory }) {
   const edges = story.dependencies;
   if (!edges.length) return null;
@@ -178,27 +176,16 @@ function DepStrip({ story }: { story: UnitStory }) {
   return (
     <div className="dep-strip">
       {needs.map((e) => (
-        <div key={`n${e.other.id}`}>
-          <div className="dep-row">
-            <span className="dep-k">Depends on</span>
-            {link(e)}
-            <span className="chip">{KIND[e.kind]}</span>
-            <span className={`chip story-${e.state.tone}`}>{e.state.text}</span>
-          </div>
-          {e.build && (
-            <div className="dep-row">
-              <span className="dep-k">Built against</span>
-              <span className="mono">{e.build.version}</span>
-              {e.build.repoId && <span className="muted">{e.build.repoId}</span>}
-            </div>
-          )}
+        <div key={`n${e.other.id}`} className="dep-row">
+          <span className="dep-k">Depends on</span>
+          {link(e)}
+          <span className={`chip story-${e.state.tone}`}>{e.state.text}</span>
         </div>
       ))}
       {feeds.map((e) => (
         <div key={`f${e.other.id}`} className="dep-row">
           <span className="dep-k">Feeds</span>
           {link(e)}
-          <span className="chip">{KIND[e.kind]}</span>
           <span className={`chip story-${e.state.tone}`}>{e.state.text}</span>
         </div>
       ))}
@@ -214,8 +201,6 @@ function DependenciesTab({ story }: { story: UnitStory }) {
           <tr>
             <th>Unit</th>
             <th>Direction</th>
-            <th>Kind</th>
-            <th>Build</th>
             <th>State</th>
           </tr>
         </thead>
@@ -230,8 +215,6 @@ function DependenciesTab({ story }: { story: UnitStory }) {
                 <div className="muted">{clip(e.other.goal, 70)}</div>
               </td>
               <td>{e.direction === "needs" ? `U${story.unit.seq} depends on it` : `depends on U${story.unit.seq}`}</td>
-              <td>{KIND[e.kind]}</td>
-              <td className="mono">{e.build ? e.build.version : ""}</td>
               <td>
                 <span className={`chip story-${e.state.tone}`}>{e.state.text}</span>
               </td>
@@ -362,13 +345,7 @@ function CodeTab({ story }: { story: UnitStory }) {
 }
 
 function ManagerTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
-  if (!story.managerOn && !story.manager.length)
-    return (
-      <div className="muted">
-        The unit lead is off for this project (the setting manager.enabled), so the fixed rules decide what happens after a rejection or failure.
-      </div>
-    );
-  if (!story.manager.length)
+  if (!story.lead.length)
     return (
       <div className="muted">
         No decisions yet. U{story.unit.seq}'s unit lead is woken only when its worker is rejected, fails, or runs out of tries; a unit that goes smoothly never
@@ -381,7 +358,7 @@ function ManagerTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
         Each time the unit lead is woken it is told what changed since its last decision and answers with one action. Open its run to read exactly what it was
         told.
       </p>
-      {byTime(story.manager, (t) => t.at, order).map((t) => (
+      {byTime(story.lead, (t) => t.at, order).map((t) => (
         <section key={t.decisionId} className="mgr-turn">
           <div className="mgr-head mono">
             {t.agentNo !== null ? `A${t.agentNo}` : "no run"} · {clock(t.at)} · {t.resumed ? "same session, told what changed" : "first wake"} · $
@@ -456,9 +433,9 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
       <h1 className="serif story-title">
         <Inline text={u.goal} />
       </h1>
-      {u.description && (
+      {u.context.length > 0 && (
         <div className="story-why">
-          {u.description.split("\n\n").map((para, i) => (
+          {u.context.map((para, i) => (
             <p key={i}>
               <Inline text={para} />
             </p>
@@ -466,8 +443,8 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
         </div>
       )}
       <div className="facts">
-        <span className={`chip story-${u.state === "landed" ? "pine" : u.state === "blocked" ? "bell" : "amber"}`}>
-          {u.state === "landed" && u.landedSha ? `landed ${u.landedSha.slice(0, 7)}` : u.state}
+        <span className={`chip story-${u.state === "merged" ? "pine" : u.state === "stuck" ? "bell" : "amber"}`}>
+          {u.state === "merged" && u.mergedSha ? `merged ${u.mergedSha.slice(0, 7)}` : u.state}
         </span>
         {story.pr && (
           <a href={story.pr.url} target="_blank" rel="noreferrer">
@@ -476,7 +453,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
         )}
         <span className="mono">${story.costUsd.toFixed(2)}</span>
         {story.started && <span>{when(story.started, story.ended, false)}</span>}
-        {u.state === "running" && running?.attempt && <Link to={`/a/${running.attempt.id}`}>running now · watch it live</Link>}
+        {(u.state === "building" || u.state === "judging") && running?.attempt && <Link to={`/a/${running.attempt.id}`}>running now · watch it live</Link>}
       </div>
       <DepStrip story={story} />
       <UnitActions projectId={projectId} unit={u} reload={reload} />
@@ -488,7 +465,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             ["agents", "Agents", story.agents.length],
             ["code", "Code", u.repoId ? "" : null],
             ...(story.dependencies.length ? ([["deps", "Dependencies", story.dependencies.length]] as const) : []),
-            ...(u.type === "work" ? ([["manager", "Unit lead", story.manager.length]] as const) : []),
+            ...(u.type === "work" ? ([["manager", "Unit lead", story.lead.length]] as const) : []),
           ] as const
         ).map(([k, label, n]) => (
           <Link

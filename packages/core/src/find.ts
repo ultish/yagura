@@ -2,7 +2,7 @@ import { findByRef, findUnitsByCommit } from "./audit.js";
 import { isBuild, type Unit } from "./domain.js";
 import { listUnits, type Db } from "./store.js";
 
-export const FIND_KINDS = ["unit", "project", "decision", "question", "review", "message", "handoff", "repo"] as const;
+export const FIND_KINDS = ["unit", "project", "decision", "question", "message", "handoff", "repo"] as const;
 export type FindKind = (typeof FIND_KINDS)[number];
 
 // One thing the header search found: where it lives, what it is, and the words that matched.
@@ -119,23 +119,6 @@ export function find(db: Db, query: string): FindResult {
       meta: `${r.title} · ${r.answer ? `answered: ${r.answer}` : "open"}`,
       text: `${r.text} ${r.answer ?? ""}`,
     });
-
-  const reviews = wordsClause("m.comments_json", words);
-  for (const r of db
-    .prepare(
-      `SELECT m.author, m.path, m.line, m.comments_json, m.decision, u.project_id, u.seq FROM mr_threads m JOIN units u ON u.id = m.unit_id WHERE ${reviews.sql} ORDER BY m.rowid DESC LIMIT ${PER_KIND}`,
-    )
-    .all(...reviews.args) as Row[]) {
-    const said = (JSON.parse(r.comments_json as string) as string[]).join("\n");
-    hits.push({
-      kind: "review",
-      ref: `${r.project_id}/U${r.seq}`,
-      href: `/p/${r.project_id}/u/${r.seq}`,
-      title: said,
-      meta: `${r.author}${r.path ? ` on ${r.path}${r.line ? `:${r.line}` : ""}` : ""}${r.decision ? ` · ${r.decision}` : ""}`,
-      text: said,
-    });
-  }
 
   const messages = wordsClause("m.body", words);
   for (const r of db

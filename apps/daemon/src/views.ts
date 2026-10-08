@@ -217,15 +217,15 @@ export function environmentView(db: Db, id: EnvironmentId) {
   const env = getEnvironment(db, id);
   const leases = db
     .prepare(
-      `SELECT l.state, l.slot, l.attempt_id, l.requested_at, l.granted_at, a.agent_no, u.project_id, u.seq, u.type, u.goal, t.seq AS target_seq
-       FROM leases l JOIN attempts a ON a.id = l.attempt_id JOIN units u ON u.id = a.unit_id LEFT JOIN units t ON t.id = u.target_unit_id
+      `SELECT l.state, l.slot, l.attempt_id, l.requested_at, l.granted_at, a.agent_no, u.project_id, u.seq, u.type, u.goal
+       FROM leases l JOIN attempts a ON a.id = l.attempt_id JOIN units u ON u.id = a.unit_id
        WHERE l.environment_id = ? AND l.state IN ('active', 'queued') ORDER BY l.id`,
     )
     .all(id) as Row[];
   const holder = (l: Row) => ({
     attemptId: l.attempt_id as number,
     agentNo: l.agent_no as number,
-    unit: { projectId: l.project_id as string, seq: (l.target_seq as number | null) ?? (l.seq as number), type: l.type as string, goal: l.goal as string },
+    unit: { projectId: l.project_id as string, seq: l.seq as number, type: l.type as string, goal: l.goal as string },
   });
   return {
     environment: env,
@@ -243,8 +243,8 @@ export function keptSlots(db: Db, where: { environmentId?: EnvironmentId; attemp
   return (
     db
       .prepare(
-        `SELECT l.id, l.slot, l.vars_json, l.kept_until, l.kept_reason, l.attempt_id, a.agent_no, u.project_id, u.seq, u.type, u.goal, t.seq AS target_seq
-         FROM leases l JOIN attempts a ON a.id = l.attempt_id JOIN units u ON u.id = a.unit_id LEFT JOIN units t ON t.id = u.target_unit_id
+        `SELECT l.id, l.slot, l.vars_json, l.kept_until, l.kept_reason, l.attempt_id, a.agent_no, u.project_id, u.seq, u.type, u.goal
+         FROM leases l JOIN attempts a ON a.id = l.attempt_id JOIN units u ON u.id = a.unit_id
          WHERE l.kept_until IS NOT NULL AND (? IS NULL OR l.environment_id = ?) AND (? IS NULL OR l.attempt_id = ?) ORDER BY l.id`,
       )
       .all(where.environmentId ?? null, where.environmentId ?? null, where.attemptId ?? null, where.attemptId ?? null) as Row[]
@@ -254,7 +254,7 @@ export function keptSlots(db: Db, where: { environmentId?: EnvironmentId; attemp
       leaseId: l.id as number,
       attemptId: l.attempt_id as number,
       agentNo: l.agent_no as number,
-      unit: { projectId: l.project_id as string, seq: (l.target_seq as number | null) ?? (l.seq as number), type: l.type as string, goal: l.goal as string },
+      unit: { projectId: l.project_id as string, seq: l.seq as number, type: l.type as string, goal: l.goal as string },
       until: l.kept_until as string,
       reason: (l.kept_reason as string) ?? "",
       namespace: vars.YAGURA_NAMESPACE ?? null,

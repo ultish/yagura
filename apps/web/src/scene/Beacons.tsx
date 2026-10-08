@@ -5,7 +5,7 @@ import { GitMerge, Hammer, Map as MapIcon, ShieldCheck } from "lucide-react";
 import { type Light, type Stage, depLine, isBuild, stages } from "../lib/units";
 import { Castle, SceneDefs } from "./Tower";
 
-const XS = { plan: 456, work: 636, verify: 816, land: 996 } as const;
+const XS = { plan: 456, work: 636, judge: 816, merge: 996 } as const;
 const ROW = 56;
 const TOP = 80;
 const TONE_STROKE = { amber: "var(--lamp)", bell: "var(--bell)", pine: "var(--pine)", muted: "var(--faint)" } as const;
@@ -69,9 +69,9 @@ function Beacon({ x, y, stage }: { x: number; y: number; stage: Stage }) {
 const reached = (l: Light) => l === "lit" || l === "flame" || l === "bell";
 
 export function visibleUnits(d: ProjectDetail): UnitView[] {
-  const work = d.units.filter((u) => isBuild(u) && u.state !== "abandoned");
-  const landed = work.filter((u) => u.state === "landed" || u.state === "done");
-  const rest = work.filter((u) => u.state !== "landed" && u.state !== "done");
+  const work = d.units.filter((u) => isBuild(u) && u.state !== "dropped");
+  const landed = work.filter((u) => u.state === "merged");
+  const rest = work.filter((u) => u.state !== "merged");
   return [...landed.slice(-4), ...rest];
 }
 
@@ -80,14 +80,12 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
   const height = Math.max(440, TOP + units.length * ROW + 40);
   const rowY = new Map(units.map((u, i) => [u.id, TOP - 5 + i * ROW]));
   const castleY = height - 408;
-  const landedEarlier =
-    d.units.filter((u) => isBuild(u) && (u.state === "landed" || u.state === "done")).length -
-    units.filter((u) => u.state === "landed" || u.state === "done").length;
+  const landedEarlier = d.units.filter((u) => isBuild(u) && u.state === "merged").length - units.filter((u) => u.state === "merged").length;
   return (
     <svg
       viewBox={`0 0 1440 ${height}`}
       role="img"
-      aria-label={`Beacon chains for ${units.length} units from plan to work, verify and land, ending at the ${d.repos[0]?.defaultBranch ?? "main"} keep`}
+      aria-label={`Beacon chains for ${units.length} units from plan to work, judge and merge, ending at the ${d.repos[0]?.defaultBranch ?? "main"} keep`}
       style={{ display: "block", width: "100%", height: "auto" }}
     >
       <SceneDefs />
@@ -97,7 +95,7 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
       />
       <g style={{ ...mono, fill: "var(--muted)" }} textAnchor="middle">
         {(Object.entries(XS) as [keyof typeof XS, number][]).map(([name, x]) => {
-          const Icon = { plan: MapIcon, work: Hammer, verify: ShieldCheck, land: GitMerge }[name];
+          const Icon = { plan: MapIcon, work: Hammer, judge: ShieldCheck, merge: GitMerge }[name];
           return (
             <g key={name}>
               <Icon x={x - name.length * 3.6 - 22} y={23} size={16} strokeWidth={1.75} color="var(--muted)" aria-hidden="true" />
@@ -127,7 +125,7 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
         const xs = st.map((s) => XS[s.name]);
         const lastReached = st.reduce((acc, s, i) => (reached(s.light) ? i : acc), 0);
         const ember = st.findIndex((s) => s.light === "ember");
-        const landed = u.state === "landed" || u.state === "done";
+        const landed = u.state === "merged";
         return (
           <g key={u.id}>
             <g
@@ -159,7 +157,7 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
                   onClick={go ? () => navigate(go) : undefined}
                   onKeyDown={go ? (e) => e.key === "Enter" && navigate(go) : undefined}
                 >
-                  <title>{go ? (s.name === "work" || s.name === "verify" ? `Open the ${s.name} agent run` : `Open U${u.seq}`) : `${s.name}: no run yet`}</title>
+                  <title>{go ? (s.name === "work" || s.name === "judge" ? `Open the ${s.name} agent run` : `Open U${u.seq}`) : `${s.name}: no run yet`}</title>
                   <circle cx={XS[s.name]} cy={y} r="20" fill="transparent" />
                   <Beacon x={XS[s.name]} y={y} stage={s} />
                 </g>
@@ -182,7 +180,7 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
         const a = d.units.find((u) => u.id === dep.unitId)!;
         const line = depLine(d, dep);
         // Drawn from the unit being waited on to the one that builds on it, so the dashes travel the way the release will.
-        const path = `M${XS.land - 6} ${y2 + 6} C ${XS.land - 90} ${y2 + 40} ${XS.plan + 100} ${y1 - 30} ${XS.plan + 6} ${y1 - 4}`;
+        const path = `M${XS.merge - 6} ${y2 + 6} C ${XS.merge - 90} ${y2 + 40} ${XS.plan + 100} ${y1 - 30} ${XS.plan + 6} ${y1 - 4}`;
         const open = () => navigate(`/p/${d.project.id}/u/${a.seq}?tab=deps`);
         return (
           <g
@@ -208,7 +206,7 @@ export function Beacons({ d, now }: { d: ProjectDetail; now: number }) {
             />
             {line.moving && (
               <text
-                x={(XS.plan + XS.land) / 2}
+                x={(XS.plan + XS.merge) / 2}
                 y={(y1 + y2) / 2 + 4}
                 textAnchor="middle"
                 style={{ ...mono, fontSize: 11.5, fill: line.tone === "bell" ? "var(--bell-text)" : "var(--amber-text)" }}

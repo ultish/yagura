@@ -54,8 +54,7 @@ beforeEach(() => {
     timeboxSeconds: 60,
     maxAttempts: 2,
   });
-  transitionUnit(db, unit.id, "ready");
-  transitionUnit(db, unit.id, "running");
+  transitionUnit(db, unit.id, "building");
   const attempt = createAttempt(db, unit.id, "claude", null);
   updateAttempt(db, attempt.id, { state: "running", pid: 999999 });
   const log = layout(boot).log(project, unit.seq, attempt.n);
@@ -78,21 +77,6 @@ const post = (path: string, body: unknown) =>
   app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("daemon API", () => {
-  it("wakes a stuck unit's unit lead with the developer's note, and says why when it cannot", async () => {
-    const url = `/api/projects/${project}/units/1/wake`;
-    db.prepare("UPDATE units SET state = 'running' WHERE seq = 1").run();
-    const refused = await post(url, { note: "look" });
-    expect(refused.status).toBe(409);
-    expect(((await refused.json()) as { error: string }).error).toBe("U1 is running; the unit lead looks at blocked, failed, or rejected units");
-    db.prepare("UPDATE units SET state = 'blocked' WHERE seq = 1").run();
-    expect((await post(url, { note: "I want emojis" })).status).toBe(200);
-    const manager = db.prepare("SELECT context_json FROM units WHERE type = 'manager'").get() as { context_json: string };
-    expect(JSON.parse(manager.context_json)).toEqual(["The developer asked you to look at U1 now: I want emojis. Answer what they wrote first.", "asked"]);
-    const twice = await post(url, {});
-    expect(twice.status).toBe(409);
-    expect(((await twice.json()) as { error: string }).error).toBe("U1's unit lead is already deciding");
-  });
-
   it("imports, lists, exports, and deletes environment templates, all in the store", async () => {
     const post = (path: string, body: object) =>
       app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -128,7 +112,7 @@ describe("daemon API", () => {
       allNotes: string | null;
     };
     const view = (await (await get(`/api/prompts?project=${project}`)).json()) as View;
-    expect(view.roles.map((r) => r.role)).toEqual(["planner", "worker", "verifier", "reviewer", "review-triage", "rebase", "pack", "manager"]);
+    expect(view.roles.map((r) => r.role)).toEqual(["planner", "worker", "judge", "lead"]);
     expect(view.roles.find((r) => r.role === "worker")).toMatchObject({ source: "default", lastAttemptId: expect.any(Number) });
     const set = (await (
       await put({ scope: "project", projectId: project, role: "planner", kind: "guidance", text: "One unit per feature, with its tests." })
@@ -148,9 +132,9 @@ describe("daemon API", () => {
   });
 
   it("summarizes projects and returns a project's units with their attempts", async () => {
-    expect(await (await get("/api/projects")).json()).toMatchObject([{ project: { id: "orders" }, workCounts: { running: 1 }, running: 1, openGates: 1 }]);
+    expect(await (await get("/api/projects")).json()).toMatchObject([{ project: { id: "orders" }, workCounts: { building: 1 }, running: 1, openGates: 1 }]);
     const detail = (await (await get("/api/projects/orders")).json()) as { units: { seq: number; attempts: unknown[] }[] };
-    expect(detail.units).toMatchObject([{ seq: 1, state: "running", attempts: [{ n: 1, state: "running" }] }]);
+    expect(detail.units).toMatchObject([{ seq: 1, state: "building", attempts: [{ n: 1, state: "running" }] }]);
     expect((await get("/api/projects/nope")).status).toBe(404);
   });
 

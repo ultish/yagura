@@ -72,8 +72,15 @@ export function importHome(db: Db, oldDbPath: string): ImportCounts {
       const messages = copy(from, db, "thread_messages");
       const decisions = copy(from, db, "thread_decisions");
       const questions = copy(from, db, "thread_questions");
+      // The turns mark which messages were answered; without them every old message is queued and answered again. Sessions stay
+      // behind (what they saw names old units), so the next turn starts fresh.
+      copy(from, db, "watchman_turns", (r) => ({ ...r, session_id: null, state: r.state === "running" ? "stopped" : r.state }));
       copy(from, db, "issue_watches");
-      const issues = copy(from, db, "forge_issues");
+      // Unit announcements are keyed by unit id, and the new home numbers units from 1 again.
+      const issues = copy(from, db, "forge_issues", (r) => {
+        const told = r.announced_json === null ? null : (JSON.parse(r.announced_json as string) as string[]);
+        return { ...r, announced_json: told && JSON.stringify(told.filter((k) => /^d\d+$/.test(k))) };
+      });
       return { settings, environments, environmentValues, templates, repos, prompts, threads, messages, decisions, questions, issues, skipped };
     })();
   } finally {
