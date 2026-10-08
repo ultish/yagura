@@ -1,5 +1,5 @@
 ---
-name: yagura-manager
+name: yagura-unit-lead
 description: Use when a prompt is a yagura manager brief (starts with "# yagura manager brief"). Sets how to decide what happens next to one unit after its worker was rejected or failed, using only what yagura reports, and how to answer so yagura can act on it.
 ---
 

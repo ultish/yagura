@@ -9,14 +9,14 @@ import { now, type Db } from "./store.js";
 // Each role's prompt has a contract yagura parses (the brief: handoff format, evidence and scope rules; visible, never
 // editable) and guidance on how to do the job (its overlay skill's body), which the developer may override globally or
 // per project. Notes are extra standing orders per role, or for every role ("all").
-export const PROMPT_ROLES = ["planner", "worker", "verifier", "reviewer", "review-triage", "rebase", "pack", "manager", "watchman"] as const;
+export const PROMPT_ROLES = ["planner", "worker", "judge", "lead", "watchman"] as const;
 export type PromptRole = (typeof PROMPT_ROLES)[number];
 export const PROMPT_SCOPES = ["global", "project"] as const;
 export type PromptScope = (typeof PROMPT_SCOPES)[number];
 export const PROMPT_KINDS = ["guidance", "notes"] as const;
 export type PromptKind = (typeof PROMPT_KINDS)[number];
 
-export const skillOf = (role: PromptRole) => `yagura-${role}`;
+export const skillOf = (role: PromptRole) => (role === "lead" ? "yagura-unit-lead" : `yagura-${role}`);
 
 const sha = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 16);
 

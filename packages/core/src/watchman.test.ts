@@ -114,8 +114,8 @@ describe("watchman turns", () => {
     const runs: HarnessRun[] = [];
     ctx.adapters = { claude: { ...fake, command: (run) => (runs.push(run), fake.command(run)) } };
     addRepo(db, { id: "proto" as RepoId, url: "/nowhere", defaultBranch: "main" });
-    addProject(db, { id: "a" as ProjectId, name: "a", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["proto" as RepoId] });
-    addProject(db, { id: "b" as ProjectId, name: "b", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["proto" as RepoId] });
+    addProject(db, { id: "a" as ProjectId, name: "a", goal: "g", predicate: "p", repos: ["proto" as RepoId] });
+    addProject(db, { id: "b" as ProjectId, name: "b", goal: "g", predicate: "p", repos: ["proto" as RepoId] });
     const t = createThread(db, { title: "t" });
     linkThreadProject(db, t.id, "a" as ProjectId);
     await runWatchmanTurn(ctx, t.id, "hello");
@@ -143,7 +143,7 @@ describe("watchman turns", () => {
   it("stores nothing when any record is invalid", () => {
     const t = createThread(db, { title: "t" });
     addRepo(db, { id: "r", url: "/nowhere", defaultBranch: "main" });
-    addProject(db, { id: "linked", name: "l", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["r" as RepoId] });
+    addProject(db, { id: "linked", name: "l", goal: "g", predicate: "p", repos: ["r" as RepoId] });
     linkThreadProject(db, t.id, "linked" as ProjectId);
     const attempt = (records: unknown) => () => storeTurn(ctx, t.id, { body: "b", records: TurnRecords.parse(records), turnLog: null });
     expect(attempt({ decisions: [{ text: "a" }], answered: [{ question: "Q9", answer: "x" }] })).toThrow(/Q9 does not exist/);
@@ -246,9 +246,9 @@ describe("watchman turns", () => {
         .filter((u) => u.type === "work")
         .map((u) => [u.goal, u.state]),
     ).toEqual([
-      ["write a", "handed_off"],
-      ["write b", "handed_off"],
-      ["write c", "ready"],
+      ["write a", "judging"],
+      ["write b", "judging"],
+      ["write c", "waiting"],
     ]);
     expect(getProject(db, "proto-b" as ProjectId).state).toBe("framing");
     expect(listMessages(db, t.id).filter((m) => m.role === "system" && m.body.includes("is done"))).toEqual([]);
@@ -394,7 +394,6 @@ describe("watchman turns", () => {
     await applyProposal(ctx, proposal!.id);
     const at = { projectId: "svc" as ProjectId };
     expect(resolveSetting(db, "skills.scaffold", at)).toMatchObject({ value: ["setup-gradle"], source: "project" });
-    expect(resolveSetting(db, "skills.pack", at)).toMatchObject({ value: [], source: "default" });
     expect(resolveSetting(db, "project.reference_repos", at).value).toEqual(["billing"]);
   });
 
@@ -527,7 +526,7 @@ describe("specs in the store", () => {
     const b = { home, packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
     const d = openStore(":memory:");
     addRepo(d, { id: "r", url: "file:///x", defaultBranch: "main" });
-    addProject(d, { id: "sp" as ProjectId, name: "S", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["r" as never] });
+    addProject(d, { id: "sp" as ProjectId, name: "S", goal: "g", predicate: "p", repos: ["r" as never] });
     mkdirSync(join(home, "projects", "sp"), { recursive: true });
     writeFileSync(layout(b).spec("sp" as ProjectId), "# sp\n\n## Goal\n\nship\n");
     expect(importSpecFiles(d, b)).toEqual([layout(b).spec("sp" as ProjectId)]);

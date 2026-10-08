@@ -24,15 +24,13 @@ beforeEach(() => {
   boot = { home: join(root, "home"), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
   db = openStore(":memory:");
   addRepo(db, { id: "r", url: "file:///r", defaultBranch: "main" });
-  addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["r" as RepoId] });
+  addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: ["r" as RepoId] });
   const unit = addUnit(db, {
     projectId: "p" as ProjectId,
     type: "work",
     repoId: "r" as RepoId,
     goal: "g",
-    writeScope: [],
     acceptance: [],
-    verify: "v",
     timeboxSeconds: 60,
     maxAttempts: 1,
   });

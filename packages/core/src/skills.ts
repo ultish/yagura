@@ -5,7 +5,7 @@ import { resolveSetting, type Bootstrap } from "./config.js";
 import type { ProjectId, Role, Unit } from "./domain.js";
 import { getProject, projectRepos, type Db } from "./store.js";
 
-export const SKILL_PURPOSES = ["scaffold", "work", "pack", "verify", "review"] as const;
+export const SKILL_PURPOSES = ["scaffold", "work"] as const;
 export type SkillPurpose = (typeof SKILL_PURPOSES)[number];
 
 export const claudeConfigDir = (env: NodeJS.ProcessEnv = process.env) => env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
@@ -34,7 +34,7 @@ export const isInstalled = (installed: Set<string>, skill: string) =>
 // The project skills a session must load, on top of the role's own required skills.
 export function requiredProjectSkills(db: Db, unit: Pick<Unit, "projectId" | "repoId" | "type" | "scaffold">): string[] {
   const at = { projectId: unit.projectId, repoId: unit.repoId ?? undefined, environmentId: getProject(db, unit.projectId).environmentId };
-  const purpose: SkillPurpose = unit.type === "pack" ? "pack" : unit.type === "verify" ? "verify" : unit.scaffold ? "scaffold" : "work";
+  const purpose: SkillPurpose = unit.scaffold ? "scaffold" : "work";
   return resolveSetting(db, `skills.${purpose}`, at).value;
 }
 
@@ -67,7 +67,8 @@ export function skillMethod(skills: string[]): string {
 export const REQUIRED_SKILLS: Partial<Record<Role, readonly string[]>> = {
   worker: ["yagura:yagura-worker", "pstack:poteto-mode", "pstack:principle-prove-it-works", "pstack:principle-test-behavior-not-implementation"],
   planner: ["yagura:yagura-planner"],
-  manager: ["yagura:yagura-manager"],
+  judge: ["yagura:yagura-judge"],
+  lead: ["yagura:yagura-unit-lead"],
   watchman: ["yagura:yagura-watchman"],
 };
 

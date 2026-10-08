@@ -38,7 +38,7 @@ const unitHit = (u: Unit, text: string, meta?: string): FindHit => ({
   ref: `${u.projectId}/U${u.seq}`,
   href: `/p/${u.projectId}/u/${u.seq}`,
   title: u.goal,
-  meta: meta ?? `${u.type} · ${u.state}${u.landedSha ? ` · landed ${u.landedSha.slice(0, 7)}` : ""}`,
+  meta: meta ?? `${u.type} · ${u.state}${u.mergedSha ? ` · merged ${u.mergedSha.slice(0, 7)}` : ""}`,
   text,
 });
 

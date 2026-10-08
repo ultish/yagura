@@ -1,54 +1,65 @@
 import { z } from "zod";
-import {
-  FAIL_TIERS,
-  HANDOFF_STATUSES,
-  MANAGER_ACTIONS,
-  PASS_TIERS,
-  type AttemptId,
-  type Handoff,
-  type ManagerAction,
-  type RecordKind,
-  type Role,
-  type UnitId,
-} from "./domain.js";
+import { HANDOFF_STATUSES, JUDGE_VERDICTS, LEAD_ACTIONS, type AttemptId, type Handoff, type RecordKind, type Role } from "./domain.js";
 import { applyDelta, PlanDelta, PlanRejected } from "./plan.js";
 import { getAttempt, getUnit, now, recordEvent, type Db } from "./store.js";
 
-// What an agent records through its yagura commands (§27). Each command's input is one of these schemas, checked when the agent
+// What an agent records through its yagura commands. Each command's input is one of these schemas, checked when the agent
 // calls it; the engine reads the stored records and never parses the agent's final message.
 const text = z.string().trim().min(1);
 const lines = z.array(text).default([]);
-const MENU = MANAGER_ACTIONS.filter((a): a is Exclude<ManagerAction, "fallback"> => a !== "fallback");
+const runIds = z.array(z.number().int().positive()).default([]);
 
 export const HandoffRecord = z
   .object({
     status: z.enum(HANDOFF_STATUSES),
-    tier: z
-      .enum([...PASS_TIERS, ...FAIL_TIERS, "not-verified"])
-      .nullable()
-      .default(null),
+    reason: text.nullable().default(null),
     did: lines,
     evidence: lines,
-    outsideScope: z.array(z.object({ path: text, reason: text }).strict()).default([]),
-    forOthers: lines,
     decisions: lines,
     notes: lines,
     followUps: lines,
-    findings: lines,
   })
-  .strict();
+  .strict()
+  .superRefine((h, ctx) => {
+    if (h.status === "stuck" && !h.reason) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "stuck needs --reason: what stops you", path: ["reason"] });
+    if (h.status === "done" && h.reason) ctx.addIssue({ code: z.ZodIssueCode.custom, message: "--reason only goes with stuck", path: ["reason"] });
+  });
+
+// The judge answers with one of three verdicts, and each one carries what the engine needs to act on it.
+export const JudgeRecord = z
+  .object({
+    verdict: z.enum(JUDGE_VERDICTS),
+    runs: runIds,
+    findings: lines,
+    question: text.nullable().default(null),
+  })
+  .strict()
+  .superRefine((j, ctx) => {
+    const issue = (message: string, path: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: [path] });
+    if (j.verdict === "approve" && !j.runs.length) issue("an approval needs the runs it rests on (--runs <id,…>)", "runs");
+    if (j.verdict === "changes" && !j.findings.length) issue('changes need at least one --finding "<file:line> what is wrong"', "findings");
+    if (j.verdict === "ask" && !j.question) issue("ask needs --question", "question");
+    if (j.verdict !== "changes" && j.findings.length) issue("--finding only goes with changes", "findings");
+    if (j.verdict !== "ask" && j.question) issue("--question only goes with ask", "question");
+  });
+
 export const DecisionRecord = z
   .object({
-    action: z.enum(MANAGER_ACTIONS).exclude(["fallback"]),
+    action: z.enum(LEAD_ACTIONS),
     reason: text,
     note: text.nullable().default(null),
     question: text.nullable().default(null),
-    to: text.nullable().default(null),
   })
-  .strict();
+  .strict()
+  .superRefine((d, ctx) => {
+    const issue = (message: string, path: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: [path] });
+    if (d.action === "ask" && !d.question) issue("ask needs --question for the developer", "question");
+    if ((d.action === "answer" || d.action === "reply") && !d.note) issue(`${d.action} needs --note: the words to send`, "note");
+  });
 
 export const RECORD_SCHEMAS = {
   handoff: HandoffRecord,
+  judge: JudgeRecord,
   decision: DecisionRecord,
   plan: PlanDelta,
 } as const;
@@ -58,8 +69,8 @@ export type RecordData<K extends LiveRecordKind> = z.output<(typeof RECORD_SCHEM
 // The record kinds each role may write; a command outside its role's list is refused.
 export const ROLE_RECORDS: Partial<Record<Role, readonly LiveRecordKind[]>> = {
   worker: ["handoff"],
-  "ci-fix": ["handoff"],
-  manager: ["decision", "plan"],
+  judge: ["judge"],
+  lead: ["decision", "plan"],
   planner: ["plan"],
 };
 
@@ -86,8 +97,17 @@ export const getRecord = <K extends LiveRecordKind>(db: Db, attemptId: AttemptId
 
 export const hasRecords = (db: Db, attemptId: AttemptId) => !!db.prepare("SELECT 1 FROM agent_records WHERE attempt_id = ? LIMIT 1").get(attemptId);
 
-// Facts about the record that only the store can check: a plan delta yagura would refuse is refused while the agent can still fix it.
+const runsOfAttempt = (db: Db, attemptId: AttemptId) =>
+  new Set((db.prepare("SELECT id FROM evidence_runs WHERE attempt_id = ?").all(attemptId) as { id: number }[]).map((r) => r.id));
+
+// Facts about the record that only the store can check: the runs a judge cites were recorded by its own session, and a plan delta
+// yagura would refuse is refused while the agent can still fix it.
 export function recordProblem<K extends LiveRecordKind>(db: Db, attemptId: AttemptId, kind: K, data: RecordData<K>): string | null {
+  if (kind === "judge") {
+    const mine = runsOfAttempt(db, attemptId);
+    const bad = (data as RecordData<"judge">).runs.filter((id) => !mine.has(id));
+    return bad.length ? `${bad.map((id) => `run:${id}`).join(", ")} ${bad.length === 1 ? "was" : "were"} not recorded by your yagura evidence run calls` : null;
+  }
   if (kind !== "plan") return null;
   const unit = getUnit(db, getAttempt(db, attemptId).unitId);
   // Applied for real and rolled back.
@@ -108,47 +128,39 @@ export function recordProblem<K extends LiveRecordKind>(db: Db, attemptId: Attem
 export function missingRecords(db: Db, attemptId: AttemptId, role: Role): string[] {
   const has = (kind: LiveRecordKind, key = "") => getRecord(db, attemptId, kind, key) !== null;
   switch (role) {
-    case "manager":
-      return has("decision") ? [] : [`no decision: run \`yagura decide <${MENU.join("|")}> --reason "…"\``];
+    case "judge":
+      return has("judge")
+        ? []
+        : [
+            'no verdict: run `yagura judge approve --runs <id,…>`, `yagura judge changes --finding "<file:line> what is wrong"`, or `yagura judge ask --question "…"`',
+          ];
+    case "lead":
+      return has("decision") ? [] : [`no decision: run \`yagura decide <${LEAD_ACTIONS.join("|")}> --reason "…"\``];
     case "planner":
       return has("plan") ? [] : ["no plan: write the delta to a file and run `yagura plan --file <path>`"];
     case "watchman":
       return [];
     default:
-      return has("handoff") ? [] : ['no handoff: run `yagura handoff <success|partial|blocked> --did "…"` with the rest of your report as flags'];
+      return has("handoff") ? [] : ['no handoff: run `yagura handoff done` when the unit\'s goal is met, or `yagura handoff stuck --reason "…"`'];
   }
 }
 
 const bullets = (items: string[]) => items.map((i) => `- ${i}`).join("\n");
 
 // The engine's view of a finished attempt, built from its records; null when it recorded no handoff.
-export function recordedHandoff(db: Db, attemptId: AttemptId, raw: string): Handoff | null {
+export function recordedHandoff(db: Db, attemptId: AttemptId): Handoff | null {
   const h = getRecord(db, attemptId, "handoff");
   if (h)
     return {
       status: h.status,
-      branch: null,
+      reason: h.reason,
       whatIDid: bullets(h.did),
-      measurements: "",
-      verification: h.tier,
       evidence: h.evidence,
       notes: bullets(h.notes),
-      forOthers: bullets(h.forOthers),
-      followUps: bullets(h.followUps),
-      packChanges: "",
-      findings: bullets(h.findings),
       decisions: bullets(h.decisions),
-      outsideScope: h.outsideScope.map((o) => `- ${o.path}: ${o.reason}`).join("\n"),
-      raw,
+      followUps: bullets(h.followUps),
     };
   return null;
-}
-
-// Every use of an old parser while records are rolled out is visible on the unit (§27 step 5).
-export function noteFallback(db: Db, attemptId: AttemptId, parser: string, ok: boolean): void {
-  const a = getAttempt(db, attemptId);
-  const unit = getUnit(db, a.unitId);
-  recordEvent(db, "parse.fallback", { projectId: unit.projectId, unitId: unit.id, attemptId }, { parser, ok });
 }
 
 const section = (title: string, items: string[]) => (items.length ? [`${title}:`, ...items.map((i) => `- ${i}`)] : []);
@@ -159,23 +171,21 @@ export function describeRecords(db: Db, attemptId: AttemptId): string | null {
   const h = getRecord(db, attemptId, "handoff");
   if (h)
     out.push(
-      `Handoff: ${h.status}${h.tier ? `, self-reported ${h.tier}` : ""}`,
+      `Handoff: ${h.status}${h.reason ? `: ${h.reason}` : ""}`,
       ...section("What it did", h.did),
       ...section("Evidence it ran", h.evidence),
-      ...section("Findings", h.findings),
       ...section("Decisions", h.decisions),
-      ...section(
-        "Outside scope",
-        h.outsideScope.map((o) => `${o.path}: ${o.reason}`),
-      ),
-      ...section("For other units", h.forOthers),
       ...section("Notes", h.notes),
       ...section("Suggested follow-ups", h.followUps),
     );
-  const d = getRecord(db, attemptId, "decision");
-  if (d)
+  const j = getRecord(db, attemptId, "judge");
+  if (j)
     out.push(
-      `Decision: ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}${d.question ? ` (question: ${d.question})` : ""}${d.to ? ` (to: ${d.to})` : ""}`,
+      `Judge: ${j.verdict}${j.runs.length ? ` (${j.runs.map((id) => `run:${id}`).join(", ")})` : ""}`,
+      ...section("Findings", j.findings),
+      ...(j.question ? [`Question: ${j.question}`] : []),
     );
+  const d = getRecord(db, attemptId, "decision");
+  if (d) out.push(`Decision: ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}${d.question ? ` (question: ${d.question})` : ""}`);
   return out.length ? out.join("\n") : null;
 }

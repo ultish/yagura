@@ -61,22 +61,14 @@ beforeEach(async () => {
   origins = { lib: await origin(root, "lib", true), app: await origin(root, "app") };
   addRepo(db, { id: "lib", url: origins.lib, defaultBranch: "main" });
   addRepo(db, { id: "app", url: origins.app, defaultBranch: "main" });
-  addProject(db, { id: project, name: "P", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["lib", "app"] as RepoId[] });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "x", repos: ["lib", "app"] as RepoId[] });
   addEnvironment(db, { id: "local", name: "local", provider: "local-process", capacity: 2 });
   setValue(db, "local" as EnvironmentId, { name: "NEXUS", value: nexus });
   setProjectEnvironment(db, project, "local" as EnvironmentId);
   setMergePolicy(db, project, "auto");
   process.env.FAKE_MODE = "engine";
-  const unit = (key: string, repo: string, deps: unknown[] = []) => ({
-    key,
-    repo,
-    goal: `write ${key}`,
-    write: [`${key}/**`],
-    accept: ["a"],
-    verify: "true",
-    deps,
-  });
-  applyDelta(db, project, PlanDelta.parse({ add: [unit("lib", "lib"), unit("app", "app", [{ on: "lib", kind: "needs-source" }])] }), null);
+  const unit = (key: string, repo: string, after: string[] = []) => ({ key, repo, goal: `write ${key}`, acceptance: ["a"], after });
+  applyDelta(db, project, PlanDelta.parse({ add: [unit("lib", "lib"), unit("app", "app", ["lib"])] }), null);
 });
 
 describe("published artifacts", () => {

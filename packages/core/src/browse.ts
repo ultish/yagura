@@ -42,7 +42,7 @@ async function mirrorOf(db: Db, boot: Bootstrap, repoId: RepoId, fetch = false):
 const trailer = (body: string, key: string) => new RegExp(`^${key}: (.+)$`, "m").exec(body)?.[1]?.trim() ?? null;
 
 function unitOfCommit(db: Db, sha: string, body: string): Pick<CommitUnit, "projectId" | "seq"> {
-  const landed = db.prepare("SELECT project_id, seq FROM units WHERE landed_sha = ?").get(sha) as { project_id: ProjectId; seq: number } | undefined;
+  const landed = db.prepare("SELECT project_id, seq FROM units WHERE merged_sha = ?").get(sha) as { project_id: ProjectId; seq: number } | undefined;
   if (landed) return { projectId: landed.project_id, seq: landed.seq };
   const project = trailer(body, "Yagura-Project");
   const unit = trailer(body, "Yagura-Unit");
@@ -121,9 +121,9 @@ export async function repoChange(db: Db, boot: Bootstrap, repoId: RepoId, sha: s
 }
 
 // What a unit changed: the commit that landed it, or, before it lands, its latest handed-off branch against its base.
-export async function unitCode(db: Db, boot: Bootstrap, unit: Unit): Promise<(Change & { source: "landed" | "branch"; branch: string | null }) | null> {
+export async function unitCode(db: Db, boot: Bootstrap, unit: Unit): Promise<(Change & { source: "merged" | "branch"; branch: string | null }) | null> {
   if (!unit.repoId) return null;
-  if (unit.landedSha) return { ...(await repoChange(db, boot, unit.repoId, unit.landedSha)), source: "landed", branch: null };
+  if (unit.mergedSha) return { ...(await repoChange(db, boot, unit.repoId, unit.mergedSha)), source: "merged", branch: null };
   const work = listAttempts(db, unit.id)
     .filter((a) => a.headSha && a.baseSha && a.state === "handed_off")
     .at(-1);

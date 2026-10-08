@@ -20,7 +20,6 @@ import {
   getMessage,
   readTurnCalls,
   bumpMaxAttempts,
-  wakeManager,
   logTimesPath,
   threadsForProject,
   transitionUnit,
@@ -273,11 +272,9 @@ export function createApp(opts: ServerOptions): Hono {
     const attempts = rows.map((r) => {
       const a = getAttempt(db, r.id as AttemptId);
       const u = getUnit(db, a.unitId);
-      const target = u.targetUnitId ? getUnit(db, u.targetUnitId) : null;
       return {
         ...a,
         unit: { id: u.id, seq: u.seq, type: u.type, goal: u.goal, projectId: u.projectId, state: u.state },
-        target: target ? { seq: target.seq, goal: target.goal } : null,
       };
     });
     return c.json({
@@ -321,21 +318,11 @@ export function createApp(opts: ServerOptions): Hono {
     return c.json(unitView(db, getUnit(db, unit.id)));
   });
 
-  // The developer asks a stuck unit's unit lead to look at it now, with a note.
-  app.post("/api/projects/:id/units/:seq/wake", async (c) => {
-    const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
-    const note = String(((await c.req.json().catch(() => ({}))) as { note?: unknown }).note ?? "").trim();
-    const woken = wakeManager(db, unit, note);
-    if (!woken.ok) return c.json({ error: woken.reason }, 409);
-    return c.json(unitView(db, getUnit(db, unit.id)));
-  });
-
   app.post("/api/projects/:id/units/:seq/cancel", async (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
     const reason = String(((await c.req.json().catch(() => ({}))) as { reason?: unknown }).reason ?? "cancelled by operator");
-    if (["running", "landed", "done", "abandoned", "landing"].includes(unit.state))
-      return c.json({ error: `U${unit.seq} is ${unit.state} and cannot be cancelled` }, 409);
-    transitionUnit(db, unit.id, "abandoned", { by: "operator", reason });
+    if (["building", "merged", "dropped"].includes(unit.state)) return c.json({ error: `U${unit.seq} is ${unit.state} and cannot be cancelled` }, 409);
+    transitionUnit(db, unit.id, "dropped", { by: "operator", reason });
     return c.json(unitView(db, getUnit(db, unit.id)));
   });
 
@@ -622,12 +609,8 @@ export function createApp(opts: ServerOptions): Hono {
   const ROLE_UNIT: Record<PromptRole, string> = {
     planner: "plan",
     worker: "work",
-    verifier: "verify",
-    reviewer: "review",
-    "review-triage": "review-triage",
-    rebase: "rebase",
-    pack: "pack",
-    manager: "manager",
+    judge: "work",
+    lead: "work",
     watchman: "",
   };
   const promptsView = (projectId: string | null) => ({

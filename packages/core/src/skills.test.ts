@@ -35,7 +35,7 @@ beforeEach(() => {
   db = openStore(":memory:");
   addRepo(db, { id: "a", url: "/a", defaultBranch: "main" });
   addRepo(db, { id: "b", url: "/b", defaultBranch: "main" });
-  addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["a", "b"] as RepoId[] });
+  addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: ["a", "b"] as RepoId[] });
 });
 
 describe("installed skills", () => {

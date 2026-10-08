@@ -84,7 +84,7 @@ describe("forge issues (§30, fake gh)", () => {
     setSetting(db, "global", "", "forge.gh_bin", bin);
     setSetting(db, "repo", "testbed", "forge.watch_issues", true);
     setSetting(db, "global", "", "forge.trusted_authors", ["ultish"]);
-    addProject(db, { id: project, name: "p", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["testbed" as RepoId] });
+    addProject(db, { id: project, name: "p", goal: "g", predicate: "p", repos: ["testbed" as RepoId] });
     setProjectState(db, project, "active");
   });
 

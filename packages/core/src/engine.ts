@@ -5,7 +5,6 @@ import { layout } from "./paths.js";
 import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
-import { applyAskAnswer, managerNeed, queueManager, runManagerUnit, settleManagerUnit, wakeOnNote } from "./manager.js";
 import { checkRetroWatch, scanReverts, watchingFor } from "./retro.js";
 import { runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
@@ -44,16 +43,14 @@ export interface EngineOptions {
 
 export const LANDING_CUTOFF = 0.7;
 const COST_WARNING = 0.8;
-const PLAN_TRIGGERS = ["landed", "blocked", "abandoned", "done"];
+const PLAN_TRIGGERS = ["merged", "stuck", "dropped"];
 const YAGURA_GATES = ["report", "land", "environment", "review", "manager"];
 
-function suggestsFollowUps(db: Db, boot: RunContext["boot"], unitId: UnitId): boolean {
-  const unit = getUnit(db, unitId);
+function suggestsFollowUps(db: Db, unitId: UnitId): boolean {
   const last = listAttempts(db, unitId)
     .filter((a) => a.state === "handed_off")
     .at(-1);
-  const path = last ? layout(boot).handoff(unit.projectId, unit.seq, last.n) : null;
-  const handoff = last ? savedHandoff(db, last.id, path) : null;
+  const handoff = last ? savedHandoff(db, last.id) : null;
   return (handoff?.followUps ?? "")
     .split("\n")
     .map((l) =>
@@ -111,47 +108,10 @@ export class Engine {
     recordEvent(this.db, "engine.error", { projectId: unit.projectId, unitId }, { error: e instanceof Error ? e.message : String(e) });
     for (const a of listAttempts(this.db, unitId))
       if (a.state === "running" || a.state === "queued") updateAttempt(this.db, a.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
-    if (unit.state === "running") transitionUnit(this.db, unitId, "failed", { reason: "engine error" });
+    if (unit.state === "building") transitionUnit(this.db, unitId, "stuck", { reason: "engine error" });
     // A unit that crashes before it starts would crash again on the next tick, so it waits for someone to look.
-    else if (unit.state === "ready")
-      transitionUnit(this.db, unitId, "blocked", { reason: `engine error before it started: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}` });
-  }
-
-  private settleFailures(project: Project): void {
-    for (const u of listUnits(this.db, project.id)) {
-      if (this.inflight.has(`unit:${u.id}`)) continue;
-      if (u.type === "manager" && (u.state === "failed" || u.state === "blocked")) {
-        settleManagerUnit(this.db, u);
-        this.log(`  U${u.seq}: the unit lead session failed; the fixed rules decide`);
-      }
-      if (u.type === "work" && !this.inflight.has(`unit:${u.id}`)) {
-        const m = wakeOnNote(this.db, this.ctx.boot, u);
-        if (m) this.log(`  U${u.seq} left a note; its unit lead decides who needs it`);
-      }
-      if (!isBuild(u) || (u.state !== "failed" && u.state !== "rejected")) continue;
-      // A manager decides what happens next when one is on for the project; its absence, failure, or spent decisions leave it to the fixed rules.
-      const need = managerNeed(this.db, u);
-      if (need?.kind === "waiting") continue;
-      if (need?.kind === "wake") {
-        const m = queueManager(this.db, u, need.wake);
-        this.log(`  U${u.seq} goes to its unit lead (${need.wake})`);
-        void m;
-        continue;
-      }
-      if (need?.kind === "cap") {
-        transitionUnit(this.db, u.id, "blocked", { reason: `its unit lead has used ${need.cap} decisions on it; it needs you` });
-        this.log(`  U${u.seq} blocked: its unit lead has used ${need.cap} decisions`);
-        continue;
-      }
-      if (need?.kind === "answered") {
-        applyAskAnswer(this.db, u, need.answer);
-        this.log(`  U${u.seq}: ${need.answer === "retry" ? "retries as you said" : "blocked as you said"}`);
-        continue;
-      }
-      const policy = failurePolicy(u, listAttempts(this.db, u.id));
-      transitionUnit(this.db, u.id, policy.action === "retry" ? "ready" : "blocked", { reason: policy.reason });
-      this.log(`  U${u.seq} ${policy.action === "retry" ? "retries" : "blocked"}: ${policy.reason}`);
-    }
+    else if (unit.state === "waiting")
+      transitionUnit(this.db, unitId, "stuck", { reason: `engine error before it started: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}` });
   }
 
   // The share of the project's wall-clock budget used since it became active, or null without a budget.
@@ -186,26 +146,24 @@ export class Engine {
            OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed', 'retro.reverted'))`,
       )
       .all(project.id, since, ...PLAN_TRIGGERS, ...YAGURA_GATES) as { type: string; unit_id: UnitId | null; data_json: string; unit_type: string | null }[];
-    const open = () => listUnits(this.db, project.id).some((u) => isBuild(u) && !TERMINAL_STATES.has(u.state) && u.state !== "blocked");
+    const open = () => listUnits(this.db, project.id).some((u) => isBuild(u) && !TERMINAL_STATES.has(u.state) && u.state !== "stuck");
     return events.some((e) => {
       const to = e.type === "unit.state" ? (JSON.parse(e.data_json) as { to: string }).to : null;
-      // Plan, verify, and review rows end in done every time; only a work unit closing without landing changes the plan.
-      if (to === "done") return e.unit_type === "work";
-      if (to !== "landed") return true;
-      return !open() || suggestsFollowUps(this.db, this.ctx.boot, e.unit_id!);
+      if (to !== "merged") return true;
+      if (e.unit_type === "plan") return false;
+      return !open() || suggestsFollowUps(this.db, e.unit_id!);
     });
   }
 
   private spawn(project: Project): void {
     const r = readiness(this.db, project.id);
     for (const s of r.stuck) {
-      transitionUnit(this.db, s.unit.id, "blocked", { reason: s.reason });
-      this.log(`  U${s.unit.seq} blocked: ${s.reason}`);
+      transitionUnit(this.db, s.unit.id, "stuck", { reason: s.reason });
+      this.log(`  U${s.unit.seq} stuck: ${s.reason}`);
     }
     for (const u of r.ready) {
       if (this.inflight.has(`unit:${u.id}`) || !this.mayStart(project, u)) continue;
-      const sctx = { projectId: project.id, repoId: u.repoId, environmentId: null };
-      const harness = resolveSetting(this.db, u.type === "manager" ? "role.manager.harness" : "role.worker.harness", sctx).value;
+      const harness = resolveSetting(this.db, "role.worker.harness", { projectId: project.id, repoId: u.repoId ?? undefined }).value;
       if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return;
       if (runningAttempts(this.db, { harness }) >= resolveSetting(this.db, "max_parallel_per_harness").value) return;
       if (
@@ -213,9 +171,11 @@ export class Engine {
         resolveSetting(this.db, "project.max_in_flight", { projectId: project.id }).value
       )
         return;
-      const run = u.type === "manager" ? () => runManagerUnit(this.ctx, u.id) : () => runWorkUnit(this.ctx, u.id);
-      this.start(`unit:${u.id}`, isBuild(u) ? `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}` : `${u.type}: ${u.goal.slice(0, 80)}`, run, (e) =>
-        this.recoverCrashed(u.id, e),
+      this.start(
+        `unit:${u.id}`,
+        `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}`,
+        () => runWorkUnit(this.ctx, u.id),
+        (e) => this.recoverCrashed(u.id, e),
       );
     }
   }
@@ -234,7 +194,7 @@ export class Engine {
   private maybeClose(project: Project): boolean {
     const delta = latestDelta(this.db, project.id);
     const units = listUnits(this.db, project.id).filter((u) => u.type !== "plan");
-    if (!delta?.done || this.planNeeded(project) || units.some((u) => !TERMINAL_STATES.has(u.state) && u.state !== "blocked")) return false;
+    if (!delta?.done || this.planNeeded(project) || units.some((u) => !TERMINAL_STATES.has(u.state) && u.state !== "stuck")) return false;
     if ([...this.inflight.keys()].some((k) => k === `plan:${project.id}`)) return false;
     setProjectState(this.db, project.id, "closed");
     this.log(`✔ project ${project.id} closed: ${delta.summary}`);
@@ -272,8 +232,8 @@ export class Engine {
     if (project.state !== "active" || project.andonReason) return null;
     if ([...this.inflight.keys()].some((k) => k === `plan:${project.id}`)) return null;
     const units = listUnits(this.db, project.id);
-    if (units.some((u) => this.inflight.has(`unit:${u.id}`) || ["ready", "running", "handed_off"].includes(u.state))) return null;
-    const blocked = units.filter((u) => isBuild(u) && u.state === "blocked").map((u) => u.seq);
+    if (units.some((u) => this.inflight.has(`unit:${u.id}`) || ["waiting", "building", "judging", "ready"].includes(u.state))) return null;
+    const blocked = units.filter((u) => isBuild(u) && u.state === "stuck").map((u) => u.seq);
     return blocked.length && !this.planNeeded(project) ? blocked : null;
   }
 
@@ -323,7 +283,7 @@ export class Engine {
     if (!this.opts.projectId) this.issues();
     if (Date.now() - this.lastRevertScan > (this.opts.revertScanMs ?? REVERT_SCAN_MS)) {
       this.lastRevertScan = Date.now();
-      const repos = this.db.prepare("SELECT DISTINCT repo_id AS id FROM units WHERE landed_sha IS NOT NULL").all() as { id: string }[];
+      const repos = this.db.prepare("SELECT DISTINCT repo_id AS id FROM units WHERE merged_sha IS NOT NULL").all() as { id: string }[];
       for (const { id } of repos)
         if (!this.inflight.has(`reverts:${id}`))
           this.start(
@@ -377,7 +337,6 @@ export class Engine {
         this.cutoffSaid.add(project.id);
         this.log(`  ${project.id}: ${Math.round(used * 100)}% of the wall-clock budget used; no new work starts, verified work keeps landing`);
       }
-      this.settleFailures(project);
       if (this.maybeClose(project)) continue;
       if (project.andonReason) continue;
       if (hold) continue;
@@ -403,7 +362,7 @@ export class Engine {
       if (p.andonReason || held) return true;
       if (this.planNeeded(p)) return false;
       if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
-      return !listUnits(this.db, p.id).some((u) => isBuild(u) && (u.state === "failed" || u.state === "rejected"));
+      return true;
     });
   }
 

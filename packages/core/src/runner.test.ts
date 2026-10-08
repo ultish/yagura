@@ -55,7 +55,7 @@ beforeEach(async () => {
   boot = { home: join(root, "home"), packsDir: "", skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
   addRepo(db, { id: "testbed", url: origin, defaultBranch: "main" });
-  addProject(db, { id: project, name: "P", goal: "g", predicate: "pred", minTier: "unit-verified", repos: ["testbed" as RepoId] });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "pred", repos: ["testbed" as RepoId] });
 });
 
 async function run(mode: string, timeboxSeconds = 60) {
@@ -65,13 +65,10 @@ async function run(mode: string, timeboxSeconds = 60) {
     type: "work",
     repoId: "testbed" as RepoId,
     goal: "Implement apply_discount",
-    writeScope: ["app/**"],
     acceptance: ["SAVE10 takes 10% off"],
-    verify: "python3 -m unittest",
     timeboxSeconds,
     maxAttempts: 2,
   });
-  transitionUnit(db, unit.id, "ready");
   const attempt = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
   return { unit: getUnit(db, unit.id), attempt, paths: layout(boot) };
 }
@@ -79,7 +76,7 @@ async function run(mode: string, timeboxSeconds = 60) {
 describe("runWorkUnit", () => {
   it("runs an agent in its own worktree and records a clean handoff", async () => {
     const { unit, attempt, paths } = await run("success");
-    expect(unit.state).toBe("handed_off");
+    expect(unit.state).toBe("judging");
     expect(listUnits(db, project).filter((u) => u.type !== "work")).toEqual([]);
     expect(attempt.skills).toEqual([
       "yagura:yagura-worker",
@@ -90,8 +87,7 @@ describe("runWorkUnit", () => {
     expect(attempt.missingSkills).toEqual([]);
     expect(attempt).toMatchObject({
       state: "handed_off",
-      handoffStatus: "success",
-      selfTier: "unit-verified",
+      handoffStatus: "done",
       model: "fake-model",
       contextPeak: 1200,
       costUsd: 0.01,
@@ -100,7 +96,7 @@ describe("runWorkUnit", () => {
     expect(attempt.headSha).not.toBe(attempt.baseSha);
     expect(readFileSync(join(attempt.worktreePath!, "app/orders.py"), "utf8")).toContain("brief had GOAL: true");
     expect(readFileSync(paths.brief(project, 1, 1), "utf8")).toContain("## ACCEPTANCE\n- SAVE10 takes 10% off");
-    expect(getRecord(db, attempt.id, "handoff")).toMatchObject({ status: "success", tier: "unit-verified", did: ["edited app/orders.py"] });
+    expect(getRecord(db, attempt.id, "handoff")).toMatchObject({ status: "done", did: ["edited app/orders.py"] });
     expect(readFileSync(paths.handoff(project, 1, 1), "utf8")).toMatch(/^Handing off success\./);
     expect(
       readFileSync(paths.log(project, 1, 1), "utf8")
@@ -122,17 +118,17 @@ describe("runWorkUnit", () => {
     const brief = readFileSync(paths.brief(project, unit.seq, attempt.n), "utf8");
     expect(brief).toContain("## ENV\n- MARKER=edited by fake agent (the text every fake edit starts with)\n");
     expect(brief).toContain("- About this environment: deps run in the cluster");
-    expect(unit.state).toBe("handed_off");
-    expect(attempt).toMatchObject({ state: "handed_off", rejection: null });
+    expect(unit.state).toBe("judging");
+    expect(attempt).toMatchObject({ state: "handed_off" });
   });
 
   it("blocks the unit when the agent hands off blocked", async () => {
-    expect((await run("blocked")).unit.state).toBe("blocked");
+    expect((await run("blocked")).unit.state).toBe("stuck");
   });
 
   it("writes a synthetic failure handoff when the agent ends without one", async () => {
     const { unit, attempt, paths } = await run("nohandoff");
-    expect(unit.state).toBe("failed");
+    expect(unit.state).toBe("waiting");
     expect(attempt).toMatchObject({ state: "failed", failureMode: "unknown" });
     expect(readFileSync(paths.handoff(project, 1, 1), "utf8")).toContain("yagura synthetic failure handoff");
   });
@@ -141,24 +137,23 @@ describe("runWorkUnit", () => {
     const started = Date.now();
     const { unit, attempt } = await run("hang", 1);
     expect(Date.now() - started).toBeLessThan(8000);
-    expect(unit.state).toBe("failed");
+    expect(unit.state).toBe("stuck");
     expect(attempt.failureMode).toBe("timebox");
     expect(listAttempts(db, unit.id)).toHaveLength(1);
   });
 
-  it("refuses to run a unit that is not ready", async () => {
+  it("refuses to run a unit that is not waiting", async () => {
     const unit = addUnit(db, {
       projectId: project,
       type: "work",
       repoId: "testbed" as RepoId,
       goal: "g",
-      writeScope: ["app/**"],
       acceptance: ["a"],
-      verify: "v",
       timeboxSeconds: 60,
       maxAttempts: 1,
     });
-    await expect(runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id)).rejects.toThrow(/draft, not ready/);
+    transitionUnit(db, unit.id, "stuck");
+    await expect(runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id)).rejects.toThrow(/is stuck, not waiting/);
     expect(existsSync(layout(boot).mirror("testbed" as RepoId))).toBe(false);
   });
 
@@ -170,14 +165,14 @@ describe("runWorkUnit", () => {
       "pstack:principle-prove-it-works",
       "pstack:principle-test-behavior-not-implementation",
     ]);
-    expect(unit.state).toBe("rejected");
+    expect(unit.state).toBe("stuck");
     expect(unit.notes[0]).toMatch(/skipped required skills \(yagura:yagura-worker, pstack:poteto-mode, /);
   });
 
   it("lets a skipped skill through when enforcement is switched off", async () => {
     const { setSetting } = await import("./config.js");
     setSetting(db, "global", "", "method.enforce_required_skills", false);
-    expect((await run("noskills")).unit.state).toBe("handed_off");
+    expect((await run("noskills")).unit.state).toBe("judging");
   });
 
   it("stops a running agent on request and puts the unit back with the operator's note", async () => {
@@ -188,13 +183,10 @@ describe("runWorkUnit", () => {
       type: "work",
       repoId: "testbed" as RepoId,
       goal: "g",
-      writeScope: ["app/**"],
       acceptance: ["a"],
-      verify: "v",
       timeboxSeconds: 60,
       maxAttempts: 1,
     });
-    transitionUnit(db, unit.id, "ready");
     const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
     let attempt = listAttempts(db, unit.id)[0];
     for (let i = 0; i < 50 && !attempt?.pid; i++) {
@@ -204,7 +196,7 @@ describe("runWorkUnit", () => {
     expect(stopAttempt(db, attempt!.id, "wrong approach; use the store")).toBe(true);
     const done = await running;
     expect(done.state).toBe("stopped");
-    expect(getUnit(db, unit.id)).toMatchObject({ state: "ready", notes: ["Operator stopped attempt 1: wrong approach; use the store"] });
+    expect(getUnit(db, unit.id)).toMatchObject({ state: "waiting", notes: ["Operator stopped attempt 1: wrong approach; use the store"] });
   });
 
   describe("the account's usage limit", () => {
@@ -220,9 +212,9 @@ describe("runWorkUnit", () => {
         expect(held).toMatchObject({ harness: "claude", reason: "You've hit your session limit · resets soon" });
         expect(Date.now()).toBeGreaterThanOrEqual(Math.min(Date.parse(held.until), started + 1000));
         expect(events("attempt.limited")).toEqual([{ until: held.until }]);
-        expect(unit.state).toBe("handed_off");
+        expect(unit.state).toBe("judging");
         expect(listAttempts(db, unit.id)).toHaveLength(1);
-        expect(attempt).toMatchObject({ state: "handed_off", handoffStatus: "success", limitedUntil: null, sessionId: "s1" });
+        expect(attempt).toMatchObject({ state: "handed_off", handoffStatus: "done", limitedUntil: null, sessionId: "s1" });
         expect(attempt.skills).toContain("pstack:poteto-mode");
         expect(readFileSync(join(attempt.worktreePath!, "app/orders.py"), "utf8")).toContain("brief had GOAL: true");
         const log = readFileSync(paths.log(project, 1, 1), "utf8");
@@ -242,13 +234,10 @@ describe("runWorkUnit", () => {
           type: "work",
           repoId: "testbed" as RepoId,
           goal: "g",
-          writeScope: ["app/**"],
           acceptance: ["a"],
-          verify: "v",
           timeboxSeconds: 60,
           maxAttempts: 1,
         });
-        transitionUnit(db, unit.id, "ready");
         const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
         let attempt = listAttempts(db, unit.id)[0];
         for (let i = 0; i < 100 && !attempt?.limitedUntil; i++) {
@@ -258,7 +247,7 @@ describe("runWorkUnit", () => {
         expect(Date.parse(attempt!.limitedUntil!)).toBeGreaterThan(Date.now() + 500_000);
         expect(stopAttempt(db, attempt!.id, "not today")).toBe(true);
         expect(await running).toMatchObject({ state: "stopped", limitedUntil: null });
-        expect(getUnit(db, unit.id).state).toBe("ready");
+        expect(getUnit(db, unit.id).state).toBe("waiting");
       } finally {
         delete process.env.FAKE_LIMIT;
       }
@@ -275,13 +264,10 @@ describe("runWorkUnit", () => {
         type: "work",
         repoId: "testbed" as RepoId,
         goal: "g",
-        writeScope: ["app/**"],
         acceptance: ["a"],
-        verify: "v",
         timeboxSeconds,
         maxAttempts: 1,
       });
-      transitionUnit(db, unit.id, "ready");
       return { unit, running: runWorkUnit({ db, boot, adapters: { claude: claudeAdapter }, cli }, unit.id) };
     };
     const runningAttempt = async (unitId: number) => {
@@ -299,7 +285,7 @@ describe("runWorkUnit", () => {
       const attempt = await runningAttempt(unit.id);
       addSteer(db, attempt.id, "use the existing store instead");
       const done = await running;
-      expect(done).toMatchObject({ n: 1, state: "handed_off", handoffStatus: "success" });
+      expect(done).toMatchObject({ n: 1, state: "handed_off", handoffStatus: "done" });
       expect(readFileSync(join(done.worktreePath!, "app/orders.py"), "utf8")).toContain("# steered: use the existing store instead");
       const [steer] = listSteers(db, attempt.id);
       expect(steer).toMatchObject({ state: "delivered", body: "use the existing store instead" });
@@ -327,7 +313,7 @@ describe("runWorkUnit", () => {
         const { unit, running } = start();
         const attempt = await runningAttempt(unit.id);
         addSteer(db, attempt.id, "too late");
-        expect(await running).toMatchObject({ state: "handed_off", handoffStatus: "success" });
+        expect(await running).toMatchObject({ state: "handed_off", handoffStatus: "done" });
         expect(listSteers(db, attempt.id)).toMatchObject([{ state: "undelivered", reason: "the agent finished before reading it" }]);
         expect(() => addSteer(db, attempt.id, "after the end")).toThrow(/not running/);
       } finally {
@@ -344,14 +330,11 @@ describe("runWorkUnit", () => {
         type: "work",
         repoId: "testbed" as RepoId,
         goal: "Build it",
-        writeScope: ["app/**"],
         acceptance: ["it builds"],
-        verify: "true",
         scaffold,
         timeboxSeconds: 60,
         maxAttempts: 2,
       });
-      transitionUnit(db, u.id, "ready");
       return u;
     };
     const runUnit = async (scaffold: boolean, skills: string) => {
@@ -370,11 +353,11 @@ describe("runWorkUnit", () => {
       setSetting(db, "project", project, "skills.work", ["setup-thing"]);
       const skipped = await runUnit(false, "");
       expect(skipped.brief).toContain("Then load these project skills with the Skill tool before you change anything, and follow them: setup-thing.");
-      expect(skipped.attempt).toMatchObject({ missingSkills: ["setup-thing"], rejection: "skills" });
-      expect(skipped.unit.state).toBe("rejected");
+      expect(skipped.attempt).toMatchObject({ missingSkills: ["setup-thing"] });
+      expect(skipped.unit.state).toBe("stuck");
       const loaded = await runUnit(false, "setup-thing");
       expect(loaded.attempt.missingSkills).toEqual([]);
-      expect(loaded.unit.state).toBe("handed_off");
+      expect(loaded.unit.state).toBe("judging");
     });
 
     it("runs a scaffold unit with the scaffold skills instead of the work skills", async () => {
@@ -384,7 +367,7 @@ describe("runWorkUnit", () => {
       expect(brief).toContain("This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more.");
       expect(brief).toContain("follow them: setup-gradle.");
       expect(attempt.missingSkills).toEqual([]);
-      expect(unit.state).toBe("handed_off");
+      expect(unit.state).toBe("judging");
     });
 
     it("gives the worker a read-only trunk checkout of each reference repo", async () => {

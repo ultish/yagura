@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import {
@@ -42,7 +44,6 @@ import {
   addUnitNote,
   evidenceCli,
   agentRefusal,
-  wakeManager,
   gitRead,
   listEvidenceRuns,
   PROVIDERS,
@@ -68,7 +69,6 @@ import {
   missingBriefFields,
   openStore,
   parseClaudeLine,
-  PASS_TIERS,
   resolveSetting,
   runWorkUnit,
   setSetting,
@@ -96,7 +96,6 @@ import {
   PROVIDERS_IMPL,
   transitionUnit,
   type HarnessEvent,
-  type PassTier,
   type ProjectId,
   type RepoId,
   type SettingScope,
@@ -113,15 +112,17 @@ import {
   type PromptRole,
   activeHold,
   clearHold,
+  describeImport,
+  importHome,
 } from "@yagura/core";
 
 const USAGE = `yagura — agent orchestration
 
   yagura repo add <git URL> [--id <id>] [--forge gh|glab | --land push]   mirror an existing repo; github.com lands through pull requests, hosts in forge.glab_hosts through merge requests; any other remote needs --forge or --land push
-  yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified] [--issue <ref>...]
+  yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--issue <ref>...]
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
-  yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
-                  [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>] [--description <text>] [--needs <seq>[:source]...]
+  yagura unit add <project> --repo <id> --goal <text> --accept <text>...
+                  [--context <text>...] [--base <branch>] [--after <unit#>...] [--playbook <name>] [--timebox <seconds>] [--issue <ref>...]
   yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab land through pull/merge requests (forge.repo, forge.merge_method)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]
@@ -149,12 +150,12 @@ const USAGE = `yagura — agent orchestration
   yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
   yagura daemon                          run yagura for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)
   yagura drive <project>                 plan and run workers until nothing is left to do (without a daemon)
+  yagura import <old home>               copy settings, repos, environments, templates, and conversations from an old home (projects and units stay behind)
   yagura andon <project> --reason <text> | --clear
   yagura limit [--clear]                 whether the account's usage limit holds new agents back, and until when; --clear starts them now
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
-  yagura unit wake <project> <unit#> [--note <text>]   ask a blocked, failed, or rejected unit's unit lead to look at it now
-  yagura unit reject|requeue <project> <unit#> [--note <text>]   requeue puts a blocked or failed unit back to ready
+  yagura unit requeue|drop <project> <unit#> [--note <text>]   requeue puts a stuck unit back to waiting; drop gives it up
   yagura run <project> <unit#>           run a ready work unit
   yagura evidence run --at base|head --label <name> -- <command>   (inside an agent session)
   yagura show <project> [unit#]
@@ -297,7 +298,6 @@ async function main() {
         predicate: { type: "string" },
         repo: { type: "string", multiple: true },
         name: { type: "string" },
-        "min-tier": { type: "string", default: "unit-verified" },
         env: { type: "string" },
         merge: { type: "string" },
         issue: { type: "string", multiple: true },
@@ -308,7 +308,7 @@ async function main() {
       const id = positionals[1];
       if (positionals[0] === "skills" && id) {
         const checks = projectSkillChecks(db, boot, id as ProjectId);
-        if (!checks.length) console.log(`project ${id} names no project skills (set skills.scaffold, skills.work, skills.pack, skills.verify)`);
+        if (!checks.length) console.log(`project ${id} names no project skills (set skills.scaffold, skills.work)`);
         for (const c of checks)
           console.log(
             `${c.installed ? "✓" : "✗"} ${c.skill}  ${c.purposes.join(", ")} · ${c.repos.join(", ")}${c.installed ? "" : "  not installed where agents run"}`,
@@ -334,14 +334,11 @@ async function main() {
         return;
       }
       if (positionals[0] !== "new" || !id || !values.goal || !values.predicate || !many(values.repo).length) fail(USAGE);
-      const minTier = values["min-tier"] as string;
-      if (!(PASS_TIERS as readonly string[]).includes(minTier)) fail(`--min-tier must be one of ${PASS_TIERS.join(", ")}`);
       const p = addProject(db, {
         id: id!,
         name: (values.name as string) ?? id!,
         goal: values.goal as string,
         predicate: values.predicate as string,
-        minTier: minTier as PassTier,
         repos: many(values.repo) as RepoId[],
         refs: many(values.issue),
         after: many(values.after) as ProjectId[],
@@ -356,68 +353,45 @@ async function main() {
       const { positionals, values } = args({
         repo: { type: "string" },
         goal: { type: "string" },
-        write: { type: "string", multiple: true },
-        forbid: { type: "string", multiple: true },
         accept: { type: "string", multiple: true },
-        verify: { type: "string" },
         context: { type: "string", multiple: true },
+        base: { type: "string" },
+        after: { type: "string", multiple: true },
         playbook: { type: "string" },
         timebox: { type: "string" },
         note: { type: "string" },
         issue: { type: "string", multiple: true },
-        needs: { type: "string", multiple: true },
-        description: { type: "string" },
       });
       const projectId = positionals[1] as ProjectId | undefined;
-      if (positionals[0] === "wake" && projectId && positionals[2]) {
-        const woken = wakeManager(db, getUnitBySeq(db, projectId, Number(positionals[2])), values.note ?? "");
-        if (!woken.ok) fail(woken.reason);
-        console.log(`U${positionals[2]}: its unit lead is looking at it (the daemon runs it)`);
-        return;
-      }
-      if ((positionals[0] === "reject" || positionals[0] === "requeue") && projectId && positionals[2]) {
+      if ((positionals[0] === "requeue" || positionals[0] === "drop") && projectId && positionals[2]) {
         const u = getUnitBySeq(db, projectId, Number(positionals[2]));
         if (values.note) addUnitNote(db, u.id, values.note);
-        const direct = positionals[0] === "requeue" && (u.state === "blocked" || u.state === "failed");
-        if (!direct && u.state !== "rejected") transitionUnit(db, u.id, "rejected", { by: "operator", note: values.note ?? null });
-        if (positionals[0] === "requeue") transitionUnit(db, u.id, "ready", { by: "operator" });
+        if (positionals[0] === "requeue") {
+          if (u.state !== "stuck") fail(`U${u.seq} is ${u.state}; only a stuck unit can be requeued`);
+          transitionUnit(db, u.id, "waiting", { by: "operator" });
+        } else transitionUnit(db, u.id, "dropped", { by: "operator", note: values.note ?? null });
         console.log(`U${u.seq} → ${getUnitBySeq(db, projectId, u.seq).state}`);
         return;
       }
       if (positionals[0] !== "add" || !projectId || !values.repo) fail(USAGE);
-      const fields = {
-        goal: (values.goal as string) ?? "",
-        scope: { write: many(values.write), forbid: many(values.forbid) },
-        acceptance: many(values.accept),
-        verify: (values.verify as string) ?? "",
-      };
+      const fields = { goal: (values.goal as string) ?? "", acceptance: many(values.accept) };
+      const missing = missingBriefFields(fields);
+      if (missing.length) fail(`a unit needs ${missing.join(" and ")}`);
       const u = addUnit(db, {
         projectId: projectId!,
         type: "work",
         repoId: values.repo as RepoId,
+        base: (values.base as string | undefined) ?? null,
         goal: fields.goal,
-        description: (values.description as string | undefined) ?? null,
-        writeScope: fields.scope.write,
-        forbidScope: fields.scope.forbid,
         acceptance: fields.acceptance,
-        verify: fields.verify || null,
         context: many(values.context),
+        after: many(values.after).map((n) => getUnitBySeq(db, projectId!, Number(n.replace(/^U/i, ""))).id),
         playbook: (values.playbook as string) ?? null,
         refs: many(values.issue),
         timeboxSeconds: values.timebox ? Number(values.timebox) : resolveSetting(db, "timebox.work_seconds", { projectId }).value,
         maxAttempts: resolveSetting(db, "max_attempts", { projectId }).value,
       });
-      for (const n of many(values.needs)) {
-        const [seq, kind] = n.replace(/^U/i, "").split(":");
-        addDep(db, { unitId: u.id, dependsOn: getUnitBySeq(db, projectId!, Number(seq)).id, kind: kind === "source" ? "needs-source" : "needs-landed" });
-      }
-      const missing = missingBriefFields(fields);
-      if (missing.length) {
-        console.log(`U${u.seq} created as draft; brief is missing ${missing.join(", ")}`);
-        return;
-      }
-      transitionUnit(db, u.id, "ready");
-      console.log(`U${u.seq} ready: ${u.goal}`);
+      console.log(`U${u.seq} waiting: ${u.goal}`);
       return;
     }
     case "run": {
@@ -430,7 +404,7 @@ async function main() {
       const after = getUnitBySeq(db, projectId as ProjectId, Number(seq));
       console.log(
         `\nU${after.seq} → ${after.state} · attempt ${attempt.n} ${attempt.state}` +
-          `${attempt.handoffStatus ? ` (${attempt.handoffStatus}, self-reported ${attempt.selfTier ?? "no tier"})` : ""}` +
+          `${attempt.handoffStatus ? ` (${attempt.handoffStatus})` : ""}` +
           `${attempt.failureMode ? ` · failure: ${attempt.failureMode}` : ""}` +
           `\n  branch ${attempt.branch} @ ${attempt.headSha?.slice(0, 10)} · worktree ${attempt.worktreePath}` +
           `\n  handoff ${layout(boot).handoff(projectId as ProjectId, after.seq, attempt.n)}`,
@@ -468,19 +442,13 @@ async function main() {
       for (const unit of units) {
         const t = traceUnit(db, boot, unit);
         console.log(`\n${t.project.id}/U${unit.seq} [${unit.state}] ${unit.goal}`);
-        if (unit.landedSha) console.log(`  landed as ${unit.landedSha}`);
+        if (unit.mergedSha) console.log(`  merged as ${unit.mergedSha}`);
         if (unit.refs.length || t.project.refs.length) console.log(`  refs: ${[...new Set([...t.project.refs, ...unit.refs])].join(", ")}`);
-        for (const a of t.work)
+        for (const a of t.attempts)
           console.log(
-            `  work attempt ${a.n} (attempt id ${a.id}): ${a.state} ${a.handoffStatus ?? a.failureMode ?? ""} · ${a.model ?? a.harness}` +
+            `  attempt ${a.n} (attempt id ${a.id}): ${a.role ?? "agent"} ${a.state} ${a.handoffStatus ?? a.failureMode ?? ""} · ${a.model ?? a.harness}` +
               `${a.pluginVersions.pstack ? ` · pstack ${a.pluginVersions.pstack}` : ""} · skills ${a.skills.join(", ") || "none"} · ${a.branch ?? ""}`,
           );
-        for (const v of t.verifications) {
-          console.log(`  verified by ${jobLabel(db, v.unit as never)} [${v.unit.state}]`);
-          for (const r of v.runs)
-            console.log(`    run:${r.id} ${r.label}@${r.at} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}${r.tampered ? " TAMPERED" : ""}`);
-        }
-        for (const v of t.verdicts) console.log(`  verdict ${v.id}: ${v.tier} @ ${v.headSha.slice(0, 10)}${v.voided ? ` (void: ${v.voidReason})` : " (live)"}`);
         for (const h of t.handoffPaths) console.log(`  handoff ${h}`);
       }
       return;
@@ -491,6 +459,15 @@ async function main() {
       if (!projectId || (!values.reason && !values.clear)) fail(USAGE);
       setAndon(db, projectId as ProjectId, values.clear ? null : values.reason!);
       console.log(values.clear ? `andon cleared on ${projectId}` : `andon raised on ${projectId}: ${values.reason}`);
+      return;
+    }
+    case "import": {
+      const [source] = rest;
+      if (!source) fail(USAGE);
+      const dir = source!.replace(/^~(?=\/|$)/, homedir());
+      const path = dir.endsWith(".db") ? dir : join(dir, "yagura.db");
+      if (!existsSync(path)) fail(`no yagura database at ${path}`);
+      console.log(describeImport(importHome(db, path)));
       return;
     }
     case "limit": {
@@ -702,17 +679,15 @@ async function main() {
           ).map((r) => [r.id, r.usd]),
         );
         const total = [...costs.values()].reduce((a, b) => a + b, 0);
-        console.log(
-          `${project.id} [${project.state}] ${project.goal}\n  predicate: ${project.predicate} · min tier: ${project.minTier} · agent cost $${total.toFixed(2)}`,
-        );
+        console.log(`${project.id} [${project.state}] ${project.goal}\n  predicate: ${project.predicate} · agent cost $${total.toFixed(2)}`);
         const units = listUnits(db, project.id);
         for (const u of units.filter(isBuild)) {
-          const own = units.filter((j) => j.targetUnitId === u.id).reduce((sum, j) => sum + (costs.get(j.id) ?? 0), costs.get(u.id) ?? 0);
+          const own = costs.get(u.id) ?? 0;
           console.log(`  U${u.seq}  ${u.state.padEnd(10)} ${u.type.padEnd(6)} ${`$${own.toFixed(2)}`.padStart(6)}  ${u.goal}`);
         }
         const agents = db
           .prepare(
-            `SELECT a.agent_no, a.state, a.cost_usd, a.started_at, u.type, u.seq, t.seq AS target FROM attempts a JOIN units u ON u.id = a.unit_id LEFT JOIN units t ON t.id = u.target_unit_id
+            `SELECT a.agent_no, a.state, a.role, a.cost_usd, a.started_at, u.type, u.seq FROM attempts a JOIN units u ON u.id = a.unit_id
              WHERE u.project_id = ? ORDER BY a.agent_no`,
           )
           .all(project.id) as {
@@ -721,18 +696,18 @@ async function main() {
           cost_usd: number;
           started_at: string | null;
           type: string;
+          role: string | null;
           seq: number;
-          target: number | null;
         }[];
         console.log("  agents (cost above includes the agents that worked on each unit):");
         for (const a of agents)
           console.log(
-            `  A${a.agent_no}  ${a.state.padEnd(10)} ${(a.type === "plan" ? "planner" : a.type).padEnd(13)} ${`$${a.cost_usd.toFixed(2)}`.padStart(6)}  ${a.type === "plan" ? "plan" : `for U${a.target ?? a.seq}`}  ${a.started_at ?? ""}`,
+            `  A${a.agent_no}  ${a.state.padEnd(10)} ${(a.role ?? a.type).padEnd(13)} ${`$${a.cost_usd.toFixed(2)}`.padStart(6)}  ${a.type === "plan" ? "plan" : `for U${a.seq}`}  ${a.started_at ?? ""}`,
           );
         return;
       }
       const u = getUnitBySeq(db, project.id, Number(seq));
-      console.log(`U${u.seq} [${u.state}] ${u.goal}\n  write: ${u.writeScope.join(", ")}\n  verify: ${u.verify}`);
+      console.log(`U${u.seq} [${u.state}] ${u.goal}\n  accept: ${u.acceptance.join(" / ")}${u.after.length ? `\n  after: ${u.after.length} unit(s)` : ""}`);
       if (u.notes.length) console.log(`  notes:\n${u.notes.map((n) => `    - ${n}`).join("\n")}`);
       for (const a of listAttempts(db, u.id)) {
         console.log(
@@ -742,14 +717,6 @@ async function main() {
         for (const r of listEvidenceRuns(db, a.id))
           console.log(`    run:${r.id} ${r.label}@${r.at} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}${r.tampered ? " TAMPERED" : ""}`);
       }
-      for (const v of db.prepare("SELECT id, tier, head_sha, voided_at, void_reason FROM verdicts WHERE unit_id = ? ORDER BY id").all(u.id) as {
-        id: number;
-        tier: string;
-        head_sha: string;
-        voided_at: string | null;
-        void_reason: string | null;
-      }[])
-        console.log(`  verdict ${v.id}: ${v.tier} @ ${v.head_sha.slice(0, 10)}${v.voided_at ? ` (void: ${v.void_reason})` : " (live)"}`);
       return;
     }
     case "git": {

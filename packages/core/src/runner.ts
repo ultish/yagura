@@ -5,13 +5,13 @@ import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext
 import { WORKER_REPORT, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
 import { isBuild, type Attempt, type EnvironmentId, type ProjectId, type RenderedBrief, type RepoId, type Sha, type Unit, type UnitId } from "./domain.js";
-import { chooseResume, rejectionFindings, renderResumePrompt } from "./resume.js";
+import { chooseResume, renderResumePrompt, sendBackReason } from "./resume.js";
 import { requiredProjectSkills, skillMethod } from "./skills.js";
-import { managerForcesFresh } from "./manager.js";
 import { environmentNotes, listValues, valueMap } from "./envvalues.js";
 import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, resolveRef } from "./git.js";
-import { classifyFailure, ensureRecorded, readHandoff, reportOf, sessionReport, syntheticFailureHandoff } from "./finish.js";
+import { classifyFailure, ensureRecorded, reportOf, savedHandoff, sessionReport, syntheticFailureHandoff } from "./finish.js";
 import { layout, unitRef } from "./paths.js";
+import { failurePolicy } from "./schedule.js";
 import {
   getEnvironment,
   addUnit,
@@ -24,6 +24,7 @@ import {
   listAttempts,
   now,
   recordEvent,
+  setUnitBranch,
   transitionUnit,
   updateAttempt,
   type Db,
@@ -53,7 +54,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   const { db, boot } = ctx;
   const unit = getUnit(db, unitId);
   if (!isBuild(unit)) throw new Error(`U${unit.seq} is a ${unit.type} unit; use the runner for its type`);
-  if (unit.state !== "ready") throw new Error(`U${unit.seq} is ${unit.state}, not ready`);
+  if (unit.state !== "waiting") throw new Error(`U${unit.seq} is ${unit.state}, not waiting`);
   if (!unit.repoId) throw new Error(`U${unit.seq} has no repo`);
 
   const project = getProject(db, unit.projectId);
@@ -68,7 +69,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   const mirror = paths.mirror(repo.id);
   await ensureMirror(repo.url, mirror);
   const choice = chooseResume(listAttempts(db, unit.id), {
-    enabled: setting("work.resume_on_rejection") && !managerForcesFresh(db, unit),
+    enabled: setting("work.resume_on_rejection"),
     canResume: adapter.canResume,
     maxContext: setting("work.resume_max_context"),
   });
@@ -78,7 +79,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   const attempt = createAttempt(db, unit.id, harnessId, setting("role.worker.model"));
   const refs = { projectId: project.id, unitId: unit.id, attemptId: attempt.id };
   if (fresh) recordEvent(db, "attempt.fresh", refs, { reason: fresh });
-  const base = from ? from.baseSha! : await resolveRef(mirror, `origin/${repo.defaultBranch}`);
+  const base = from ? from.baseSha! : await resolveRef(mirror, `origin/${unit.base ?? repo.defaultBranch}`);
   const branch = from ? from.branch! : `${setting("git.branch_prefix")}/${project.id}/${unitRef(unit.seq)}-${attempt.n}`;
   const worktree = from ? from.worktreePath! : paths.worktree(repo.id, project.id, unit.seq, attempt.n);
   if (!from) {
@@ -92,16 +93,14 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   const brief: RenderedBrief = {
     goal: unit.goal,
     repo: { id: repo.id, worktree, branch, baseSha: base },
-    scope: { write: unit.writeScope, forbid: unit.forbidScope, hard: [] },
     context: [
-      ...(unit.description ? [`Why this unit exists: ${unit.description}`] : []),
       ...unit.context,
       ...unit.notes.map((n) => `Note from an earlier attempt: ${n}`),
       ...(environmentNotes(db, project.environmentId) ? [`About this environment: ${environmentNotes(db, project.environmentId)}`] : []),
     ],
     readonly: references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
     acceptance: unit.acceptance,
-    verify: unit.verify ?? "",
+    test: resolveSetting(db, "test.command", { ...sctx, environmentId: project.environmentId }).value,
     env: envValues,
     envNotes: Object.fromEntries(
       listValues(db, project.environmentId as EnvironmentId)
@@ -123,7 +122,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         attempt: attempt.n,
         resumes: from.n,
         branch,
-        ...rejectionFindings(db, boot, unit, from),
+        why: sendBackReason(unit),
         timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
         report: WORKER_REPORT,
       })
@@ -131,7 +130,8 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   write(paths.brief(project.id, unit.seq, attempt.n), briefText);
 
   const startedAt = now();
-  transitionUnit(db, unit.id, "running", { attempt: attempt.n, ...(from ? { resumes: from.n } : {}) });
+  transitionUnit(db, unit.id, "building", { attempt: attempt.n, ...(from ? { resumes: from.n } : {}) });
+  setUnitBranch(db, unit.id, branch);
   updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base, resumesAttemptId: from?.id ?? null });
 
   const role = "worker";
@@ -170,7 +170,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     await discardLeftovers(worktree);
     updateAttempt(db, attempt.id, { state: "stopped", endedAt, exitCode: first.exitCode });
     if (stop.note) addUnitNote(db, unit.id, `Operator stopped attempt ${attempt.n}: ${stop.note}`);
-    transitionUnit(db, unit.id, "ready", { reason: "stopped by operator", attempt: attempt.n });
+    transitionUnit(db, unit.id, "waiting", { reason: "stopped by operator", attempt: attempt.n });
     recordEvent(db, "attempt.ended", { projectId: project.id, unitId: unit.id, attemptId: attempt.id }, { stopped: true });
     return getAttempt(db, attempt.id);
   }
@@ -179,7 +179,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     const reason = `resuming attempt ${from.n}'s session failed to start: ${session.final?.text || session.stderrTail.trim() || `exit ${session.exitCode}`}`;
     updateAttempt(db, attempt.id, { state: "failed", endedAt, exitCode: session.exitCode, failureMode: "harness-error" });
     recordEvent(db, "attempt.resume_failed", refs, { reason });
-    transitionUnit(db, unit.id, "ready", { reason, attempt: attempt.n });
+    transitionUnit(db, unit.id, "waiting", { reason, attempt: attempt.n });
     return runWorkUnit(ctx, unitId);
   }
 
@@ -191,32 +191,25 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   const touched = await changedPaths(worktree, base);
   const final = session.final;
   const report = sessionReport(first, session);
-  const handoff = readHandoff(db, attempt.id, [reportOf(session), reportOf(first)]);
+  const handoff = savedHandoff(db, attempt.id);
 
   if (handoff) {
     write(paths.handoff(project.id, unit.seq, attempt.n), report ?? "");
     db.prepare("INSERT INTO search (body, kind, ref_id, project_id) VALUES (?, 'handoff', ?, ?)").run(report ?? "", String(attempt.id), project.id);
-    updateAttempt(db, attempt.id, {
-      state: "handed_off",
-      endedAt,
-      exitCode: session.exitCode,
-      headSha: head,
-      handoffStatus: handoff.status,
-      selfTier: handoff.verification === "not-verified" ? null : handoff.verification,
-    });
-    transitionUnit(db, unit.id, "handed_off", { attempt: attempt.n, status: handoff.status, head, leftovers: leftovers.paths });
-    if (handoff.status === "blocked") {
-      transitionUnit(db, unit.id, "blocked", { reason: "agent reported blocked" });
+    updateAttempt(db, attempt.id, { state: "handed_off", endedAt, exitCode: session.exitCode, headSha: head, handoffStatus: handoff.status });
+    if (handoff.status === "stuck") {
+      transitionUnit(db, unit.id, "stuck", { attempt: attempt.n, reason: handoff.reason ?? "the worker said it is stuck" });
     } else if (head === base) {
-      transitionUnit(db, unit.id, "blocked", { reason: "handed off with no commits" });
+      transitionUnit(db, unit.id, "stuck", { attempt: attempt.n, reason: "handed off done with no commits" });
     } else if (session.missingSkills.length && setting("method.enforce_required_skills")) {
       addUnitNote(
         db,
         unit.id,
         `Attempt ${attempt.n} skipped required skills (${session.missingSkills.join(", ")}). Load each of them with the Skill tool before doing any work.`,
       );
-      updateAttempt(db, attempt.id, { rejection: "skills" });
-      transitionUnit(db, unit.id, "rejected", { reason: "skipped required skills", missing: session.missingSkills });
+      transitionUnit(db, unit.id, "stuck", { attempt: attempt.n, reason: "skipped required skills", missing: session.missingSkills });
+    } else {
+      transitionUnit(db, unit.id, "judging", { attempt: attempt.n, head, leftovers: leftovers.paths });
     }
   } else {
     const facts = {
@@ -242,7 +235,8 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       }),
     );
     updateAttempt(db, attempt.id, { state: "failed", endedAt, exitCode: session.exitCode, headSha: head, failureMode: mode });
-    transitionUnit(db, unit.id, "failed", { attempt: attempt.n, mode });
+    const policy = failurePolicy(getUnit(db, unit.id), listAttempts(db, unit.id));
+    transitionUnit(db, unit.id, policy.action === "retry" ? "waiting" : "stuck", { attempt: attempt.n, mode, reason: policy.reason });
   }
   recordEvent(db, "attempt.ended", refs, { exit: session.exitCode, signal: session.signal, timedOut: session.timedOut, touched });
   return getAttempt(db, attempt.id);

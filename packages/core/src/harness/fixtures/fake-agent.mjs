@@ -15,19 +15,19 @@ const yg = (...args) => {
 };
 const pendingFile = () => join(tmpdir(), `fake-records-${process.env.YAGURA_HOME?.replace(/\W/g, "_")}-${process.env.YAGURA_ATTEMPT}.json`);
 const canRecord = () => !!process.env.YAGURA_CLI && process.env.FAKE_RECORDS !== "prose";
-// yagura handoff with the flags a builder records; h: { tier, did[], evidence[], outsideScope: [[path, why]], forOthers[], followUps[], notes[], findings[] }.
-const handoffCall = (status, h = {}) => [
-  "handoff",
-  status,
-  ...(h.tier ? ["--tier", h.tier] : []),
-  ...(h.did ?? []).flatMap((d) => ["--did", d]),
-  ...(h.evidence ?? []).flatMap((d) => ["--evidence", d]),
-  ...(h.outsideScope ?? []).flatMap(([path, why]) => ["--outside-scope", `${path}=${why}`]),
-  ...(h.forOthers ?? []).flatMap((d) => ["--for-others", d]),
-  ...(h.followUps ?? []).flatMap((d) => ["--follow-up", d]),
-  ...(h.notes ?? []).flatMap((d) => ["--note", d]),
-  ...(h.findings ?? []).flatMap((d) => ["--finding", d]),
-];
+// yagura handoff with the flags a worker records; h: { did[], evidence[], followUps[], notes[], reason }. A blocked agent is stuck.
+const handoffCall = (status, h = {}) => {
+  const stuck = status === "blocked" || status === "stuck";
+  return [
+    "handoff",
+    stuck ? "stuck" : "done",
+    ...(stuck ? ["--reason", h.reason ?? "the fake agent was told to be blocked"] : []),
+    ...(h.did ?? []).flatMap((d) => ["--did", d]),
+    ...(h.evidence ?? []).flatMap((d) => ["--evidence", d]),
+    ...(h.followUps ?? []).flatMap((d) => ["--follow-up", d]),
+    ...(h.notes ?? []).flatMap((d) => ["--note", d]),
+  ];
+};
 // A builder's ending: the handoff recorded through yagura when it can, else the old prose report (tests without the CLI).
 function handOff(status, h, prose) {
   if (!canRecord()) return finish(prose);
@@ -115,7 +115,8 @@ async function main() {
       worker: ["yagura:yagura-worker", "pstack:poteto-mode", "pstack:principle-prove-it-works", "pstack:principle-test-behavior-not-implementation"],
       planner: ["yagura:yagura-planner"],
       watchman: ["yagura:yagura-watchman"],
-      manager: ["yagura:yagura-manager"],
+      lead: ["yagura:yagura-unit-lead"],
+      judge: ["yagura:yagura-judge"],
     }[process.env.YAGURA_ROLE] ?? [];
   skills.push(...(process.env.FAKE_SKILLS ?? "").split(",").filter(Boolean));
   if (mode !== "noskills")
@@ -224,9 +225,7 @@ function manager() {
             key: `split-${k}`,
             repo,
             goal: `half ${k}`,
-            write: [`app/split-${k}/**`],
-            accept: [`half ${k} exists`],
-            verify: "true",
+            acceptance: [`half ${k} exists`],
             playbook: "feature",
           })),
           summary: "split in two",
@@ -260,13 +259,13 @@ async function engine(role) {
   if (role === "planner") {
     const workRows = [...brief.matchAll(/^\| U\d+ \| work \| (\w+)/gm)].map((m) => m[1]);
     const repo = /^## CODE[^\n]*\n- ([\w-]+):/m.exec(brief)[1];
-    const unit = (key, write) => ({ key, repo, goal: `write ${key}`, write: [write], accept: [`${key} file exists`], verify: "true", playbook: "feature" });
+    const unit = (key, extra = {}) => ({ key, repo, goal: `write ${key}`, acceptance: [`${key} file exists`], playbook: "feature", ...extra });
     const disagreed = [...brief.matchAll(/^- D(\d+) on U\d+/gm)].map((m) => Number(m[1]));
     const delta = disagreed.length
-      ? { add: disagreed.map((n) => ({ ...unit(`fix-d${n}`, `app/fix${n}/**`), disagreement: n })), summary: "fix forward" }
+      ? { add: disagreed.map((n) => ({ ...unit(`fix-d${n}`), disagreement: n })), summary: "fix forward" }
       : !workRows.length
-        ? { add: [unit("a", "app/a/**"), unit("b", "app/b/**"), unit("c", "app/a/extra/**")], summary: "three units" }
-        : { done: workRows.every((s) => s === "landed"), summary: workRows.every((s) => s === "landed") ? "all landed" : "waiting" };
+        ? { add: [unit("a"), unit("b"), unit("c", { after: ["a"] })], summary: "three units" }
+        : { done: workRows.every((s) => s === "merged"), summary: workRows.every((s) => s === "merged") ? "all merged" : "waiting" };
     if (canRecord()) {
       record([["plan", "--json", JSON.stringify(delta)]]);
       return finish(`Plan: ${delta.summary}.\n\n\`\`\`json\n{"add": [{"key": "decoy"}]}\n\`\`\``);
@@ -274,7 +273,7 @@ async function engine(role) {
     return finish("Plan:\n```json\n" + JSON.stringify(delta) + "\n```");
   }
   if (role === "worker") {
-    const base = /Expected to write:\n- ([^*\n]+?)\/?\*\*/.exec(brief)[1];
+    const base = `app/${/## GOAL\nwrite ([\w-]+)/.exec(brief)?.[1] ?? "unit"}`;
     let steered = null;
     if (streaming && process.env.FAKE_STEER_WAIT_MS) {
       emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "w1", name: "Bash", input: { command: "sleep 1 # waiting to be steered" } }] } });
@@ -336,9 +335,7 @@ function watchman(sessionId) {
         key: `issue-${n}`,
         repo,
         goal: `write issue-${n}.txt`,
-        write: [`issue-${n}.txt`],
-        accept: [`issue-${n}.txt exists`],
-        verify: `test -f issue-${n}.txt`,
+        acceptance: [`issue-${n}.txt exists`],
       };
       const proposal = { summary: `build what issue #${n} asks`, amend: [{ project: process.env.FAKE_ISSUE_PROJECT, units: [unit] }] };
       return finish(`I can build that: one unit writing issue-${n}.txt.\n\n\`\`\`yagura\n${JSON.stringify({ proposal })}\n\`\`\``);

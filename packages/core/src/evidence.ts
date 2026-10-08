@@ -98,7 +98,7 @@ export const runEvidence = (db: Db, boot: Bootstrap, req: RunRequest): Promise<E
 async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<EvidenceRun> {
   const attempt = getAttempt(db, req.attemptId);
   const unit = getUnit(db, attempt.unitId);
-  if (unit.type !== "verify") throw new Error(`attempt ${attempt.id} is not a verify attempt`);
+  if (attempt.role !== "worker" && attempt.role !== "judge") throw new Error(`attempt ${attempt.id} is not a worker or judge attempt`);
   if (attempt.state !== "queued" && attempt.state !== "running")
     throw new Error(`attempt ${attempt.id} is ${attempt.state}; evidence can only be captured while it runs`);
   if (!attempt.worktreePath || !attempt.baseSha || !attempt.headSha) throw new Error(`attempt ${attempt.id} has no checkouts`);

@@ -9,7 +9,6 @@ export type AttemptId = Brand<number, "AttemptId">;
 export type DrainId = Brand<number, "DrainId">;
 export type LeaseId = Brand<number, "LeaseId">;
 export type ArtifactId = Brand<number, "ArtifactId">;
-export type VerdictId = Brand<number, "VerdictId">;
 export type GateId = Brand<number, "GateId">;
 export type EventId = Brand<number, "EventId">;
 export type Sha = Brand<string, "Sha">;
@@ -21,125 +20,45 @@ export type Provider = (typeof PROVIDERS)[number];
 export const FORGES = ["none", "glab", "gh"] as const;
 export type Forge = (typeof FORGES)[number];
 
-export const PACK_STATUSES = ["missing", "unproven", "proven", "stale"] as const;
-export type PackStatus = (typeof PACK_STATUSES)[number];
-
 export const PROJECT_STATES = ["framing", "active", "paused", "closing", "closed"] as const;
 export type ProjectState = (typeof PROJECT_STATES)[number];
 
 export const MERGE_POLICIES = ["auto", "human"] as const;
 export type MergePolicy = (typeof MERGE_POLICIES)[number];
 
-export const UNIT_TYPES = [
-  "plan",
-  "work",
-  "verify",
-  "measure",
-  "pack",
-  "rebase",
-  "ci-fix",
-  "review-triage",
-  "review",
-  "manager",
-  "investigate",
-  "land",
-  "release",
-] as const;
+// A work unit changes a repo and ends as a merged pull request; a plan unit is the job row of one planning session.
+export const UNIT_TYPES = ["plan", "work"] as const;
 export type UnitType = (typeof UNIT_TYPES)[number];
 
-// Units that change a repo and land: an agent writes them on a branch, they are verified, and they land on trunk.
-export const BUILD_TYPES: ReadonlySet<UnitType> = new Set(["work", "pack"]);
-export const isBuild = (u: { type: UnitType }) => BUILD_TYPES.has(u.type);
-export const BUILD_TYPES_SQL = `(${[...BUILD_TYPES].map((t) => `'${t}'`).join(", ")})`;
+export const isBuild = (u: { type: UnitType }) => u.type === "work";
 
-export const ROLES = ["planner", "worker", "verifier", "pack", "rebase", "ci-fix", "review-triage", "reviewer", "manager", "watchman"] as const;
+export const ROLES = ["planner", "worker", "judge", "lead", "watchman"] as const;
 export type Role = (typeof ROLES)[number];
 export const ROLE_NAMES: Record<Role, string> = {
   planner: "project lead",
   worker: "worker",
-  verifier: "verifier",
-  pack: "pack writer",
-  rebase: "rebase",
-  "ci-fix": "ci fix",
-  "review-triage": "arbiter",
-  reviewer: "reviewer",
-  manager: "unit lead",
+  judge: "judge",
+  lead: "unit lead",
   watchman: "watchman",
 };
 
-export const ROLE_OF: Record<UnitType, Role | null> = {
-  plan: "planner",
-  work: "worker",
-  verify: "verifier",
-  measure: "verifier",
-  pack: "pack",
-  rebase: "rebase",
-  "ci-fix": "ci-fix",
-  "review-triage": "review-triage",
-  review: "reviewer",
-  manager: "manager",
-  investigate: "worker",
-  land: null,
-  release: null,
-};
+export const ROLE_OF: Record<UnitType, Role> = { plan: "planner", work: "worker" };
 
-export const UNIT_STATES = [
-  "draft",
-  "ready",
-  "running",
-  "handed_off",
-  "verifying",
-  "verified",
-  "landing",
-  "landed",
-  "done",
-  "rejected",
-  "failed",
-  "blocked",
-  "abandoned",
-] as const;
+export const UNIT_STATES = ["waiting", "building", "judging", "ready", "merged", "stuck", "dropped"] as const;
 export type UnitState = (typeof UNIT_STATES)[number];
 
-// A review thread on a unit's pull request (§28): where it stands, and the only moves between those states. A reviewer's new
-// comment reopens a thread from wherever it is.
-export const REVIEW_THREAD_STATES = ["open", "ruling", "waiting", "applying", "fixing", "verifying", "replying", "settled", "blocked"] as const;
-export type ReviewThreadState = (typeof REVIEW_THREAD_STATES)[number];
-export const REVIEW_THREAD_TRANSITIONS: Record<ReviewThreadState, readonly ReviewThreadState[]> = {
-  open: ["ruling", "applying"],
-  ruling: ["replying", "fixing", "waiting", "blocked", "open"],
-  waiting: ["applying", "replying", "open"],
-  applying: ["fixing", "verifying", "replying", "blocked", "open"],
-  fixing: ["verifying", "blocked", "open"],
-  verifying: ["fixing", "replying", "blocked", "open"],
-  replying: ["settled", "open"],
-  settled: ["open"],
-  blocked: ["open"],
-};
-export const canMoveReviewThread = (from: ReviewThreadState, to: ReviewThreadState) => REVIEW_THREAD_TRANSITIONS[from].includes(to);
-
-// What a ruling says must change for a thread to be resolved (§28). code is the worker's; the rest change what the unit must do
-// (acceptance, verify, scope) or what the project plans (plan), so they wait for the developer.
-export const CHANGE_KINDS = ["code", "acceptance", "verify", "scope", "plan"] as const;
-export type ChangeKind = (typeof CHANGE_KINDS)[number];
-export const NEEDS_APPROVAL: readonly ChangeKind[] = ["acceptance", "verify", "scope", "plan"];
-
+// The only moves between unit states (core-loop design, "The unit's life"). `stuck` is where the unit lead decides.
 export const UNIT_TRANSITIONS: Record<UnitState, readonly UnitState[]> = {
-  draft: ["ready", "abandoned"],
-  ready: ["running", "blocked", "abandoned"],
-  running: ["handed_off", "failed", "ready", "abandoned"],
-  handed_off: ["verifying", "done", "rejected", "blocked", "abandoned"],
-  verifying: ["verified", "rejected", "blocked", "done", "abandoned"],
-  verified: ["landing", "verifying", "blocked", "abandoned"],
-  landing: ["landed", "verifying", "blocked", "abandoned"],
-  rejected: ["ready", "blocked", "abandoned"],
-  failed: ["ready", "blocked", "abandoned"],
-  blocked: ["ready", "verifying", "verified", "landed", "done", "abandoned"],
-  landed: [],
-  done: [],
-  abandoned: [],
+  waiting: ["building", "stuck", "dropped"],
+  building: ["judging", "stuck", "waiting", "merged", "dropped"],
+  judging: ["ready", "building", "stuck", "dropped"],
+  ready: ["merged", "building", "stuck", "dropped"],
+  stuck: ["waiting", "building", "judging", "ready", "dropped"],
+  merged: [],
+  dropped: [],
 };
 
-export const TERMINAL_STATES: ReadonlySet<UnitState> = new Set(["landed", "done", "abandoned"]);
+export const TERMINAL_STATES: ReadonlySet<UnitState> = new Set(["merged", "dropped"]);
 
 export function canTransition(from: UnitState, to: UnitState): boolean {
   return UNIT_TRANSITIONS[from].includes(to);
@@ -155,25 +74,9 @@ export class IllegalTransition extends Error {
   }
 }
 
-// An attempt yagura made itself (a rebased head waiting for re-verification) is not a try the unit spent.
-export const REBASE_HARNESS = "yagura-rebase";
-export const PROOF_HARNESS = "yagura-proof";
-export const PACK_EDIT_HARNESS = "yagura-pack-edit";
-export const REPIN_HARNESS = "yagura-repin";
-// A resume that never started a session (unknown or expired session id) falls back to a fresh attempt at no extra try.
-export const spendsAttempt = (a: {
-  state: string;
-  harness: string;
-  resumesAttemptId?: AttemptId | null;
-  sessionId?: string | null;
-  limitedUntil?: string | null;
-}) =>
-  a.state !== "stopped" &&
-  !a.limitedUntil &&
-  a.harness !== REBASE_HARNESS &&
-  a.harness !== PACK_EDIT_HARNESS &&
-  a.harness !== REPIN_HARNESS &&
-  !(a.resumesAttemptId && !a.sessionId);
+// A try that never ran an agent session, or whose session the account's usage limit or the operator ended, is not one the unit spent.
+export const spendsAttempt = (a: { state: string; resumesAttemptId?: AttemptId | null; sessionId?: string | null; limitedUntil?: string | null }) =>
+  a.state !== "stopped" && !a.limitedUntil && !(a.resumesAttemptId && !a.sessionId);
 
 // A test build of a verified head for its consumers, or the real version CI publishes once it lands (§14).
 export const PUBLICATION_KINDS = ["test", "release"] as const;
@@ -181,51 +84,31 @@ export type PublicationKind = (typeof PUBLICATION_KINDS)[number];
 export const PUBLICATION_STATES = ["publishing", "published", "failed", "waiting", "unchanged", "removed", "left"] as const;
 export type PublicationState = (typeof PUBLICATION_STATES)[number];
 
-// What a manager may decide (§26): about a unit that failed or was rejected, or (`relay`, `ignore`) about a note a worker left for it.
-// `fallback` records that the fixed rules decided because the manager gave no usable decision.
-export const MANAGER_ACTIONS = ["resume", "fresh", "split", "planner", "ask", "stop", "investigate", "relay", "ignore", "fallback"] as const;
-export type ManagerAction = (typeof MANAGER_ACTIONS)[number];
-
-export const DEP_KINDS = ["needs-source", "needs-landed", "scope-overlap"] as const;
-export type DepKind = (typeof DEP_KINDS)[number];
+// What a unit lead may decide: send the worker back with a note (`resume`) or start a fresh one (`fresh`), answer the judge's
+// question (`answer`), reply on the pull request with no change (`reply`), ask the developer (`ask`), ask the project lead to change
+// the plan (`replan`), or give the unit up (`drop`).
+export const LEAD_ACTIONS = ["resume", "fresh", "answer", "reply", "ask", "replan", "drop"] as const;
+export type LeadAction = (typeof LEAD_ACTIONS)[number];
 
 export const ATTEMPT_STATES = ["queued", "running", "handed_off", "failed", "stopped"] as const;
 export type AttemptState = (typeof ATTEMPT_STATES)[number];
 
-// What an agent records through its yagura commands (§27); the engine reads these, never the final message.
-export const RECORD_KINDS = ["handoff", "verdict", "finding", "ruling", "amendment", "review-finding", "decision", "plan"] as const;
+// What an agent records through its yagura commands; the engine reads these, never the final message.
+export const RECORD_KINDS = ["handoff", "judge", "decision", "plan"] as const;
 export type RecordKind = (typeof RECORD_KINDS)[number];
 
-export const SEVERITIES = ["blocking", "should", "nit"] as const;
-export type Severity = (typeof SEVERITIES)[number];
-
-export const HANDOFF_STATUSES = ["success", "partial", "blocked"] as const;
+export const HANDOFF_STATUSES = ["done", "stuck"] as const;
 export type HandoffStatus = (typeof HANDOFF_STATUSES)[number];
 
-// Why yagura sent a handed-off attempt back; decides whether the next attempt may resume its session.
-// yagura no longer rejects hard-coded values ("literals", until 2026-09-30); older databases still hold the value.
-export const REJECTIONS = ["code-fault", "literals", "scope", "skills", "conflict"] as const;
-export const PACK_EDIT_STATES = ["pending", "queued", "dropped"] as const;
+export const JUDGE_VERDICTS = ["approve", "changes", "ask"] as const;
+export type JudgeVerdict = (typeof JUDGE_VERDICTS)[number];
+
 export const DISAGREEMENT_ACTIONS = ["follow-up", "note"] as const;
 export type DisagreementAction = (typeof DISAGREEMENT_ACTIONS)[number];
 export const DISAGREEMENT_STATES = ["open", "planned", "noted"] as const;
 export type DisagreementState = (typeof DISAGREEMENT_STATES)[number];
-export type PackEditState = (typeof PACK_EDIT_STATES)[number];
-export type Rejection = (typeof REJECTIONS)[number];
-
-export const FAILURE_MODES = ["timebox", "context-exhausted", "oom", "network", "tool-error", "harness-error", "scope", "unknown"] as const;
+export const FAILURE_MODES = ["timebox", "context-exhausted", "oom", "network", "tool-error", "harness-error", "unknown"] as const;
 export type FailureMode = (typeof FAILURE_MODES)[number];
-
-export const PASS_TIERS = ["deployed-verified", "live-local-verified", "e2e-verified", "unit-verified", "build-only"] as const;
-export type PassTier = (typeof PASS_TIERS)[number];
-export const FAIL_TIERS = ["verifier-blocked", "verifier-failed"] as const;
-export type FailTier = (typeof FAIL_TIERS)[number];
-export type Tier = PassTier | FailTier;
-
-export function meetsTier(tier: Tier, min: PassTier): boolean {
-  const rank = (PASS_TIERS as readonly Tier[]).indexOf(tier);
-  return rank !== -1 && rank <= PASS_TIERS.indexOf(min);
-}
 
 export const LEASE_STATES = ["queued", "active", "released", "reaped"] as const;
 export type LeaseState = (typeof LEASE_STATES)[number];
@@ -235,9 +118,6 @@ export type ArtifactSource = (typeof ARTIFACT_SOURCES)[number];
 
 export const GATE_STATES = ["open", "answered", "defaulted", "cancelled"] as const;
 export type GateState = (typeof GATE_STATES)[number];
-
-export const MR_DECISIONS = ["fixed", "dismissed", "asked"] as const;
-export type MrDecision = (typeof MR_DECISIONS)[number];
 
 export const THREAD_AUTONOMIES = ["propose", "go"] as const;
 export type ThreadAutonomy = (typeof THREAD_AUTONOMIES)[number];
@@ -274,15 +154,12 @@ export interface Repo {
   forge: Forge;
   // A remote repo without a forge lands by pushing to trunk only when someone chose that (§23).
   pushConfirmed: boolean;
-  verifyPackPath: string;
-  packStatus: PackStatus;
-  packProvenSha: Sha | null;
-  // Trunk pack's publish block as of the last time yagura read it.
-  publish: PackPublish | null;
+  // How yagura publishes a snapshot of a unit's head for the units that build on it (§14); null when the repo does not publish.
+  publish: PublishConfig | null;
   createdAt: IsoTime;
 }
 
-export interface PackPublish {
+export interface PublishConfig {
   version: string;
   command: string;
   suffix: string;
@@ -294,7 +171,6 @@ export interface Project {
   name: string;
   goal: string;
   predicate: string;
-  minTier: PassTier;
   environmentId: EnvironmentId | null;
   state: ProjectState;
   mergePolicy: MergePolicy;
@@ -314,19 +190,20 @@ export interface Unit {
   type: UnitType;
   state: UnitState;
   repoId: RepoId | null;
-  targetUnitId: UnitId | null;
+  // The branch the unit starts from and merges into; null means the repo's default branch.
+  base: string | null;
   goal: string;
-  // Why the unit exists, in words for the developer; null on units made before this was kept.
-  description: string | null;
-  writeScope: string[];
-  forbidScope: string[];
   acceptance: string[];
-  verify: string | null;
   context: string[];
-  measurements: MeasurementSpec[];
-  notes: string[];
+  // Units that must merge first.
+  after: UnitId[];
   refs: string[];
-  landedSha: Sha | null;
+  notes: string[];
+  // The unit's own branch, yagura/<project>/u<n>, once the first worker has started.
+  branch: string | null;
+  // The head the judge approved, and the commit that merged the unit.
+  approvedSha: Sha | null;
+  mergedSha: Sha | null;
   playbook: string | null;
   scaffold: boolean;
   timeboxSeconds: number;
@@ -334,18 +211,6 @@ export interface Unit {
   createdByDrainId: DrainId | null;
   createdAt: IsoTime;
   updatedAt: IsoTime;
-}
-
-export interface MeasurementSpec {
-  name: string;
-  command: string;
-  unit: string;
-}
-
-export interface UnitDep {
-  unitId: UnitId;
-  dependsOn: UnitId;
-  kind: DepKind;
 }
 
 export interface Attempt {
@@ -366,7 +231,6 @@ export interface Attempt {
   baseSha: Sha | null;
   headSha: Sha | null;
   handoffStatus: HandoffStatus | null;
-  selfTier: Tier | null;
   failureMode: FailureMode | null;
   exitCode: number | null;
   stopNote: string | null;
@@ -376,40 +240,22 @@ export interface Attempt {
   costUsd: number;
   sessionId: string | null;
   resumesAttemptId: AttemptId | null;
-  sources: { unit: string; repoId: RepoId; sha: Sha; path: string; version?: string }[];
   // Set while the session waits out the account's usage limit: a try the limit ended is not one the unit spent.
   limitedUntil: string | null;
-  rejection: Rejection | null;
   skills: string[];
   missingSkills: string[];
   startedAt: IsoTime | null;
   endedAt: IsoTime | null;
 }
 
-export interface Verdict {
-  id: VerdictId;
-  unitId: UnitId;
-  attemptId: AttemptId;
-  tier: Tier;
-  repoId: RepoId;
-  headSha: Sha;
-  patchId: string | null;
-  depShas: Record<string, Sha>;
-  artifactVersions: Record<string, string>;
-  artifactIds: ArtifactId[];
-  voidedAt: IsoTime | null;
-  voidReason: string | null;
-  createdAt: IsoTime;
-}
-
 export interface RenderedBrief {
   goal: string;
   repo: { id: RepoId; worktree: string; branch: string; baseSha: Sha };
-  scope: { write: string[]; forbid: string[]; hard?: string[] };
   context: string[];
   readonly: { repoId: RepoId; path: string; sha: Sha; version?: string }[];
   acceptance: string[];
-  verify: string;
+  // How the environment runs the repo's tests, or null when it does not say.
+  test: string | null;
   env: Record<string, string>;
   envNotes?: Record<string, string>;
   timeboxMinutes: number;
@@ -421,21 +267,12 @@ export interface RenderedBrief {
 
 export interface Handoff {
   status: HandoffStatus;
-  branch: string | null;
+  reason: string | null;
   whatIDid: string;
-  measurements: string;
-  verification: Tier | "not-verified" | null;
   evidence: string[];
   notes: string;
-  forOthers: string;
-  followUps: string;
-  packChanges: string;
-  findings: string;
   decisions: string;
-  outsideScope: string;
-  raw: string;
-  // Set when the handoff came from recorded commands (§27): the runs the verifier cited, as stored ids rather than text.
-  citedRunIds?: number[];
+  followUps: string;
 }
 
 export type HarnessEvent =

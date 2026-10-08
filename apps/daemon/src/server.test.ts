@@ -41,7 +41,7 @@ beforeEach(() => {
     name: "Orders",
     goal: "ship it",
     predicate: "done",
-    minTier: "unit-verified",
+
     repos: ["testbed" as RepoId],
     refs: ["gitlab#7"],
   });
@@ -50,9 +50,7 @@ beforeEach(() => {
     type: "work",
     repoId: "testbed" as RepoId,
     goal: "Implement create",
-    writeScope: ["app/**"],
     acceptance: ["a"],
-    verify: "v",
     timeboxSeconds: 60,
     maxAttempts: 2,
   });

@@ -160,20 +160,17 @@ export interface ProjectDetail extends ProjectSummary {
 export interface AgentRow extends Attempt {
   unit: { id: number; seq: number; type: string; goal: string; projectId: string; state: string };
   // The unit a verifier, triage, or rebase worked for.
-  target: { seq: number; goal: string } | null;
 }
 
 export interface AttemptDetail {
   attempt: Attempt;
   unit: UnitView;
   project: { id: string; minTier: string; state: string };
-  target: { id: number; seq: number; goal: string } | null;
   timeboxSeconds: number;
   brief: string | null;
   handoff: string | null;
   leftovers: string | null;
   runs: EvidenceRun[];
-  verifications: { unit: { id: number; seq: number; state: string }; attempts: { id: number; n: number; state: string; runs: EvidenceRun[] }[] }[];
   kept: KeptSlot[];
   waiting: string | null;
   recordedFrom: { id: number; agentNo: number; unitSeq: number } | null;

@@ -10,7 +10,6 @@ import type {
   EnvironmentId,
   Provider,
   IsoTime,
-  MeasurementSpec,
   Project,
   ProjectId,
   Repo,
@@ -19,9 +18,7 @@ import type {
   UnitId,
   UnitState,
   UnitType,
-  PassTier,
   Forge,
-  PackStatus,
 } from "./domain.js";
 
 export type Db = Database.Database;
@@ -116,14 +113,13 @@ export function transitionUnit(db: Db, unitId: UnitId, to: UnitState, data: Reco
   })();
 }
 
-export function addRepo(db: Db, r: { id: string; url: string; defaultBranch: string; forge?: Forge; pushConfirmed?: boolean; packStatus?: PackStatus }): Repo {
-  db.prepare("INSERT INTO repos (id, url, default_branch, forge, push_confirmed, pack_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+export function addRepo(db: Db, r: { id: string; url: string; defaultBranch: string; forge?: Forge; pushConfirmed?: boolean }): Repo {
+  db.prepare("INSERT INTO repos (id, url, default_branch, forge, push_confirmed, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
     r.id,
     r.url,
     r.defaultBranch,
     r.forge ?? "none",
     r.pushConfirmed ? 1 : 0,
-    r.packStatus ?? "missing",
     now(),
   );
   return getRepo(db, r.id as RepoId);
@@ -138,9 +134,6 @@ export function getRepo(db: Db, id: RepoId): Repo {
     defaultBranch: r.default_branch as string,
     forge: r.forge as Forge,
     pushConfirmed: r.push_confirmed === 1,
-    verifyPackPath: r.verify_pack_path as string,
-    packStatus: r.pack_status as Repo["packStatus"],
-    packProvenSha: (r.pack_proven_sha as Repo["packProvenSha"]) ?? null,
     publish: r.publish_json ? (JSON.parse(r.publish_json as string) as Repo["publish"]) : null,
     createdAt: r.created_at as IsoTime,
   };
@@ -153,7 +146,6 @@ export function addProject(
     name: string;
     goal: string;
     predicate: string;
-    minTier: PassTier;
     repos: RepoId[];
     refs?: string[];
     after?: ProjectId[];
@@ -167,14 +159,13 @@ export function addProject(
     for (const dep of p.after ?? []) getProject(db, dep);
     if (p.environmentId) getEnvironment(db, p.environmentId);
     db.prepare(
-      `INSERT INTO projects (id, name, goal, predicate, min_tier, state, refs_json, after_json, phase_gate, merge_policy, land, environment_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO projects (id, name, goal, predicate, state, refs_json, after_json, phase_gate, merge_policy, land, environment_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       p.id,
       p.name,
       p.goal,
       p.predicate,
-      p.minTier,
       p.after?.length ? "framing" : "active",
       JSON.stringify(p.refs ?? []),
       JSON.stringify(p.after ?? []),
@@ -198,7 +189,6 @@ export function getProject(db: Db, id: ProjectId): Project {
     name: r.name as string,
     goal: r.goal as string,
     predicate: r.predicate as string,
-    minTier: r.min_tier as PassTier,
     environmentId: (r.environment_id as Project["environmentId"]) ?? null,
     state: r.state as Project["state"],
     mergePolicy: r.merge_policy as Project["mergePolicy"],
@@ -216,18 +206,14 @@ export interface NewUnit {
   projectId: ProjectId;
   type: UnitType;
   repoId: RepoId | null;
-  targetUnitId?: UnitId | null;
+  base?: string | null;
   goal: string;
-  description?: string | null;
-  writeScope: string[];
-  forbidScope?: string[];
   acceptance: string[];
-  verify: string | null;
   context?: string[];
-  measurements?: MeasurementSpec[];
+  after?: UnitId[];
+  refs?: string[];
   playbook?: string | null;
   scaffold?: boolean;
-  refs?: string[];
   timeboxSeconds: number;
   maxAttempts: number;
 }
@@ -238,24 +224,20 @@ export function addUnit(db: Db, u: NewUnit): Unit {
     const t = now();
     const result = db
       .prepare(
-        `INSERT INTO units (project_id, seq, type, repo_id, target_unit_id, goal, write_scope_json, forbid_scope_json,
-          acceptance_json, verify, context_json, measurements_json, playbook, timebox_seconds, max_attempts, refs_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO units (project_id, seq, type, repo_id, base, goal, acceptance_json, context_json, playbook, scaffold, timebox_seconds, max_attempts, refs_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         u.projectId,
         seq,
         u.type,
         u.repoId,
-        u.targetUnitId ?? null,
+        u.base ?? null,
         u.goal,
-        JSON.stringify(u.writeScope),
-        JSON.stringify(u.forbidScope ?? []),
         JSON.stringify(u.acceptance),
-        u.verify,
         JSON.stringify(u.context ?? []),
-        JSON.stringify(u.measurements ?? []),
         u.playbook ?? null,
+        u.scaffold ? 1 : 0,
         u.timeboxSeconds,
         u.maxAttempts,
         JSON.stringify(u.refs ?? []),
@@ -263,15 +245,14 @@ export function addUnit(db: Db, u: NewUnit): Unit {
         t,
       );
     const unitId = Number(result.lastInsertRowid) as UnitId;
-    if (u.scaffold) db.prepare("UPDATE units SET scaffold = 1 WHERE id = ?").run(unitId);
-    if (u.description) db.prepare("UPDATE units SET description = ? WHERE id = ?").run(u.description, unitId);
+    for (const dep of new Set(u.after ?? [])) addDep(db, { unitId, dependsOn: dep });
     recordEvent(db, "unit.created", { projectId: u.projectId, unitId }, { seq, type: u.type });
     return unitId;
   })();
   return getUnit(db, id);
 }
 
-function toUnit(r: Record<string, unknown>): Unit {
+function toUnit(r: Record<string, unknown>, after: UnitId[]): Unit {
   return {
     id: r.id as UnitId,
     projectId: r.project_id as ProjectId,
@@ -279,18 +260,16 @@ function toUnit(r: Record<string, unknown>): Unit {
     type: r.type as UnitType,
     state: r.state as UnitState,
     repoId: (r.repo_id as RepoId | null) ?? null,
-    targetUnitId: (r.target_unit_id as UnitId | null) ?? null,
+    base: (r.base as string | null) ?? null,
     goal: r.goal as string,
-    description: (r.description as string | null) ?? null,
-    writeScope: JSON.parse(r.write_scope_json as string),
-    forbidScope: JSON.parse(r.forbid_scope_json as string),
     acceptance: JSON.parse(r.acceptance_json as string),
-    verify: (r.verify as string | null) ?? null,
     context: JSON.parse(r.context_json as string),
-    measurements: JSON.parse(r.measurements_json as string),
-    notes: JSON.parse((r.notes_json as string | undefined) ?? "[]"),
-    refs: JSON.parse((r.refs_json as string | undefined) ?? "[]"),
-    landedSha: (r.landed_sha as Unit["landedSha"]) ?? null,
+    after,
+    refs: JSON.parse(r.refs_json as string),
+    notes: JSON.parse(r.notes_json as string),
+    branch: (r.branch as string | null) ?? null,
+    approvedSha: (r.approved_sha as Unit["approvedSha"]) ?? null,
+    mergedSha: (r.merged_sha as Unit["mergedSha"]) ?? null,
     playbook: (r.playbook as string | null) ?? null,
     scaffold: r.scaffold === 1,
     timeboxSeconds: r.timebox_seconds as number,
@@ -304,17 +283,27 @@ function toUnit(r: Record<string, unknown>): Unit {
 export function getUnit(db: Db, id: UnitId): Unit {
   const r = db.prepare("SELECT * FROM units WHERE id = ?").get(id) as Record<string, unknown> | undefined;
   if (!r) throw new Error(`unit ${id} not found`);
-  return toUnit(r);
+  const after = (db.prepare("SELECT depends_on FROM unit_deps WHERE unit_id = ? ORDER BY depends_on").all(id) as { depends_on: UnitId }[]).map(
+    (d) => d.depends_on,
+  );
+  return toUnit(r, after);
 }
 
 export function getUnitBySeq(db: Db, projectId: ProjectId, seq: number): Unit {
-  const r = db.prepare("SELECT * FROM units WHERE project_id = ? AND seq = ?").get(projectId, seq) as Record<string, unknown> | undefined;
+  const r = db.prepare("SELECT id FROM units WHERE project_id = ? AND seq = ?").get(projectId, seq) as { id: UnitId } | undefined;
   if (!r) throw new Error(`unit ${projectId}/U${seq} not found`);
-  return toUnit(r);
+  return getUnit(db, r.id);
 }
 
 export function listUnits(db: Db, projectId: ProjectId): Unit[] {
-  return (db.prepare("SELECT * FROM units WHERE project_id = ? ORDER BY seq").all(projectId) as Record<string, unknown>[]).map(toUnit);
+  const after = new Map<UnitId, UnitId[]>();
+  for (const d of db
+    .prepare("SELECT d.unit_id, d.depends_on FROM unit_deps d JOIN units u ON u.id = d.unit_id WHERE u.project_id = ? ORDER BY d.depends_on")
+    .all(projectId) as { unit_id: UnitId; depends_on: UnitId }[])
+    after.set(d.unit_id, [...(after.get(d.unit_id) ?? []), d.depends_on]);
+  return (db.prepare("SELECT * FROM units WHERE project_id = ? ORDER BY seq").all(projectId) as Record<string, unknown>[]).map((r) =>
+    toUnit(r, after.get(r.id as UnitId) ?? []),
+  );
 }
 
 function toAttempt(r: Record<string, unknown>): Attempt {
@@ -335,7 +324,6 @@ function toAttempt(r: Record<string, unknown>): Attempt {
     baseSha: (r.base_sha as Attempt["baseSha"]) ?? null,
     headSha: (r.head_sha as Attempt["headSha"]) ?? null,
     handoffStatus: (r.handoff_status as Attempt["handoffStatus"]) ?? null,
-    selfTier: (r.self_tier as Attempt["selfTier"]) ?? null,
     failureMode: (r.failure_mode as Attempt["failureMode"]) ?? null,
     exitCode: (r.exit_code as number | null) ?? null,
     stopNote: (r.stop_note as string | null) ?? null,
@@ -345,8 +333,6 @@ function toAttempt(r: Record<string, unknown>): Attempt {
     costUsd: (r.cost_usd as number | undefined) ?? 0,
     sessionId: (r.session_id as string | null) ?? null,
     resumesAttemptId: (r.resumes_attempt_id as AttemptId | null) ?? null,
-    sources: JSON.parse((r.sources_json as string | undefined) ?? "[]"),
-    rejection: (r.rejection as Attempt["rejection"]) ?? null,
     limitedUntil: (r.limited_until as string | null | undefined) ?? null,
     skills: JSON.parse((r.skills_json as string | undefined) ?? "[]"),
     missingSkills: JSON.parse((r.missing_skills_json as string | undefined) ?? "[]"),
@@ -355,13 +341,13 @@ function toAttempt(r: Record<string, unknown>): Attempt {
   };
 }
 
-// Verify, review, triage, rebase, and plan rows are agent jobs, not slices of work: they are named by their agent, "A13", once one has started.
+// A plan row is an agent job, not a slice of work: it is named by its agent, "A13", once one has started.
 export function jobLabel(db: Db, unit: Pick<Unit, "id" | "type">): string {
   const a = db.prepare("SELECT agent_no FROM attempts WHERE unit_id = ? ORDER BY id DESC LIMIT 1").get(unit.id) as { agent_no: number } | undefined;
-  return a ? `A${a.agent_no}` : `its ${unit.type === "review-triage" ? "arbiter" : unit.type} (not started)`;
+  return a ? `A${a.agent_no}` : `its ${unit.type} (not started)`;
 }
 
-// The first agent run on a unit, "A4": for a unit with two agents (an arbiter, then the worker it called), the one that ruled.
+// The first agent run on a unit, "A4".
 export function firstAgentRef(db: Db, unit: Pick<Unit, "id" | "seq">): string {
   const a = db.prepare("SELECT agent_no FROM attempts WHERE unit_id = ? ORDER BY id LIMIT 1").get(unit.id) as { agent_no: number } | undefined;
   return a ? `A${a.agent_no}` : `U${unit.seq}`;
@@ -408,7 +394,6 @@ const ATTEMPT_COLUMNS = {
   baseSha: "base_sha",
   headSha: "head_sha",
   handoffStatus: "handoff_status",
-  selfTier: "self_tier",
   failureMode: "failure_mode",
   exitCode: "exit_code",
   stopNote: "stop_note",
@@ -423,8 +408,6 @@ const ATTEMPT_COLUMNS = {
   missingSkills: "missing_skills_json",
   sessionId: "session_id",
   resumesAttemptId: "resumes_attempt_id",
-  sources: "sources_json",
-  rejection: "rejection",
   role: "role",
   limitedUntil: "limited_until",
 } as const satisfies Partial<Record<keyof Attempt, string>>;
@@ -433,7 +416,7 @@ export function updateAttempt(db: Db, id: AttemptId, patch: Partial<Pick<Attempt
   const entries = Object.entries(patch) as [keyof typeof ATTEMPT_COLUMNS, unknown][];
   if (!entries.length) return;
   const sets = entries.map(([k]) => `${ATTEMPT_COLUMNS[k]} = ?`).join(", ");
-  const values = entries.map(([k, v]) => (k === "pluginVersions" || k === "skills" || k === "missingSkills" || k === "sources" ? JSON.stringify(v) : v));
+  const values = entries.map(([k, v]) => (k === "pluginVersions" || k === "skills" || k === "missingSkills" ? JSON.stringify(v) : v));
   db.prepare(`UPDATE attempts SET ${sets} WHERE id = ?`).run(...values, id);
 }
 
@@ -552,21 +535,19 @@ export function setProjectState(db: Db, projectId: ProjectId, state: Project["st
 export interface UnitDepRow {
   unitId: UnitId;
   dependsOn: UnitId;
-  kind: "needs-source" | "needs-landed" | "scope-overlap";
 }
 
 export function addDep(db: Db, dep: UnitDepRow): void {
-  db.prepare("INSERT OR IGNORE INTO unit_deps (unit_id, depends_on, kind) VALUES (?, ?, ?)").run(dep.unitId, dep.dependsOn, dep.kind);
+  db.prepare("INSERT OR IGNORE INTO unit_deps (unit_id, depends_on) VALUES (?, ?)").run(dep.unitId, dep.dependsOn);
 }
 
 export function listDeps(db: Db, projectId: ProjectId): UnitDepRow[] {
   return (
-    db.prepare("SELECT d.unit_id, d.depends_on, d.kind FROM unit_deps d JOIN units u ON u.id = d.unit_id WHERE u.project_id = ?").all(projectId) as {
+    db.prepare("SELECT d.unit_id, d.depends_on FROM unit_deps d JOIN units u ON u.id = d.unit_id WHERE u.project_id = ?").all(projectId) as {
       unit_id: UnitId;
       depends_on: UnitId;
-      kind: UnitDepRow["kind"];
     }[]
-  ).map((r) => ({ unitId: r.unit_id, dependsOn: r.depends_on, kind: r.kind }));
+  ).map((r) => ({ unitId: r.unit_id, dependsOn: r.depends_on }));
 }
 
 export interface Gate {
@@ -640,17 +621,11 @@ export function bumpMaxAttempts(db: Db, unitId: UnitId, to: number): void {
   db.prepare("UPDATE units SET max_attempts = MAX(max_attempts, ?), updated_at = ? WHERE id = ?").run(to, now(), unitId);
 }
 
-export function amendUnit(
-  db: Db,
-  unitId: UnitId,
-  patch: { goal?: string; writeScope?: string[]; acceptance?: string[]; verify?: string; context?: string[] },
-): void {
+export function amendUnit(db: Db, unitId: UnitId, patch: { goal?: string; acceptance?: string[]; context?: string[] }): void {
   const sets: string[] = [];
   const values: unknown[] = [];
   if (patch.goal !== undefined) (sets.push("goal = ?"), values.push(patch.goal));
-  if (patch.writeScope !== undefined) (sets.push("write_scope_json = ?"), values.push(JSON.stringify(patch.writeScope)));
   if (patch.acceptance !== undefined) (sets.push("acceptance_json = ?"), values.push(JSON.stringify(patch.acceptance)));
-  if (patch.verify !== undefined) (sets.push("verify = ?"), values.push(patch.verify));
   if (patch.context !== undefined) (sets.push("context_json = ?"), values.push(JSON.stringify(patch.context)));
   if (!sets.length) return;
   db.prepare(`UPDATE units SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`).run(...values, now(), unitId);
@@ -661,6 +636,14 @@ export function setProjectRefs(db: Db, projectId: ProjectId, refs: string[]): vo
   recordEvent(db, "project.refs", { projectId }, { refs });
 }
 
-export function setLandedSha(db: Db, unitId: UnitId, sha: string): void {
-  db.prepare("UPDATE units SET landed_sha = ?, updated_at = ? WHERE id = ?").run(sha, now(), unitId);
+export function setMergedSha(db: Db, unitId: UnitId, sha: string): void {
+  db.prepare("UPDATE units SET merged_sha = ?, updated_at = ? WHERE id = ?").run(sha, now(), unitId);
+}
+
+export function setApprovedSha(db: Db, unitId: UnitId, sha: string | null): void {
+  db.prepare("UPDATE units SET approved_sha = ?, updated_at = ? WHERE id = ?").run(sha, now(), unitId);
+}
+
+export function setUnitBranch(db: Db, unitId: UnitId, branch: string): void {
+  db.prepare("UPDATE units SET branch = ?, updated_at = ? WHERE id = ?").run(branch, now(), unitId);
 }

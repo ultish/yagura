@@ -8,11 +8,11 @@ import { resolveSetting } from "./config.js";
 import type { ProjectId } from "./domain.js";
 import { addDetachedWorktree, ensureMirror, removeWorktree, resolveRef } from "./git.js";
 import { layout } from "./paths.js";
-import { applyDelta, extractDelta, PlanRejected, WORK_PLAYBOOKS, type PlanDelta } from "./plan.js";
+import { applyDelta, PlanRejected, WORK_PLAYBOOKS, type PlanDelta } from "./plan.js";
 import { generateStatus } from "./status.js";
 import { addUnit, createAttempt, getAttempt, getProject, now, projectRepos, recordEvent, setAndon, transitionUnit, updateAttempt, type Db } from "./store.js";
-import { ensureRecorded, reportOf, sessionReport } from "./finish.js";
-import { getRecord, noteFallback } from "./records.js";
+import { ensureRecorded, sessionReport } from "./finish.js";
+import { getRecord } from "./records.js";
 
 export interface PlanResult {
   drainId: number;
@@ -64,13 +64,11 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
     type: "plan",
     repoId: null,
     goal: `Planning round ${drainId}`,
-    writeScope: [],
     acceptance: ["a valid plan delta"],
-    verify: null,
     timeboxSeconds: setting("timebox.plan_seconds"),
     maxAttempts: 1,
   });
-  transitionUnit(db, unit.id, "ready", { drain: drainId });
+  db.prepare("UPDATE units SET created_by_drain_id = ? WHERE id = ?").run(drainId, unit.id);
   const attempt = createAttempt(db, unit.id, harnessId, setting("role.planner.model"));
   db.prepare("UPDATE drains SET planner_attempt_id = ? WHERE id = ?").run(attempt.id, drainId);
 
@@ -104,7 +102,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
     const status = generateStatus(db, boot, projectId, since);
     write(join(boot.home, "projects", projectId, "status.md"), status);
     const briefText = renderPlanBrief({
-      project: { id: project.id, goal: project.goal, predicate: project.predicate, minTier: project.minTier },
+      project: { id: project.id, goal: project.goal, predicate: project.predicate },
       repos: checkouts.map(({ id, path, trunkSha }) => ({ id, path, trunkSha })),
       status,
       playbooks: WORK_PLAYBOOKS,
@@ -115,7 +113,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
       references: setting("project.reference_repos"),
     });
     write(paths.brief(projectId, unit.seq, attempt.n), briefText);
-    transitionUnit(db, unit.id, "running", { attempt: attempt.n });
+    transitionUnit(db, unit.id, "building", { attempt: attempt.n, drain: drainId });
     updateAttempt(db, attempt.id, { state: "running", startedAt: now() });
 
     const plan = (prompt: string, resume?: string) =>
@@ -140,8 +138,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
     const first = await plan(briefText);
     if (stopRequested(db, attempt.id).stopped) {
       updateAttempt(db, attempt.id, { state: "stopped", endedAt: now(), exitCode: first.exitCode });
-      transitionUnit(db, unit.id, "failed", { drain: drainId, reason: "stopped by operator" });
-      transitionUnit(db, unit.id, "abandoned", { drain: drainId });
+      transitionUnit(db, unit.id, "dropped", { drain: drainId, reason: "stopped by operator" });
       return finish("failed", STOPPED, null);
     }
     // The plan comes from yagura plan, checked against the store when it was recorded; the report is kept for the developer.
@@ -157,23 +154,16 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
       failureMode: text ? null : session.timedOut ? "timebox" : "unknown",
     });
     if (!text) {
-      transitionUnit(db, unit.id, "failed", { drain: drainId });
-      return finish("failed", "planner ended without a final message", null);
+      transitionUnit(db, unit.id, "stuck", { drain: drainId });
+      return finish("failed", "planner ended without recording a plan", null);
     }
-    transitionUnit(db, unit.id, "handed_off", { drain: drainId });
-    transitionUnit(db, unit.id, "done", { drain: drainId });
-
-    const proseReports = [reportOf(session), reportOf(first)].filter((r): r is string => !!r);
-    const extracted = recorded
-      ? ({ ok: true, delta: recorded } as const)
-      : (proseReports.map((r) => extractDelta(r)).find((x) => x.ok) ?? extractDelta(proseReports[0] ?? ""));
-    if (!recorded) noteFallback(db, attempt.id, "extractDelta", extracted.ok);
-    if (!extracted.ok) return finish("rejected", extracted.reason, null);
+    transitionUnit(db, unit.id, "merged", { drain: drainId });
+    if (!recorded) return finish("rejected", "the planner recorded no plan: it must run yagura plan", null);
     try {
-      const applied = applyDelta(db, projectId, extracted.delta, drainId);
-      return finish("applied", applied.warnings.join("; ") || extracted.delta.summary, extracted.delta);
+      const applied = applyDelta(db, projectId, recorded, drainId);
+      return finish("applied", applied.warnings.join("; ") || recorded.summary, recorded);
     } catch (e) {
-      if (e instanceof PlanRejected) return finish("rejected", e.message, extracted.delta);
+      if (e instanceof PlanRejected) return finish("rejected", e.message, recorded);
       throw e;
     }
   } finally {

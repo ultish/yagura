@@ -16,9 +16,22 @@ import {
   UnknownSetting,
   effectiveSettings,
 } from "./config.js";
-import { IllegalTransition, PACK_EDIT_STATES, type ProjectId, type RepoId } from "./domain.js";
-import { addProject, addRepo, addUnit, createAttempt, getUnit, openStore, schemaVersion, transitionUnit, updateAttempt, getAttempt, type Db } from "./store.js";
-import { LATEST_VERSION, MIGRATIONS } from "./migrations.js";
+import { IllegalTransition, UNIT_STATES, UNIT_TRANSITIONS, type ProjectId, type RepoId, type UnitState } from "./domain.js";
+import {
+  addProject,
+  addRepo,
+  addUnit,
+  createAttempt,
+  getUnit,
+  listUnits,
+  openStore,
+  schemaVersion,
+  transitionUnit,
+  updateAttempt,
+  getAttempt,
+  type Db,
+} from "./store.js";
+import { LATEST_VERSION } from "./migrations.js";
 import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 
@@ -28,7 +41,7 @@ const project = "p" as ProjectId;
 beforeEach(() => {
   db = openStore(":memory:");
   addRepo(db, { id: "testbed", url: "file:///tb", defaultBranch: "main" });
-  addProject(db, { id: project, name: "P", goal: "g", predicate: "pred", minTier: "unit-verified", repos: ["testbed" as RepoId] });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "pred", repos: ["testbed" as RepoId] });
 });
 
 const newUnit = () =>
@@ -37,27 +50,12 @@ const newUnit = () =>
     type: "work",
     repoId: "testbed" as RepoId,
     goal: "Implement apply_discount",
-    writeScope: ["app/**"],
     acceptance: ["SAVE10 takes 10% off"],
-    verify: "python3 -m unittest",
     timeboxSeconds: 600,
     maxAttempts: 2,
   });
 
 describe("store", () => {
-  it("accepts every pack edit state and nothing else", () => {
-    const unit = newUnit();
-    const attempt = createAttempt(db, unit.id, "claude", null);
-    const insert = (state: string) =>
-      db
-        .prepare(
-          "INSERT INTO pack_edits (attempt_id, target_unit_id, base_sha, sha, branch, summary, state, created_at) VALUES (?, ?, 'b', 's', 'x', 'y', ?, 'now')",
-        )
-        .run(attempt.id, unit.id, state);
-    for (const state of PACK_EDIT_STATES) insert(state);
-    expect(() => insert("landed")).toThrow(/CHECK/);
-  });
-
   it("reopens an existing database without re-applying the schema", () => {
     const path = join(mkdtempSync(join(tmpdir(), "yagura-db-")), "yagura.db");
     const first = openStore(path);
@@ -107,55 +105,70 @@ describe("store", () => {
     expect(schemaVersion(db)).toBe(LATEST_VERSION);
   });
 
-  it("migrates a version-1 database in place without losing rows", () => {
-    const path = join(mkdtempSync(join(tmpdir(), "yagura-v1-")), "yagura.db");
-    const v1 = new Database(path);
-    v1.exec(readFileSync(new URL("./schema.sql", import.meta.url), "utf8"));
-    v1.prepare("INSERT INTO repos (id, url, default_branch, created_at) VALUES ('old', 'file:///old', 'main', 't')").run();
-    v1.close();
-    const upgraded = openStore(path);
-    expect(schemaVersion(upgraded)).toBe(LATEST_VERSION);
-    expect(upgraded.prepare("SELECT id FROM repos").all()).toEqual([{ id: "old" }]);
-    expect(upgraded.prepare("SELECT COUNT(*) AS n FROM evidence_runs").get()).toEqual({ n: 0 });
-  });
-
-  it("rebuilds the units table for the manager and investigate types when SQLite stored its name quoted", () => {
-    const path = join(mkdtempSync(join(tmpdir(), "yagura-quoted-")), "yagura.db");
-    const old = openStore(path);
-    old.pragma("foreign_keys = OFF");
-    const { sql } = old.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'units'").get() as { sql: string };
-    const before = sql
-      .replace("'review', 'manager', 'investigate', 'land'", "'review', 'land'")
-      .replace("'review-triage', 'review', 'manager', 'investigate') OR", "'review-triage', 'review') OR")
-      .replace(/^CREATE TABLE units\b/, "CREATE TABLE units_before");
-    old.exec(before);
-    old.exec("DROP TABLE units");
-    old.exec("ALTER TABLE units_before RENAME TO units");
-    expect(old.prepare("SELECT sql FROM sqlite_master WHERE name = 'units'").get()).toMatchObject({ sql: expect.stringContaining('CREATE TABLE "units"') });
-    for (const version of [35, 38]) MIGRATIONS.find((m) => m.version === version)!.rebuild!(old);
-    const after = (old.prepare("SELECT sql FROM sqlite_master WHERE name = 'units'").get() as { sql: string }).sql;
-    expect(after).toContain("'manager'");
-    expect(after).toContain("'investigate'");
-  });
-
   it("numbers units per project and round-trips their fields", () => {
     const a = newUnit();
     const b = newUnit();
     expect([a.seq, b.seq]).toEqual([1, 2]);
-    expect(a).toMatchObject({ state: "draft", writeScope: ["app/**"], acceptance: ["SAVE10 takes 10% off"], forbidScope: [] });
+    expect(a).toMatchObject({
+      state: "waiting",
+      acceptance: ["SAVE10 takes 10% off"],
+      context: [],
+      after: [],
+      base: null,
+      branch: null,
+      approvedSha: null,
+      mergedSha: null,
+    });
   });
 
   it("applies legal transitions, refuses illegal ones, and records each in events", () => {
     const u = newUnit();
-    transitionUnit(db, u.id, "ready");
-    transitionUnit(db, u.id, "running", { attempt: 1 });
-    expect(() => transitionUnit(db, u.id, "landed")).toThrow(IllegalTransition);
-    expect(getUnit(db, u.id).state).toBe("running");
+    transitionUnit(db, u.id, "building", { attempt: 1 });
+    expect(() => transitionUnit(db, u.id, "ready")).toThrow(IllegalTransition);
+    expect(getUnit(db, u.id).state).toBe("building");
+    transitionUnit(db, u.id, "judging");
     const events = db.prepare("SELECT data_json FROM events WHERE type = 'unit.state' ORDER BY id").all() as { data_json: string }[];
     expect(events.map((e) => JSON.parse(e.data_json))).toEqual([
-      { from: "draft", to: "ready" },
-      { from: "ready", to: "running", attempt: 1 },
+      { from: "waiting", to: "building", attempt: 1 },
+      { from: "building", to: "judging" },
     ]);
+  });
+
+  it("allows every move UNIT_TRANSITIONS lists and refuses every other", () => {
+    const at = (state: UnitState) => {
+      const u = newUnit();
+      db.prepare("UPDATE units SET state = ? WHERE id = ?").run(state, u.id);
+      return u;
+    };
+    for (const from of UNIT_STATES)
+      for (const to of UNIT_STATES) {
+        const u = at(from);
+        if (UNIT_TRANSITIONS[from].includes(to)) {
+          transitionUnit(db, u.id, to);
+          expect(getUnit(db, u.id).state).toBe(to);
+        } else {
+          expect(() => transitionUnit(db, u.id, to)).toThrow(IllegalTransition);
+          expect(getUnit(db, u.id).state).toBe(from);
+        }
+      }
+  });
+
+  it("keeps the units a unit comes after, in either order they were given", () => {
+    const first = newUnit();
+    const second = newUnit();
+    const third = addUnit(db, {
+      projectId: project,
+      type: "work",
+      repoId: "testbed" as RepoId,
+      goal: "g",
+      acceptance: ["a"],
+      after: [second.id, first.id, first.id],
+      timeboxSeconds: 60,
+      maxAttempts: 1,
+    });
+    expect(third.after).toEqual([first.id, second.id]);
+    expect(getUnit(db, third.id).after).toEqual([first.id, second.id]);
+    expect(listUnits(db, project).map((u) => u.after)).toEqual([[], [], [first.id, second.id]]);
   });
 
   it("numbers attempts per unit and patches them", () => {
@@ -189,15 +202,12 @@ describe("settings", () => {
     expect(() => setSetting(db, "environment", "dev", "max_attempts", 9)).toThrow(
       "max_attempts cannot be set per environment; it can be set globally or per project or repo",
     );
-    setSetting(db, "environment", "dev", "role.verifier.model", "claude-opus-5-5");
+    setSetting(db, "environment", "dev", "test.command", "npm test");
     expect(describeSettings(db, { environmentId: "dev" as never }, "environment").map((s) => [s.key, s.source])).toEqual([
-      ["role.verifier.harness", "default"],
-      ["role.verifier.model", "environment"],
+      ["timebox.judge_seconds", "default"],
+      ["test.command", "environment"],
       ["skills.scaffold", "default"],
       ["skills.work", "default"],
-      ["skills.pack", "default"],
-      ["skills.verify", "default"],
-      ["timebox.verify_seconds", "default"],
       ["lease.keep", "default"],
       ["lease.keep_hours", "default"],
     ]);
@@ -275,7 +285,7 @@ describe("deleting an environment", () => {
     const { setSetting } = await import("./config.js");
     const db = openStore(":memory:");
     addRepo(db, { id: "r", url: "/r", defaultBranch: "main" });
-    addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["r" as RepoId] });
+    addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: ["r" as RepoId] });
     const env = "box" as never;
     addEnvironment(db, { id: "box", name: "box", provider: "local-process", capacity: 1 });
     setValue(db, env, { name: "REDIS_URL", value: "redis://box:6379" });
@@ -288,9 +298,7 @@ describe("deleting an environment", () => {
       type: "work",
       repoId: "r" as RepoId,
       goal: "g",
-      writeScope: [],
       acceptance: [],
-      verify: "v",
       timeboxSeconds: 60,
       maxAttempts: 1,
     });

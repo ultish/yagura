@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, navigate, useApi, useNow, type ProjectDetail, type UnitView } from "../api";
 import { modelName, sha, spend, tokens } from "../lib/format";
 import { Package } from "lucide-react";
-import { type Group, groupOf, isBuild, jobName, latestAttempt, openGateFor, statusLine, verifiersOf } from "../lib/units";
+import { type Group, groupOf, isBuild, jobName, latestAttempt, openGateFor, statusLine } from "../lib/units";
 import { Inline } from "../lib/markdown";
 import { Beacons } from "../scene/Beacons";
 import { Link } from "../ui/Link";
@@ -13,19 +13,9 @@ const GROUPS: { key: Group; title: string; bell?: boolean; collapsed?: boolean }
   { key: "bell", title: "The bell · needs you", bell: true },
   { key: "lit", title: "Lanterns lit" },
   { key: "waiting", title: "Waiting for a signal" },
-  { key: "landed", title: "Landed", collapsed: true },
-  { key: "cancelled", title: "Cancelled", collapsed: true },
+  { key: "merged", title: "Merged", collapsed: true },
+  { key: "dropped", title: "Dropped", collapsed: true },
 ];
-
-function Runs({ d, u }: { d: ProjectDetail; u: UnitView }) {
-  const v = verifiersOf(d, u).at(-1);
-  if (!v || !u.verdict) return null;
-  return (
-    <span className="run ok">
-      verified {u.verdict.tier} by {jobName(v)}
-    </span>
-  );
-}
 
 function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) {
   const action = useAction();
@@ -36,9 +26,7 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
   const gate = openGateFor(d, u);
   const last = latestAttempt(u);
   const running = u.attempts.find((a) => a.state === "running");
-  const verifying = verifiersOf(d, u)
-    .flatMap((v) => v.attempts)
-    .find((a) => a.state === "running");
+  const verifying = u.attempts.find((a) => a.state === "running" && a.role === "judge");
   const base = `/api/projects/${d.project.id}/units/${u.seq}`;
   const facts = last && (
     <>
@@ -47,9 +35,8 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
         {last.skills.length ? (last.missingSkills.length ? ` · skills ✕ ${last.missingSkills.join(", ")}` : " · skills ✓") : ""}
       </span>
       {last.contextPeak > 0 && <span>ctx {tokens(last.contextPeak)}</span>}
-      <Runs d={d} u={u} />
       {last.branch && <span>{last.branch}</span>}
-      {u.landedSha && <span>landed {sha(u.landedSha, 10)}</span>}
+      {u.mergedSha && <span>merged {sha(u.mergedSha, 10)}</span>}
     </>
   );
   return (
@@ -64,7 +51,6 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
           </Link>
         ) : null
       }
-      why={u.description ? <Inline text={u.description.split("\n\n")[0]!} /> : null}
       status={<Inline text={status.text} />}
       tone={status.tone}
       facts={facts}
@@ -118,7 +104,7 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
                   {o === "land" ? "Merge" : o === "hold" ? "Hold" : o}
                 </button>
               ))}
-            {u.state === "blocked" && (
+            {u.state === "stuck" && (
               <button className="btn" type="button" onClick={() => setRetrying(true)}>
                 Retry with a note
               </button>
@@ -203,7 +189,6 @@ export function Project({ id }: { id: string }) {
   const facts = [
     p.environmentId ? `env ${p.environmentId}` : "no environment",
     p.mergePolicy === "auto" ? "merges automatically" : "merge by hand",
-    `≥ ${p.minTier}`,
     `${d.maxInFlight} agent slots`,
     spend(d.costUsd, d.budgetUsd),
     ...p.refs,
@@ -216,7 +201,7 @@ export function Project({ id }: { id: string }) {
         <div className="mono muted" style={{ fontSize: 12.5, display: "flex", flexWrap: "wrap", alignItems: "center", gap: "6px 12px" }}>
           {d.repos.map((r) => {
             const units = work.filter((u) => u.repoId === r.id);
-            const landed = units.filter((u) => u.state === "landed" || u.state === "done").length;
+            const landed = units.filter((u) => u.state === "merged").length;
             return (
               <Link
                 key={r.id}

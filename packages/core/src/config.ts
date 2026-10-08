@@ -60,12 +60,10 @@ export const SETTINGS = {
   "harness.claude.extra_args": z.array(z.string()).default([]).describe("Extra arguments added to every claude run"),
   "role.worker.harness": z.string().default("claude").describe("Harness that runs workers"),
   "role.worker.model": z.string().nullable().default(null).describe("Model for workers (empty: the harness default)"),
-  "role.verifier.harness": z.string().default("claude").describe("Harness that runs verifiers"),
-  "role.verifier.model": z.string().nullable().default(null).describe("Model for verifiers (empty: the harness default)"),
-  "role.reviewer.harness": z.string().default("claude").describe("Harness that runs code reviewers"),
-  "role.reviewer.model": z.string().nullable().default(null).describe("Model for code reviewers (empty: the harness default)"),
-  "role.manager.harness": z.string().default("claude").describe("Harness that runs unit managers"),
-  "role.manager.model": z.string().nullable().default(null).describe("Model for unit managers (empty: the harness default)"),
+  "role.lead.harness": z.string().default("claude").describe("Harness that runs unit leads"),
+  "role.judge.harness": z.string().default("claude").describe("Harness that runs judges"),
+  "role.judge.model": z.string().nullable().default(null).describe("Model for judges (empty: the harness default)"),
+  "role.lead.model": z.string().nullable().default(null).describe("Model for unit leads (empty: the harness default)"),
   "forge.trusted_authors": z
     .array(z.string())
     .default([])
@@ -82,11 +80,14 @@ export const SETTINGS = {
     .positive()
     .default(10)
     .describe("Watchman turns one issue may start in a day; later comments wait for the next day"),
-  "manager.enabled": z
-    .boolean()
-    .default(true)
-    .describe("A manager agent decides what happens to a unit after a rejection or failure, instead of the fixed rules"),
-  "manager.max_decisions_per_unit": z.number().int().min(1).default(4).describe("Decisions a unit's manager may make before the unit blocks for the developer"),
+  "lead.max_decisions_per_unit": z.number().int().min(1).default(4).describe("Decisions a unit's lead may make before the unit waits for the developer"),
+  "judge.max_rounds": z.number().int().min(1).default(3).describe("Rounds of changes the judge may ask for in a row before the unit lead is woken"),
+  "timebox.judge_seconds": z.number().int().positive().default(1200).describe("How long a judge may run before it is stopped"),
+  "test.command": z
+    .string()
+    .nullable()
+    .default(null)
+    .describe("How this environment runs a repo's tests (npm test, gradle test); workers and judges read it from their brief"),
   "role.planner.harness": z.string().default("claude").describe("Harness that runs planners"),
   "role.planner.model": z.string().nullable().default(null).describe("Model for planners (empty: the harness default)"),
   "role.watchman.harness": z.string().default("claude").describe("Harness that runs the watchman"),
@@ -110,9 +111,6 @@ export const SETTINGS = {
   "timebox.work_seconds": z.number().int().positive().default(1800).describe("How long a worker may run before it is stopped"),
   "skills.scaffold": z.array(z.string().min(1)).default([]).describe("Skills a scaffold unit (a new project's skeleton) must load"),
   "skills.work": z.array(z.string().min(1)).default([]).describe("Skills every worker must load"),
-  "skills.pack": z.array(z.string().min(1)).default([]).describe("Skills the verify pack writer must load"),
-  "skills.verify": z.array(z.string().min(1)).default([]).describe("Skills every verifier must load"),
-  "skills.review": z.array(z.string().min(1)).default([]).describe("Skills every code reviewer must load"),
   "retro.watch_minutes": z
     .number()
     .int()
@@ -120,13 +118,6 @@ export const SETTINGS = {
     .default(60)
     .describe("Minutes to watch trunk after a unit lands: its CI on the forge, and anyone reverting it (0: off)"),
   "project.auto_revert": z.boolean().default(false).describe("When trunk CI breaks after a landing, revert the change instead of fixing forward"),
-  "review.enabled": z.boolean().default(true).describe("A reviewer agent reads every verified change before it may land"),
-  "review.max_rounds": z
-    .number()
-    .int()
-    .min(0)
-    .default(1)
-    .describe("How many times a change fixed after review is reviewed again before open findings go to the developer"),
   "project.budget_hours": z
     .number()
     .positive()
@@ -147,8 +138,6 @@ export const SETTINGS = {
     .max(1)
     .default(0.6)
     .describe("Start fresh instead when the rejected session used more than this share of its context window"),
-  "timebox.verify_seconds": z.number().int().positive().default(1200).describe("How long a verifier may run before it is stopped"),
-  "verify.max_retries": z.number().int().positive().default(2).describe("Fresh verify runs after an invalid or blocked verdict"),
   max_attempts: z.number().int().positive().default(2).describe("Tries a unit gets before it blocks"),
   "git.author_name": z.string().default("yagura").describe("Author name on landed commits"),
   "git.author_email": z.string().default("yagura@localhost").describe("Author email on landed commits"),
@@ -159,7 +148,6 @@ export const SETTINGS = {
   "lease.keep_hours": z.number().positive().default(2).describe("Hours a kept namespace or slot lives before it is deleted"),
   "gates.timeout_hours": z.number().positive().nullable().default(24).describe("Hours before an unanswered question takes its default (empty: never)"),
   "forge.repo": z.string().nullable().default(null).describe("The repo on the forge as [host/]owner/name (empty: read from the repo URL)"),
-  "forge.merge_method": z.enum(["rebase", "squash", "merge"]).default("rebase").describe("How yagura merges a pull request"),
   "forge.gh_bin": z.string().default("gh").describe("The gh CLI yagura runs for GitHub"),
   "forge.glab_bin": z.string().default("glab").describe("The glab CLI yagura runs for GitLab"),
   "forge.glab_hosts": z.array(z.string().min(1)).default([]).describe("GitLab hosts: a repo registered from one of them lands through merge requests"),
@@ -192,17 +180,17 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "harness.claude.extra_args": P,
   "role.worker.harness": PR,
   "role.worker.model": PR,
-  "role.verifier.harness": PRE,
-  "role.verifier.model": PRE,
-  "role.manager.harness": PR,
-  "role.manager.model": PR,
-  "manager.enabled": PR,
+  "role.lead.harness": PR,
+  "role.lead.model": PR,
+  "role.judge.harness": PR,
+  "role.judge.model": PR,
+  "judge.max_rounds": PR,
+  "timebox.judge_seconds": PRE,
+  "test.command": PRE,
   "forge.trusted_authors": PR,
   "forge.watch_issues": R,
   "issues.max_turns_per_day": R,
-  "manager.max_decisions_per_unit": PR,
-  "role.reviewer.harness": PR,
-  "role.reviewer.model": PR,
+  "lead.max_decisions_per_unit": PR,
   "role.planner.harness": P,
   "role.planner.model": P,
   "role.watchman.harness": [],
@@ -216,19 +204,12 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "work.resume_on_rejection": PR,
   "skills.scaffold": PRE,
   "skills.work": PRE,
-  "skills.pack": PRE,
-  "skills.verify": PRE,
-  "skills.review": PR,
-  "review.enabled": PR,
   "retro.watch_minutes": PR,
   "project.auto_revert": P,
-  "review.max_rounds": PR,
   "project.reference_repos": P,
   "project.budget_hours": P,
   "project.budget_usd": P,
   "work.resume_max_context": PR,
-  "timebox.verify_seconds": PRE,
-  "verify.max_retries": P,
   max_attempts: PR,
   "git.author_name": PR,
   "git.author_email": PR,
@@ -239,7 +220,6 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "lease.keep": PE,
   "lease.keep_hours": PE,
   "forge.repo": R,
-  "forge.merge_method": R,
   "forge.gh_bin": [],
   "forge.glab_bin": [],
   "forge.glab_hosts": [],

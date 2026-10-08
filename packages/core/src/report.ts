@@ -12,7 +12,7 @@ export const reportKey = (r: ReportKind) => (r.kind === "closed" ? "closed" : r.
 
 function blockedReason(db: Db, u: Unit): string {
   const row = db
-    .prepare("SELECT data_json FROM events WHERE unit_id = ? AND type = 'unit.state' AND json_extract(data_json, '$.to') = 'blocked' ORDER BY id DESC LIMIT 1")
+    .prepare("SELECT data_json FROM events WHERE unit_id = ? AND type = 'unit.state' AND json_extract(data_json, '$.to') = 'stuck' ORDER BY id DESC LIMIT 1")
     .get(u.id) as { data_json: string } | undefined;
   const reason = row ? (JSON.parse(row.data_json) as { reason?: unknown }).reason : null;
   return reason ? (typeof reason === "string" ? reason : JSON.stringify(reason)) : (u.notes.at(-1) ?? "no reason recorded");
@@ -30,12 +30,12 @@ export async function renderReport(ctx: { db: Db; boot: Bootstrap }, threadId: n
         : `**${project.id} is stuck:** ${r.blocked.map((s) => `U${s}`).join(", ")} blocked and the planner has nothing further to try.`;
 
   const landed = work
-    .filter((u) => u.state === "landed")
+    .filter((u) => u.state === "merged")
     .map((u) => {
-      return `- U${u.seq} ${u.goal} — landed \`${u.landedSha?.slice(0, 10) ?? "?"}\` on ${u.repoId} · \`yagura trace ${u.landedSha?.slice(0, 10) ?? `${projectId}`}\``;
+      return `- U${u.seq} ${u.goal} — landed \`${u.mergedSha?.slice(0, 10) ?? "?"}\` on ${u.repoId} · \`yagura trace ${u.mergedSha?.slice(0, 10) ?? `${projectId}`}\``;
     });
-  const blocked = work.filter((u) => u.state === "blocked").map((u) => `- U${u.seq} ${u.goal}: ${blockedReason(db, u)}`);
-  const open = work.filter((u) => !["landed", "done", "abandoned", "blocked"].includes(u.state)).map((u) => `- U${u.seq} ${u.goal} (${u.state})`);
+  const blocked = work.filter((u) => u.state === "stuck").map((u) => `- U${u.seq} ${u.goal}: ${blockedReason(db, u)}`);
+  const open = work.filter((u) => !["merged", "dropped", "stuck"].includes(u.state)).map((u) => `- U${u.seq} ${u.goal} (${u.state})`);
 
   const run: string[] = [];
   for (const repo of projectRepos(db, projectId)) {

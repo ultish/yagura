@@ -16,7 +16,7 @@ beforeEach(() => {
   boot = { home: mkdtempSync(join(tmpdir(), "yagura-lease-")), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
   db = openStore(":memory:");
   addRepo(db, { id: "r", url: "file:///r", defaultBranch: "main" });
-  addProject(db, { id: "p", name: "P", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["r" as RepoId] });
+  addProject(db, { id: "p", name: "P", goal: "g", predicate: "x", repos: ["r" as RepoId] });
   addEnvironment(db, { id: env, name: "local", provider: "local-process", capacity: 2 });
 });
 
@@ -26,9 +26,7 @@ function attempt() {
     type: "work",
     repoId: "r" as RepoId,
     goal: "g",
-    writeScope: ["**"],
     acceptance: ["a"],
-    verify: "v",
     timeboxSeconds: 60,
     maxAttempts: 1,
   });
@@ -87,7 +85,8 @@ describe("required skills", () => {
     ]);
     expect(missingSkills("worker", ["yagura-worker", "poteto-mode", "principle-prove-it-works", "principle-test-behavior-not-implementation"])).toEqual([]);
     expect(missingSkills("planner", [])).toEqual(["yagura:yagura-planner"]);
-    expect(missingSkills("ci-fix", [])).toEqual([]);
+    expect(missingSkills("judge", [])).toEqual(["yagura:yagura-judge"]);
+    expect(missingSkills("lead", [])).toEqual(["yagura:yagura-unit-lead"]);
   });
 });
 

@@ -7,7 +7,7 @@ import type { Bootstrap } from "./config.js";
 import type { ProjectId, RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import { layout } from "./paths.js";
-import { addProject, addRepo, addUnit, createAttempt, getUnitBySeq, openStore, setLandedSha, updateAttempt, type Db } from "./store.js";
+import { addProject, addRepo, addUnit, createAttempt, getUnitBySeq, openStore, setMergedSha, updateAttempt, type Db } from "./store.js";
 
 let db: Db;
 let boot: Bootstrap;
@@ -37,19 +37,17 @@ beforeEach(async () => {
   boot = { home: join(root, "home"), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
   addRepo(db, { id: repo, url: origin, defaultBranch: "main" });
-  addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", minTier: "unit-verified", repos: [repo] });
+  addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: [repo] });
   const unit = addUnit(db, {
     projectId: "p" as ProjectId,
     type: "work",
     repoId: repo,
     goal: "add c",
-    writeScope: [],
     acceptance: [],
-    verify: "v",
     timeboxSeconds: 60,
     maxAttempts: 1,
   });
-  setLandedSha(db, unit.id, landed);
+  setMergedSha(db, unit.id, landed);
 });
 
 describe("browsing a repo's trunk", () => {
@@ -101,15 +99,13 @@ describe("browsing a repo's trunk", () => {
   it("shows a unit's code: what landed, or its branch before it lands", async () => {
     await repoTree(db, boot, repo);
     const landed = await unitCode(db, boot, getUnitBySeq(db, "p" as ProjectId, 1));
-    expect(landed).toMatchObject({ source: "landed", files: ["README.md", "app/main.py"], base: shas.trailered });
+    expect(landed).toMatchObject({ source: "merged", files: ["README.md", "app/main.py"], base: shas.trailered });
     const pending = addUnit(db, {
       projectId: "p" as ProjectId,
       type: "work",
       repoId: repo,
       goal: "change b",
-      writeScope: [],
       acceptance: [],
-      verify: "v",
       timeboxSeconds: 60,
       maxAttempts: 1,
     });

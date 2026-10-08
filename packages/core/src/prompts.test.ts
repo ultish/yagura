@@ -17,7 +17,7 @@ beforeEach(() => {
   boot = { home: mkdtempSync(join(tmpdir(), "yagura-prompts-")), packsDir: "", skillsDir: BUNDLED_SKILLS_DIR, bind: "", port: 0, tokenFile: "" };
   db = openStore(":memory:");
   addRepo(db, { id: "r", url: "file:///nowhere", defaultBranch: "main" });
-  addProject(db, { id: project, name: "P", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["r" as RepoId] });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "p", repos: ["r" as RepoId] });
 });
 
 describe("role prompts", () => {
@@ -43,7 +43,7 @@ describe("role prompts", () => {
     setPromptText(db, "project", project, "all", "notes", "Never touch vendor/.");
     setPromptText(db, "project", project, "worker", "notes", "Run the linter before you hand off.");
     expect(standingFor(db, project, "worker")).toBe("Never touch vendor/.\n\nRun the linter before you hand off.\n");
-    expect(standingFor(db, project, "verifier")).toBe("Never touch vendor/.\n");
+    expect(standingFor(db, project, "judge")).toBe("Never touch vendor/.\n");
   });
 
   it("moves hand-edited standing-orders files into the store and removes them", () => {
@@ -65,9 +65,7 @@ describe("role prompts", () => {
       type: "work",
       repoId: "r" as RepoId,
       goal: "g",
-      writeScope: ["a"],
       acceptance: ["x"],
-      verify: "true",
       timeboxSeconds: 60,
       maxAttempts: 2,
     });

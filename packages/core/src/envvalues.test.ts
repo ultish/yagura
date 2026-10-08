@@ -45,15 +45,13 @@ describe("values in a slot", () => {
   it("hands every value to the slot as a variable, under yagura's own", async () => {
     setValue(db, dev, { name: "REGISTRY_PUSH", value: "localhost:5000" });
     addRepo(db, { id: "r", url: "file:///r", defaultBranch: "main" });
-    addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["r" as RepoId] });
+    addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: ["r" as RepoId] });
     const unit = addUnit(db, {
       projectId: "p" as ProjectId,
       type: "work",
       repoId: "r" as RepoId,
       goal: "g",
-      writeScope: [],
       acceptance: [],
-      verify: "v",
       timeboxSeconds: 60,
       maxAttempts: 1,
     });

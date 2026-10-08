@@ -55,7 +55,7 @@ beforeEach(async () => {
   db = openStore(layout(boot).db);
   ctx = { db, boot, adapters: { claude: fake }, cli: [process.execPath, "--import", tsx, fixtures("evidence-shim.ts")] };
   addRepo(db, { id: "testbed", url: origin, defaultBranch: "main" });
-  addProject(db, { id: project, name: "P", goal: "g", predicate: "all files landed", minTier: "unit-verified", repos: ["testbed" as RepoId] });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "all files landed", repos: ["testbed" as RepoId] });
   addEnvironment(db, { id: "local", name: "local", provider: "local-process", capacity: 2 });
   setProjectEnvironment(db, project, "local" as EnvironmentId);
   setMergePolicy(db, project, "auto");
@@ -71,7 +71,7 @@ describe("Engine", () => {
     const engine = new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) });
     await engine.runUntilIdle();
     const work = listUnits(db, project).filter((u) => u.type === "work");
-    expect(work.map((u) => u.state)).toEqual(["ready", "ready", "ready"]);
+    expect(work.map((u) => u.state)).toEqual(["waiting", "waiting", "waiting"]);
     expect(db.prepare("SELECT COUNT(*) AS n FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.type = 'work'").get()).toEqual({ n: 0 });
     expect(log).toContain("  p: 83% of the wall-clock budget used; no new work starts, verified work keeps landing");
     db.prepare("UPDATE projects SET created_at = ? WHERE id = ?").run(ago(70), project);
@@ -96,18 +96,18 @@ describe("Engine", () => {
     setSetting(db, "project", project, "project.budget_usd", 100);
     setAndon(db, project, null);
     await engine.runUntilIdle();
-    expect(listUnits(db, project).filter((u) => u.type === "work" && u.state === "handed_off")).toHaveLength(2);
+    expect(listUnits(db, project).filter((u) => u.type === "work" && u.state === "judging")).toHaveLength(2);
   }, 60_000);
 
-  it("plans and runs disjoint units in parallel, leaves an overlapping one waiting, and ends each worker at handed_off", async () => {
+  it("plans and runs disjoint units in parallel, leaves an overlapping one waiting, and ends each worker at judging", async () => {
     const log: string[] = [];
     await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();
 
     const work = listUnits(db, project).filter((u) => u.type === "work");
     expect(work.map((u) => [u.goal, u.state])).toEqual([
-      ["write a", "handed_off"],
-      ["write b", "handed_off"],
-      ["write c", "ready"],
+      ["write a", "judging"],
+      ["write b", "judging"],
+      ["write c", "waiting"],
     ]);
     expect(listUnits(db, project).filter((u) => u.type !== "work" && u.type !== "plan")).toEqual([]);
 
@@ -130,15 +130,15 @@ describe("Engine", () => {
     expect(fallbacks).toEqual([]);
   }, 60_000);
 
-  it("blocks a unit that crashes before it starts instead of starting it again every tick", async () => {
+  it("sticks a unit that crashes before it starts instead of starting it again every tick", async () => {
     setSetting(db, "project", project, "role.worker.harness", "missing-harness");
     const log: string[] = [];
     await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();
     const work = listUnits(db, project).filter((u) => u.type === "work");
-    expect(work.filter((u) => u.state === "blocked").length).toBeGreaterThan(0);
-    expect(log.filter((l) => l.startsWith("✗ work")).length).toBe(work.filter((u) => u.state === "blocked").length);
-    expect(db.prepare("SELECT data_json FROM events WHERE type = 'unit.state' AND json_extract(data_json, '$.to') = 'blocked' LIMIT 1").get()).toEqual({
-      data_json: JSON.stringify({ from: "ready", to: "blocked", reason: "engine error before it started: no adapter for harness missing-harness" }),
+    expect(work.filter((u) => u.state === "stuck").length).toBeGreaterThan(0);
+    expect(log.filter((l) => l.startsWith("✗ work")).length).toBe(work.filter((u) => u.state === "stuck").length);
+    expect(db.prepare("SELECT data_json FROM events WHERE type = 'unit.state' AND json_extract(data_json, '$.to') = 'stuck' LIMIT 1").get()).toEqual({
+      data_json: JSON.stringify({ from: "waiting", to: "stuck", reason: "engine error before it started: no adapter for harness missing-harness" }),
     });
   });
 

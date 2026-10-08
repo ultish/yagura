@@ -13,23 +13,21 @@ export { RECORD_COMMANDS, RECORD_USAGE, recordInstructions, type RecordCommand }
 // agent at once with what to fix; the engine reads the records, never the agent's final message.
 const KIND: Record<Exclude<RecordCommand, "check-done">, LiveRecordKind> = {
   handoff: "handoff",
+  judge: "judge",
   decide: "decision",
   plan: "plan",
 };
 
 const OPTIONS = {
-  tier: { type: "string" },
   did: { type: "string", multiple: true },
   evidence: { type: "string", multiple: true },
-  "outside-scope": { type: "string", multiple: true },
-  "for-others": { type: "string", multiple: true },
   decision: { type: "string", multiple: true },
   note: { type: "string", multiple: true },
   "follow-up": { type: "string", multiple: true },
   finding: { type: "string", multiple: true },
+  runs: { type: "string" },
   reason: { type: "string" },
   question: { type: "string" },
-  to: { type: "string" },
   file: { type: "string" },
   json: { type: "string" },
   hook: { type: "boolean" },
@@ -38,32 +36,34 @@ const OPTIONS = {
 type Values = ReturnType<typeof parseArgs<{ options: typeof OPTIONS; allowPositionals: true; strict: true; args: string[] }>>["values"];
 type Built = { key: string; data: unknown } | { problem: string };
 
+const runList = (s: string | undefined): number[] | string => {
+  const parts = (s ?? "").split(/[,\s]+/).filter(Boolean);
+  return parts.every((x) => /^(run:)?\d+$/.test(x)) ? parts.map((x) => Number(x.replace(/^run:/, ""))) : `--runs takes run ids like 12,14, not "${s}"`;
+};
+
 function build(db: Db, attemptId: AttemptId, command: Exclude<RecordCommand, "check-done">, pos: string[], v: Values, stdin: () => string): Built {
   const one = (xs: string[] | undefined) => xs?.at(-1) ?? null;
   switch (command) {
-    case "handoff": {
-      const scope = (v["outside-scope"] ?? []).map((s) => {
-        const at = s.indexOf("=");
-        return at > 0 ? { path: s.slice(0, at).trim(), reason: s.slice(at + 1).trim() } : { path: s.trim(), reason: "" };
-      });
+    case "handoff":
       return {
         key: "",
         data: {
           status: pos[0],
-          tier: v.tier ?? null,
+          reason: v.reason ?? null,
           did: v.did ?? [],
           evidence: v.evidence ?? [],
-          outsideScope: scope,
-          forOthers: v["for-others"] ?? [],
           decisions: v.decision ?? [],
           notes: v.note ?? [],
           followUps: v["follow-up"] ?? [],
-          findings: v.finding ?? [],
         },
       };
+    case "judge": {
+      const runs = runList(v.runs);
+      if (typeof runs === "string") return { problem: runs };
+      return { key: "", data: { verdict: pos[0], runs, findings: v.finding ?? [], question: v.question ?? null } };
     }
     case "decide":
-      return { key: "", data: { action: pos[0], reason: v.reason, note: one(v.note), question: v.question ?? null, to: v.to ?? null } };
+      return { key: "", data: { action: pos[0], reason: v.reason, note: one(v.note), question: v.question ?? null } };
     case "plan": {
       if (!v.file && !v.json) return { problem: "give the plan delta as a JSON file (--file <path>, or --file - for stdin) or inline (--json '<delta>')" };
       const raw = v.json ?? (v.file === "-" ? stdin() : existsSync(v.file!) ? readFileSync(v.file!, "utf8") : null);

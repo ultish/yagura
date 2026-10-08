@@ -5,7 +5,7 @@ import { z } from "zod";
 import { write } from "./agent.js";
 import { resolveSetting, setSetting, type Bootstrap } from "./config.js";
 import { SKILL_PURPOSES } from "./skills.js";
-import { LAND_ROUTES, MERGE_POLICIES, PASS_TIERS, type EnvironmentId, type LandRoute, type ProjectId, type RepoId } from "./domain.js";
+import { LAND_ROUTES, MERGE_POLICIES, type EnvironmentId, type LandRoute, type ProjectId, type RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta, PlanRejected, PlanUnit } from "./plan.js";
@@ -49,7 +49,6 @@ export const ProposalBody = z
             environment: z.string().nullable().default(null),
             merge: z.enum(MERGE_POLICIES).default("human"),
             land: z.enum(LAND_ROUTES).optional(),
-            minTier: z.enum(PASS_TIERS).default("unit-verified"),
             after: z.array(z.string()).default([]),
             phaseGate: z.boolean().default(false),
             refs: z.array(z.string().min(1)).default([]),
@@ -59,9 +58,6 @@ export const ProposalBody = z
               .object({
                 scaffold: z.array(z.string().min(1)).optional(),
                 work: z.array(z.string().min(1)).optional(),
-                pack: z.array(z.string().min(1)).optional(),
-                verify: z.array(z.string().min(1)).optional(),
-                review: z.array(z.string().min(1)).optional(),
               })
               .strict()
               .default({}),
@@ -292,7 +288,6 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
           name: p.name ?? p.id,
           goal: p.goal,
           predicate: p.predicate,
-          minTier: p.minTier,
           repos: p.repos as RepoId[],
           refs: withIssue(p).refs,
           after: p.after as ProjectId[],
@@ -358,7 +353,6 @@ export function describeProposal(body: ProposalBody): string {
       `repos ${p.repos.join(", ")}`,
       `merge ${p.merge}`,
       p.land === "pr" ? "lands through pull/merge requests" : p.land === "push" ? "pushes to the default branch" : "",
-      `min ${p.minTier}`,
       p.after.length ? `after ${p.after.join(", ")}` : "",
       p.phaseGate ? "phase gate" : "",
       p.environment ? `env ${p.environment}` : "",

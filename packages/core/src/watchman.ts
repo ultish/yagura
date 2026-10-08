@@ -6,7 +6,7 @@ import { assertThreadFree, beginTurn, currentSession, endSession, endTurn, getTu
 import { z } from "zod";
 import { runAgentSession, write, type RunContext, type SessionRecorder } from "./agent.js";
 import { resolveSetting } from "./config.js";
-import { PASS_TIERS, type Environment, type EnvironmentId, type ProjectId, type RepoId } from "./domain.js";
+import { type Environment, type EnvironmentId, type ProjectId, type RepoId } from "./domain.js";
 import { listValues } from "./envvalues.js";
 import { PROVIDERS_IMPL } from "./leases.js";
 import { PRESETS } from "./presets.js";
@@ -296,7 +296,6 @@ function catalog(db: Db, boot: RunContext["boot"]): string {
         .join(", ") || "(none)"
     }`,
     `- existing project ids (taken): ${projects.map((p) => `${p.id} [${p.state}]`).join(", ") || "(none)"}`,
-    `- tiers, strongest first: ${PASS_TIERS.join(", ")}`,
     `- unit playbooks: ${WORK_PLAYBOOKS.join(", ")}`,
   ].join("\n");
 }

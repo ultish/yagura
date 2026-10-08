@@ -1,61 +1,37 @@
-import { TERMINAL_STATES, type DepKind, type Unit, type UnitId, type UnitState } from "./domain.js";
-import { listPublications } from "./publish.js";
-import { getUnit, listAttempts, listDeps, listGates, type Db } from "./store.js";
+import type { Unit, UnitId, UnitState } from "./domain.js";
+import { getUnit, listDeps, listGates, type Db } from "./store.js";
 
 export type EdgeTone = "pine" | "amber" | "bell" | "muted";
 
-// One dependency, seen from one unit: it needs `other` (`needs`), or `other` needs it (`feeds`).
+// One `after` link, seen from one unit: it comes after `other` (`needs`), or `other` comes after it (`feeds`).
 export interface DepEdge {
   direction: "needs" | "feeds";
-  kind: DepKind;
   other: { id: UnitId; seq: number; repoId: string | null; goal: string; state: UnitState };
-  // The test build the consumer was built against, or (for the upstream's own page) its latest test build.
-  build: { version: string; repoId: string } | null;
   state: { text: string; tone: EdgeTone };
 }
 
-// What the edge is doing now, in words, from the consumer's side.
-function edgeState(db: Db, consumer: Unit, upstream: Unit, kind: DepKind): DepEdge["state"] {
-  const up = `U${upstream.seq}`;
-  if (upstream.state === "abandoned") return { text: `${up} was cancelled`, tone: "muted" };
-  if (TERMINAL_STATES.has(upstream.state)) return { text: `${up} landed`, tone: "pine" };
-  if (kind === "scope-overlap")
-    return ["draft", "ready"].includes(consumer.state)
-      ? { text: `waits for ${up}: the same files`, tone: "amber" }
-      : { text: `shares files with ${up}`, tone: "muted" };
-  const gate = listGates(db, upstream.projectId, "open").find((g) => g.unitId === upstream.id);
-  if (["draft", "ready"].includes(consumer.state)) return { text: `needs ${up}'s code`, tone: "amber" };
-  if (["running", "handed_off", "verifying"].includes(consumer.state)) return { text: `builds on ${up}; lands after ${up} lands`, tone: "amber" };
+// What the link is doing now, in words, from the later unit's side.
+function edgeState(db: Db, later: Unit, earlier: Unit): DepEdge["state"] {
+  const up = `U${earlier.seq}`;
+  if (earlier.state === "dropped") return { text: `${up} was dropped`, tone: "bell" };
+  if (earlier.state === "merged") return { text: `${up} merged`, tone: "pine" };
+  const gate = listGates(db, earlier.projectId, "open").find((g) => g.unitId === earlier.id);
   if (gate) return { text: `${up} waits for you (${gate.question.split("\n")[0]!.slice(0, 80)})`, tone: "bell" };
-  return { text: `waits for ${up} to land (now ${upstream.state})`, tone: "amber" };
-}
-
-// The version the consumer's worker was handed for `upstream`, else the upstream's latest published test build.
-function buildFor(db: Db, consumer: Unit, upstream: Unit): DepEdge["build"] {
-  const repoId = upstream.repoId ?? "";
-  for (const a of listAttempts(db, consumer.id).slice().reverse()) {
-    const hit = a.sources.find((s) => s.unit === `U${upstream.seq}` && s.version);
-    if (hit) return { version: hit.version!, repoId };
-  }
-  const last = listPublications(db, upstream.id)
-    .filter((p) => p.kind === "test" && p.state === "published")
-    .at(-1);
-  return last?.version ? { version: last.version, repoId } : null;
+  if (later.state === "waiting") return { text: `waits for ${up} to merge (now ${earlier.state})`, tone: "amber" };
+  return { text: `${up} is ${earlier.state}`, tone: "amber" };
 }
 
 export function dependencyEdges(db: Db, unit: Unit): DepEdge[] {
   const edges: DepEdge[] = [];
   for (const d of listDeps(db, unit.projectId)) {
     if (d.unitId !== unit.id && d.dependsOn !== unit.id) continue;
-    const consumer = d.unitId === unit.id ? unit : getUnit(db, d.unitId);
-    const upstream = d.dependsOn === unit.id ? unit : getUnit(db, d.dependsOn);
-    const other = d.unitId === unit.id ? upstream : consumer;
+    const later = d.unitId === unit.id ? unit : getUnit(db, d.unitId);
+    const earlier = d.dependsOn === unit.id ? unit : getUnit(db, d.dependsOn);
+    const other = d.unitId === unit.id ? earlier : later;
     edges.push({
       direction: d.unitId === unit.id ? "needs" : "feeds",
-      kind: d.kind,
       other: { id: other.id, seq: other.seq, repoId: other.repoId, goal: other.goal, state: other.state },
-      build: d.kind === "needs-source" ? buildFor(db, consumer, upstream) : null,
-      state: edgeState(db, consumer, upstream, d.kind),
+      state: edgeState(db, later, earlier),
     });
   }
   return edges;

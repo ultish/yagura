@@ -45,16 +45,8 @@ export function attemptAccount(db: Db, attemptId: AttemptId, reportPath: string 
   return report ? `${recorded}\n\nIts report:\n${report}` : recorded;
 }
 
-// A finished attempt's handoff read again later (story, audit, notes to other units): what it recorded.
-export function savedHandoff(db: Db, attemptId: AttemptId, reportPath: string | null): Handoff | null {
-  const report = reportPath && existsSync(reportPath) ? readFileSync(reportPath, "utf8") : null;
-  return recordedHandoff(db, attemptId, report ?? "");
-}
-
-// The handoff the engine acts on: only what the agent recorded.
-export function readHandoff(db: Db, attemptId: AttemptId, reports: (string | null)[]): Handoff | null {
-  return recordedHandoff(db, attemptId, reports.find((r): r is string => !!r) ?? "");
-}
+// An attempt's handoff, read from what it recorded.
+export const savedHandoff = (db: Db, attemptId: AttemptId): Handoff | null => recordedHandoff(db, attemptId);
 
 export interface ExitFacts {
   timedOut: boolean;
