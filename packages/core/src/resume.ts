@@ -25,7 +25,8 @@ export type WorkerRound =
   | { kind: "first" }
   | { kind: "changes"; findings: string[] }
   | { kind: "conflict"; base: string; baseSha: Sha; files: string[] }
-  | { kind: "fresh"; reason: string };
+  | { kind: "fresh"; reason: string }
+  | { kind: "lead"; note: string };
 
 export function roundText(r: WorkerRound): string {
   switch (r.kind) {
@@ -37,6 +38,8 @@ export function roundText(r: WorkerRound): string {
       return `yagura could not merge \`${r.base}\` (now at ${r.baseSha}) into your branch; these files conflict:\n${r.files.map((f) => `- ${f}`).join("\n")}\n\nMerge the base into your branch with \`git merge ${r.baseSha}\`, resolve those files, run the tests, commit the merge, and hand off. Never rebase.`;
     case "fresh":
       return `A fresh worker takes over: ${r.reason}. The branch keeps what earlier workers committed.`;
+    case "lead":
+      return `Your unit lead sends the unit back to you: ${r.note}`;
   }
 }
 

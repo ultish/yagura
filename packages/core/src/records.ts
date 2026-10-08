@@ -49,12 +49,16 @@ export const DecisionRecord = z
     reason: text,
     note: text.nullable().default(null),
     question: text.nullable().default(null),
+    reply: text.nullable().default(null),
   })
   .strict()
   .superRefine((d, ctx) => {
     const issue = (message: string, path: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, message, path: [path] });
     if (d.action === "ask" && !d.question) issue("ask needs --question for the developer", "question");
-    if ((d.action === "answer" || d.action === "reply") && !d.note) issue(`${d.action} needs --note: the words to send`, "note");
+    if (d.action === "answer" && !d.note) issue("answer needs --note: the answer the judge reads", "note");
+    if ((d.action === "resume" || d.action === "fresh") && !d.note) issue(`${d.action} needs --note: what the worker should do`, "note");
+    if (d.action === "reply" && !d.reply) issue("reply needs --reply: the words to post on the pull request", "reply");
+    if (d.action !== "ask" && d.question) issue("--question only goes with ask", "question");
   });
 
 export const RECORD_SCHEMAS = {
@@ -186,6 +190,9 @@ export function describeRecords(db: Db, attemptId: AttemptId): string | null {
       ...(j.question ? [`Question: ${j.question}`] : []),
     );
   const d = getRecord(db, attemptId, "decision");
-  if (d) out.push(`Decision: ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}${d.question ? ` (question: ${d.question})` : ""}`);
+  if (d)
+    out.push(
+      `Decision: ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}${d.question ? ` (question: ${d.question})` : ""}${d.reply ? ` (replied: ${d.reply})` : ""}`,
+    );
   return out.length ? out.join("\n") : null;
 }

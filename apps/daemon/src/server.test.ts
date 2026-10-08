@@ -77,6 +77,27 @@ const post = (path: string, body: unknown) =>
   app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("daemon API", () => {
+  it("wakes a stuck unit's lead with the developer's note, says why when it cannot, and retries a stuck unit", async () => {
+    const url = `/api/projects/${project}/units/1/wake`;
+    const refused = await post(url, { note: "look" });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: string }).error).toBe("U1 is building; the unit lead looks at a stuck or ready unit");
+    db.prepare("UPDATE units SET state = 'stuck' WHERE seq = 1").run();
+    expect((await post(url, { note: "I want emojis" })).status).toBe(200);
+    expect(db.prepare("SELECT json_extract(data_json, '$.note') AS note FROM events WHERE type = 'lead.wake'").all()).toEqual([{ note: "I want emojis" }]);
+    const lead = createAttempt(db, 1 as never, "claude", null);
+    updateAttempt(db, lead.id, { state: "running", role: "lead" });
+    const twice = await post(url, {});
+    expect(twice.status).toBe(409);
+    expect(((await twice.json()) as { error: string }).error).toBe("U1's unit lead is already deciding");
+    updateAttempt(db, lead.id, { state: "handed_off" });
+    expect((await post(`/api/projects/${project}/units/1/retry`, { note: "try the store" })).status).toBe(200);
+    expect(db.prepare("SELECT state, notes_json FROM units WHERE seq = 1").get()).toEqual({
+      state: "waiting",
+      notes_json: JSON.stringify(["The developer: try the store"]),
+    });
+  });
+
   it("imports, lists, exports, and deletes environment templates, all in the store", async () => {
     const post = (path: string, body: object) =>
       app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });

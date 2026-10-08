@@ -8,6 +8,7 @@ import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { checkRetroWatch, scanReverts, watchingFor } from "./retro.js";
 import { currentRound, runWorkerRound } from "./runner.js";
 import { runJudgeRound } from "./judge.js";
+import { pendingWake, runLeadRound } from "./lead.js";
 import { checkReady, syncWithBase, unitsOnBase } from "./merge.js";
 import { ensureMirror, resolveRef } from "./git.js";
 import { readiness, runningAttempts } from "./schedule.js";
@@ -49,7 +50,7 @@ export interface EngineOptions {
 export const LANDING_CUTOFF = 0.7;
 const COST_WARNING = 0.8;
 const PLAN_TRIGGERS = ["merged", "stuck", "dropped"];
-const YAGURA_GATES = ["report", "land", "environment", "review", "manager"];
+const YAGURA_GATES = ["report", "land", "environment", "lead"];
 
 function suggestsFollowUps(db: Db, unitId: UnitId): boolean {
   const last = listAttempts(db, unitId)
@@ -117,7 +118,7 @@ export class Engine {
     for (const a of listAttempts(this.db, unitId))
       if (a.state === "running" || a.state === "queued") updateAttempt(this.db, a.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
     if (unit.state === "building" || unit.state === "judging")
-      transitionUnit(this.db, unitId, "stuck", { reason: `engine error: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}` });
+      transitionUnit(this.db, unitId, "stuck", { reason: `engine error: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`, trigger: "engine" });
     // A unit that crashes before it starts would crash again on the next tick, so it waits for someone to look.
     else if (unit.state === "waiting")
       transitionUnit(this.db, unitId, "stuck", { reason: `engine error before it started: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}` });
@@ -152,7 +153,7 @@ export class Engine {
            (e.type = 'unit.state' AND json_extract(e.data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(e.data_json, '$.drain') IS NULL)
            OR (e.type IN ('gate.answered', 'gate.defaulted') AND COALESCE(json_extract(e.data_json, '$.kind'), '') NOT IN (${YAGURA_GATES.map(() => "?").join(", ")}))
            OR (e.type = 'disagreement.recorded' AND json_extract(e.data_json, '$.action') = 'follow-up')
-           OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed', 'retro.reverted'))`,
+           OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed', 'retro.reverted', 'lead.replan'))`,
       )
       .all(project.id, since, ...PLAN_TRIGGERS, ...YAGURA_GATES) as { type: string; unit_id: UnitId | null; data_json: string; unit_type: string | null }[];
     const open = () => listUnits(this.db, project.id).some((u) => isBuild(u) && !TERMINAL_STATES.has(u.state) && u.state !== "stuck");
@@ -190,6 +191,12 @@ export class Engine {
     for (const u of listUnits(this.db, project.id)) {
       if (!isBuild(u) || this.inflight.has(`unit:${u.id}`)) continue;
       const label = `U${u.seq}: ${u.goal.slice(0, 80)}`;
+      const wake = u.state === "stuck" || u.state === "ready" ? pendingWake(this.db, u) : null;
+      if (wake) {
+        if (this.slotFree(project, resolveSetting(this.db, "role.lead.harness", at(u)).value))
+          this.unitTask(u.id, `unit lead ${label} (${wake.trigger})`, () => runLeadRound(this.ctx, u.id, wake));
+        continue;
+      }
       if ((u.state === "waiting" && startable.has(u.id)) || u.state === "building") {
         if (!this.slotFree(project, resolveSetting(this.db, "role.worker.harness", at(u)).value)) continue;
         if (u.state === "waiting") transitionUnit(this.db, u.id, "building", { round: this.roundFromWaiting(u) });
@@ -458,7 +465,9 @@ export class Engine {
       if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
       // A ready unit is settled only while it waits for the developer's go.
       const waitsForYou = (u: Unit) => listGates(this.db, p.id, "open").some((g) => g.unitId === u.id);
-      return !listUnits(this.db, p.id).some((u) => u.state === "building" || u.state === "judging" || (u.state === "ready" && !waitsForYou(u)));
+      return !listUnits(this.db, p.id).some(
+        (u) => u.state === "building" || u.state === "judging" || (u.state === "ready" && !waitsForYou(u)) || (u.state === "stuck" && pendingWake(this.db, u)),
+      );
     });
   }
 

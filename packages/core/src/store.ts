@@ -110,6 +110,12 @@ export function transitionUnit(db: Db, unitId: UnitId, to: UnitState, data: Reco
     if (!canTransition(row.state, to)) throw new IllegalTransition(unitId, row.state, to);
     db.prepare("UPDATE units SET state = ?, updated_at = ? WHERE id = ?").run(to, now(), unitId);
     recordEvent(db, "unit.state", { projectId: row.project_id, unitId }, { from: row.state, to, ...data });
+    // A merge question is about the head that was ready; once the unit leaves ready it no longer has an answer.
+    if (row.state === "ready")
+      for (const g of db.prepare("SELECT id FROM gates WHERE unit_id = ? AND kind = 'land' AND state = 'open'").all(unitId) as { id: number }[]) {
+        db.prepare("UPDATE gates SET state = 'cancelled', resolved_at = ? WHERE id = ?").run(now(), g.id);
+        recordEvent(db, "gate.cancelled", { projectId: row.project_id, unitId }, { gate: g.id, reason: `the unit went ${to}` });
+      }
   })();
 }
 

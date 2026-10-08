@@ -38,7 +38,7 @@ export function generateStatus(db: Db, boot: Bootstrap, projectId: ProjectId, si
   const events = db
     .prepare(
       `SELECT id, type, unit_id, data_json FROM events WHERE project_id = ? AND id > ?
-       AND type IN ('unit.state', 'attempt.method_miss', 'plan.rejected', 'gate.answered', 'unit.note')
+       AND type IN ('unit.state', 'attempt.method_miss', 'plan.rejected', 'gate.answered', 'unit.note', 'lead.replan')
        ORDER BY id`,
     )
     .all(projectId, sinceEventId) as { id: number; type: string; unit_id: number | null; data_json: string }[];
@@ -55,6 +55,7 @@ export function generateStatus(db: Db, boot: Bootstrap, projectId: ProjectId, si
       if (e.type === "plan.rejected") return `- your previous plan delta was rejected: ${d.reason}`;
       if (e.type === "gate.answered") return `- gate ${d.gate} answered: ${d.answer}`;
       if (e.type === "unit.note") return `- ${u} note: ${d.note}`;
+      if (e.type === "lead.replan") return `- ${u}'s unit lead asks you to change the plan: ${d.reason}${d.note ? `. ${d.note}` : ""}`;
       return null;
     })
     .filter(Boolean);

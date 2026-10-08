@@ -5,6 +5,7 @@ import { resolveSetting } from "./config.js";
 import type { Repo, Sha, Unit, UnitId } from "./domain.js";
 import { forgeFor, getMergeRequest, recordMergeStatus } from "./forge.js";
 import { gateResolved } from "./gates.js";
+import { pendingWake, recordNewComments } from "./lead.js";
 import { ensureMirror, resolveRef } from "./git.js";
 import { layout } from "./paths.js";
 import type { WorkerRound } from "./resume.js";
@@ -91,6 +92,9 @@ export async function checkReady(ctx: RunContext, unitId: UnitId): Promise<{ rep
       transitionUnit(db, unit.id, "stuck", { reason: `its ${mr.url} was closed on the forge` });
       return null;
     }
+    // Comments wait for the unit lead before anything merges.
+    recordNewComments(db, unit, await forge.threads(mr.number));
+    if (pendingWake(db, unit)) return null;
     // A ready unit's pull request is out of draft; marking it again converges when an earlier mark was lost.
     if (status.draft) await forge.markReady(mr.number);
     head = status.headSha;
@@ -98,7 +102,7 @@ export async function checkReady(ctx: RunContext, unitId: UnitId): Promise<{ rep
     if (head === unit.approvedSha && status.failing.length) {
       const reran = db.prepare("SELECT 1 FROM events WHERE unit_id = ? AND type = 'ci.rerun' AND json_extract(data_json, '$.head') = ?").get(unit.id, head);
       if (reran) {
-        transitionUnit(db, unit.id, "stuck", { reason: `CI failed twice on ${head.slice(0, 10)}: ${status.failing.join(", ")}` });
+        transitionUnit(db, unit.id, "stuck", { reason: `CI failed twice on ${head.slice(0, 10)}: ${status.failing.join(", ")}`, trigger: "ci-failed" });
         return null;
       }
       for (const run of await forge.failedRuns(head)) await forge.rerunFailed(run.id);
@@ -112,6 +116,7 @@ export async function checkReady(ctx: RunContext, unitId: UnitId): Promise<{ rep
   }
   if ((await syncWithBase(ctx, unit.id)) !== "current") return null;
 
+  if (listGates(db, project.id, "open").some((g) => g.unitId === unit.id && g.kind === "lead")) return null;
   if (project.mergePolicy === "human") {
     const gates = listGates(db, project.id).filter((g) => g.unitId === unit.id && g.kind === "land" && g.question.includes(head.slice(0, 10)));
     const gate = gates.at(-1);

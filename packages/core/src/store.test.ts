@@ -18,6 +18,7 @@ import {
 } from "./config.js";
 import { IllegalTransition, UNIT_STATES, UNIT_TRANSITIONS, type ProjectId, type RepoId, type UnitState } from "./domain.js";
 import {
+  addGate,
   addProject,
   addRepo,
   addUnit,
@@ -131,6 +132,18 @@ describe("store", () => {
     expect(events.map((e) => JSON.parse(e.data_json))).toEqual([
       { from: "waiting", to: "building", attempt: 1 },
       { from: "building", to: "judging" },
+    ]);
+  });
+
+  it("cancels a unit's open merge question when it leaves ready, and keeps every other question", () => {
+    const u = newUnit();
+    for (const to of ["building", "judging", "ready"] as const) transitionUnit(db, u.id, to);
+    const land = addGate(db, { projectId: u.projectId, unitId: u.id, kind: "land", question: "Merge U1 at abc?", options: ["land", "hold"] });
+    const lead = addGate(db, { projectId: u.projectId, unitId: u.id, kind: "lead", question: "U1's unit lead asks: why?", options: [] });
+    transitionUnit(db, u.id, "judging");
+    expect(db.prepare("SELECT id, state FROM gates ORDER BY id").all()).toEqual([
+      { id: land, state: "cancelled" },
+      { id: lead, state: "open" },
     ]);
   });
 

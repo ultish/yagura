@@ -122,7 +122,6 @@ async function main() {
   if (mode !== "noskills")
     for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
-  if (process.env.YAGURA_ROLE === "manager") return manager();
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
   if (mode === "hang") return setTimeout(() => {}, 60_000);
   const file = mode === "scope" || mode === "scope-justified" ? "README.md" : "app/orders.py";
@@ -177,7 +176,6 @@ function resumed(sessionId) {
     return finish("Recorded what I had only written down.");
   }
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
-  if (process.env.YAGURA_ROLE === "manager") return manager();
   const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args], { encoding: "utf8" });
   const merging = /git merge ([0-9a-f]{40})/.exec(brief);
   let file;
@@ -214,47 +212,6 @@ function resumed(sessionId) {
   });
 }
 
-// FAKE_MANAGER: the action to decide (default fresh); FAKE_MANAGER=garbage answers without a usable decision.
-function manager() {
-  const action = process.env.FAKE_MANAGER ?? "fresh";
-  if (action === "garbage") return finish("## Status\nsuccess\n\nI am not sure what to do.\n");
-  const repo = /^- U\d+ \(([\w-]+)\):/m.exec(brief)?.[1] ?? "repo";
-  const lines = [`action: ${action}`, `reason: the fake manager chose ${action}`];
-  if (action === "relay") {
-    const to = [...brief.slice(brief.indexOf("## OTHER UNITS")).matchAll(/^- (U\d+) \(\w+\):/gm)]
-      .map((m) => m[1])
-      .slice(0, Number(process.env.FAKE_RELAY_TO ?? 1));
-    lines.push(`to: ${to.join(", ")}`, "note: the shared helper moved");
-  }
-  if (action === "fresh" || action === "resume") lines.push("note: write it with care");
-  if (action === "ask") lines.push("question: Should it try again?");
-  if (action === "investigate") lines.push("question: Why does the scenario fail on head?");
-  const delta =
-    action === "split"
-      ? "\n```json\n" +
-        JSON.stringify({
-          add: ["a", "b"].map((k) => ({
-            key: `split-${k}`,
-            repo,
-            goal: `half ${k}`,
-            acceptance: [`half ${k} exists`],
-            playbook: "feature",
-          })),
-          summary: "split in two",
-        }) +
-        "\n```\n"
-      : "";
-  if (canRecord()) {
-    const field = (k) => lines.find((l) => l.startsWith(`${k}: `))?.slice(k.length + 2);
-    const decide = ["decide", action, "--reason", field("reason")];
-    for (const k of ["note", "question", "to"]) if (field(k)) decide.push(`--${k}`, field(k));
-    const plan = action === "split" ? [["plan", "--json", delta.replace(/```json|```/g, "").trim()]] : [];
-    record([...plan, decide]);
-    return finish(`I chose ${action}.\n\n## Decision\naction: stop\n`);
-  }
-  finish(`## Status\nsuccess\n\n## Decision\n${lines.join("\n")}\n${delta}`);
-}
-
 function finish(text) {
   const delay = Number(process.env.FAKE_DELAY_MS ?? 0);
   if (delay) {
@@ -286,6 +243,18 @@ async function engine(role) {
     }
     return finish("Plan:\n```json\n" + JSON.stringify(delta) + "\n```");
   }
+  // FAKE_LEAD=<action> decides that; otherwise the lead answers by what woke it: a comment is sent to the worker with a reply on the
+  // pull request, a judge's question is answered, anything else gets a fresh worker.
+  if (role === "lead") {
+    const woken = /## WHY YOU WERE WOKEN\n(.*)/.exec(brief)?.[1] ?? "";
+    const action = process.env.FAKE_LEAD ?? (/commented/.test(woken) ? "resume" : /judge asks/.test(woken) ? "answer" : "fresh");
+    const call = ["decide", action, "--reason", `the fake lead chose ${action}`];
+    if (["resume", "fresh", "answer"].includes(action)) call.push("--note", "do what was asked, and say so in a test");
+    if (/commented/.test(woken) || action === "reply") call.push("--reply", "Thanks, the worker is on it.");
+    if (action === "ask") call.push("--question", "Should it try again?");
+    record([call]);
+    return finish(`I chose ${action}.`);
+  }
   // FAKE_JUDGE_CHANGES=U2,U3: the judge asks those units for changes in their first round and approves after.
   if (role === "judge") {
     const ran = /run:(\d+)/.exec(yg("evidence", "run", "--", "true")?.out ?? "")?.[1];
@@ -301,6 +270,11 @@ async function engine(role) {
     }
     record([["judge", "approve", "--runs", ran]]);
     return finish(`Approved on run:${ran}.`);
+  }
+  // FAKE_WORKER_STUCK=U2: that unit's first worker hands off stuck; a later one builds as usual.
+  if (role === "worker" && (process.env.FAKE_WORKER_STUCK ?? "").split(",").includes(process.env.YAGURA_UNIT) && !brief.includes("A fresh worker takes over")) {
+    record([["handoff", "stuck", "--reason", "the spec does not say which rounding to use"]]);
+    return finish("Stuck.");
   }
   if (role === "worker") {
     const base = `app/${/## GOAL\nwrite ([\w-]+)/.exec(brief)?.[1] ?? "unit"}`;

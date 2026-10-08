@@ -249,12 +249,17 @@ async function applyVerdict(ctx: RunContext, unit: Unit, attempt: Attempt): Prom
     if (failedBefore) return transitionUnit(db, unit.id, "stuck", { reason: `two judge sessions in a row ended without a verdict (${attempt.failureMode})` });
     return transitionUnit(db, unit.id, "judging", { reason: `the judge ended without a verdict (${attempt.failureMode}); a fresh judge looks again` });
   }
-  if (verdict.verdict === "ask") return transitionUnit(db, unit.id, "stuck", { reason: `the judge asks: ${verdict.question}`, question: verdict.question });
+  if (verdict.verdict === "ask")
+    return transitionUnit(db, unit.id, "stuck", { reason: `the judge asks: ${verdict.question}`, question: verdict.question, trigger: "judge-asks" });
   if (verdict.verdict === "changes") {
     const rounds = changeRounds(db, unit.id);
     const max = resolveSetting(db, "judge.max_rounds", { projectId: unit.projectId, repoId: unit.repoId ?? undefined }).value;
     if (rounds >= max)
-      return transitionUnit(db, unit.id, "stuck", { reason: `the judge asked for changes ${rounds} rounds running`, findings: verdict.findings });
+      return transitionUnit(db, unit.id, "stuck", {
+        reason: `the judge asked for changes ${rounds} rounds running`,
+        findings: verdict.findings,
+        trigger: "changes-rounds",
+      });
     return transitionUnit(db, unit.id, "building", { round: { kind: "changes", findings: verdict.findings } satisfies WorkerRound });
   }
   const head = attempt.headSha!;

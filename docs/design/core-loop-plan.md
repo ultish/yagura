@@ -237,41 +237,41 @@ Each live lane runs against its own isolated checkout, a worktree, or an `Agent`
 
 **Files.**
 
-- [ ] Rewrite `packages/core/src/manager.ts` as `packages/core/src/lead.ts`.
-- [ ] Rewrite `plugins/yagura/skills/yagura-manager/SKILL.md` as `yagura-unit-lead/SKILL.md`.
-- [ ] Edit `packages/core/src/forge.ts` and `packages/core/src/engine.ts`.
+- [x] Rewrite `packages/core/src/manager.ts` as `packages/core/src/lead.ts`.
+- [x] Rewrite `plugins/yagura/skills/yagura-manager/SKILL.md` as `yagura-unit-lead/SKILL.md`.
+- [x] Edit `packages/core/src/forge.ts` and `packages/core/src/engine.ts`. `forge.ts` needed no change: `threads` and `reply` already serve; comments are read in `merge.ts`.
 
 **Build.**
 
-- [ ] Wake the unit lead on each trigger in the design's table, as a `LEAD_TRIGGERS` map from trigger to brief section in `lead.ts`.
-- [ ] Read comments on ready pull requests only, and route each to the unit lead.
-- [ ] Let `yagura decide` resume the worker, start a fresh one, reply on the pull request, ask the developer, ask the project lead, or drop the unit.
+- [x] Wake the unit lead on each trigger in the design's table, as a `LEAD_TRIGGERS` map from trigger to brief section in `lead.ts`. Each move into stuck carries its trigger; yagura's own errors carry `engine` and go to the developer instead.
+- [x] Read comments on ready pull requests only, and route each to the unit lead.
+- [x] Let `yagura decide` resume the worker, start a fresh one, reply on the pull request, ask the developer, ask the project lead, or drop the unit. Also `answer` (the judge's question), and `--reply` with any action.
 
 **You see.**
 
-- [ ] A comment on a ready fake pull request wakes the unit lead, and its reply shows on the fake pull request signed as the unit lead.
+- [x] A comment on a ready fake pull request wakes the unit lead, and its reply shows on the fake pull request signed as the unit lead. Fake PR #1 holds the comment and `🧭 **yagura unit lead** · A4 … Thanks, the worker is on it.`
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] `lead.test.ts` gains one case per trigger with the decision the fake lead records and the resulting state. Run `caffeinate -is pnpm -r test`.
+- [x] `lead.test.ts` gains one case per trigger with the decision the fake lead records and the resulting state. Run `caffeinate -is pnpm -r test`. 10 cases (8 triggers, ask and its answer, the decision limit and a unit right first time); core 228, web 33, daemon 23.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. One lane at the step head, per the boot recipe, by the developer's one-agent limit.
 
-- [ ] Lane 1. Comment on a ready unit's fake pull request asking for a change. Save `cl5-comment.png`. Pass when the worker commits the fix, the judge approves again, and the unit merges.
+- [x] Lane 1. Comment on a ready unit's fake pull request asking for a change. Save `cl5-comment.png`. Pass when the worker commits the fix, the judge approves again, and the unit merges. U2: `waiting → building → judging → ready → building → judging → ready → merged`; the old merge gate was cancelled and a new one asked at the new head. Screenshot `/tmp/swarm-cl5/worker-1/cl5-comment.png` (JPEG data).
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] Metric. Unit lead sessions per unit with no trigger.
-- [ ] Probe. Count lead attempts in the CL4 two-unit run.
-- [ ] Baseline. Record the CL4 head count, zero, first.
-- [ ] Rule. A unit right the first time wakes no unit lead. Fail at one.
+- [x] Metric. Unit lead sessions per unit with no trigger.
+- [x] Probe. Count lead attempts in the CL4 two-unit run.
+- [x] Baseline. Record the CL4 head count, zero, first. 0.
+- [x] Rule. A unit right the first time wakes no unit lead. Fail at one. 0 in the CL4 run; in this lane only U2 (commented on) had a lead session, U3 none.
 
 **Review gate.** None. CL5 is not review-gated.
 
 **Merge.**
 
-- [ ] The step's gates, lane, and probe pass at its last commit on `core-loop`.
-- [ ] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
+- [x] The step's gates, lane, and probe pass at its last commit on `core-loop`.
+- [x] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
 
 ## Plan units and answer issues on the new model (CL6)
 

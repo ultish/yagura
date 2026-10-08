@@ -68,7 +68,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  for (const k of ["FAKE_JUDGE_CHANGES", "FAKE_BASE_MOVE", "FAKE_JUDGE"]) delete process.env[k];
+  for (const k of ["FAKE_JUDGE_CHANGES", "FAKE_BASE_MOVE", "FAKE_JUDGE", "FAKE_WORKER_STUCK"]) delete process.env[k];
 });
 
 let ghState: string;
@@ -208,6 +208,19 @@ describe("Engine", () => {
     expect(await git(["show", "main:app/a/p-U2.txt"], { gitDir: origin })).toBe("work, merged with the base");
   }, 60_000);
 
+  it("wakes the unit lead when a worker is stuck, and the fresh worker it starts takes the unit to a merge", async () => {
+    process.env.FAKE_WORKER_STUCK = "U2";
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    const u2 = workUnits().find((u) => u.seq === 2)!;
+    expect(states(u2.id)).toEqual(["building", "stuck", "building", "judging", "ready", "merged"]);
+    expect(listAttempts(db, u2.id).map((x) => x.role)).toEqual(["worker", "lead", "worker", "judge"]);
+    expect(
+      workUnits()
+        .filter((u) => u.seq !== 2)
+        .flatMap((u) => listAttempts(db, u.id).map((x) => x.role)),
+    ).not.toContain("lead");
+  }, 60_000);
+
   it("sticks a unit that crashes before it starts instead of starting it again every tick", async () => {
     setSetting(db, "project", project, "role.worker.harness", "missing-harness");
     const log: string[] = [];
@@ -216,7 +229,7 @@ describe("Engine", () => {
     expect(work.filter((u) => u.state === "stuck").length).toBeGreaterThan(0);
     expect(log.filter((l) => l.startsWith("✗ worker")).length).toBe(work.filter((u) => u.state === "stuck").length);
     expect(db.prepare("SELECT data_json FROM events WHERE type = 'unit.state' AND json_extract(data_json, '$.to') = 'stuck' LIMIT 1").get()).toEqual({
-      data_json: JSON.stringify({ from: "building", to: "stuck", reason: "engine error: no adapter for harness missing-harness" }),
+      data_json: JSON.stringify({ from: "building", to: "stuck", reason: "engine error: no adapter for harness missing-harness", trigger: "engine" }),
     });
   });
 

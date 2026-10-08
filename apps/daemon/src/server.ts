@@ -3,6 +3,7 @@ import { extname, join, normalize } from "node:path";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
+  askLead,
   addUnitNote,
   deleteTemplate,
   exportTemplate,
@@ -310,11 +311,18 @@ export function createApp(opts: ServerOptions): Hono {
   app.post("/api/projects/:id/units/:seq/retry", async (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
     const note = String(((await c.req.json().catch(() => ({}))) as { note?: unknown }).note ?? "").trim();
-    if (!["blocked", "failed", "rejected"].includes(unit.state))
-      return c.json({ error: `U${unit.seq} is ${unit.state}; only blocked, failed, or rejected units can be retried` }, 409);
-    if (note) addUnitNote(db, unit.id, `Operator: ${note}`);
-    bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).length + 1);
-    transitionUnit(db, unit.id, "ready", { by: "operator", note: note || null });
+    if (unit.state !== "stuck") return c.json({ error: `U${unit.seq} is ${unit.state}; only a stuck unit can be retried` }, 409);
+    if (note) addUnitNote(db, unit.id, `The developer: ${note}`);
+    bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).filter((a) => a.role === "worker").length + 1);
+    transitionUnit(db, unit.id, "waiting", { by: "developer", reason: note || "retried by the developer" });
+    return c.json(unitView(db, getUnit(db, unit.id)));
+  });
+
+  app.post("/api/projects/:id/units/:seq/wake", async (c) => {
+    const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
+    const note = String(((await c.req.json().catch(() => ({}))) as { note?: unknown }).note ?? "").trim();
+    const refused = askLead(db, unit, note || "Look at this unit now.");
+    if (refused) return c.json({ error: refused }, 409);
     return c.json(unitView(db, getUnit(db, unit.id)));
   });
 

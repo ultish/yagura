@@ -71,6 +71,7 @@ import {
   parseClaudeLine,
   resolveSetting,
   runWorkerRound,
+  askLead,
   getRecord,
   setSetting,
   projectSkillChecks,
@@ -157,6 +158,7 @@ const USAGE = `yagura — agent orchestration
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
   yagura unit requeue|drop <project> <unit#> [--note <text>]   requeue puts a stuck unit back to waiting; drop gives it up
+  yagura unit wake <project> <unit#> --note <text>          wake a stuck or ready unit's lead now, with your note
   yagura run <project> <unit#>           run one worker round of a unit (debugging; the daemon does this)
   yagura evidence run [--label <name>] [--at base] -- <command>   (inside an agent session: a recorded run on its commit)
   yagura show <project> [unit#]
@@ -364,6 +366,13 @@ async function main() {
         issue: { type: "string", multiple: true },
       });
       const projectId = positionals[1] as ProjectId | undefined;
+      if (positionals[0] === "wake" && projectId && positionals[2]) {
+        const u = getUnitBySeq(db, projectId, Number(positionals[2]));
+        const refused = askLead(db, u, values.note ?? "Look at this unit now.");
+        if (refused) fail(refused);
+        console.log(`U${u.seq}'s unit lead is woken; it reads your note first`);
+        return;
+      }
       if ((positionals[0] === "requeue" || positionals[0] === "drop") && projectId && positionals[2]) {
         const u = getUnitBySeq(db, projectId, Number(positionals[2]));
         if (values.note) addUnitNote(db, u.id, values.note);

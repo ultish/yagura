@@ -107,7 +107,7 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
 
   const round = currentRound(db, unitId);
   const choice =
-    round.kind === "changes" || round.kind === "conflict"
+    round.kind === "changes" || round.kind === "conflict" || round.kind === "lead"
       ? chooseResume(listAttempts(db, unit.id), {
           enabled: setting("work.resume_on_rejection"),
           canResume: adapter.canResume,
@@ -259,7 +259,12 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
   write(paths.handoff(project.id, unit.seq, attempt.n), report ?? "");
   db.prepare("INSERT INTO search (body, kind, ref_id, project_id) VALUES (?, 'handoff', ?, ?)").run(report ?? "", String(attempt.id), project.id);
   updateAttempt(db, attempt.id, { state: "handed_off", endedAt, exitCode: session.exitCode, headSha: head, handoffStatus: handoff.status });
-  if (handoff.status === "stuck") return transitionUnit(db, unit.id, "stuck", { attempt: attempt.n, reason: handoff.reason ?? "the worker said it is stuck" });
+  if (handoff.status === "stuck")
+    return transitionUnit(db, unit.id, "stuck", {
+      attempt: attempt.n,
+      reason: handoff.reason ?? "the worker said it is stuck",
+      trigger: round.kind === "conflict" ? "conflict" : "worker-stuck",
+    });
   if (session.missingSkills.length && setting("method.enforce_required_skills")) {
     addUnitNote(
       db,
