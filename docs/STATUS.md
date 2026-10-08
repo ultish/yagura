@@ -2,7 +2,7 @@
 
 Updated 2026-10-07 (the §28 run's small items; handoff from 2026-10-06 below). Older material is in `docs/STATUS-ARCHIVE.md`; read it only when you need the history of something.
 
-**Agreed 2026-10-08: the core loop is being redesigned (`docs/design/core-loop.md`).** One judge instead of verifier, reviewer, and arbiter; goals instead of file lists; one draft pull request per unit, merged with a merge commit; the unit lead owns the pull request once it is ready; no verify pack. Built as if from scratch, not patched onto the current code. Next: a second document mapping it onto the code (what stays, what is rewritten, what is deleted), then the build. Until then, do not extend the parts it replaces.
+**Agreed 2026-10-08: the core loop is being redesigned (`docs/design/core-loop.md`).** One judge instead of verifier, reviewer, and arbiter; goals instead of file lists; one draft pull request per unit, merged with a merge commit; the unit lead owns the pull request once it is ready; no verify pack. Built as if from scratch, not patched onto the current code. The build plan is `docs/design/core-loop-plan.md` (steps CL1 to CL8 on the branch `core-loop`, clean break of data, merged into `main` with a merge commit); the developer said go on 2026-10-08. Start at the first unchecked box, tick boxes as their evidence exists, and work with one agent (at most one subagent): the developer's token budget is limited. Run tests under `caffeinate -is` (the Mac sleeps). Until CL8, do not extend the parts it replaces on `main`.
 
 **Resume here (handoff, 2026-10-06, end of the §28 session):**
 
