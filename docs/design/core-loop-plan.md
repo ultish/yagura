@@ -64,39 +64,39 @@ Each live lane runs against its own isolated checkout, a worktree, or an `Agent`
 
 **Files.**
 
-- [ ] Delete `packages/core/src/verify.ts`, `verdict.ts`, `review.ts`, `triage.ts`, `amend.ts`, `rebase.ts`, `pack.ts`, `packs.ts`, `packedits.ts`, `envpause.ts`, `handoff.ts`, `investigate.ts`, `sources.ts`, `followups.ts`, and their tests.
-- [ ] Delete `plugins/yagura/skills/yagura-verifier`, `yagura-reviewer`, `yagura-review-triage`, `yagura-rebase`, and `yagura-pack`.
-- [ ] Edit `packages/core/src/engine.ts`, `land.ts`, `schedule.ts`, `story.ts`, `records.ts`, `report.ts`, `followups.ts`, `evidence.ts`, `publish.ts`, and `index.ts` to drop every import of the deleted modules.
+- [x] Delete `packages/core/src/verify.ts`, `verdict.ts`, `review.ts`, `triage.ts`, `amend.ts`, `rebase.ts`, `pack.ts`, `packs.ts`, `packedits.ts`, `envpause.ts`, `handoff.ts`, `investigate.ts`, `sources.ts`, `followups.ts`, and their tests. Done in commit; `git diff --stat main` lists them.
+- [x] Delete `plugins/yagura/skills/yagura-verifier`, `yagura-reviewer`, `yagura-review-triage`, `yagura-rebase`, and `yagura-pack`.
+- [x] Edit `packages/core/src/engine.ts`, `land.ts`, `schedule.ts`, `story.ts`, `records.ts`, `report.ts`, `followups.ts`, `evidence.ts`, `publish.ts`, and `index.ts` to drop every import of the deleted modules. `land.ts` and `scope.ts` were deleted rather than edited, and the callers also in `agent`, `finish`, `records`, `record-cli`, `repos`, `proposal`, `publish`, `chain`, `manager`, `brief`, `skills`, the CLI and the daemon were cut.
 
 **Build.**
 
-- [ ] Remove the deleted modules and every caller branch that reached them. Scope fields, tiers, and the verify pack go with them.
-- [ ] Leave the engine planning and running workers only. A worker hand-off ends the unit at `handed_off`. That is the planned break this step allows on the branch.
+- [x] Remove the deleted modules and every caller branch that reached them. Scope fields, tiers, and the verify pack go with them.
+- [x] Leave the engine planning and running workers only. A worker hand-off ends the unit at `handed_off`. That is the planned break this step allows on the branch.
 
 **You see.**
 
-- [ ] `pnpm -r typecheck` prints no error, and `git diff --stat main` shows deletions only, apart from the edited callers.
+- [x] `pnpm -r typecheck` prints no error, and `git diff --stat main` shows deletions only, apart from the edited callers. Zero errors; diff is 267 insertions, 8608 deletions.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] The remaining suites pass. Run `caffeinate -is pnpm -r test`.
+- [x] The remaining suites pass. Run `caffeinate -is pnpm -r test`. core 222, web 34, daemon 23 under `caffeinate -is`.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. One lane at the step head, per the boot recipe, by the developer's one-agent limit.
 
-- [ ] Lane 1. Start a project with the fake agent and watch a worker hand off. Save `cl1-handoff.png`. Pass when the unit shows `handed_off` and the log shows no verify, review, or pack unit.
+- [x] Lane 1. Start a project with the fake agent and watch a worker hand off. Save `cl1-handoff.png`. Pass when the unit shows `handed_off` and the log shows no verify, review, or pack unit. Real daemon and CLI on a scratch home: U2 and U3 `handed_off`, U4 waits; daemon log has no verify, review, or pack line. Screenshot `/tmp/swarm-cl1/worker-1/cl1-handoff.png` (JPEG data).
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] Metric. Lines in `packages/core/src` without tests.
-- [ ] Probe. `cat $(ls packages/core/src/*.ts | grep -v test) | wc -l`, at `main` and at the head.
-- [ ] Baseline. Record the `main` count first.
-- [ ] Rule. The head must be at least 4000 lines smaller, or the step left callers behind.
+- [x] Metric. Lines in `packages/core/src` without tests.
+- [x] Probe. `cat $(ls packages/core/src/*.ts | grep -v test) | wc -l`, at `main` and at the head.
+- [x] Baseline. Record the `main` count first. main 16805.
+- [x] Rule. The head must be at least 4000 lines smaller, or the step left callers behind. head 11924, 4881 smaller.
 
 **Review gate.** None. CL1 is not review-gated.
 
 **Merge.**
 
-- [ ] The step's gates, lane, and probe pass at its last commit on `core-loop`.
+- [x] The step's gates, lane, and probe pass at its last commit on `core-loop`.
 - [ ] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
 
 ## Lay the new unit model and schema (CL2)

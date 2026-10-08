@@ -1,29 +1,12 @@
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Bootstrap } from "./config.js";
-import { resolveSetting } from "./config.js";
-import {
-  REPIN_HARNESS,
-  TERMINAL_STATES,
-  type PackPublish,
-  type ProjectId,
-  type PublicationKind,
-  type PublicationState,
-  type Repo,
-  type RepoId,
-  type Sha,
-  type Unit,
-  type UnitId,
-} from "./domain.js";
+import { type ProjectId, type PublicationKind, type PublicationState, type Repo, type RepoId, type Sha, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
 import { runShell } from "./evidence.js";
-import { addDetachedWorktree, addWorktree, commitAll, ensureMirror, git, headSha, readFileAt, removeWorktree } from "./git.js";
-import { verifiedHead } from "./land.js";
-import { parsePack } from "./pack.js";
-import { layout, unitRef } from "./paths.js";
-import { addVerifyUnit } from "./runner.js";
-import { reverifyAgainstSources, sourceDeps, sourceSha } from "./sources.js";
-import { createAttempt, getProject, getRepo, getUnit, listDeps, listUnits, now, recordEvent, transitionUnit, updateAttempt, type Db } from "./store.js";
+import { addDetachedWorktree, ensureMirror, removeWorktree } from "./git.js";
+import { layout } from "./paths.js";
+import { getProject, getRepo, getUnit, now, recordEvent, type Db } from "./store.js";
 
 export interface Publication {
   id: number;
@@ -89,50 +72,13 @@ function setPublication(db: Db, id: number, fields: Partial<Pick<Publication, "v
 export const releaseVersion = (raw: string) => raw.trim().replace(/-SNAPSHOT$/, "");
 
 // A snapshot stays a snapshot (1.5.0-SNAPSHOT becomes 1.5.0-yg-p-u2-ab12cd3-SNAPSHOT), so a build range such as 1.5.+ never resolves it
-// and nothing yagura publishes can pass for a release. Other ecosystems use the pack's own suffix.
+// and nothing yagura publishes can pass for a release. Other ecosystems use the repo's own suffix.
 export function qualifiedVersion(base: string, projectId: ProjectId, seq: number, sha: Sha, suffix: string): string {
   const project = projectId
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
   return `${releaseVersion(base)}-yg-${project}-u${seq}-${sha.slice(0, 7)}${/-SNAPSHOT$/.test(base.trim()) ? "-SNAPSHOT" : suffix}`;
-}
-
-// Units in another repo that build on this one's artifact and are not finished.
-function liveConsumers(db: Db, up: Unit, kinds: readonly string[]): Unit[] {
-  return listDeps(db, up.projectId)
-    .filter((d) => d.dependsOn === up.id && kinds.includes(d.kind))
-    .map((d) => getUnit(db, d.unitId))
-    .filter((c) => c.repoId !== up.repoId && !TERMINAL_STATES.has(c.state));
-}
-
-export type UpstreamArtifact = { version: string } | { wait: string } | { stuck: string } | null;
-
-// The artifact a consumer in `consumerRepo` builds against, what it waits for, or why it cannot get one; null when the upstream's repo does not publish.
-// yagura publishes snapshots only: a landed upstream's consumers keep the snapshot they were proven against (none when it never had one), and the real release is the developer's merge.
-export function upstreamArtifact(db: Db, up: Unit, consumerRepo: RepoId | null): UpstreamArtifact {
-  if (!up.repoId || up.repoId === consumerRepo) return null;
-  const repo = getRepo(db, up.repoId);
-  if (!repo.publish) return null;
-  if (up.state === "done" && !up.landedSha) return null;
-  const tests = listPublications(db, up.id).filter((p) => p.kind === "test");
-  if (up.landedSha) {
-    const last = tests.filter((p) => p.state === "published").at(-1);
-    return last ? { version: last.version! } : null;
-  }
-  const head = sourceSha(db, up);
-  const test = tests.find((p) => p.sha === head);
-  if (test?.state === "published") return { version: test.version! };
-  if (test?.state === "failed") return { stuck: `the test build of U${up.seq} in ${repo.id} failed: ${test.reason}` };
-  return { wait: `waits for the test build of U${up.seq} in ${repo.id}` };
-}
-
-async function trunkPublish(ctx: { db: Db; boot: Bootstrap }, repo: Repo): Promise<PackPublish | null> {
-  const mirror = layout(ctx.boot).mirror(repo.id);
-  const pack = parsePack(await readFileAt(mirror, `origin/${repo.defaultBranch}`, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath);
-  const publish = pack.ok ? (pack.pack.publish ?? null) : null;
-  ctx.db.prepare("UPDATE repos SET publish_json = ? WHERE id = ?").run(publish ? JSON.stringify(publish) : null, repo.id);
-  return publish;
 }
 
 const lastLine = (text: string) =>
@@ -195,7 +141,7 @@ export async function publishTestBuild(ctx: { db: Db; boot: Bootstrap }, unitId:
   const { db } = ctx;
   const unit = getUnit(db, unitId);
   const repo = getRepo(db, unit.repoId!);
-  const publish = await trunkPublish(ctx, repo);
+  const publish = repo.publish;
   if (!publish || publicationAt(db, unit.id, "test", head)) return null;
   const log = startLog(ctx, unit, "test", head);
   const id = insertPublication(db, unit, "test", head, "publishing", log);
@@ -203,7 +149,7 @@ export async function publishTestBuild(ctx: { db: Db; boot: Bootstrap }, unitId:
   await inCheckout(ctx, unit, repo, head, async (dir) => {
     const base = await step(ctx, unit, log, "version", publish.version, dir, { YAGURA_SHA: head });
     if (!base.ok || !base.stdout.trim()) {
-      setPublication(db, id, { state: "failed", reason: base.ok ? "the pack's version command printed nothing" : base.detail });
+      setPublication(db, id, { state: "failed", reason: base.ok ? "the repo's version command printed nothing" : base.detail });
       return;
     }
     const baseVersion = releaseVersion(base.stdout);
@@ -229,128 +175,4 @@ export async function publishTestBuild(ctx: { db: Db; boot: Bootstrap }, unitId:
     ...(done.reason ? { reason: done.reason } : {}),
   });
   return done;
-}
-
-export interface PublishJob {
-  key: string;
-  label: string;
-  run: (ctx: { db: Db; boot: Bootstrap }) => Promise<unknown>;
-}
-
-// What the engine should do about artifacts in a project now: publish verified heads consumers need. Snapshots are never removed.
-export function publishJobs(db: Db, projectId: ProjectId): PublishJob[] {
-  const jobs: PublishJob[] = [];
-  for (const u of listUnits(db, projectId)) {
-    if (!u.repoId || !getRepo(db, u.repoId).publish) continue;
-    const pubs = listPublications(db, u.id);
-    if (!u.landedSha && (u.state === "verified" || u.state === "landing") && liveConsumers(db, u, ["needs-source"]).length) {
-      const head = sourceSha(db, u);
-      if (head && !pubs.some((p) => p.kind === "test" && p.sha === head))
-        jobs.push({ key: `publish:${u.id}`, label: `publish a test build of U${u.seq}`, run: (c) => publishTestBuild(c, u.id, head) });
-    }
-  }
-  return jobs;
-}
-
-// A publishing upstream does not land until its test build is published when another repo's unit builds on it: once it has landed no
-// test build can be made, and the consumer would go without the pin. A failed publish does not hold it (the consumer is stuck on its own).
-export function testBuildWait(db: Db, unit: Unit): string | null {
-  if (!unit.repoId || !getRepo(db, unit.repoId).publish) return null;
-  if (!liveConsumers(db, unit, ["needs-source"]).length) return null;
-  const head = sourceSha(db, unit);
-  const test = head ? publicationAt(db, unit.id, "test", head) : null;
-  if (test?.state === "published" || test?.state === "failed") return null;
-  return `waits for its test build to be published, which U${liveConsumers(db, unit, ["needs-source"])[0]!.seq} builds on`;
-}
-
-// What a verified consumer is waiting for before it can land, in words: its sources landing.
-// `stuck` means no amount of waiting helps (a source's test build failed), so the unit blocks.
-export function landWait(db: Db, unit: Unit): { reason: string; stuck: boolean } | null {
-  const ups = sourceDeps(db, unit);
-  const open = ups.find((up) => up.state !== "landed" && up.state !== "done");
-  if (open) return { reason: `waits for U${open.seq}${open.repoId ? ` in ${open.repoId}` : ""} to land (now ${open.state})`, stuck: false };
-  for (const up of ups) {
-    const a = upstreamArtifact(db, up, unit.repoId);
-    if (a && "stuck" in a) return { reason: a.stuck, stuck: true };
-  }
-  return null;
-}
-
-// Test versions of the consumer's sources that its verified head still names, with the version each should become.
-async function stalePins(ctx: { db: Db; boot: Bootstrap }, unit: Unit, head: Sha): Promise<{ from: string; to: string; source: Unit }[]> {
-  const { db } = ctx;
-  const mirror = layout(ctx.boot).mirror(unit.repoId!);
-  const out: { from: string; to: string; source: Unit }[] = [];
-  for (const up of sourceDeps(db, unit)) {
-    const current = upstreamArtifact(db, up, unit.repoId);
-    if (!current || !("version" in current)) continue;
-    for (const p of listPublications(db, up.id).filter((x) => x.kind === "test" && x.version && x.version !== current.version)) {
-      const hit = await git(["grep", "-l", "-F", "-e", p.version!, head], { gitDir: mirror }).then(
-        (o) => o.trim().length > 0,
-        () => false,
-      );
-      if (hit) out.push({ from: p.version!, to: current.version, source: up });
-    }
-  }
-  return out;
-}
-
-// A consumer lands only with its sources' current versions in its code, whatever its verdict says about SHAs.
-export async function repinIfStale(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId): Promise<"clean" | "repinned"> {
-  const unit = getUnit(ctx.db, unitId);
-  const { verdict } = verifiedHead(ctx.db, unit);
-  if (!(await stalePins(ctx, unit, verdict.head_sha)).length) return "clean";
-  await moveConsumer(ctx, unitId, "its change still names a test version of a source that has a newer one");
-  return "repinned";
-}
-
-// A consumer whose source moved: yagura moves its pinned test versions to the source's current version on a new
-// branch and verifies that head; with nothing pinned (a composite build) it is simply verified again.
-export async function moveConsumer(ctx: { db: Db; boot: Bootstrap }, unitId: UnitId, reason: string): Promise<"repinned" | "reverify"> {
-  const { db, boot } = ctx;
-  const unit = getUnit(db, unitId);
-  const { verdict, work } = verifiedHead(db, unit);
-  const repo = getRepo(db, unit.repoId!);
-  const mirror = layout(boot).mirror(repo.id);
-  await ensureMirror(repo.url, mirror);
-  const pins = await stalePins(ctx, unit, verdict.head_sha);
-  if (!pins.length) {
-    reverifyAgainstSources(db, unit, reason, (u) => addVerifyUnit(db, u));
-    return "reverify";
-  }
-  const sctx = { projectId: unit.projectId, repoId: repo.id };
-  const attempt = createAttempt(db, unit.id, REPIN_HARNESS, null);
-  const branch = `${resolveSetting(db, "git.branch_prefix", sctx).value}/${unit.projectId}/${unitRef(unit.seq)}-repin-${attempt.n}`;
-  const wt = layout(boot).worktree(repo.id, unit.projectId, unit.seq, attempt.n);
-  mkdirSync(dirname(wt), { recursive: true });
-  await addWorktree(mirror, wt, branch, verdict.head_sha);
-  const files = new Set<string>();
-  for (const pin of pins) {
-    const listed = await git(["grep", "-l", "-F", "-e", pin.from], { cwd: wt }).catch(() => "");
-    for (const f of listed.split("\n").filter(Boolean)) {
-      const path = join(wt, f);
-      writeFileSync(path, readFileSync(path, "utf8").split(pin.from).join(pin.to));
-      files.add(f);
-    }
-  }
-  const moved = pins.map((p) => `${p.source.repoId} ${p.from} → ${p.to}`).join(", ");
-  await commitAll(wt, `chore: move to ${pins.map((p) => `${p.source.repoId} ${p.to}`).join(", ")}\n\n${reason}`, {
-    name: resolveSetting(db, "git.author_name", sctx).value,
-    email: resolveSetting(db, "git.author_email", sctx).value,
-  });
-  const head = await headSha(wt);
-  const why = `${reason}; yagura moved ${moved} in ${[...files].join(", ")}`;
-  db.transaction(() => {
-    updateAttempt(db, attempt.id, { state: "handed_off", baseSha: work.baseSha, headSha: head, branch, startedAt: now(), endedAt: now() });
-    db.prepare("UPDATE verdicts SET voided_at = ?, void_reason = ? WHERE unit_id = ? AND voided_at IS NULL").run(now(), why, unit.id);
-    transitionUnit(db, unit.id, "verifying", { reason: why });
-    addVerifyUnit(db, getUnit(db, unit.id));
-  })();
-  recordEvent(
-    db,
-    "consumer.repinned",
-    { projectId: unit.projectId, unitId: unit.id, attemptId: attempt.id },
-    { moved: pins.map((p) => ({ repo: p.source.repoId, from: p.from, to: p.to })), files: [...files], head },
-  );
-  return "repinned";
 }

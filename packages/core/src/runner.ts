@@ -2,33 +2,16 @@ import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
-import { WORKER_REPORT, packContract, renderBrief } from "./brief.js";
+import { WORKER_REPORT, renderBrief } from "./brief.js";
 import { resolveSetting } from "./config.js";
-import {
-  isBuild,
-  type Attempt,
-  type EnvironmentId,
-  type ProjectId,
-  type Rejection,
-  type RenderedBrief,
-  type RepoId,
-  type Sha,
-  type Unit,
-  type UnitId,
-} from "./domain.js";
+import { isBuild, type Attempt, type EnvironmentId, type ProjectId, type RenderedBrief, type RepoId, type Sha, type Unit, type UnitId } from "./domain.js";
 import { chooseResume, rejectionFindings, renderResumePrompt } from "./resume.js";
 import { requiredProjectSkills, skillMethod } from "./skills.js";
-import { mountSources, sourceEnv } from "./sources.js";
-import { upstreamArtifact } from "./publish.js";
 import { managerForcesFresh } from "./manager.js";
 import { environmentNotes, listValues, valueMap } from "./envvalues.js";
-import { LEASE_VARS } from "./leases.js";
-import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
-import { amendmentContext } from "./amend.js";
-import { ensureRecorded, readHandoff, reportOf, sessionReport } from "./finish.js";
-import { classifyFailure, syntheticFailureHandoff } from "./handoff.js";
+import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, resolveRef } from "./git.js";
+import { classifyFailure, ensureRecorded, readHandoff, reportOf, sessionReport, syntheticFailureHandoff } from "./finish.js";
 import { layout, unitRef } from "./paths.js";
-import { assessScope } from "./scope.js";
 import {
   getEnvironment,
   addUnit,
@@ -39,7 +22,6 @@ import {
   getRepo,
   getUnit,
   listAttempts,
-  listDeps,
   now,
   recordEvent,
   transitionUnit,
@@ -48,33 +30,6 @@ import {
 } from "./store.js";
 
 export type { RunContext } from "./agent.js";
-
-export function addVerifyUnit(db: Db, target: Unit): Unit {
-  const verify = addUnit(db, {
-    projectId: target.projectId,
-    type: "verify",
-    repoId: target.repoId,
-    targetUnitId: target.id,
-    goal: `Verify U${target.seq}: ${target.goal}`,
-    writeScope: [],
-    acceptance: target.acceptance,
-    verify: target.verify,
-    timeboxSeconds: resolveSetting(db, "timebox.verify_seconds", {
-      projectId: target.projectId,
-      repoId: target.repoId,
-      environmentId: getProject(db, target.projectId).environmentId,
-    }).value,
-    maxAttempts: 1,
-  });
-  transitionUnit(db, verify.id, "ready");
-  return getUnit(db, verify.id);
-}
-
-export function queueVerification(db: Db, target: Unit): Unit {
-  const verify = addVerifyUnit(db, target);
-  transitionUnit(db, target.id, "verifying", { verifyUnit: verify.seq });
-  return verify;
-}
 
 // Read-only trunk checkouts of repos that already do it right; a resumed attempt keeps the paths its session saw.
 async function referenceCheckouts(ctx: RunContext, projectId: ProjectId, seq: number, n: number, repoIds: string[]) {
@@ -94,30 +49,12 @@ async function referenceCheckouts(ctx: RunContext, projectId: ProjectId, seq: nu
   return out;
 }
 
-// What the next attempt (or the resumed session) is told about a scope rejection.
-export function scopeNote(attempt: number, paths: string[], hard: boolean): string {
-  return hard
-    ? `Attempt ${attempt} wrote ${paths.join(", ")}, which yagura never allows (the verify pack). Leave it alone.`
-    : `Attempt ${attempt} changed ${paths.join(", ")} outside SCOPE without saying why. If the path is not needed, revert it and commit; if it is, record it with the reason the work needs it: yagura handoff --outside-scope "<path>=<why>" (running it again replaces your handoff, so repeat the rest).`;
-}
-
-function releasedUpstreams(db: Db, unit: Unit): string[] {
-  return listDeps(db, unit.projectId)
-    .filter((d) => d.unitId === unit.id && d.kind === "needs-landed")
-    .flatMap((d) => {
-      const up = getUnit(db, d.dependsOn);
-      const a = upstreamArtifact(db, up, unit.repoId);
-      return a && "version" in a ? [`U${up.seq} landed in ${up.repoId}, and its build is published as ${a.version}; depend on exactly that version.`] : [];
-    });
-}
-
 export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt> {
   const { db, boot } = ctx;
   const unit = getUnit(db, unitId);
   if (!isBuild(unit)) throw new Error(`U${unit.seq} is a ${unit.type} unit; use the runner for its type`);
-  const isPack = unit.type === "pack";
   if (unit.state !== "ready") throw new Error(`U${unit.seq} is ${unit.state}, not ready`);
-  if (!unit.repoId || !unit.verify) throw new Error(`U${unit.seq} has no repo or verify recipe`);
+  if (!unit.repoId) throw new Error(`U${unit.seq} has no repo`);
 
   const project = getProject(db, unit.projectId);
   const repo = getRepo(db, unit.repoId);
@@ -150,38 +87,21 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   }
 
   const projectSkills = requiredProjectSkills(db, unit);
-  const sources = await mountSources(ctx, unit, worktree);
   const references = await referenceCheckouts(ctx, project.id, unit.seq, from?.n ?? attempt.n, setting("project.reference_repos"));
-  const packForbid = isPack ? [] : [`${repo.verifyPackPath}/**`];
-  const env = project.environmentId ? getEnvironment(db, project.environmentId) : null;
   const envValues = valueMap(db, project.environmentId);
   const brief: RenderedBrief = {
     goal: unit.goal,
     repo: { id: repo.id, worktree, branch, baseSha: base },
-    scope: { write: unit.writeScope, forbid: unit.forbidScope, hard: packForbid },
+    scope: { write: unit.writeScope, forbid: unit.forbidScope, hard: [] },
     context: [
       ...(unit.description ? [`Why this unit exists: ${unit.description}`] : []),
-      ...amendmentContext(db, unit.id),
-      ...(isPack
-        ? packContract({
-            packPath: repo.verifyPackPath,
-            provider: env?.provider ?? "local-process",
-            leaseVars: LEASE_VARS[env?.provider ?? "local-process"] ?? [],
-            minTier: project.minTier,
-            reason: unit.context[0] ?? "This repo has no usable verify pack on trunk",
-          })
-        : []),
-      ...(isPack ? unit.context.slice(1) : unit.context),
+      ...unit.context,
       ...unit.notes.map((n) => `Note from an earlier attempt: ${n}`),
-      ...releasedUpstreams(db, unit),
       ...(environmentNotes(db, project.environmentId) ? [`About this environment: ${environmentNotes(db, project.environmentId)}`] : []),
     ],
-    readonly: [
-      ...sources.map((s) => ({ repoId: s.repoId, path: s.path, sha: s.sha, version: s.version })),
-      ...references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
-    ],
+    readonly: references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
     acceptance: unit.acceptance,
-    verify: unit.verify,
+    verify: unit.verify ?? "",
     env: envValues,
     envNotes: Object.fromEntries(
       listValues(db, project.environmentId as EnvironmentId)
@@ -189,21 +109,13 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         .filter(([, n]) => n),
     ),
     timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
-    forbidden: [
-      "no git push, rebase, merge, or branch switching",
-      "nothing outside SCOPE",
-      isPack
-        ? "do not change the code the pack verifies"
-        : `do not edit the verify pack at ${repo.verifyPackPath}; if your change stops it working, say what broke under Notes and the verifier will fix the pack`,
-    ],
+    forbidden: ["no git push, rebase, merge, or branch switching"],
     method:
-      (isPack
-        ? "Load the yagura-pack skill first and follow it."
-        : `Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and follow its ${unit.playbook ?? "feature"} playbook. Then load pstack:principle-prove-it-works and pstack:principle-test-behavior-not-implementation, and write the test that proves the change before the change itself. All four are required: an attempt that does not load them is rejected.`) +
+      `Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and follow its ${unit.playbook ?? "feature"} playbook. Then load pstack:principle-prove-it-works and pstack:principle-test-behavior-not-implementation, and write the test that proves the change before the change itself. All four are required: an attempt that does not load them is rejected.` +
       (unit.scaffold ? " This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more." : "") +
       skillMethod(projectSkills),
     report: WORKER_REPORT,
-    standing: standingFor(db, project.id, isPack ? "pack" : "worker"),
+    standing: standingFor(db, project.id, "worker"),
   };
   const briefText = from
     ? renderResumePrompt({
@@ -220,9 +132,9 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
 
   const startedAt = now();
   transitionUnit(db, unit.id, "running", { attempt: attempt.n, ...(from ? { resumes: from.n } : {}) });
-  updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base, resumesAttemptId: from?.id ?? null, sources });
+  updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base, resumesAttemptId: from?.id ?? null });
 
-  const role = isPack ? "pack" : "worker";
+  const role = "worker";
   const work = (prompt: string, resume: string | undefined, reminder = false) =>
     runAgentSession(ctx, {
       recorder: attemptRecorder(db, {
@@ -239,13 +151,13 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
         model: setting("role.worker.model"),
         permissionMode: setting("harness.claude.permission_mode"),
-        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: isPack ? "pack" : "worker" })],
-        addDirs: [...sources.map((s) => s.path), ...references.map((r) => r.path)],
+        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role })],
+        addDirs: references.map((r) => r.path),
         extraArgs: setting("harness.claude.extra_args"),
         resume,
       },
       cwd: worktree,
-      env: { ...envValues, ...sourceEnv(sources) },
+      env: envValues,
       timeboxSeconds: unit.timeboxSeconds,
       logPath: reminder ? paths.log(project.id, unit.seq, attempt.n).replace(/\.jsonl$/, ".resume.jsonl") : paths.log(project.id, unit.seq, attempt.n),
     });
@@ -277,10 +189,6 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   if (leftovers.paths.length) write(paths.leftovers(project.id, unit.seq, attempt.n), leftovers.patch);
   const head = await headSha(worktree);
   const touched = await changedPaths(worktree, base);
-  const reject = (rejection: Rejection, data: Record<string, unknown>) => {
-    updateAttempt(db, attempt.id, { rejection, ...(rejection === "code-fault" ? {} : { failureMode: "scope" as const }) });
-    transitionUnit(db, unit.id, "rejected", data);
-  };
   const final = session.final;
   const report = sessionReport(first, session);
   const handoff = readHandoff(db, attempt.id, [reportOf(session), reportOf(first)]);
@@ -297,27 +205,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       selfTier: handoff.verification === "not-verified" ? null : handoff.verification,
     });
     transitionUnit(db, unit.id, "handed_off", { attempt: attempt.n, status: handoff.status, head, leftovers: leftovers.paths });
-    const scope = assessScope(touched, unit.writeScope, unit.forbidScope, packForbid, handoff.outsideScope);
-    const violations = [...scope.hard, ...scope.unjustified];
-    if (!violations.length && scope.justified.length)
-      recordEvent(
-        db,
-        "attempt.beyond_scope",
-        { projectId: project.id, unitId: unit.id, attemptId: attempt.id },
-        { paths: scope.justified.map((v) => v.path), reason: handoff.outsideScope },
-      );
-    if (violations.length) {
-      addUnitNote(
-        db,
-        unit.id,
-        scopeNote(
-          attempt.n,
-          (scope.hard.length ? scope.hard : scope.unjustified).map((v) => v.path),
-          scope.hard.length > 0,
-        ),
-      );
-      reject("scope", { reason: "scope", violations });
-    } else if (handoff.status === "blocked") {
+    if (handoff.status === "blocked") {
       transitionUnit(db, unit.id, "blocked", { reason: "agent reported blocked" });
     } else if (head === base) {
       transitionUnit(db, unit.id, "blocked", { reason: "handed off with no commits" });
@@ -329,18 +217,6 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       );
       updateAttempt(db, attempt.id, { rejection: "skills" });
       transitionUnit(db, unit.id, "rejected", { reason: "skipped required skills", missing: session.missingSkills });
-    } else {
-      await ensureMirror(repo.url, mirror);
-      const trunk = await resolveRef(mirror, `origin/${repo.defaultBranch}`);
-      if (trunk !== base && !(await mergesCleanly(mirror, trunk, head))) {
-        addUnitNote(
-          db,
-          unit.id,
-          `Attempt ${attempt.n} conflicted with ${repo.defaultBranch} at ${trunk.slice(0, 10)}, which moved while it worked; the next attempt starts from the new trunk.`,
-        );
-        updateAttempt(db, attempt.id, { rejection: "conflict" });
-        transitionUnit(db, unit.id, "rejected", { reason: "conflicts with trunk", trunk });
-      } else queueVerification(db, getUnit(db, unit.id));
     }
   } else {
     const facts = {

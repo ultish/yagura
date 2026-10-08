@@ -22,6 +22,7 @@ import {
   addUnit,
   getUnit,
   getUnitBySeq,
+  listUnits,
   listAttempts,
   openStore,
   setProjectEnvironment,
@@ -78,8 +79,8 @@ async function run(mode: string, timeboxSeconds = 60) {
 describe("runWorkUnit", () => {
   it("runs an agent in its own worktree and records a clean handoff", async () => {
     const { unit, attempt, paths } = await run("success");
-    expect(unit.state).toBe("verifying");
-    expect(getUnitBySeq(db, project, 2)).toMatchObject({ type: "verify", state: "ready", targetUnitId: unit.id });
+    expect(unit.state).toBe("handed_off");
+    expect(listUnits(db, project).filter((u) => u.type !== "work")).toEqual([]);
     expect(attempt.skills).toEqual([
       "yagura:yagura-worker",
       "pstack:poteto-mode",
@@ -112,41 +113,7 @@ describe("runWorkUnit", () => {
     expect(readFileSync(paths.leftovers(project, 1, 1), "utf8")).toContain("app/notes.txt");
   });
 
-  it("rejects work that wrote outside its scope", async () => {
-    const { unit, attempt } = await run("scope");
-    expect(unit.state).toBe("rejected");
-    expect(attempt).toMatchObject({ state: "handed_off", failureMode: "scope" });
-    const ev = db.prepare("SELECT data_json FROM events WHERE type = 'unit.state' ORDER BY id DESC LIMIT 1").get() as { data_json: string };
-    expect(JSON.parse(ev.data_json).violations).toEqual([{ path: "README.md", reason: "outside-write-scope" }]);
-  });
-
-  it("accepts work that wrote outside its scope when the handoff says why, and records it", async () => {
-    const { unit } = await run("scope-justified");
-    expect(unit.state).toBe("verifying");
-    const ev = db.prepare("SELECT data_json FROM events WHERE type = 'attempt.beyond_scope'").get() as { data_json: string };
-    expect(JSON.parse(ev.data_json)).toMatchObject({ paths: ["README.md"], reason: expect.stringContaining("needs a line in the docs") });
-  });
-
-  it("resumes the worker's own session when it wrote outside scope without a reason, and accepts the reason it gives", async () => {
-    const { unit, attempt: first } = await run("scope");
-    expect(unit.state).toBe("rejected");
-    process.env.FAKE_RESUME_JUSTIFY = "1";
-    try {
-      transitionUnit(db, unit.id, "ready");
-      const second = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
-      expect(second.resumesAttemptId).toBe(first.id);
-      expect(getUnit(db, unit.id).state).toBe("verifying");
-    } finally {
-      delete process.env.FAKE_RESUME_JUSTIFY;
-    }
-  });
-
-  it("tells the next attempt why a path outside scope was rejected", async () => {
-    const { unit } = await run("scope");
-    expect(unit.notes.join("\n")).toContain("outside SCOPE without saying why");
-  });
-
-  it("gives the agent the environment's values with their notes, and leaves judging a hard-coded value to the verifier", async () => {
+  it("gives the agent the environment's values with their notes", async () => {
     addEnvironment(db, { id: "dev", name: "dev", provider: "local-process", capacity: 1 });
     setProjectEnvironment(db, project, "dev" as EnvironmentId);
     setEnvironmentNotes(db, "dev" as EnvironmentId, "deps run in the cluster");
@@ -155,7 +122,7 @@ describe("runWorkUnit", () => {
     const brief = readFileSync(paths.brief(project, unit.seq, attempt.n), "utf8");
     expect(brief).toContain("## ENV\n- MARKER=edited by fake agent (the text every fake edit starts with)\n");
     expect(brief).toContain("- About this environment: deps run in the cluster");
-    expect(unit.state).toBe("verifying");
+    expect(unit.state).toBe("handed_off");
     expect(attempt).toMatchObject({ state: "handed_off", rejection: null });
   });
 
@@ -210,7 +177,7 @@ describe("runWorkUnit", () => {
   it("lets a skipped skill through when enforcement is switched off", async () => {
     const { setSetting } = await import("./config.js");
     setSetting(db, "global", "", "method.enforce_required_skills", false);
-    expect((await run("noskills")).unit.state).toBe("verifying");
+    expect((await run("noskills")).unit.state).toBe("handed_off");
   });
 
   it("stops a running agent on request and puts the unit back with the operator's note", async () => {
@@ -253,7 +220,7 @@ describe("runWorkUnit", () => {
         expect(held).toMatchObject({ harness: "claude", reason: "You've hit your session limit · resets soon" });
         expect(Date.now()).toBeGreaterThanOrEqual(Math.min(Date.parse(held.until), started + 1000));
         expect(events("attempt.limited")).toEqual([{ until: held.until }]);
-        expect(unit.state).toBe("verifying");
+        expect(unit.state).toBe("handed_off");
         expect(listAttempts(db, unit.id)).toHaveLength(1);
         expect(attempt).toMatchObject({ state: "handed_off", handoffStatus: "success", limitedUntil: null, sessionId: "s1" });
         expect(attempt.skills).toContain("pstack:poteto-mode");
@@ -407,7 +374,7 @@ describe("runWorkUnit", () => {
       expect(skipped.unit.state).toBe("rejected");
       const loaded = await runUnit(false, "setup-thing");
       expect(loaded.attempt.missingSkills).toEqual([]);
-      expect(loaded.unit.state).toBe("verifying");
+      expect(loaded.unit.state).toBe("handed_off");
     });
 
     it("runs a scaffold unit with the scaffold skills instead of the work skills", async () => {
@@ -417,7 +384,7 @@ describe("runWorkUnit", () => {
       expect(brief).toContain("This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more.");
       expect(brief).toContain("follow them: setup-gradle.");
       expect(attempt.missingSkills).toEqual([]);
-      expect(unit.state).toBe("verifying");
+      expect(unit.state).toBe("handed_off");
     });
 
     it("gives the worker a read-only trunk checkout of each reference repo", async () => {

@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { sourceEnv } from "./sources.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, relative } from "node:path";
@@ -7,8 +6,6 @@ import type { Bootstrap } from "./config.js";
 import type { ArtifactId, AttemptId, ProjectId, Sha } from "./domain.js";
 import { isPristine, readFileAt, restorePristine } from "./git.js";
 import { activeLease } from "./leases.js";
-import { loadPack, parsePack, type PackLoad } from "./pack.js";
-import { overlayPack, packWorkspaceOf } from "./packedits.js";
 import { layout } from "./paths.js";
 import { getAttempt, getRepo, getUnit, now, recordEvent, type Db } from "./store.js";
 
@@ -96,51 +93,7 @@ export function runShell(
 
 type RunRequest = { attemptId: AttemptId; at: At; label: string; command: string; timeoutSeconds?: number };
 
-export const PACK_LABEL = (step: "doctor" | "deploy" | "teardown") => `pack:${step}`;
-const LIFECYCLE_SECONDS = 900;
-
-// A pack unit's proof uses the pack it wrote; a verification uses its verifier's copy of trunk's pack, which the
-// verifier may fix or extend and which runs on both sides alike. The worker's change never supplies the pack.
-export async function packForAttempt(db: Db, boot: Bootstrap, attemptId: AttemptId): Promise<PackLoad> {
-  const attempt = getAttempt(db, attemptId);
-  const unit = getUnit(db, attempt.unitId);
-  const target = unit.targetUnitId ? getUnit(db, unit.targetUnitId) : null;
-  const repo = getRepo(db, unit.repoId!);
-  const workspace = packWorkspaceOf(db, attemptId);
-  if (workspace) return loadPack(workspace, repo.verifyPackPath);
-  const mirror = layout(boot).mirror(repo.id);
-  const ref = target?.type === "pack" ? attempt.headSha! : `origin/${repo.defaultBranch}`;
-  return parsePack(await readFileAt(mirror, ref, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath);
-}
-
-export function deployedSide(db: Db, attemptId: AttemptId): At | null {
-  const last = db
-    .prepare("SELECT label, at FROM evidence_runs WHERE attempt_id = ? AND label IN (?, ?) ORDER BY id DESC LIMIT 1")
-    .get(attemptId, PACK_LABEL("deploy"), PACK_LABEL("teardown")) as { label: string; at: At } | undefined;
-  return last?.label === PACK_LABEL("deploy") ? last.at : null;
-}
-
-export async function runEvidence(db: Db, boot: Bootstrap, req: RunRequest): Promise<EvidenceRun> {
-  if (!req.label.startsWith("pack:")) {
-    const pack = await packForAttempt(db, boot, req.attemptId);
-    if (pack.ok && pack.pack.deploy) {
-      const side = deployedSide(db, req.attemptId);
-      if (side !== req.at) {
-        if (side && pack.pack.teardown)
-          await captureRun(db, boot, { ...req, at: side, label: PACK_LABEL("teardown"), command: pack.pack.teardown, timeoutSeconds: LIFECYCLE_SECONDS });
-        await captureRun(db, boot, { ...req, label: PACK_LABEL("deploy"), command: pack.pack.deploy, timeoutSeconds: LIFECYCLE_SECONDS });
-      }
-    }
-  }
-  return captureRun(db, boot, req);
-}
-
-export async function teardownDeployed(db: Db, boot: Bootstrap, attemptId: AttemptId): Promise<EvidenceRun | null> {
-  const side = deployedSide(db, attemptId);
-  const pack = side ? await packForAttempt(db, boot, attemptId) : null;
-  if (!side || !pack?.ok || !pack.pack.teardown) return null;
-  return captureRun(db, boot, { attemptId, at: side, label: PACK_LABEL("teardown"), command: pack.pack.teardown, timeoutSeconds: LIFECYCLE_SECONDS });
-}
+export const runEvidence = (db: Db, boot: Bootstrap, req: RunRequest): Promise<EvidenceRun> => captureRun(db, boot, req);
 
 async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<EvidenceRun> {
   const attempt = getAttempt(db, req.attemptId);
@@ -154,8 +107,6 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
 
   const tampered = !(await isPristine(cwd, sha));
   if (tampered) await restorePristine(cwd, sha);
-  const workspace = packWorkspaceOf(db, attempt.id);
-  if (workspace) overlayPack(workspace, cwd, getRepo(db, unit.repoId!).verifyPackPath);
 
   const evidenceDir = mkdtempSync(join(boot.home, "evidence-tmp-"));
   const lease = activeLease(db, attempt.id);
@@ -163,7 +114,7 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
   const result = await runShell(
     req.command,
     cwd,
-    { ...process.env, ...(lease?.vars ?? {}), ...sourceEnv(attempt.sources), YAGURA_EVIDENCE: evidenceDir, YAGURA_AT: req.at, YAGURA_SHA: sha },
+    { ...process.env, ...(lease?.vars ?? {}), YAGURA_EVIDENCE: evidenceDir, YAGURA_AT: req.at, YAGURA_SHA: sha },
     req.timeoutSeconds ?? 300,
   );
   const durationMs = Date.now() - started;

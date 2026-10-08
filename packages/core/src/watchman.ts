@@ -13,7 +13,7 @@ import { PRESETS } from "./presets.js";
 import { listTemplates } from "./templates.js";
 import { installedSkills } from "./skills.js";
 import { describeMention, resolveMentions } from "./mentions.js";
-import { missingSkills } from "./pack.js";
+import { missingSkills } from "./skills.js";
 import { layout } from "./paths.js";
 import { lastDrainEventId, latestDelta } from "./planner.js";
 import { WORK_PLAYBOOKS } from "./plan.js";
@@ -239,7 +239,7 @@ Reply to the developer in plain prose. Then end your final message with exactly 
   "proposal": {
     "summary": "what applying this starts and why",
     "repos": [
-      { "id": "kafka-diff", "description": "one line", "verifyPack": { "provider": "local-process", "checks": [{ "name": "unit", "command": "python3 -m unittest -v", "tier": "unit-verified" }] } },
+      { "id": "kafka-diff", "description": "one line" },
       { "id": "billing", "existing": "git@gitlab.internal:team/billing.git", "forge": "glab" }
     ],
     "environments": [

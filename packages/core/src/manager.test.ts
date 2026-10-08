@@ -22,7 +22,6 @@ import {
   wakeManager,
   wakeOnNote,
 } from "./manager.js";
-import { runInvestigateUnit } from "./investigate.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
 import { runWorkUnit } from "./runner.js";
@@ -355,59 +354,6 @@ describe("the developer waking the unit lead", () => {
     setSetting(db, "project", project, "manager.enabled", false);
     expect(wakeManager(db, getUnit(db, u.id), "x")).toEqual({ ok: false, reason: "the unit lead is switched off for this project (manager.enabled)" });
   }, 60_000);
-
-  it("is woken again with the findings when it asked for an investigation of a blocked unit", async () => {
-    const u = await stuck();
-    const unit = (wakeManager(db, u, "why does it keep failing?") as { unit: ReturnType<typeof getUnit> }).unit;
-    process.env.FAKE_MANAGER = "investigate";
-    await runManagerUnit(ctx, unit.id);
-    const inv = listUnits(db, project).find((x) => x.type === "investigate")!;
-    expect(managerNeed(db, getUnit(db, u.id))).toEqual({ kind: "waiting" });
-    await runInvestigateUnit(ctx, inv.id);
-    expect(managerNeed(db, getUnit(db, u.id))).toMatchObject({ kind: "wake", wake: expect.stringContaining("has finished") });
-  }, 90_000);
-});
-
-describe("a manager that asks for an investigation", () => {
-  it("waits for the investigator, then is woken once with its findings and decides again", async () => {
-    const u = await rejectedUnit();
-    process.env.FAKE_MANAGER = "investigate";
-    await wake(u.id);
-    const inv = listUnits(db, project).find((x) => x.type === "investigate")!;
-    expect(inv).toMatchObject({ state: "ready", targetUnitId: u.id, goal: "Investigate for U1: Why does the scenario fail on head?" });
-    expect(getUnit(db, u.id).state).toBe("rejected");
-    expect(managerNeed(db, getUnit(db, u.id))).toEqual({ kind: "waiting" });
-
-    const attempt = await runInvestigateUnit(ctx, inv.id);
-    expect(getUnit(db, inv.id).state).toBe("done");
-    expect(getRecord(db, attempt!.id, "handoff")!.findings).toEqual(["the failing test depends on the clock: it passes before noon"]);
-    const need = managerNeed(db, getUnit(db, u.id));
-    expect(need).toMatchObject({
-      kind: "wake",
-      wake: expect.stringMatching(/^The investigation U\d+ you asked for has finished: Why does the scenario fail on head\?$/),
-    });
-
-    process.env.FAKE_MANAGER = "fresh";
-    const m2 = queueManager(db, getUnit(db, u.id), (need as { wake: string }).wake);
-    await runManagerUnit(ctx, m2.id);
-    const brief = readFileSync(layout(ctx.boot).brief(project, m2.seq, 1), "utf8");
-    expect(brief).toContain("investigator");
-    expect(brief).toContain("the failing test depends on the clock");
-    expect(listManagerDecisions(db, u.id).map((d) => d.action)).toEqual(["investigate", "fresh"]);
-    expect(getUnit(db, u.id).state).toBe("ready");
-  }, 90_000);
-
-  it("is woken with the failure when the investigator reports nothing, and the investigator changed nothing", async () => {
-    const u = await rejectedUnit();
-    process.env.FAKE_MANAGER = "investigate";
-    await wake(u.id);
-    const inv = listUnits(db, project).find((x) => x.type === "investigate")!;
-    process.env.FAKE_INVESTIGATE = "garbage";
-    await runInvestigateUnit(ctx, inv.id);
-    delete process.env.FAKE_INVESTIGATE;
-    expect(getUnit(db, inv.id).state).toBe("failed");
-    expect(managerNeed(db, getUnit(db, u.id))).toMatchObject({ kind: "wake", wake: expect.stringContaining("failed") });
-  }, 90_000);
 });
 
 describe("a manager told of a worker's note", () => {
@@ -430,7 +376,7 @@ describe("a manager told of a worker's note", () => {
     await runManagerUnit(ctx, m.id);
     expect(getUnit(db, b.id).notes).toEqual([`The unit lead says, from U${a.seq}: the shared helper moved`]);
     expect(listManagerDecisions(db, a.id)).toMatchObject([{ action: "relay", note: "the shared helper moved" }]);
-    expect(getUnit(db, a.id).state).toBe("verifying");
+    expect(getUnit(db, a.id).state).toBe("handed_off");
     expect(wakeOnNote(db, ctx.boot, getUnit(db, a.id))).toBeNull();
     expect(managerNeed(db, getUnit(db, a.id))).toBeNull();
   }, 60_000);
@@ -478,64 +424,6 @@ describe("a manager told of a worker's note", () => {
     transitionUnit(db, a.id, "rejected", { reason: "verification failed" });
     expect(managerNeed(db, getUnit(db, a.id))?.kind).toBe("wake");
   }, 60_000);
-});
-
-describe("the engine with a manager", () => {
-  const run = async () => {
-    const log: string[] = [];
-    await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();
-    return log;
-  };
-
-  it("sends a rejected unit to its manager, applies the decision, and lands the work", async () => {
-    process.env.FAKE_VERIFY_NEEDS_FIX = "1";
-    process.env.FAKE_MANAGER = "resume";
-    const log = await run();
-    const work = listUnits(db, project).filter((u) => u.type === "work");
-    expect(work.map((u) => u.state)).toEqual(["landed", "landed", "landed"]);
-    expect(listUnits(db, project).filter((u) => u.type === "manager").length).toBe(3);
-    expect(work.flatMap((u) => listManagerDecisions(db, u.id)).map((d) => d.action)).toEqual(["resume", "resume", "resume"]);
-    expect(log.some((l) => l.includes("goes to its unit lead"))).toBe(true);
-    for (const u of work) expect(listAttempts(db, u.id).filter((a) => a.resumesAttemptId).length).toBe(1);
-  }, 120_000);
-
-  it("runs the investigations its manager asks for, and blocks the unit once its decisions are spent", async () => {
-    process.env.FAKE_VERIFY_NEEDS_FIX = "1";
-    process.env.FAKE_MANAGER = "investigate";
-    setSetting(db, "project", project, "manager.max_decisions_per_unit", 2);
-    const log = await run();
-    const work = listUnits(db, project).filter((u) => u.type === "work");
-    expect(work.some((u) => u.state === "blocked")).toBe(true);
-    const investigations = listUnits(db, project).filter((u) => u.type === "investigate");
-    expect(investigations.length).toBeGreaterThanOrEqual(2);
-    expect(investigations.every((u) => u.state === "done")).toBe(true);
-    expect(log.some((l) => l.includes("its unit lead has used"))).toBe(true);
-  }, 180_000);
-
-  it("leaves a rejection to the fixed rules when the manager is off", async () => {
-    setSetting(db, "global", "", "manager.enabled", false);
-    process.env.FAKE_VERIFY_NEEDS_FIX = "1";
-    await run();
-    expect(listUnits(db, project).filter((u) => u.type === "manager").length).toBe(0);
-    expect(
-      listUnits(db, project)
-        .filter((u) => u.type === "work")
-        .map((u) => u.state),
-    ).toEqual(["landed", "landed", "landed"]);
-  }, 120_000);
-
-  it("falls back to the fixed rules when the manager never gives a usable answer", async () => {
-    process.env.FAKE_VERIFY_NEEDS_FIX = "1";
-    process.env.FAKE_MANAGER = "garbage";
-    await run();
-    expect(
-      listUnits(db, project)
-        .filter((u) => u.type === "work")
-        .map((u) => u.state),
-    ).toEqual(["landed", "landed", "landed"]);
-    const work = listUnits(db, project).filter((u) => u.type === "work");
-    expect(work.flatMap((u) => listManagerDecisions(db, u.id)).every((d) => d.action === "fallback")).toBe(true);
-  }, 120_000);
 });
 
 void getUnitBySeq;

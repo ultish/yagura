@@ -1,5 +1,5 @@
 import { TERMINAL_STATES, type DepKind, type Unit, type UnitId, type UnitState } from "./domain.js";
-import { listPublications, upstreamArtifact } from "./publish.js";
+import { listPublications } from "./publish.js";
 import { getUnit, listAttempts, listDeps, listGates, type Db } from "./store.js";
 
 export type EdgeTone = "pine" | "amber" | "bell" | "muted";
@@ -24,12 +24,7 @@ function edgeState(db: Db, consumer: Unit, upstream: Unit, kind: DepKind): DepEd
       ? { text: `waits for ${up}: the same files`, tone: "amber" }
       : { text: `shares files with ${up}`, tone: "muted" };
   const gate = listGates(db, upstream.projectId, "open").find((g) => g.unitId === upstream.id);
-  if (["draft", "ready"].includes(consumer.state)) {
-    const artifact = upstreamArtifact(db, upstream, consumer.repoId);
-    if (artifact && "wait" in artifact) return { text: artifact.wait, tone: "amber" };
-    if (artifact && "stuck" in artifact) return { text: artifact.stuck, tone: "bell" };
-    return { text: artifact ? `can start: ${up}'s test build is published` : `needs ${up}'s code`, tone: "amber" };
-  }
+  if (["draft", "ready"].includes(consumer.state)) return { text: `needs ${up}'s code`, tone: "amber" };
   if (["running", "handed_off", "verifying"].includes(consumer.state)) return { text: `builds on ${up}; lands after ${up} lands`, tone: "amber" };
   if (gate) return { text: `${up} waits for you (${gate.question.split("\n")[0]!.slice(0, 80)})`, tone: "bell" };
   return { text: `waits for ${up} to land (now ${upstream.state})`, tone: "amber" };

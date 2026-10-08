@@ -2,15 +2,13 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type { Bootstrap } from "./config.js";
-import type { Forge, PackStatus, Repo, RepoId, Sha } from "./domain.js";
-import { ensureMirror, git, readFileAt } from "./git.js";
-import { parsePack, type PackLoad } from "./pack.js";
+import type { Forge, Repo, RepoId, Sha } from "./domain.js";
+import { ensureMirror, git } from "./git.js";
 import { layout } from "./paths.js";
 import { chooseRoute } from "./route.js";
-import { addRepo, recordEvent, type Db } from "./store.js";
+import { addRepo, type Db } from "./store.js";
 
 export const REPO_ID = /^[a-z][a-z0-9-]{1,39}$/;
-const PACK_PATH = ".agents/verify";
 
 export class RepoUnusable extends Error {}
 
@@ -43,26 +41,6 @@ export interface RepoInspection {
   url: string;
   defaultBranch: string;
   trunk: Sha;
-  pack: PackLoad;
-  notes: string[];
-}
-
-export const packStatusOf = (pack: PackLoad): PackStatus => (pack.ok ? "unproven" : "missing");
-
-// Trunk's pack as last read: a proof is kept while a pack still parses, and lost when it no longer does.
-export function syncPackStatus(db: Db, repoId: RepoId, pack: PackLoad): PackStatus {
-  db.prepare("UPDATE repos SET publish_json = ? WHERE id = ?").run(pack.ok && pack.pack.publish ? JSON.stringify(pack.pack.publish) : null, repoId);
-  const current = (db.prepare("SELECT pack_status FROM repos WHERE id = ?").get(repoId) as { pack_status: PackStatus }).pack_status;
-  const next: PackStatus = !pack.ok ? "missing" : current === "missing" ? "unproven" : current;
-  if (next !== current) {
-    db.prepare("UPDATE repos SET pack_status = ?, pack_proven_sha = CASE WHEN ? = 'missing' THEN NULL ELSE pack_proven_sha END WHERE id = ?").run(
-      next,
-      next,
-      repoId,
-    );
-    recordEvent(db, "repo.pack_status", {}, { repo: repoId, from: current, to: next, reason: pack.ok ? null : pack.reason });
-  }
-  return next;
 }
 
 async function remoteHead(url: string): Promise<{ defaultBranch: string; trunk: Sha }> {
@@ -95,9 +73,7 @@ export async function inspectRepo(source: string, mirror?: string): Promise<Repo
   try {
     if (mirror) await ensureMirror(url, gitDir);
     else await git(["clone", "--bare", "--quiet", "--depth", "1", "--branch", defaultBranch, url, gitDir]);
-    const pack = parsePack(await readFileAt(gitDir, trunk, `${PACK_PATH}/verify.json`), PACK_PATH);
-    const notes = pack.ok ? [] : [`${pack.reason}; verification stays env-blocked until a pack lands on ${defaultBranch}`];
-    return { url, defaultBranch, trunk, pack, notes };
+    return { url, defaultBranch, trunk };
   } finally {
     if (!mirror) rmSync(gitDir, { recursive: true, force: true });
   }
@@ -118,56 +94,6 @@ export async function registerRepo(
   checkRepoFree(ctx.db, id, resolveSource(input.source));
   const route = chooseRoute(ctx.db, resolveSource(input.source), input);
   const inspection = await inspectRepo(input.source, layout(ctx.boot).mirror(id as RepoId));
-  const repo = addRepo(ctx.db, { id, url: inspection.url, defaultBranch: inspection.defaultBranch, ...route, packStatus: packStatusOf(inspection.pack) });
+  const repo = addRepo(ctx.db, { id, url: inspection.url, defaultBranch: inspection.defaultBranch, ...route });
   return { repo, inspection };
-}
-
-async function packTree(mirror: string, ref: string, path: string): Promise<string | null> {
-  try {
-    return (await git(["rev-parse", `${ref}:${path}`], { cwd: mirror })).trim();
-  } catch {
-    return null;
-  }
-}
-
-// A proven pack whose files changed on trunk since it was proven is stale until a verification passes it again.
-export async function notePackStale(db: Db, repo: Repo, mirror: string): Promise<PackStatus> {
-  if (repo.packStatus !== "proven" || !repo.packProvenSha) return repo.packStatus;
-  const [then, now_] = await Promise.all([
-    packTree(mirror, repo.packProvenSha, repo.verifyPackPath),
-    packTree(mirror, `origin/${repo.defaultBranch}`, repo.verifyPackPath),
-  ]);
-  if (!then || !now_ || then === now_) return "proven";
-  db.prepare("UPDATE repos SET pack_status = 'stale' WHERE id = ?").run(repo.id);
-  recordEvent(
-    db,
-    "repo.pack_status",
-    {},
-    { repo: repo.id, from: "proven", to: "stale", reason: `the pack changed on ${repo.defaultBranch} since ${repo.packProvenSha.slice(0, 10)}` },
-  );
-  return "stale";
-}
-
-// Every verification runs the trunk pack's doctor, deploy, and checks on trunk; when all of them pass, with the pack as
-// trunk has it (the verifier changed nothing), that is a proof of the pack.
-export function proveTrunkPack(
-  db: Db,
-  repoId: RepoId,
-  trunkSha: string,
-  runs: { label: string; at: string; exitCode: number | null; timedOut: boolean }[],
-  checks: { name: string }[],
-): boolean {
-  const status = (db.prepare("SELECT pack_status FROM repos WHERE id = ?").get(repoId) as { pack_status: PackStatus }).pack_status;
-  if (status !== "unproven" && status !== "stale") return false;
-  const onTrunk = runs.filter((r) => r.at === "base");
-  const ok = (r: { exitCode: number | null; timedOut: boolean }) => r.exitCode === 0 && !r.timedOut;
-  const lifecycle = onTrunk.filter((r) => r.label === "pack:doctor" || r.label === "pack:deploy");
-  const everyCheck = checks.every((c) => {
-    const run = onTrunk.filter((r) => r.label === `check:${c.name}`).at(-1);
-    return run && ok(run);
-  });
-  if (!checks.length || !everyCheck || !lifecycle.every(ok)) return false;
-  db.prepare("UPDATE repos SET pack_status = 'proven', pack_proven_sha = ? WHERE id = ?").run(trunkSha, repoId);
-  recordEvent(db, "repo.pack_status", {}, { repo: repoId, from: status, to: "proven", sha: trunkSha, by: "verification" });
-  return true;
 }

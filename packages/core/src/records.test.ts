@@ -7,7 +7,7 @@ import { attemptRecorder } from "./agent.js";
 import { RECORD_KINDS, type ProjectId, type RepoId, type Role, type Unit } from "./domain.js";
 import { layout } from "./paths.js";
 import { recordCli } from "./record-cli.js";
-import { missingRecords, recordedAmendments, recordedHandoff, recordedRulings } from "./records.js";
+import { missingRecords, recordedHandoff } from "./records.js";
 import { addProject, addRepo, addUnit, createAttempt, openStore, type Db } from "./store.js";
 
 let home: string;
@@ -73,9 +73,9 @@ describe("agent records", () => {
       code: 2,
       output: "yagura handoff refused: YAGURA_EVIDENCE_TOKEN does not match this attempt's session\n",
     });
-    const r = await s.call("rule", "T1", "fix", "--changes", "code", "--reason", "x");
+    const r = await s.call("decide", "fresh", "--reason", "x");
     expect(r.code).toBe(1);
-    expect(r.output).toMatch(/^yagura rule was not recorded: the worker role does not record rulings\n/);
+    expect(r.output).toMatch(/^yagura decide was not recorded: the worker role does not record decisions\n/);
   });
 
   it("records a worker's handoff once it is valid, and the engine reads it without parsing any text", async () => {
@@ -106,98 +106,6 @@ describe("agent records", () => {
       forOthers: "- shout() exists now",
       raw: "the report",
     });
-  });
-
-  it("takes a verifier's verdict only with runs this attempt recorded, and criteria the unit has", async () => {
-    const target = unitOf("work");
-    const s = session(unitOf("verify", target.id), "verifier");
-    const run = db
-      .prepare(
-        "INSERT INTO evidence_runs (attempt_id, at, sha, label, command, exit_code, duration_ms, created_at) VALUES (?, 'head', 'h', 's', 'c', 0, 1, 't')",
-      )
-      .run(s.attempt.id).lastInsertRowid as number;
-    expect((await s.call("verdict", "unit-verified")).output).toMatch(/a pass tier needs the runs that prove it/);
-    expect((await s.call("verdict", "unit-verified", "--runs", "999")).output).toMatch(/run:999 was not recorded by your yagura evidence run calls/);
-    expect((await s.call("finding", "3", "met", "--runs", String(run))).output).toMatch(/criterion 3 does not exist; ACCEPTANCE has 2/);
-    expect((await s.call("finding", "1", "met", "--runs", `run:${run}`)).code).toBe(0);
-    expect((await s.call("verdict", "unit-verified", "--runs", String(run))).code).toBe(0);
-    expect(recordedHandoff(db, s.attempt.id, "")).toMatchObject({
-      verification: "unit-verified",
-      citedRunIds: [run],
-      findings: `- [x] criterion 1 (run:${run})`,
-    });
-  });
-
-  it("asks the arbiter for a ruling on every thread of its wave, and checks an amendment against the unit as it stands", async () => {
-    const target = unitOf("work");
-    const wave = unitOf("review-triage", target.id);
-    const thread = db.prepare(
-      "INSERT INTO mr_threads (unit_id, thread_id, kind, author, comments_json, wave_unit_id, created_at) VALUES (?, ?, 'review-thread', 'ultish', '[]', ?, 't')",
-    );
-    thread.run(target.id, "A", wave.id);
-    thread.run(target.id, "B", wave.id);
-    const s = session(wave, "review-triage");
-    expect((await s.call("rule", "T3", "fix", "--changes", "code", "--reason", "x")).output).toMatch(/T3 does not exist; this wave has 2 threads \(T1–T2\)/);
-    expect((await s.call("rule", "T1", "ask", "--reason", "emojis contradict criterion 1")).output).toMatch(/an ask must name what changes/);
-    expect((await s.call("rule", "T1", "dismiss", "--changes", "code", "--reason", "x")).output).toMatch(/a dismissal changes nothing/);
-    expect((await s.call("rule", "T1", "fix", "--changes", "code,acceptance", "--reason", "x")).output).toMatch(
-      /acceptance changes what the unit must do or plans, so the developer decides: rule ask/,
-    );
-    expect((await s.call("rule", "T1", "ask", "--changes", "code,plan", "--reason", "x")).output).toMatch(/plan needs --plan-note/);
-    expect((await s.call("rule", "T1", "ask", "--changes", "code,acceptance,verify", "--reason", "emojis contradict criterion 1")).output).toMatch(
-      /an ask that changes code needs --instruction/,
-    );
-    expect(
-      (
-        await s.call(
-          "rule",
-          "T1",
-          "ask",
-          "--changes",
-          "code,acceptance,verify",
-          "--reason",
-          "emojis contradict criterion 1",
-          "--instruction",
-          "If the developer approves: append 🎉 in shout()",
-        )
-      ).output,
-    ).toMatch(/write it as a command \("Append 🎉 to …"\), with no "if"/);
-    expect(
-      (
-        await s.call(
-          "rule",
-          "T1",
-          "ask",
-          "--changes",
-          "code,acceptance,verify",
-          "--reason",
-          "emojis contradict criterion 1",
-          "--instruction",
-          "append 🎉 in shout()",
-        )
-      ).output,
-    ).toMatch(
-      /recorded ruling T1\nstill to record:\n- no ruling for T2[^\n]*\n- T1 names acceptance but records no criterion change[^\n]*\n- T1 names verify but records no new command/,
-    );
-    expect((await s.call("amend", "T1", "scope", "--path", "docs/**", "--text", "the docs mention it")).output).toMatch(
-      /T1's ruling does not name scope in --changes/,
-    );
-    expect((await s.call("amend", "T1", "replace", "--from", "no such criterion", "--to", "x")).output).toMatch(
-      /no acceptance criterion reads "no such criterion"/,
-    );
-    expect((await s.call("amend", "T1", "replace", "--from", "shout('app') === 'HELLO, APP!'", "--to", "shout('app') === 'HELLO, APP! 🎉'")).code).toBe(0);
-    expect((await s.call("amend", "T1", "verify", "--command", "node check.js --emoji")).code).toBe(0);
-    expect((await s.call("rule", "T2", "dismiss", "--changes", "none", "--reason", "the test covers it")).output).toMatch(/nothing left to record/);
-    expect(recordedRulings(db, s.attempt.id)).toEqual(
-      new Map([
-        [1, { decision: "asked", reason: "emojis contradict criterion 1" }],
-        [2, { decision: "dismissed", reason: "the test covers it" }],
-      ]),
-    );
-    expect(recordedAmendments(db, s.attempt.id).get(1)).toEqual([
-      { kind: "replace", from: "shout('app') === 'HELLO, APP!'", to: "shout('app') === 'HELLO, APP! 🎉'" },
-      { kind: "verify", command: "node check.js --emoji" },
-    ]);
   });
 
   it("blocks the agent's stop as a Claude Code hook while something is missing, at most twice, then lets it stop", async () => {

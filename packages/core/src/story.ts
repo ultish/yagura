@@ -3,18 +3,11 @@ import type { Bootstrap } from "./config.js";
 import { listDisagreements, type Disagreement } from "./disagreements.js";
 import { ROLE_NAMES, spendsAttempt, type ManagerAction, type Attempt, type Handoff, type IsoTime, type Unit, type UnitId } from "./domain.js";
 import { getMergeRequest } from "./forge.js";
-import { liveVerdict } from "./land.js";
-import { landWait } from "./publish.js";
-import { listPackEdits } from "./packedits.js";
 import { layout } from "./paths.js";
 import { getGate, getProject, getUnit, listAttempts, listGates, listUnits, type Db, jobLabel, type Gate } from "./store.js";
-import { isReviewThread, listThreadRows } from "./triage.js";
-import { findingFates } from "./review.js";
-import { describeOps, listAmendments } from "./amend.js";
 import { dependencyEdges, type DepEdge } from "./chain.js";
 import { listManagerDecisions, managerOn } from "./manager.js";
 import { savedHandoff } from "./finish.js";
-import { recordedAmendments, recordedRulings } from "./records.js";
 
 // A unit's page reads as one story: who did what, what each chose, and what yagura checked about it. Agents' lines are
 // judgment unless a check sits beside them; a check is something yagura proved from its own records.
@@ -57,7 +50,6 @@ export interface ManagerTurn {
 export interface UnitStory {
   unit: Unit;
   projectId: string;
-  tier: string | null;
   pr: { number: number; url: string } | null;
   costUsd: number;
   started: IsoTime | null;
@@ -157,22 +149,6 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     });
   }
 
-  // The verification that judged a head, by the head it judged.
-  const verifyFor = new Map<string, { seq: number; agent: string; outcome: string; check: string; tier: string | null; reason: string }>();
-  for (const v of related.filter((u) => u.type === "verify")) {
-    const out = events.find((e) => e.type === "verify.outcome" && e.unit_id === unit.id && e.data.verifyUnit === v.seq);
-    const head = listAttempts(db, v.id).at(-1)?.headSha;
-    if (out && head)
-      verifyFor.set(head, {
-        seq: v.seq,
-        agent: jobLabel(db, v),
-        outcome: String(out.data.outcome),
-        check: String(out.data.check ?? "agreed"),
-        tier: (out.data.tier as string | null) ?? null,
-        reason: String(out.data.reason),
-      });
-  }
-
   // The unit's own work: one entry per attempt that did the work; tries that cost no try fold into the next one.
   let folded: string[] = [];
   for (const a of listAttempts(db, unit.id)) {
@@ -186,16 +162,11 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     const rejected = events.find(
       (e) => e.type === "unit.state" && e.unit_id === unit.id && e.data.to === "rejected" && e.id > 0 && sameAttempt(events, e, a.n),
     );
-    const verified = a.headSha ? verifyFor.get(a.headSha) : undefined;
-    const checks: StoryCheck[] = rejected
-      ? [{ ok: false, text: `rejected: ${describeRejection(rejected.data)}` }]
-      : verified
-        ? [{ ok: verified.outcome === "verified", text: `${verified.outcome === "verified" ? "verified" : verified.outcome} by ${verified.agent}` }]
-        : [];
+    const checks: StoryCheck[] = rejected ? [{ ok: false, text: `rejected: ${describeRejection(rejected.data)}` }] : [];
     entries.push({
       at: a.startedAt ?? a.endedAt ?? unit.createdAt,
-      actor: unit.type === "pack" ? "pack" : "worker",
-      who: unit.type === "pack" ? "Pack writer" : "Worker",
+      actor: "worker",
+      who: "Worker",
       attempt: attemptOf(unit, a),
       status: { text: rejected ? "rejected" : h.status === "success" ? "handed off" : h.status, tone: rejected ? "bell" : "amber" },
       body: bullets(h.whatIDid)[0] ?? null,
@@ -203,121 +174,6 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       folded: folded.length ? { summary: `${folded.length} earlier tr${folded.length === 1 ? "y" : "ies"} did not count`, items: folded } : null,
     });
     folded = [];
-  }
-
-  for (const v of related.filter((u) => u.type === "verify")) {
-    for (const a of listAttempts(db, v.id)) {
-      const h = handoffOf(v, a);
-      const out = events.find((e) => e.type === "verify.outcome" && e.unit_id === unit.id && e.data.verifyUnit === v.seq);
-      if (a.harness === "yagura-proof") {
-        if (out)
-          entries.push({
-            at: a.startedAt ?? v.createdAt,
-            actor: "yagura",
-            who: `yagura · proof ${jobLabel(db, v)}`,
-            attempt: null,
-            status: { text: String(out.data.outcome), tone: out.data.outcome === "verified" ? "pine" : "bell" },
-            body: null,
-            lines: [
-              line(`a${a.id}:claimed:0`, "claimed", "Ran the pack on its own head with no agent.", [
-                { ok: out.data.outcome === "verified", text: String(out.data.reason) },
-              ]),
-            ],
-            folded: null,
-          });
-        continue;
-      }
-      if (!h && !out) continue;
-      const ref = `a${a.id}`;
-      const lines: StoryLine[] = [];
-      if (h) {
-        const met = (h.findings.match(/^\s*-\s*\[x\]/gim) ?? []).length;
-        const all = (h.findings.match(/^\s*-\s*\[[ x]\]/gim) ?? []).length;
-        const checks: StoryCheck[] = out
-          ? [
-              ...String(out.data.reason)
-                .split(/;\s*/)
-                .map((t) => ({ ok: out.data.check !== "disagreed", text: t })),
-              ...(out.data.tier && h.verification && out.data.tier !== h.verification && out.data.outcome === "verified"
-                ? [{ ok: true, text: `capped at ${String(out.data.tier)}: no pack check proves more` }]
-                : []),
-            ]
-          : [];
-        lines.push(line(`${ref}:claimed:0`, "claimed", `${h.verification ?? "No tier"}${all ? `: ${met} of ${all} criteria met` : ""}.`, checks));
-        bullets(h.packChanges).forEach((t, i) => {
-          const edit = listPackEdits(db, unit.id).find((e) => e.attemptId === a.id);
-          const state = edit
-            ? edit.state === "dropped"
-              ? { ok: false, text: `dropped: ${edit.reason}` }
-              : {
-                  ok: true,
-                  text: edit.packUnitId ? `re-run on both sides; lands as U${getUnit(db, edit.packUnitId).seq}` : "re-run on both sides; lands after this unit",
-                }
-            : { ok: false, text: "not kept" };
-          lines.push(line(`${ref}:pack:${i}`, "claimed", `Changed the pack: ${t}`, i === 0 ? [state] : []));
-        });
-        lines.push(...judgment(ref, h));
-      }
-      entries.push({
-        at: a.startedAt ?? v.createdAt,
-        actor: "verifier",
-        who: "Verifier",
-        attempt: attemptOf(v, a),
-        status: out
-          ? { text: out.data.check === "disagreed" ? "yagura disagreed" : String(out.data.outcome), tone: out.data.outcome === "verified" ? "pine" : "bell" }
-          : null,
-        body: null,
-        lines,
-        folded: null,
-      });
-    }
-  }
-
-  const threads = listThreadRows(db, unit.id);
-  // yagura's own reviewer's findings are told in the reviewer's entry; only people's threads stand alone.
-  for (const r of threads.filter((t) => !isReviewThread(t.threadId)))
-    entries.push({
-      at: r.createdAt,
-      actor: "person",
-      who: `${r.author} · ${r.path ? `review on ${r.path}${r.line ? `:${r.line}` : ""}` : "comment"}`,
-      attempt: null,
-      status: null,
-      body: r.comments[0] ?? null,
-      lines: [],
-      folded: null,
-    });
-
-  // Each finding with what became of it: fixed in which commit, dismissed and why, asked, or kept as a note.
-  for (const r of related.filter((u) => u.type === "review")) {
-    const last = listAttempts(db, r.id)
-      .filter((a) => a.state === "handed_off")
-      .at(-1);
-    const done = events.find((e) => e.unit_id === r.id && e.type === "review.done");
-    if (!last || !done) continue;
-    const ref = `a${last.id}`;
-    const fates = findingFates(db, r) ?? [];
-    const lines = fates.length
-      ? fates.map((f, i) => line(`${ref}:finding:${i}`, "claimed", `[${f.severity}] ${f.path}${f.line ? `:${f.line}` : ""} — ${f.text} → ${f.fate}`))
-      : [line(`${ref}:finding:0`, "claimed", "No findings.")];
-    const raised = fates.filter((f) => f.severity !== "nit");
-    const open = raised.filter((f) => {
-      const t = threads.find((x) => x.threadId === `review:U${r.seq}:F${f.n}`);
-      return !t?.decision || (t.decision === "asked" && t.gateId !== null && getGate(db, t.gateId).state === "open");
-    }).length;
-    entries.push({
-      at: last.startedAt ?? r.createdAt,
-      actor: "reviewer",
-      who: /again/.test(r.goal) ? "Reviewer (the fixes)" : "Reviewer",
-      attempt: attemptOf(r, last),
-      status: open
-        ? { text: `${open} to settle`, tone: "amber" }
-        : raised.length
-          ? { text: `${raised.length} settled`, tone: "pine" }
-          : { text: "nothing to settle", tone: "pine" },
-      body: null,
-      lines,
-      folded: null,
-    });
   }
 
   // The manager's decisions: what it chose and why, which the developer can disagree with like any other claim.
@@ -339,78 +195,6 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
             : null,
       lines: d.action === "fallback" ? [] : [line(`m${d.id}`, "chose", `${MANAGER_ACTION_TEXT[d.action]}: ${d.reason}`)],
       folded: null,
-    });
-  }
-
-  // Changes to what the unit must do, proposed from a review comment and decided by the developer.
-  for (const a of listAmendments(db, unit.id)) {
-    const rejected = a.state === "rejected";
-    entries.push({
-      at: (a.decidedAt ?? a.createdAt) as IsoTime,
-      actor: a.state === "proposed" || a.gateId === null ? "yagura" : "person",
-      who: a.state === "proposed" ? "Amendment" : a.gateId === null ? "Yagura" : "You",
-      attempt: null,
-      status:
-        a.state === "approved"
-          ? { text: a.gateId === null ? "amendment applied (trusted author)" : "approved an amendment", tone: "pine" }
-          : rejected
-            ? { text: "rejected an amendment", tone: "muted" }
-            : { text: "amendment waits for you", tone: "bell" },
-      body: `${a.author} wrote: "${a.quote.slice(0, 240)}"\n${describeOps(a.changes).join("; ")}`,
-      lines: [],
-      folded: null,
-    });
-  }
-
-  for (const t of related.filter((u) => u.type === "review-triage" || u.type === "rebase")) {
-    const attempts = listAttempts(db, t.id);
-    const done = attempts.filter((a) => a.state === "handed_off" && events.some((e) => e.unit_id === t.id && e.type === "unit.state" && e.data.to === "done"));
-    const last = done.at(-1) ?? null;
-    const failedTries = attempts.filter((a) => a !== last && a.startedAt).map((a) => `A${a.agentNo}: ${failReason(events, t, a)}`);
-    if (!last) continue;
-    const h = handoffOf(t, last);
-    const ref = `a${last.id}`;
-    // A wave's rulings are the arbiter's own records, which a later wave on the same thread cannot overwrite; the thread table
-    // holds only each thread's latest state, so it gives the reply check while the thread is still this wave's.
-    const current = threads.filter((r) => r.waveUnitId === t.id);
-    // A wave the developer already answered runs no arbiter (§28): only its worker, building from the recorded instruction.
-    const judge = attempts.find((a) => a.role === "review-triage") ?? attempts.find((a) => a.n === 1 && !a.role);
-    const rulings = judge ? [...recordedRulings(db, judge.id).entries()].sort(([a], [b]) => a - b) : [];
-    const replyCheck = (r: (typeof threads)[number] | undefined): StoryCheck[] =>
-      !r || (r.decision !== "fixed" && r.decision !== "dismissed") || isReviewThread(r.threadId)
-        ? []
-        : [{ ok: !!r.repliedAt, text: r.repliedAt ? "reply posted on the thread" : "reply pending" }];
-    const lines: StoryLine[] =
-      t.type !== "review-triage"
-        ? [line(`${ref}:claimed:0`, "claimed", "Rebased onto the moved trunk.")]
-        : rulings.length
-          ? [
-              ...rulings.map(([n, r], i) => line(`${ref}:thread:${i}`, "claimed", `T${n} ${r.decision}: ${r.reason}`, replyCheck(current[n - 1]))),
-              ...[...recordedAmendments(db, judge!.id).entries()].map(([n, ops], i) =>
-                line(`${ref}:amend:${i}`, "claimed", `T${n} would change what U${unit.seq} must do: ${describeOps(ops).join("; ")}`),
-              ),
-            ]
-          : current
-              .filter((r) => r.decision)
-              .map((r, i) => line(`${ref}:thread:${i}`, "claimed", judge ? `${r.decision}: ${r.reason}` : `Fixed as you approved: ${r.reason}`, replyCheck(r)));
-    if (h) lines.push(...judgment(ref, h));
-    entries.push({
-      at: last.startedAt ?? t.createdAt,
-      actor: t.type === "review-triage" ? "review-triage" : "rebase",
-      who: t.type !== "review-triage" ? "Rebase" : judge ? "Arbiter" : "Worker",
-      attempt: attemptOf(t, t.type === "review-triage" && judge ? judge : last),
-      status: { text: "done", tone: "pine" },
-      body: null,
-      lines,
-      folded: failedTries.length
-        ? {
-            summary: `${failedTries.length} earlier tr${failedTries.length === 1 ? "y" : "ies"} did not count ($${attempts
-              .filter((a) => a !== last)
-              .reduce((s, a) => s + a.costUsd, 0)
-              .toFixed(2)})`,
-            items: failedTries,
-          }
-        : null,
     });
   }
 
@@ -498,24 +282,9 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     });
   }
 
-  const stillWaiting = unit.state === "verified" ? landWait(db, unit) : null;
-  if (stillWaiting)
-    entries.push({
-      at: new Date().toISOString() as IsoTime,
-      actor: "yagura",
-      who: "Waiting",
-      attempt: null,
-      status: { text: stillWaiting.stuck ? "will not come" : "waiting", tone: stillWaiting.stuck ? "bell" : "amber" },
-      body: stillWaiting.reason,
-      lines: [],
-      folded: null,
-    });
-
   const landed = events.find((e) => e.type === "unit.landed" && e.unit_id === unit.id);
-  const verdict = liveVerdict(db, unit.id);
   if (landed) {
     const sha = String(landed.data.sha);
-    const carried = verdict?.head_sha === sha;
     entries.push({
       at: landed.ts,
       actor: "yagura",
@@ -528,11 +297,6 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
           "landed",
           "landed",
           landed.data.pr ? `Pull request #${String(landed.data.pr)} merged as ${sha.slice(0, 10)}.` : `Landed on trunk as ${sha.slice(0, 10)}.`,
-          [
-            carried
-              ? { ok: true, text: "the merged patch is the one verified, so the verdict carries" }
-              : { ok: false, text: "merged with a patch other than the one verified; the verdict did not carry" },
-          ],
         ),
       ],
       folded: null,
@@ -585,7 +349,6 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
   return {
     unit,
     projectId: project.id,
-    tier: verdict?.tier ?? null,
     pr: mr ? { number: mr.number, url: mr.url } : null,
     costUsd: allAttempts.reduce((s, a) => s + a.costUsd, 0),
     agents: agentsOf(db, unit, related, planUnit, handoffOf, events),

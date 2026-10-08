@@ -1,6 +1,6 @@
 import type { SessionRecorder } from "./agent.js";
 import type { IsoTime } from "./domain.js";
-import { missingSkills } from "./pack.js";
+import { missingSkills } from "./skills.js";
 import { now, recordEvent, type Db } from "./store.js";
 
 export const TURN_STATES = ["running", "done", "failed", "stopped"] as const;

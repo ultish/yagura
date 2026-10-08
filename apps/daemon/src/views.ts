@@ -17,7 +17,6 @@ import {
   type EnvironmentId,
   getRepo,
   layout,
-  parsePack,
   readFileAt,
   resolveRef,
   type Bootstrap,
@@ -31,7 +30,6 @@ import {
   listProposals,
   listThreads,
   listUnits,
-  liveVerdict,
   ProposalBody,
   readiness,
   resolveSetting,
@@ -42,7 +40,6 @@ import {
   type ProjectId,
   type Unit,
   type UnitId,
-  pausedBy,
 } from "@yagura/core";
 
 type Row = Record<string, unknown>;
@@ -86,11 +83,10 @@ function blockedReason(db: Db, unitId: UnitId): string | null {
 }
 
 export function unitView(db: Db, u: Unit) {
-  const verdict = liveVerdict(db, u.id);
   return {
     ...u,
     attempts: listAttempts(db, u.id),
-    verdict: verdict ? { id: verdict.id, tier: verdict.tier, headSha: verdict.head_sha } : null,
+    verdict: null,
     blockedReason: u.state === "blocked" ? blockedReason(db, u.id) : null,
   };
 }
@@ -209,7 +205,6 @@ export async function repoView(db: Db, boot: Bootstrap, repoId: RepoId) {
   const repo = getRepo(db, repoId);
   const mirror = layout(boot).mirror(repoId);
   const trunk = existsSync(mirror) ? await resolveRef(mirror, `origin/${repo.defaultBranch}`).catch(() => null) : null;
-  const pack = trunk ? parsePack(await readFileAt(mirror, trunk, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath) : null;
   const projects = db
     .prepare("SELECT p.id, p.state FROM project_repos pr JOIN projects p ON p.id = pr.project_id WHERE pr.repo_id = ? ORDER BY p.created_at")
     .all(repoId) as { id: string; state: string }[];
@@ -224,11 +219,7 @@ export async function repoView(db: Db, boot: Bootstrap, repoId: RepoId) {
     repo,
     trunk,
     route: { text: `lands ${describeRoute(repo)}`, confirmed: !(repo.forge === "none" && isRemote(repo.url) && !repo.pushConfirmed) },
-    pack: pack
-      ? pack.ok
-        ? { ok: true as const, checks: pack.pack.checks.map((c) => ({ name: c.name, tier: c.tier })) }
-        : { ok: false as const, reason: pack.reason }
-      : null,
+    pack: null,
     projects,
     landingQueue: units.filter((u) => u.state === "verified").map(ref),
     landedCount: landed.length,
@@ -257,7 +248,7 @@ export function environmentView(db: Db, id: EnvironmentId) {
     queued: leases.filter((l) => l.state === "queued").map((l) => ({ ...holder(l), since: l.requested_at as string })),
     projects: db.prepare("SELECT id, state FROM projects WHERE environment_id = ? ORDER BY created_at").all(id) as { id: string; state: string }[],
     kept: keptSlots(db, { environmentId: id }),
-    pausedBy: pausedBy(db, id),
+    pausedBy: null,
   };
 }
 

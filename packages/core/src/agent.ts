@@ -7,7 +7,7 @@ import type { Bootstrap } from "./config.js";
 import type { Attempt, HarnessEvent, ProjectId, Role, Unit } from "./domain.js";
 import type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
 import { activeHold, holdHarness, limitUntil } from "./limits.js";
-import { missingSkills } from "./pack.js";
+import { missingSkills } from "./skills.js";
 import { steerChannel, type SteerChannel } from "./steer.js";
 import { logTimesPath } from "./paths.js";
 import { getAttempt, getUnit, recordEvent, updateAttempt, type Db } from "./store.js";

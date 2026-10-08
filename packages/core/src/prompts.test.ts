@@ -87,24 +87,3 @@ describe("role prompts", () => {
     expect(recorded.text).toContain("Write the test first.");
   });
 });
-
-describe("follow-up messages", () => {
-  it("renders each message yagura may send after the brief, from the functions that send it", async () => {
-    const { followUps } = await import("./followups.js");
-    const worker = followUps("worker");
-    expect(worker.map((f) => f.when)).toEqual([
-      "The verifier rejected its work: the same session resumes, once",
-      "It changed a path outside SCOPE without a reason: the same session resumes, once",
-      "You send it a message while it runs (any agent that can take one)",
-    ]);
-    expect(worker[0]!.text).toMatch(/^# yagura: your handoff was rejected/);
-    expect(worker[1]!.text).toContain('yagura handoff --outside-scope "<path>=<why>"');
-    expect(followUps("review-triage")[0]!.text).toMatch(/^# yagura: your triage handoff was not accepted/);
-    expect(followUps("watchman").map((f) => f.text.split("\n")[0])).toEqual([
-      "# yagura: the next message in this thread",
-      "## YOUR PREVIOUS REPLY WAS REJECTED",
-      "<the full brief>",
-    ]);
-    expect(followUps("verifier").length).toBe(1);
-  });
-});

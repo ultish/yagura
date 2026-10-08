@@ -11,7 +11,6 @@ import {
   getSpec,
   recordEvent,
   writeSpec,
-  followUps,
   PROMPT_ROLES,
   defaultGuidance,
   effectiveGuidance,
@@ -21,7 +20,6 @@ import {
   getMessage,
   readTurnCalls,
   bumpMaxAttempts,
-  retryState,
   wakeManager,
   logTimesPath,
   threadsForProject,
@@ -128,7 +126,6 @@ import {
   repoHistory,
   repoChange,
   unitCode,
-  landWait,
   repoDiffFiles,
 } from "@yagura/core";
 import {
@@ -237,13 +234,7 @@ export function createApp(opts: ServerOptions): Hono {
       threads: threadsForProject(db, id),
       deps: listDeps(db, id),
       gates: listGates(db, id),
-      waiting: [
-        ...r.waiting.map((w) => ({ unitId: w.unit.id, reason: w.reason })),
-        ...listUnits(db, id).flatMap((u) => {
-          const w = u.state === "verified" ? landWait(db, u) : null;
-          return w ? [{ unitId: u.id, reason: w.reason }] : [];
-        }),
-      ],
+      waiting: r.waiting.map((w) => ({ unitId: w.unit.id, reason: w.reason })),
       skills: projectSkillChecks(db, boot, id),
     });
   });
@@ -325,9 +316,8 @@ export function createApp(opts: ServerOptions): Hono {
     if (!["blocked", "failed", "rejected"].includes(unit.state))
       return c.json({ error: `U${unit.seq} is ${unit.state}; only blocked, failed, or rejected units can be retried` }, 409);
     if (note) addUnitNote(db, unit.id, `Operator: ${note}`);
-    const next = retryState(db, unit);
-    if (next === "ready") bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).length + 1);
-    transitionUnit(db, unit.id, next, { by: "operator", note: note || null });
+    bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).length + 1);
+    transitionUnit(db, unit.id, "ready", { by: "operator", note: note || null });
     return c.json(unitView(db, getUnit(db, unit.id)));
   });
 
@@ -500,7 +490,7 @@ export function createApp(opts: ServerOptions): Hono {
         { db, boot },
         { source: b.source, id: b.id, forge: b.forge as "gh" | "glab" | undefined, land: b.land === "push" ? "push" : undefined },
       );
-      return c.json({ ...(await repoView(db, boot, repo.id)), notes: inspection.notes }, 201);
+      return c.json(await repoView(db, boot, repo.id), 201);
     } catch (e) {
       if (e instanceof RouteNeeded) return c.json({ error: e.message, needsRoute: true }, 400);
       if (e instanceof RepoUnusable) return c.json({ error: e.message }, e.message.includes("already") ? 409 : 400);
@@ -661,7 +651,7 @@ export function createApp(opts: ServerOptions): Hono {
         sha: e.sha,
         notes: projectId ? getPromptText(db, "project", projectId, role, "notes") : role === "watchman" ? getPromptText(db, "global", "", role, "notes") : null,
         lastAttemptId: last?.id ?? null,
-        followUps: followUps(role),
+        followUps: [],
       };
     }),
   });

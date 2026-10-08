@@ -5,9 +5,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import type { Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
 import { acquireLease, activeLease, reapLeases, releaseLease, setProviderConfig } from "./leases.js";
-import { loadPack, missingSkills } from "./pack.js";
+import { missingSkills } from "./skills.js";
 import { addEnvironment, addProject, addRepo, addUnit, createAttempt, openStore, updateAttempt, type Db } from "./store.js";
-import { writeFileSync, mkdirSync } from "node:fs";
 
 let db: Db;
 let boot: Bootstrap;
@@ -79,21 +78,7 @@ describe("leases", () => {
   });
 });
 
-describe("verify pack", () => {
-  it("loads a valid pack and reports why an invalid one fails", () => {
-    const wt = mkdtempSync(join(tmpdir(), "yagura-pack-"));
-    expect(loadPack(wt, ".agents/verify")).toEqual({ ok: false, reason: "no verify pack at .agents/verify/verify.json" });
-    mkdirSync(join(wt, ".agents/verify"), { recursive: true });
-    writeFileSync(
-      join(wt, ".agents/verify/verify.json"),
-      JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "make test", tier: "unit-verified" }] }),
-    );
-    expect(loadPack(wt, ".agents/verify")).toMatchObject({ ok: true, pack: { checks: [{ name: "unit", timeoutSeconds: 300 }], protected: [] } });
-    writeFileSync(join(wt, ".agents/verify/verify.json"), JSON.stringify({ provider: "k8s", checks: [] }));
-    const bad = loadPack(wt, ".agents/verify");
-    expect(bad.ok === false && bad.reason).toMatch(/provider.*checks/s);
-  });
-
+describe("required skills", () => {
   it("reports required skills a role did not load", () => {
     expect(missingSkills("worker", ["yagura:yagura-worker"])).toEqual([
       "pstack:poteto-mode",
@@ -102,8 +87,6 @@ describe("verify pack", () => {
     ]);
     expect(missingSkills("worker", ["yagura-worker", "poteto-mode", "principle-prove-it-works", "principle-test-behavior-not-implementation"])).toEqual([]);
     expect(missingSkills("planner", [])).toEqual(["yagura:yagura-planner"]);
-    expect(missingSkills("pack", [])).toEqual(["yagura:yagura-pack"]);
-    expect(missingSkills("rebase", [])).toEqual(["yagura:yagura-rebase"]);
     expect(missingSkills("ci-fix", [])).toEqual([]);
   });
 });

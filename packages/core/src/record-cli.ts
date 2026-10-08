@@ -2,22 +2,17 @@ import { timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { loadBootstrap } from "./config.js";
-import type { AttemptId, RecordKind, Role } from "./domain.js";
+import type { AttemptId, Role } from "./domain.js";
 import { layout } from "./paths.js";
-import { RECORD_SCHEMAS, ROLE_RECORDS, issuesOf, listRecords, missingRecords, putRecord, recordProblem, type RecordData } from "./records.js";
+import { type LiveRecordKind, RECORD_SCHEMAS, ROLE_RECORDS, issuesOf, missingRecords, putRecord, recordProblem, type RecordData } from "./records.js";
 import { getAttempt, getUnit, openStore, recordEvent, type Db } from "./store.js";
 import { RECORD_USAGE, type RecordCommand } from "./record-usage.js";
 export { RECORD_COMMANDS, RECORD_USAGE, recordInstructions, type RecordCommand } from "./record-usage.js";
 
 // The commands an agent records its work with (§27). Each one is checked when it is called, so a wrong value comes back to the
 // agent at once with what to fix; the engine reads the records, never the agent's final message.
-const KIND: Record<Exclude<RecordCommand, "check-done">, RecordKind> = {
+const KIND: Record<Exclude<RecordCommand, "check-done">, LiveRecordKind> = {
   handoff: "handoff",
-  verdict: "verdict",
-  finding: "finding",
-  rule: "ruling",
-  amend: "amendment",
-  "review-finding": "review-finding",
   decide: "decision",
   plan: "plan",
 };
@@ -32,18 +27,9 @@ const OPTIONS = {
   note: { type: "string", multiple: true },
   "follow-up": { type: "string", multiple: true },
   finding: { type: "string", multiple: true },
-  runs: { type: "string" },
-  "pack-change": { type: "string", multiple: true },
   reason: { type: "string" },
-  changes: { type: "string" },
-  "plan-note": { type: "string" },
-  instruction: { type: "string" },
-  path: { type: "string" },
-  from: { type: "string" },
-  to: { type: "string" },
-  text: { type: "string" },
-  command: { type: "string" },
   question: { type: "string" },
+  to: { type: "string" },
   file: { type: "string" },
   json: { type: "string" },
   hook: { type: "boolean" },
@@ -51,20 +37,6 @@ const OPTIONS = {
 
 type Values = ReturnType<typeof parseArgs<{ options: typeof OPTIONS; allowPositionals: true; strict: true; args: string[] }>>["values"];
 type Built = { key: string; data: unknown } | { problem: string };
-
-const runList = (s: string | undefined): number[] | string =>
-  !s
-    ? []
-    : s
-          .split(/[,\s]+/)
-          .filter(Boolean)
-          .every((x) => /^(run:)?\d+$/.test(x))
-      ? s
-          .split(/[,\s]+/)
-          .filter(Boolean)
-          .map((x) => Number(x.replace(/^run:/, "")))
-      : `--runs takes run ids like 12,14, not "${s}"`;
-const threadOf = (s: string | undefined): number | null => (s && /^T\d+$/i.test(s) ? Number(s.slice(1)) : null);
 
 function build(db: Db, attemptId: AttemptId, command: Exclude<RecordCommand, "check-done">, pos: string[], v: Values, stdin: () => string): Built {
   const one = (xs: string[] | undefined) => xs?.at(-1) ?? null;
@@ -89,54 +61,6 @@ function build(db: Db, attemptId: AttemptId, command: Exclude<RecordCommand, "ch
           findings: v.finding ?? [],
         },
       };
-    }
-    case "verdict": {
-      const runs = runList(v.runs);
-      if (typeof runs === "string") return { problem: runs };
-      return { key: "", data: { tier: pos[0], runs, packChanges: v["pack-change"] ?? [], decisions: v.decision ?? [], notes: v.note ?? [] } };
-    }
-    case "finding": {
-      const runs = runList(v.runs);
-      if (typeof runs === "string") return { problem: runs };
-      const criterion = Number(pos[0]);
-      if (!Number.isInteger(criterion) || criterion < 1) return { problem: `the criterion is its number in ACCEPTANCE (1, 2, …), not "${pos[0] ?? ""}"` };
-      if (pos[1] !== "met" && pos[1] !== "unmet") return { problem: `say met or unmet, not "${pos[1] ?? ""}"` };
-      return { key: String(criterion), data: { criterion, met: pos[1] === "met", runs, note: one(v.note) } };
-    }
-    case "rule": {
-      const thread = threadOf(pos[0]);
-      if (!thread) return { problem: `name the thread as T1, T2, …, not "${pos[0] ?? ""}"` };
-      const changes = (v.changes ?? "")
-        .split(/[,\s]+/)
-        .map((c) => c.trim())
-        .filter((c) => c && c !== "none");
-      return {
-        key: `T${thread}`,
-        data: { thread, decision: pos[1], reason: v.reason, changes, planNote: v["plan-note"] ?? null, instruction: v.instruction ?? null },
-      };
-    }
-    case "amend": {
-      const thread = threadOf(pos[0]);
-      if (!thread) return { problem: `name the thread as T1, T2, …, not "${pos[0] ?? ""}"` };
-      const op =
-        pos[1] === "replace"
-          ? { kind: "replace", from: v.from, to: v.to }
-          : pos[1] === "add" || pos[1] === "remove"
-            ? { kind: pos[1], text: v.text }
-            : pos[1] === "verify"
-              ? { kind: "verify", command: v.command }
-              : pos[1] === "scope"
-                ? { kind: "scope", path: v.path, why: v.text }
-                : null;
-      if (pos[1] === "clear") return { key: `T${thread}`, data: null };
-      if (!op) return { problem: `the change is replace, add, remove, verify, scope, or clear, not "${pos[1] ?? ""}"` };
-      const earlier = listRecords(db, attemptId, "amendment").find((r) => r.data.thread === thread)?.data.ops ?? [];
-      return { key: `T${thread}`, data: { thread, ops: [...earlier, op] } };
-    }
-    case "review-finding": {
-      const at = /^(.+?)(?::(\d+))?$/.exec(pos[1] ?? "");
-      const n = listRecords(db, attemptId, "review-finding").length + 1;
-      return { key: `F${n}`, data: { n, severity: pos[0], path: at?.[1], line: at?.[2] ? Number(at[2]) : null, text: v.text } };
     }
     case "decide":
       return { key: "", data: { action: pos[0], reason: v.reason, note: one(v.note), question: v.question ?? null, to: v.to ?? null } };

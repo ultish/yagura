@@ -1,8 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { SessionResult } from "./agent.js";
-import type { AttemptId, Handoff, Role } from "./domain.js";
-import { parseHandoff } from "./handoff.js";
-import { describeRecords, missingRecords, noteFallback, recordedHandoff } from "./records.js";
+import { FAILURE_MODES, type AttemptId, type FailureMode, type Handoff, type Role } from "./domain.js";
+import { describeRecords, missingRecords, recordedHandoff } from "./records.js";
 import { getAttempt, getUnit, recordEvent, type Db } from "./store.js";
 
 // How an agent's session is closed out (§27): its final message is kept as the report for the developer, anything its role
@@ -46,19 +45,65 @@ export function attemptAccount(db: Db, attemptId: AttemptId, reportPath: string 
   return report ? `${recorded}\n\nIts report:\n${report}` : recorded;
 }
 
-// A finished attempt's handoff read again later (story, audit, follow-ups, notes to other units): its records, else its saved report.
+// A finished attempt's handoff read again later (story, audit, notes to other units): what it recorded.
 export function savedHandoff(db: Db, attemptId: AttemptId, reportPath: string | null): Handoff | null {
   const report = reportPath && existsSync(reportPath) ? readFileSync(reportPath, "utf8") : null;
-  return recordedHandoff(db, attemptId, report ?? "") ?? (report ? parseHandoff(report) : null);
+  return recordedHandoff(db, attemptId, report ?? "");
 }
 
-// The handoff the engine acts on: from the records, or, while the roles move over, from the reports the session ended with
-// (latest first: after a reminder the last one may be short), recorded as a fallback.
+// The handoff the engine acts on: only what the agent recorded.
 export function readHandoff(db: Db, attemptId: AttemptId, reports: (string | null)[]): Handoff | null {
-  const texts = reports.filter((r): r is string => !!r);
-  const recorded = recordedHandoff(db, attemptId, texts[0] ?? "");
-  if (recorded || !texts.length) return recorded;
-  const parsed = texts.map(parseHandoff).find((h) => h !== null) ?? null;
-  noteFallback(db, attemptId, "parseHandoff", parsed !== null);
-  return parsed;
+  return recordedHandoff(db, attemptId, reports.find((r): r is string => !!r) ?? "");
+}
+
+export interface ExitFacts {
+  timedOut: boolean;
+  exitCode: number | null;
+  signal: string | null;
+  finalText: string | null;
+  finalIsError: boolean;
+  stderrTail: string;
+}
+
+export function classifyFailure(f: ExitFacts): FailureMode {
+  const text = `${f.finalText ?? ""}\n${f.stderrTail}`.toLowerCase();
+  if (f.timedOut) return "timebox";
+  if (f.exitCode === 137 || f.signal === "SIGKILL" || /out of memory|oomkilled/.test(text)) return "oom";
+  if (/prompt is too long|context (window|length)|maximum context/.test(text)) return "context-exhausted";
+  if (/fetch failed|etimedout|econn|socket hang up|enotfound|network/.test(text)) return "network";
+  if (/tool_use_failed|tool-error|tool error/.test(text)) return "tool-error";
+  if (f.finalIsError || (f.exitCode !== null && f.exitCode !== 0)) return "harness-error";
+  return "unknown";
+}
+
+export function syntheticFailureHandoff(p: {
+  unit: string;
+  attempt: number;
+  mode: FailureMode;
+  branch: string | null;
+  startedAt: string;
+  endedAt: string;
+  lastActivity: string | null;
+  facts: ExitFacts;
+}): string {
+  if (!(FAILURE_MODES as readonly string[]).includes(p.mode)) throw new Error(`unknown failure mode ${p.mode}`);
+  return `<!-- yagura synthetic failure handoff: unit ${p.unit} attempt ${p.attempt} mode ${p.mode} -->
+## Status
+blocked
+
+## Branch
+${p.branch ? `\`${p.branch}\`` : "(no branch)"}
+
+## What I did
+(the agent ended without a handoff; written by yagura)
+
+## Failure
+- mode: ${p.mode}
+- exit: code ${p.facts.exitCode ?? "none"}, signal ${p.facts.signal ?? "none"}, timed out: ${p.facts.timedOut}
+- started: ${p.startedAt}
+- ended: ${p.endedAt}
+- last activity: ${p.lastActivity ?? "(none)"}
+- final message: ${p.facts.finalText ? p.facts.finalText.slice(0, 500) : "(none)"}
+- stderr tail: ${p.facts.stderrTail.slice(-500) || "(empty)"}
+`;
 }

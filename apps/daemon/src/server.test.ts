@@ -259,13 +259,10 @@ describe("daemon API", () => {
     expect(await (await get(`/api/attempts/${attemptId}/diff`)).json()).toEqual({ base: null, head: null, text: null, truncated: false });
   });
 
-  it("registers an existing repo and lists repos with their pack, projects, and landing queue", async () => {
+  it("registers an existing repo and lists repos with their projects and landing queue", async () => {
     const seed = join(boot.home, "seed");
-    mkdirSync(join(seed, ".agents/verify"), { recursive: true });
-    writeFileSync(
-      join(seed, ".agents/verify/verify.json"),
-      JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] }),
-    );
+    mkdirSync(seed, { recursive: true });
+    writeFileSync(join(seed, "README.md"), "billing\n");
     await git(["init", "--quiet", "-b", "main"], { cwd: seed });
     await commitAll(seed, "init", { name: "t", email: "t@localhost" });
     const origin = join(boot.home, "Billing.git");
@@ -275,11 +272,9 @@ describe("daemon API", () => {
     const created = await post("/api/repos", { source: origin });
     expect(created.status).toBe(201);
     expect(await created.json()).toMatchObject({
-      repo: { id: "billing", url: origin, defaultBranch: "main", packStatus: "unproven" },
-      pack: { ok: true, checks: [{ name: "unit", tier: "unit-verified" }] },
+      repo: { id: "billing", url: origin, defaultBranch: "main" },
       trunk: expect.stringMatching(/^[0-9a-f]{40}$/),
       route: { text: "lands by pushing to main", confirmed: true },
-      notes: [],
     });
     const unknown = await post("/api/repos", { source: "git@git.example.com:team/x.git" });
     expect(unknown.status).toBe(400);
@@ -289,7 +284,7 @@ describe("daemon API", () => {
 
     const repos = (await (await get("/api/repos")).json()) as { repo: { id: string } }[];
     expect(repos.map((r) => r.repo.id)).toEqual(["billing", "testbed"]);
-    expect(repos[1]).toMatchObject({ trunk: null, pack: null, projects: [{ id: "orders", state: "active" }], landingQueue: [], landedCount: 0 });
+    expect(repos[1]).toMatchObject({ trunk: null, projects: [{ id: "orders", state: "active" }], landingQueue: [], landedCount: 0 });
   });
 
   it("creates and edits environments and shows who holds and waits for their slots", async () => {

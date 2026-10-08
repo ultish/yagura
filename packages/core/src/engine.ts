@@ -1,30 +1,18 @@
 import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { TERMINAL_STATES, isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
-import { markMergeChecked, openMergeRequests, prNoun, prRef } from "./forge.js";
-import { landUnit, liveVerdict, watchMergeRequest, type LandResult } from "./land.js";
 import { layout } from "./paths.js";
 import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
-import { runRebaseUnit } from "./rebase.js";
-import { runInvestigateUnit } from "./investigate.js";
 import { applyAskAnswer, managerNeed, queueManager, runManagerUnit, settleManagerUnit, wakeOnNote } from "./manager.js";
-import { sourceDeps, staleSource } from "./sources.js";
-import { landWait, moveConsumer, publishJobs, repinIfStale, testBuildWait } from "./publish.js";
-import { queueTriage, runTriageUnit, advanceThreads } from "./triage.js";
-import { queueReview, reviewStatus, runReviewUnit } from "./review.js";
 import { checkRetroWatch, scanReverts, watchingFor } from "./retro.js";
 import { runWorkUnit } from "./runner.js";
 import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
-import { resumeVerifications } from "./envpause.js";
-import { queuePackEdits } from "./packedits.js";
-import { ensurePackUnits } from "./packs.js";
 import {
   addGate,
   getProject,
-  getRepo,
   getUnit,
   listAttempts,
   listGates,
@@ -43,7 +31,6 @@ import { activeHold } from "./limits.js";
 import { answerIssue, listIssues, pollIssues, watchedRepos } from "./issues.js";
 import { postReport, reportKey, type ReportKind } from "./report.js";
 import { listThreads } from "./threads.js";
-import { runVerifyUnit } from "./verify.js";
 import { sweepWorktrees } from "./worktrees.js";
 import { savedHandoff } from "./finish.js";
 
@@ -84,9 +71,7 @@ export class Engine {
   private lastSweep = 0;
   private lastRevertScan = 0;
   private readonly issuesPolledAt = new Map<string, number>();
-  private readonly landingSaid = new Map<UnitId, string>();
   private readonly cutoffSaid = new Set<ProjectId>();
-  private readonly pinsChecked = new Map<UnitId, string>();
   private readonly costSaid = new Set<ProjectId>();
   private holdSaid: string | null = null;
   private readonly log: (line: string) => void;
@@ -135,12 +120,6 @@ export class Engine {
   private settleFailures(project: Project): void {
     for (const u of listUnits(this.db, project.id)) {
       if (this.inflight.has(`unit:${u.id}`)) continue;
-      if (u.type === "verify" && u.state === "failed")
-        transitionUnit(this.db, u.id, "abandoned", { reason: "verifier attempt failed; outcome applied to its target" });
-      if (u.type === "investigate" && (u.state === "failed" || u.state === "blocked")) {
-        transitionUnit(this.db, u.id, "abandoned", { reason: "the investigation failed; its unit lead is told" });
-        this.log(`  U${u.seq}: the investigation failed; its unit lead decides what next`);
-      }
       if (u.type === "manager" && (u.state === "failed" || u.state === "blocked")) {
         settleManagerUnit(this.db, u);
         this.log(`  U${u.seq}: the unit lead session failed; the fixed rules decide`);
@@ -175,142 +154,6 @@ export class Engine {
     }
   }
 
-  private land(project: Project): void {
-    const openPr = new Set(openMergeRequests(this.db).map((mr) => mr.unitId));
-    // A unit whose pull request is open is still reviewed there: on a forge the pull request opens before review settles.
-    for (const u of listUnits(this.db, project.id).filter((x) => (x.state === "verified" || (x.state === "landing" && openPr.has(x.id))) && x.repoId)) {
-      const key = `land:${u.repoId}`;
-      if (u.state === "verified" && this.inflight.has(key)) continue;
-      // A consumer lands after what it builds against, and only on a verdict proven against that source as it is now.
-      const wait = landWait(this.db, u);
-      if (wait?.stuck) {
-        transitionUnit(this.db, u.id, "blocked", { reason: wait.reason });
-        this.log(`  U${u.seq} blocked: ${wait.reason}`);
-        continue;
-      }
-      if (wait) {
-        this.sayOnce(u, wait.reason);
-        continue;
-      }
-      const build = u.state === "verified" ? testBuildWait(this.db, u) : null;
-      if (build) {
-        this.sayOnce(u, build);
-        continue;
-      }
-      const stale = staleSource(this.db, u);
-      if (stale) {
-        if (!this.inflight.has(key))
-          this.start(
-            key,
-            `move U${u.seq} onto its sources as they are now`,
-            () => moveConsumer(this.ctx, u.id, stale).then((r) => this.log(`  U${u.seq} ${r === "repinned" ? "re-pinned and " : ""}re-verifies: ${stale}`)),
-            () => undefined,
-          );
-        continue;
-      }
-      const head = liveVerdict(this.db, u.id)?.head_sha;
-      if (head && this.pinsChecked.get(u.id) !== head && sourceDeps(this.db, u).some((up) => up.repoId !== u.repoId && getRepo(this.db, up.repoId!).publish)) {
-        if (!this.inflight.has(key))
-          this.start(
-            key,
-            `check U${u.seq}'s pinned versions`,
-            () =>
-              repinIfStale(this.ctx, u.id).then((r) => {
-                if (r === "clean") this.pinsChecked.set(u.id, head);
-                else this.log(`  U${u.seq} re-pinned and re-verifies: its change still named a superseded test version`);
-              }),
-            () => undefined,
-          );
-        continue;
-      }
-      const onForge = getRepo(this.db, u.repoId!).forge !== "none";
-      if (!onForge) advanceThreads(this.db, u, false);
-      // One lander per repo: a unit whose pull request is open stays landing until it merges.
-      const repoBusy = listUnits(this.db, project.id).some((x) => x.repoId === u.repoId && x.state === "landing" && x.id !== u.id);
-      // On a forge the pull request opens first, so yagura's review happens on it; a repo busy with another landing reviews meanwhile.
-      const prFirst = onForge && u.state === "verified" && !openPr.has(u.id) && !repoBusy;
-      // Nothing merges before its code review settles (§24): queue the review, or the next triage wave once the developer answered.
-      const review = reviewStatus(this.db, u);
-      if (!prFirst && review.state === "needed") {
-        queueReview(this.db, u, review.since);
-        this.log(`  review of U${u.seq} queued`);
-        continue;
-      }
-      if (!prFirst && review.state === "answered") {
-        const t = queueTriage(this.db, u, `the review of U${u.seq}`, review.fresh);
-        if (t) this.log(`  triage of the review of U${u.seq} queued`);
-        continue;
-      }
-      // From here it is about opening or merging; a landing unit's pull request is the watcher's, and it merges only once review settles.
-      if (u.state === "landing") continue;
-      if (review.state !== "settled" && !onForge) continue;
-      if (repoBusy) continue;
-      if (project.mergePolicy === "human") {
-        const gate = listGates(this.db, project.id)
-          .filter((g) => g.kind === "land" && g.unitId === u.id)
-          .at(-1);
-        if (!gate || gate.state === "cancelled") {
-          addGate(this.db, {
-            projectId: project.id,
-            unitId: u.id,
-            kind: "land",
-            question: `U${u.seq} is verified. ${onForge ? `Merge its ${prNoun(getRepo(this.db, u.repoId!).forge)}` : "Land it"} on ${u.repoId}?`,
-            options: ["land", "hold"],
-            defaultOption: "hold",
-          });
-          this.log(`  gate: land U${u.seq}?`);
-        }
-        // On a forge the pull request opens now so it can be reviewed there; the gate decides the merge.
-        if (!onForge && !landApproved(this.db, project.id, u)) continue;
-      }
-      this.start(
-        key,
-        `land U${u.seq}`,
-        () => landUnit(this.ctx, u.id).then((r) => this.logLanding(u, r)),
-        () => undefined,
-      );
-    }
-    const poll = resolveSetting(this.db, "forge.poll_seconds").value * 1000;
-    for (const mr of openMergeRequests(this.db)) {
-      const u = getUnit(this.db, mr.unitId);
-      if (u.projectId !== project.id) continue;
-      const key = `land:${u.repoId}`;
-      if (this.inflight.has(key) || (mr.checkedAt && Date.now() - Date.parse(mr.checkedAt) < poll)) continue;
-      this.start(
-        key,
-        `watch ${prRef(mr.forge, mr.number)} for U${u.seq}`,
-        () => watchMergeRequest(this.ctx, u.id).then((r) => this.logLanding(u, r)),
-        (e) => {
-          markMergeChecked(this.db, u.id);
-          this.log(`  ✗ ${prRef(mr.forge, mr.number)}: ${e instanceof Error ? e.message : String(e)}`);
-        },
-      );
-    }
-  }
-
-  // A pull request is polled every few seconds; say what it is waiting for only when that changes.
-  private logLanding(u: Unit, r: LandResult | null): void {
-    if (r) this.sayOnce(u, `${r.outcome}: ${r.reason}`);
-  }
-
-  private sayOnce(u: Unit, line: string): void {
-    if (this.landingSaid.get(u.id) === line) return;
-    this.landingSaid.set(u.id, line);
-    this.log(`  U${u.seq} ${line}`);
-  }
-
-  // Test builds run for every project, a closed one included, until nothing is left to do.
-  private publishing(project: Project): void {
-    for (const job of publishJobs(this.db, project.id))
-      if (!this.inflight.has(job.key))
-        this.start(
-          job.key,
-          job.label,
-          () => job.run(this.ctx),
-          () => undefined,
-        );
-  }
-
   // The share of the project's wall-clock budget used since it became active, or null without a budget.
   budgetUsed(project: Project, at = Date.now()): number | null {
     const hours = resolveSetting(this.db, "project.budget_hours", { projectId: project.id }).value;
@@ -321,7 +164,7 @@ export class Engine {
     return (at - Date.parse(activated?.ts ?? project.createdAt)) / (hours * 3_600_000);
   }
 
-  // Past the landing cutoff only what helps verified work land may start: verification, rebases, review triage.
+  // Past the landing cutoff only what is not a build may start.
   private mayStart(project: Project, u: Unit): boolean {
     const used = this.budgetUsed(project);
     return used === null || used < LANDING_CUTOFF || !isBuild(u);
@@ -329,7 +172,7 @@ export class Engine {
 
   // A drain costs a planner session, so only what can change the plan starts one: a unit that stopped short, a
   // question answered, a rejected delta, andon cleared, a spec edit, or work landing with nothing left queued or
-  // with follow-ups suggested. Land, environment, and review gates, and pack units, are yagura's own to finish.
+  // with follow-ups suggested. Land, environment, and review gates are yagura's own to finish.
   private planNeeded(project: Project): boolean {
     if (this.inflight.has(`plan:${project.id}`)) return false;
     const since = lastDrainEventId(this.db, project.id);
@@ -337,7 +180,7 @@ export class Engine {
     const events = this.db
       .prepare(
         `SELECT e.type, e.unit_id, e.data_json, u.type AS unit_type FROM events e LEFT JOIN units u ON u.id = e.unit_id WHERE e.project_id = ? AND e.id > ? AND (
-           (e.type = 'unit.state' AND json_extract(e.data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(e.data_json, '$.drain') IS NULL AND json_extract(e.data_json, '$.rebaseUnit') IS NULL AND json_extract(e.data_json, '$.reviewUnit') IS NULL)
+           (e.type = 'unit.state' AND json_extract(e.data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(e.data_json, '$.drain') IS NULL)
            OR (e.type IN ('gate.answered', 'gate.defaulted') AND COALESCE(json_extract(e.data_json, '$.kind'), '') NOT IN (${YAGURA_GATES.map(() => "?").join(", ")}))
            OR (e.type = 'disagreement.recorded' AND json_extract(e.data_json, '$.action') = 'follow-up')
            OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed', 'retro.reverted'))`,
@@ -349,7 +192,6 @@ export class Engine {
       // Plan, verify, and review rows end in done every time; only a work unit closing without landing changes the plan.
       if (to === "done") return e.unit_type === "work";
       if (to !== "landed") return true;
-      if (e.unit_type === "pack") return false;
       return !open() || suggestsFollowUps(this.db, this.ctx.boot, e.unit_id!);
     });
   }
@@ -362,18 +204,8 @@ export class Engine {
     }
     for (const u of r.ready) {
       if (this.inflight.has(`unit:${u.id}`) || !this.mayStart(project, u)) continue;
-      const sctx = { projectId: project.id, repoId: u.repoId, environmentId: u.type === "verify" ? project.environmentId : null };
-      const harness = resolveSetting(
-        this.db,
-        u.type === "verify"
-          ? "role.verifier.harness"
-          : u.type === "review"
-            ? "role.reviewer.harness"
-            : u.type === "manager"
-              ? "role.manager.harness"
-              : "role.worker.harness",
-        sctx,
-      ).value;
+      const sctx = { projectId: project.id, repoId: u.repoId, environmentId: null };
+      const harness = resolveSetting(this.db, u.type === "manager" ? "role.manager.harness" : "role.worker.harness", sctx).value;
       if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return;
       if (runningAttempts(this.db, { harness }) >= resolveSetting(this.db, "max_parallel_per_harness").value) return;
       if (
@@ -381,20 +213,7 @@ export class Engine {
         resolveSetting(this.db, "project.max_in_flight", { projectId: project.id }).value
       )
         return;
-      const run =
-        u.type === "verify"
-          ? () => runVerifyUnit(this.ctx, u.id)
-          : u.type === "rebase"
-            ? () => runRebaseUnit(this.ctx, u.id)
-            : u.type === "manager"
-              ? () => runManagerUnit(this.ctx, u.id)
-              : u.type === "review-triage"
-                ? () => runTriageUnit(this.ctx, u.id)
-                : u.type === "review"
-                  ? () => runReviewUnit(this.ctx, u.id)
-                  : u.type === "investigate"
-                    ? () => runInvestigateUnit(this.ctx, u.id)
-                    : () => runWorkUnit(this.ctx, u.id);
+      const run = u.type === "manager" ? () => runManagerUnit(this.ctx, u.id) : () => runWorkUnit(this.ctx, u.id);
       this.start(`unit:${u.id}`, isBuild(u) ? `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}` : `${u.type}: ${u.goal.slice(0, 80)}`, run, (e) =>
         this.recoverCrashed(u.id, e),
       );
@@ -453,8 +272,7 @@ export class Engine {
     if (project.state !== "active" || project.andonReason) return null;
     if ([...this.inflight.keys()].some((k) => k === `plan:${project.id}`)) return null;
     const units = listUnits(this.db, project.id);
-    if (units.some((u) => this.inflight.has(`unit:${u.id}`) || ["ready", "running", "handed_off", "verifying", "verified", "landing"].includes(u.state)))
-      return null;
+    if (units.some((u) => this.inflight.has(`unit:${u.id}`) || ["ready", "running", "handed_off"].includes(u.state))) return null;
     const blocked = units.filter((u) => isBuild(u) && u.state === "blocked").map((u) => u.seq);
     return blocked.length && !this.planNeeded(project) ? blocked : null;
   }
@@ -502,7 +320,6 @@ export class Engine {
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
     for (const project of this.scope()) this.retro(project);
-    for (const project of this.scope()) this.publishing(project);
     if (!this.opts.projectId) this.issues();
     if (Date.now() - this.lastRevertScan > (this.opts.revertScanMs ?? REVERT_SCAN_MS)) {
       this.lastRevertScan = Date.now();
@@ -517,7 +334,7 @@ export class Engine {
             true,
           );
     }
-    // While the account's usage limit holds, sessions already running wait it out and nothing new starts; landing carries on.
+    // While the account's usage limit holds, sessions already running wait it out and nothing new starts.
     const hold = activeHold(this.db);
     if (hold && hold.until !== this.holdSaid) {
       this.holdSaid = hold.until;
@@ -560,13 +377,9 @@ export class Engine {
         this.cutoffSaid.add(project.id);
         this.log(`  ${project.id}: ${Math.round(used * 100)}% of the wall-clock budget used; no new work starts, verified work keeps landing`);
       }
-      for (const u of await ensurePackUnits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
-      for (const u of await queuePackEdits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
-      for (const u of resumeVerifications(this.db, project.id)) this.log(`  U${u.seq}: ${u.goal} (verification resumed)`);
       this.settleFailures(project);
       if (this.maybeClose(project)) continue;
       if (project.andonReason) continue;
-      this.land(project);
       if (hold) continue;
       if (this.planNeeded(project))
         this.start(
@@ -584,14 +397,12 @@ export class Engine {
     if (this.inflight.size) return false;
     const projects = this.scope();
     if (projects.some((p) => this.activationDue(p)) || this.dueReports(projects).length) return false;
-    if (projects.some((p) => publishJobs(this.db, p.id).length)) return false;
     const held = activeHold(this.db) !== null;
     return projects.every((p) => {
       if (p.state !== "active") return true;
       if (p.andonReason || held) return true;
       if (this.planNeeded(p)) return false;
       if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
-      if (listUnits(this.db, p.id).some((u) => u.state === "verified" && this.wouldMove(p, u))) return false;
       return !listUnits(this.db, p.id).some((u) => isBuild(u) && (u.state === "failed" || u.state === "rejected"));
     });
   }
@@ -631,15 +442,6 @@ export class Engine {
         true,
       );
     }
-  }
-
-  // A verified unit the engine would act on now: queue its review or triage, or land it.
-  private wouldMove(p: Project, u: Unit): boolean {
-    const wait = landWait(this.db, u);
-    if (wait) return wait.stuck;
-    const review = reviewStatus(this.db, u).state;
-    if (review === "needed" || review === "answered") return true;
-    return review === "settled" && (p.mergePolicy === "auto" || landApproved(this.db, p.id, u));
   }
 
   recoverOrphans(): number {
@@ -689,10 +491,3 @@ export class Engine {
 
 const SWEEP_MS = 60_000;
 const REVERT_SCAN_MS = 5 * 60_000;
-
-function landApproved(db: Db, projectId: ProjectId, u: Unit): boolean {
-  const gate = listGates(db, projectId)
-    .filter((g) => g.kind === "land" && g.unitId === u.id)
-    .at(-1);
-  return !!gate && gateResolved(gate, "land");
-}

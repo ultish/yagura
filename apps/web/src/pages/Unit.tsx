@@ -469,7 +469,6 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
         <span className={`chip story-${u.state === "landed" ? "pine" : u.state === "blocked" ? "bell" : "amber"}`}>
           {u.state === "landed" && u.landedSha ? `landed ${u.landedSha.slice(0, 7)}` : u.state}
         </span>
-        {story.tier && <span>{story.tier}</span>}
         {story.pr && (
           <a href={story.pr.url} target="_blank" rel="noreferrer">
             PR #{story.pr.number}

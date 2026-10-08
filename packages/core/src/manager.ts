@@ -3,8 +3,6 @@ import { attemptRecorder, runAgentSession, write, type RunContext } from "./agen
 import { resolveSetting } from "./config.js";
 import { MANAGER_ACTIONS, TERMINAL_STATES, spendsAttempt, type Attempt, type AttemptId, type ManagerAction, type Unit, type UnitId } from "./domain.js";
 import { valueMap } from "./envvalues.js";
-import { queueInvestigation } from "./investigate.js";
-import { amendmentContext } from "./amend.js";
 import { extractDelta, applyDelta, PlanRejected, scopesOverlap } from "./plan.js";
 import { layout } from "./paths.js";
 import { promptPlugin, standingFor } from "./prompts.js";
@@ -95,29 +93,12 @@ export type ManagerNeed = { kind: "wake"; wake: string } | { kind: "waiting" } |
 // What a failed or rejected build unit needs from its unit lead now, or null when the fixed rules should decide.
 export function managerNeed(db: Db, target: Unit): ManagerNeed | null {
   if (!managerOn(db, target)) return null;
-  // A unit blocked after the developer asked for a look is also woken once more for the findings of an investigation it asked for.
-  const continuing = target.state === "blocked" && listManagerDecisions(db, target.id).at(-1)?.action === "investigate";
-  if (target.state !== "failed" && target.state !== "rejected" && !continuing) return null;
+  if (target.state !== "failed" && target.state !== "rejected") return null;
   if (liveManagerUnit(db, target)) return { kind: "waiting" };
   const ds = failureDecisions(listManagerDecisions(db, target.id));
   const last = ds.at(-1);
   const tries = triesOf(db, target);
   const cap = resolveSetting(db, "manager.max_decisions_per_unit", { projectId: target.projectId, repoId: target.repoId }).value;
-  if (last?.action === "investigate" && last.tries === tries) {
-    // The unit lead asked to find something out: it waits for the investigator, then is woken once with what it found.
-    const inv = listUnits(db, target.projectId)
-      .filter((u) => u.type === "investigate" && u.targetUnitId === target.id && u.id > last.managerUnitId)
-      .at(-1);
-    if (inv && !TERMINAL_STATES.has(inv.state) && inv.state !== "failed" && inv.state !== "blocked") return { kind: "waiting" };
-    if (inv && !managerUnits(db, target).some((m) => m.id > inv.id)) {
-      if (spent(ds) > cap) return { kind: "cap", cap };
-      return {
-        kind: "wake",
-        wake: `The investigation U${inv.seq} you asked for ${inv.state === "done" ? "has finished" : "failed"}: ${inv.context[0] ?? inv.goal}`,
-      };
-    }
-    return null;
-  }
   if (last && last.tries === tries) {
     if (last.action !== "ask" || !last.gateId) return null;
     const gate = getGate(db, last.gateId);
@@ -374,16 +355,14 @@ ${manager.context[0] ?? `U${target.seq} needs a decision`}
 ${target.description ? `- Why it exists: ${target.description}\n` : ""}- State: ${target.state}. Tries used: ${used} of ${target.maxAttempts}.
 - Expected to write: ${target.writeScope.join(", ") || "(unspecified)"}
 - Acceptance: ${target.acceptance.join("; ") || "(none)"}
-${amendmentContext(db, target.id)
-  .map((l) => `- ${l}\n`)
-  .join("")}${
-    noteWake
-      ? ""
-      : `- The fixed rules, without you, would ${policy.action === "retry" ? "retry it" : "block it"} (${policy.reason}).
+${
+  noteWake
+    ? ""
+    : `- The fixed rules, without you, would ${policy.action === "retry" ? "retry it" : "block it"} (${policy.reason}).
 - Resume the builder is ${canResume ? "available" : `not available${choice.fresh ? ` (${choice.fresh})` : ""}`}.
 - ${dependents ? `${dependents} other unit(s) depend on this one, so it cannot be split; use planner instead.` : "Nothing depends on this unit, so it can be split."}
 `
-  }${siblings.length ? `\n## OTHER UNITS IN THIS REPO NOW\n${siblings.map(sibling).join("\n")}\n` : ""}${decisions.length ? `\n## YOUR EARLIER DECISIONS ON THIS UNIT\n${decisions.map((d) => `- ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}`).join("\n")}\n` : ""}
+}${siblings.length ? `\n## OTHER UNITS IN THIS REPO NOW\n${siblings.map(sibling).join("\n")}\n` : ""}${decisions.length ? `\n## YOUR EARLIER DECISIONS ON THIS UNIT\n${decisions.map((d) => `- ${d.action}: ${d.reason}${d.note ? ` (note: ${d.note})` : ""}`).join("\n")}\n` : ""}
 ## ${resumed ? "WHAT HAPPENED SINCE YOUR LAST DECISION" : "THE RECORD"}
 ${seen.length ? seen.join("\n\n") : "Nothing new is recorded."}
 
@@ -396,7 +375,6 @@ ${
 - \`resume\`: the same worker session continues with the findings and your note. Only when resume is available above.
 - \`fresh\`: a new worker starts from trunk with your note. Use it when the old session went down a wrong path.
 - \`split\`: replace this unit with smaller ones. Record a plan delta with only "add" (the new units) with \`yagura plan --json\`; this unit is cancelled. Not possible when other units depend on it.
-- \`investigate\`: start an investigator, a worker that reads and runs things in a copy of the code, changes nothing, and reports findings. You are woken again with what it found, and decide then. Give \`question:\`, what it should find out. Use it when you cannot tell why the unit keeps failing.
 - \`planner\`: block the unit and hand it to the planner, with your reason. Use it when the plan is the problem.
 - \`ask\`: ask the developer; give a \`question:\`. They answer retry or stop.
 - \`stop\`: block the unit for the developer.`
@@ -406,7 +384,7 @@ ${
 ${recordInstructions(
   ["decide", "plan"],
   [
-    "- `yagura decide <action>` with the action from the menu and a --reason of one or two sentences the developer will read. Add --note for what the next worker should do differently (for relay, what the other units should know), --question for ask and investigate, and --to with the U numbers for relay.",
+    "- `yagura decide <action>` with the action from the menu and a --reason of one or two sentences the developer will read. Add --note for what the next worker should do differently (for relay, what the other units should know), --question for ask, and --to with the U numbers for relay.",
     "- For split, record the plan delta first with `yagura plan --json '<delta>'` (one line of JSON), then `yagura decide split`.",
   ],
 )}
@@ -453,11 +431,8 @@ function applyDecision(
     }
     case "ignore":
       return { problem: null, gateId: null };
-    case "investigate": {
-      if (!d.question) return { problem: "an investigation needs a question", gateId: null };
-      queueInvestigation(db, target, d.question);
-      return { problem: null, gateId: null };
-    }
+    case "investigate":
+      return { problem: "investigate is no longer on the menu", gateId: null };
     case "relay": {
       if (!d.note) return { problem: "a relay needs a note", gateId: null };
       const live = new Map(liveSiblings(db, target).map((u) => [u.seq, u]));

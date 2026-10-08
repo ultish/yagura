@@ -227,7 +227,7 @@ describe("watchman turns", () => {
     expect(readFileSync(layout(boot).turnBrief(t.id, turn.human.id), "utf8")).toContain("[human #1]\nprototype a chain");
   });
 
-  it("goes from a message to two chained projects built, landed, and reported back", async () => {
+  it("goes from a message to a chain of two projects, builds the first one's work, and keeps the second waiting", async () => {
     const t = createThread(db, { title: "t", autonomy: "go" });
     const turn = await runWatchmanTurn(ctx, t.id, "prototype a chain");
     expect(turn.applied).toEqual({ repos: ["proto"], projects: ["proto-a", "proto-b"], environments: ["local"], units: {} });
@@ -240,31 +240,18 @@ describe("watchman turns", () => {
     expect(listQuestions(db, t.id)[0]).toMatchObject({ answer: "local", resolvedMessageId: second.reply!.id });
 
     await new Engine(ctx, { tickMs: 50 }).runUntilIdle();
-    for (const p of ["proto-a", "proto-b"] as ProjectId[]) {
-      expect(getProject(db, p).state).toBe("closed");
-      expect(
-        listUnits(db, p)
-          .filter((u) => u.type === "work")
-          .every((u) => u.state === "landed"),
-      ).toBe(true);
-    }
-    const aClosed = db
-      .prepare("SELECT MIN(id) AS id FROM events WHERE project_id = 'proto-a' AND type = 'project.state' AND json_extract(data_json, '$.state') = 'closed'")
-      .get() as { id: number };
-    const bStarted = db.prepare("SELECT MIN(id) AS id FROM events WHERE project_id = 'proto-b' AND type = 'plan.drain_started'").get() as { id: number };
-    expect(bStarted.id).toBeGreaterThan(aClosed.id);
-
-    const reports = listMessages(db, t.id).filter((m) => m.role === "system" && m.body.includes("is done"));
-    expect(reports.map((m) => m.body.split("\n")[0])).toEqual(["**proto-a is done.** all landed", "**proto-b is done.** all landed"]);
-    expect(reports[0]!.body).toMatch(/### Landed\n- U\d+ write a — landed `[0-9a-f]{10}` on proto, verified unit-verified/);
-    expect(reports[0]!.body).toContain("- unit (unit-verified): `test -f README.md`");
+    expect(getProject(db, "proto-a" as ProjectId).state).toBe("active");
     expect(
-      listGates(db, null, "open")
-        .filter((g) => g.kind === "report")
-        .map((g) => g.projectId),
-    ).toEqual(["proto-a", "proto-b"]);
-    const files = await git(["ls-tree", "-r", "--name-only", "main"], { cwd: layout(boot).newRepo("proto") });
-    expect(files.split("\n").filter((f) => f.startsWith("app/")).length).toBe(6);
+      listUnits(db, "proto-a" as ProjectId)
+        .filter((u) => u.type === "work")
+        .map((u) => [u.goal, u.state]),
+    ).toEqual([
+      ["write a", "handed_off"],
+      ["write b", "handed_off"],
+      ["write c", "ready"],
+    ]);
+    expect(getProject(db, "proto-b" as ProjectId).state).toBe("framing");
+    expect(listMessages(db, t.id).filter((m) => m.role === "system" && m.body.includes("is done"))).toEqual([]);
   }, 120_000);
 
   it("registers an existing repo from a proposal, checking it before storing and mirroring it on apply", async () => {
@@ -284,14 +271,14 @@ describe("watchman turns", () => {
     expect(turn.problem).toBeNull();
     expect(db.prepare("SELECT COUNT(*) AS n FROM repos").get()).toEqual({ n: 0 });
     expect(await applyProposal(ctx, turn.proposal!.id)).toMatchObject({ repos: ["billing"], projects: ["billing-work"] });
-    expect(getRepo(db, "billing" as RepoId)).toMatchObject({ url: origin, defaultBranch: "trunk", packStatus: "unproven" });
+    expect(getRepo(db, "billing" as RepoId)).toMatchObject({ url: origin, defaultBranch: "trunk" });
     expect(existsSync(layout(boot).mirror("billing" as RepoId))).toBe(true);
 
     const again = await runWatchmanTurn(ctx, t.id, `register billing-2 ${origin}`);
     expect(again.problem).toBe(`proposal: ${origin} is already registered as repo billing`);
   });
 
-  it("rejects an existing repo it cannot read, and accepts one without a verify pack, which gets a pack unit later", async () => {
+  it("rejects an existing repo it cannot read, and registers a readable one", async () => {
     const t = createThread(db, { title: "t" });
     const missing = await runWatchmanTurn(ctx, t.id, `register ghost ${join(boot.home, "ghost")}`);
     expect(missing.problem).toMatch(/^proposal: repo ghost: cannot read .*ghost as a git repo/);
@@ -302,22 +289,21 @@ describe("watchman turns", () => {
     await commitAll(seed, "init", { name: "t", email: "t@localhost" });
     const bare = join(boot.home, "..", "nopack.git");
     await git(["clone", "--quiet", "--bare", seed, bare]);
-    const packless = await runWatchmanTurn(ctx, t.id, `register nopack ${bare}`);
-    expect(packless.problem).toBeNull();
-    await applyProposal(ctx, packless.proposal!.id);
-    expect(getRepo(db, "nopack" as RepoId).packStatus).toBe("missing");
+    const readable = await runWatchmanTurn(ctx, t.id, `register nopack ${bare}`);
+    expect(readable.problem).toBeNull();
+    await applyProposal(ctx, readable.proposal!.id);
+    expect(getRepo(db, "nopack" as RepoId)).toMatchObject({ url: bare, defaultBranch: "main" });
   });
 
   it("waits at a phase gate before starting the next project in a chain", async () => {
     const t = createThread(db, { title: "t" });
-    const pack = { provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] };
     const { proposal } = storeTurn(ctx, t.id, {
       body: "ok",
       turnLog: null,
       records: TurnRecords.parse({
         proposal: {
           summary: "gated",
-          repos: [{ id: "gate-repo", verifyPack: pack }],
+          repos: [{ id: "gate-repo" }],
           projects: [
             { id: "g1", goal: "g", predicate: "p", repos: ["gate-repo"] },
             { id: "g2", goal: "g", predicate: "p", repos: ["gate-repo"], after: ["g1"], phaseGate: true, merge: "auto" },
@@ -336,12 +322,11 @@ describe("watchman turns", () => {
     const { answerGate } = await import("./store.js");
     answerGate(db, gate.id, "start");
     await engine.runUntilIdle();
-    expect(getProject(db, "g2" as ProjectId).state).toBe("closed");
+    expect(getProject(db, "g2" as ProjectId).state).toBe("active");
   }, 60_000);
 
   it("proposes environments with values, presets, and templates", async () => {
     const t = createThread(db, { title: "t" });
-    const pack = { provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] };
     const propose = (proposal: unknown) => () => storeTurn(ctx, t.id, { body: "ok", turnLog: null, records: TurnRecords.parse({ proposal }) });
     const box = {
       id: "box",
@@ -363,7 +348,7 @@ describe("watchman turns", () => {
 
     const { proposal } = propose({
       summary: "box and a project on it",
-      repos: [{ id: "box-repo", verifyPack: pack }],
+      repos: [{ id: "box-repo" }],
       environments: [box],
       projects: [{ id: "on-box", goal: "g", predicate: "p", repos: ["box-repo"], environment: "box" }],
     })();
@@ -392,7 +377,6 @@ describe("watchman turns", () => {
   it("sets a proposed project's skills and reference repos, refusing a reference that is not registered", async () => {
     const t = createThread(db, { title: "t" });
     addRepo(db, { id: "billing", url: "/billing", defaultBranch: "main" });
-    const pack = { provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] };
     const propose = (references: string[]) => () =>
       storeTurn(ctx, t.id, {
         body: "ok",
@@ -400,7 +384,7 @@ describe("watchman turns", () => {
         records: TurnRecords.parse({
           proposal: {
             summary: "a service",
-            repos: [{ id: "svc", verifyPack: pack }],
+            repos: [{ id: "svc" }],
             projects: [{ id: "svc", goal: "g", predicate: "p", repos: ["svc"], skills: { scaffold: ["setup-gradle"], work: ["setup-gradle"] }, references }],
           },
         }),

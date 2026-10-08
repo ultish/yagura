@@ -1,8 +1,6 @@
 import type { Bootstrap } from "./config.js";
 import { isBuild, type ProjectId, type Unit } from "./domain.js";
-import { ensureMirror, readFileAt } from "./git.js";
-import { liveVerdict } from "./land.js";
-import { parsePack } from "./pack.js";
+import { ensureMirror } from "./git.js";
 import { layout } from "./paths.js";
 import { latestDelta } from "./planner.js";
 import { addGate, getProject, listGates, listUnits, projectRepos, type Db } from "./store.js";
@@ -34,8 +32,7 @@ export async function renderReport(ctx: { db: Db; boot: Bootstrap }, threadId: n
   const landed = work
     .filter((u) => u.state === "landed")
     .map((u) => {
-      const v = liveVerdict(db, u.id);
-      return `- U${u.seq} ${u.goal} — landed \`${u.landedSha?.slice(0, 10) ?? "?"}\` on ${u.repoId}, verified ${v?.tier ?? "(verdict voided)"} · \`yagura trace ${u.landedSha?.slice(0, 10) ?? `${projectId}`}\``;
+      return `- U${u.seq} ${u.goal} — landed \`${u.landedSha?.slice(0, 10) ?? "?"}\` on ${u.repoId} · \`yagura trace ${u.landedSha?.slice(0, 10) ?? `${projectId}`}\``;
     });
   const blocked = work.filter((u) => u.state === "blocked").map((u) => `- U${u.seq} ${u.goal}: ${blockedReason(db, u)}`);
   const open = work.filter((u) => !["landed", "done", "abandoned", "blocked"].includes(u.state)).map((u) => `- U${u.seq} ${u.goal} (${u.state})`);
@@ -45,10 +42,7 @@ export async function renderReport(ctx: { db: Db; boot: Bootstrap }, threadId: n
     const mirror = layout(boot).mirror(repo.id);
     try {
       await ensureMirror(repo.url, mirror);
-      const pack = parsePack(await readFileAt(mirror, `origin/${repo.defaultBranch}`, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath);
       run.push(`- ${repo.id} (${repo.url}, ${repo.defaultBranch})`);
-      if (pack.ok) for (const c of pack.pack.checks) run.push(`  - ${c.name} (${c.tier}): \`${c.command}\``);
-      else run.push(`  - ${pack.reason}`);
     } catch (e) {
       run.push(`- ${repo.id}: could not read trunk (${e instanceof Error ? e.message : String(e)})`);
     }

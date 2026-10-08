@@ -42,14 +42,11 @@ import {
   addUnitNote,
   evidenceCli,
   agentRefusal,
-  retryState,
   wakeManager,
   gitRead,
-  landUnit,
   listEvidenceRuns,
   PROVIDERS,
   reapLeases,
-  runVerifyUnit,
   setProjectEnvironment,
   setRepoUrl,
   setRepoForge,
@@ -151,17 +148,15 @@ const USAGE = `yagura — agent orchestration
   yagura proposal apply|discard <id>
   yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
   yagura daemon                          run yagura for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)
-  yagura drive <project>                 plan, run, verify, and land until nothing is left to do (without a daemon)
+  yagura drive <project>                 plan and run workers until nothing is left to do (without a daemon)
   yagura andon <project> --reason <text> | --clear
   yagura limit [--clear]                 whether the account's usage limit holds new agents back, and until when; --clear starts them now
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
   yagura unit wake <project> <unit#> [--note <text>]   ask a blocked, failed, or rejected unit's unit lead to look at it now
-  yagura unit reject|requeue <project> <unit#> [--note <text>]   requeue lands a blocked unit that is still verified again
+  yagura unit reject|requeue <project> <unit#> [--note <text>]   requeue puts a blocked or failed unit back to ready
   yagura run <project> <unit#>           run a ready work unit
-  yagura verify <project> <unit#>        run the queued verify unit for a unit in verifying
-  yagura land <project> <unit#>          land a verified unit onto its repo's default branch
-  yagura evidence run --at base|head --label <name> -- <command>   (inside a verify session)
+  yagura evidence run --at base|head --label <name> -- <command>   (inside an agent session)
   yagura show <project> [unit#]
   yagura git <repo> log|show|ls-tree|diff|grep|blame [args]   read a registered repo's mirror (trunk is origin/<default branch>)
   yagura logs <project> <unit#> [--attempt <n>]
@@ -293,10 +288,7 @@ async function main() {
         throw e;
       }
       const { repo, inspection } = registered!;
-      console.log(
-        `repo ${repo.id} → ${repo.url} (${repo.defaultBranch} at ${inspection.trunk.slice(0, 10)}, verify pack ${repo.packStatus}); lands ${describeRoute(repo)}`,
-      );
-      for (const n of inspection.notes) console.log(`  note: ${n}`);
+      console.log(`repo ${repo.id} → ${repo.url} (${repo.defaultBranch} at ${inspection.trunk.slice(0, 10)}); lands ${describeRoute(repo)}`);
       return;
     }
     case "project": {
@@ -388,7 +380,7 @@ async function main() {
         if (values.note) addUnitNote(db, u.id, values.note);
         const direct = positionals[0] === "requeue" && (u.state === "blocked" || u.state === "failed");
         if (!direct && u.state !== "rejected") transitionUnit(db, u.id, "rejected", { by: "operator", note: values.note ?? null });
-        if (positionals[0] === "requeue") transitionUnit(db, u.id, direct ? retryState(db, u) : "ready", { by: "operator" });
+        if (positionals[0] === "requeue") transitionUnit(db, u.id, "ready", { by: "operator" });
         console.log(`U${u.seq} → ${getUnitBySeq(db, projectId, u.seq).state}`);
         return;
       }
@@ -441,28 +433,7 @@ async function main() {
           `${attempt.handoffStatus ? ` (${attempt.handoffStatus}, self-reported ${attempt.selfTier ?? "no tier"})` : ""}` +
           `${attempt.failureMode ? ` · failure: ${attempt.failureMode}` : ""}` +
           `\n  branch ${attempt.branch} @ ${attempt.headSha?.slice(0, 10)} · worktree ${attempt.worktreePath}` +
-          `\n  handoff ${layout(boot).handoff(projectId as ProjectId, after.seq, attempt.n)}` +
-          (after.state === "verifying" ? `\n  next: yagura verify ${projectId} ${after.seq}` : ""),
-      );
-      return;
-    }
-    case "verify": {
-      const [projectId, seq] = rest;
-      if (!projectId || !seq) fail(USAGE);
-      const target = getUnitBySeq(db, projectId as ProjectId, Number(seq));
-      const verifyUnit = listUnits(db, target.projectId)
-        .filter((u) => u.type === "verify" && u.targetUnitId === target.id && u.state === "ready")
-        .at(-1);
-      if (!verifyUnit) fail(`U${target.seq} has no ready verify unit (it is ${target.state})`);
-      await reapLeases(db, boot);
-      console.log(`verifying ${projectId}/U${target.seq} with U${verifyUnit!.seq}`);
-      const result = await runVerifyUnit(agentCtx(), verifyUnit!.id);
-      const after = getUnitBySeq(db, projectId as ProjectId, target.seq);
-      console.log(
-        `\nverdict: ${result.decision.outcome}${result.decision.tier ? ` (${result.decision.tier})` : ""} — ${result.decision.reason}` +
-          `\n  trunk: ${result.decision.trunkOutcome ?? "-"}\n  head:  ${result.decision.headOutcome ?? "-"}` +
-          `\n  cited: ${result.decision.citedRunIds.map((id) => `run:${id}`).join(", ") || "none"}` +
-          `\nU${after.seq} → ${after.state}${after.state === "verified" ? `\n  next: yagura land ${projectId} ${after.seq}` : ""}`,
+          `\n  handoff ${layout(boot).handoff(projectId as ProjectId, after.seq, attempt.n)}`,
       );
       return;
     }
@@ -603,14 +574,6 @@ async function main() {
         return;
       }
       fail(USAGE);
-    }
-    case "land": {
-      const [projectId, seq] = rest;
-      if (!projectId || !seq) fail(USAGE);
-      const unit = getUnitBySeq(db, projectId as ProjectId, Number(seq));
-      const result = await landUnit({ db, boot }, unit.id);
-      console.log(`U${unit.seq} ${result.outcome}: ${result.reason}${result.landedSha ? ` @ ${result.landedSha.slice(0, 10)}` : ""}`);
-      return;
     }
     case "env": {
       const { positionals, values } = args({

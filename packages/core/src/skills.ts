@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveSetting, type Bootstrap } from "./config.js";
-import type { ProjectId, Unit } from "./domain.js";
+import type { ProjectId, Role, Unit } from "./domain.js";
 import { getProject, projectRepos, type Db } from "./store.js";
 
 export const SKILL_PURPOSES = ["scaffold", "work", "pack", "verify", "review"] as const;
@@ -62,4 +62,16 @@ export function projectSkillChecks(db: Db, boot: Bootstrap, projectId: ProjectId
 
 export function skillMethod(skills: string[]): string {
   return skills.length ? ` Then load these project skills with the Skill tool before you change anything, and follow them: ${skills.join(", ")}.` : "";
+}
+
+export const REQUIRED_SKILLS: Partial<Record<Role, readonly string[]>> = {
+  worker: ["yagura:yagura-worker", "pstack:poteto-mode", "pstack:principle-prove-it-works", "pstack:principle-test-behavior-not-implementation"],
+  planner: ["yagura:yagura-planner"],
+  manager: ["yagura:yagura-manager"],
+  watchman: ["yagura:yagura-watchman"],
+};
+
+export function missingSkills(role: Role, loaded: readonly string[], project: readonly string[] = []): string[] {
+  const bare = (s: string) => s.slice(s.indexOf(":") + 1);
+  return [...(REQUIRED_SKILLS[role] ?? []), ...project].filter((req) => !loaded.some((l) => l === req || bare(l) === bare(req)));
 }
