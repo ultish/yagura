@@ -14,6 +14,8 @@ export function layout(boot: Bootstrap) {
     project,
     mirror: (r: RepoId) => join(boot.home, "cache", "repos", `${r}.git`),
     worktree: (r: RepoId, p: ProjectId, seq: number, n: number) => join(boot.home, "worktrees", r, `${p}-${attemptRef(seq, n)}`),
+    // The unit's own checkout, which every worker round uses; the judge gets a fresh one beside it each round.
+    checkout: (r: RepoId, p: ProjectId, seq: number) => join(boot.home, "worktrees", r, `${p}-${unitRef(seq)}`),
     standingOrders: (p: ProjectId) => join(project(p), "standing-orders.md"),
     spec: (p: ProjectId) => join(project(p), "spec.md"),
     thread: (t: number) => join(boot.home, "threads", String(t)),

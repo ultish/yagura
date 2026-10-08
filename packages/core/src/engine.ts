@@ -6,13 +6,18 @@ import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
 import { checkRetroWatch, scanReverts, watchingFor } from "./retro.js";
-import { runWorkUnit } from "./runner.js";
-import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
+import { currentRound, runWorkerRound } from "./runner.js";
+import { runJudgeRound } from "./judge.js";
+import { checkReady, syncWithBase, unitsOnBase } from "./merge.js";
+import { ensureMirror, resolveRef } from "./git.js";
+import { readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
 import {
   addGate,
   getProject,
+  getRepo,
   getUnit,
+  lastTransition,
   listAttempts,
   listGates,
   listProjects,
@@ -68,6 +73,9 @@ export class Engine {
   private lastSweep = 0;
   private lastRevertScan = 0;
   private readonly issuesPolledAt = new Map<string, number>();
+  private readonly readyCheckedAt = new Map<UnitId, number>();
+  private readonly basePolledAt = new Map<string, number>();
+  private readonly baseSeen = new Map<string, string>();
   private readonly cutoffSaid = new Set<ProjectId>();
   private readonly costSaid = new Set<ProjectId>();
   private holdSaid: string | null = null;
@@ -108,7 +116,8 @@ export class Engine {
     recordEvent(this.db, "engine.error", { projectId: unit.projectId, unitId }, { error: e instanceof Error ? e.message : String(e) });
     for (const a of listAttempts(this.db, unitId))
       if (a.state === "running" || a.state === "queued") updateAttempt(this.db, a.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
-    if (unit.state === "building") transitionUnit(this.db, unitId, "stuck", { reason: "engine error" });
+    if (unit.state === "building" || unit.state === "judging")
+      transitionUnit(this.db, unitId, "stuck", { reason: `engine error: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}` });
     // A unit that crashes before it starts would crash again on the next tick, so it waits for someone to look.
     else if (unit.state === "waiting")
       transitionUnit(this.db, unitId, "stuck", { reason: `engine error before it started: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}` });
@@ -155,27 +164,111 @@ export class Engine {
     });
   }
 
+  // An agent slot is free under every cap: across yagura, on the harness, and in the project.
+  private slotFree(project: Project, harness: string): boolean {
+    if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return false;
+    if (runningAttempts(this.db, { harness }) >= resolveSetting(this.db, "max_parallel_per_harness").value) return false;
+    return (
+      runningAttempts(this.db, { projectId: project.id }) + this.pendingStarts(project.id) <
+      resolveSetting(this.db, "project.max_in_flight", { projectId: project.id }).value
+    );
+  }
+
+  private unitTask(unitId: UnitId, label: string, work: () => Promise<unknown>, quiet = false): void {
+    this.start(`unit:${unitId}`, label, work, (e) => this.recoverCrashed(unitId, e), quiet);
+  }
+
+  // Each state has one step: a worker round for building, a judge round for judging, and a check of what a ready unit waits for.
   private spawn(project: Project): void {
     const r = readiness(this.db, project.id);
     for (const s of r.stuck) {
       transitionUnit(this.db, s.unit.id, "stuck", { reason: s.reason });
       this.log(`  U${s.unit.seq} stuck: ${s.reason}`);
     }
-    for (const u of r.ready) {
-      if (this.inflight.has(`unit:${u.id}`) || !this.mayStart(project, u)) continue;
-      const harness = resolveSetting(this.db, "role.worker.harness", { projectId: project.id, repoId: u.repoId ?? undefined }).value;
-      if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return;
-      if (runningAttempts(this.db, { harness }) >= resolveSetting(this.db, "max_parallel_per_harness").value) return;
-      if (
-        runningAttempts(this.db, { projectId: project.id }) + this.pendingStarts(project.id) >=
-        resolveSetting(this.db, "project.max_in_flight", { projectId: project.id }).value
-      )
-        return;
+    const at = (u: Unit) => ({ projectId: project.id, repoId: u.repoId ?? undefined });
+    const startable = new Set(r.ready.filter((u) => this.mayStart(project, u)).map((u) => u.id));
+    for (const u of listUnits(this.db, project.id)) {
+      if (!isBuild(u) || this.inflight.has(`unit:${u.id}`)) continue;
+      const label = `U${u.seq}: ${u.goal.slice(0, 80)}`;
+      if ((u.state === "waiting" && startable.has(u.id)) || u.state === "building") {
+        if (!this.slotFree(project, resolveSetting(this.db, "role.worker.harness", at(u)).value)) continue;
+        if (u.state === "waiting") transitionUnit(this.db, u.id, "building", { round: this.roundFromWaiting(u) });
+        this.unitTask(u.id, `worker ${label}`, () => runWorkerRound(this.ctx, u.id));
+      } else if (u.state === "judging") {
+        if (!this.slotFree(project, resolveSetting(this.db, "role.judge.harness", at(u)).value)) continue;
+        this.unitTask(u.id, `judge ${label}`, () => runJudgeRound(this.ctx, u.id));
+      } else if (u.state === "ready" && this.readyDue(u)) {
+        this.readyCheckedAt.set(u.id, Date.now());
+        this.unitTask(
+          u.id,
+          `ready ${label}`,
+          async () => {
+            const merged = await checkReady(this.ctx, u.id);
+            if (merged) {
+              this.log(`✔ U${u.seq} merged`);
+              this.syncBase(merged.repoId, merged.base);
+            }
+            // Without a forge there is no CI to wait for, so the next look need not wait for the poll.
+            if (getRepo(this.db, u.repoId!).forge === "none") this.readyCheckedAt.delete(u.id);
+          },
+          true,
+        );
+      }
+    }
+  }
+
+  // A unit leaving waiting starts its first round, or a fresh worker when an earlier one stopped or failed.
+  private roundFromWaiting(u: Unit) {
+    const round = currentRound(this.db, u.id);
+    const why = lastTransition(this.db, u.id)?.data.reason;
+    return round.kind === "fresh" && typeof why === "string" ? { kind: "fresh" as const, reason: why } : round;
+  }
+
+  private readyDue(u: Unit): boolean {
+    const poll = resolveSetting(this.db, "forge.poll_seconds").value * 1000;
+    return Date.now() - (this.readyCheckedAt.get(u.id) ?? 0) >= poll;
+  }
+
+  // Every open unit on a base that just moved is checked against it, unless an agent is on it.
+  private syncBase(repoId: string, base: string): void {
+    for (const u of unitsOnBase(this.db, repoId, base)) {
+      if (this.inflight.has(`unit:${u.id}`)) continue;
+      this.unitTask(
+        u.id,
+        `base check U${u.seq} on ${base}`,
+        () => syncWithBase(this.ctx, u.id).then((r) => r !== "current" && this.log(`  U${u.seq}: ${r === "conflict" ? "conflicts with" : "merged"} ${base}`)),
+        true,
+      );
+    }
+  }
+
+  // A base that moved outside yagura (someone merged by hand) is noticed at the forge poll rate.
+  private baseMoves(): void {
+    const poll = resolveSetting(this.db, "forge.poll_seconds").value * 1000;
+    const bases = new Map<string, { repoId: string; base: string }>();
+    for (const p of this.scope())
+      for (const u of listUnits(this.db, p.id))
+        if (u.repoId && u.branch && (u.state === "judging" || u.state === "ready")) {
+          const base = u.base ?? getRepo(this.db, u.repoId).defaultBranch;
+          bases.set(`${u.repoId}:${base}`, { repoId: u.repoId, base });
+        }
+    for (const [key, { repoId, base }] of bases) {
+      if (this.inflight.has(`base:${key}`) || Date.now() - (this.basePolledAt.get(key) ?? 0) < poll) continue;
+      this.basePolledAt.set(key, Date.now());
       this.start(
-        `unit:${u.id}`,
-        `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}`,
-        () => runWorkUnit(this.ctx, u.id),
-        (e) => this.recoverCrashed(u.id, e),
+        `base:${key}`,
+        `base ${key}`,
+        async () => {
+          const repo = getRepo(this.db, repoId as never);
+          const mirror = layout(this.ctx.boot).mirror(repo.id);
+          await ensureMirror(repo.url, mirror);
+          const sha = await resolveRef(mirror, `refs/remotes/origin/${base}`);
+          const seen = this.baseSeen.get(key);
+          this.baseSeen.set(key, sha);
+          if (seen && seen !== sha) this.syncBase(repoId, base);
+        },
+        () => undefined,
+        true,
       );
     }
   }
@@ -186,7 +279,7 @@ export class Engine {
       if (!key.startsWith("unit:")) continue;
       const u = getUnit(this.db, Number(key.slice(5)) as UnitId);
       if (projectId && u.projectId !== projectId) continue;
-      if (!listAttempts(this.db, u.id).some((a) => a.state === "running")) n++;
+      if ((u.state === "building" || u.state === "judging") && !listAttempts(this.db, u.id).some((a) => a.state === "running")) n++;
     }
     return n;
   }
@@ -349,6 +442,7 @@ export class Engine {
         );
       this.spawn(project);
     }
+    this.baseMoves();
     this.report(this.scope());
   }
 
@@ -362,7 +456,9 @@ export class Engine {
       if (p.andonReason || held) return true;
       if (this.planNeeded(p)) return false;
       if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
-      return true;
+      // A ready unit is settled only while it waits for the developer's go.
+      const waitsForYou = (u: Unit) => listGates(this.db, p.id, "open").some((g) => g.unitId === u.id);
+      return !listUnits(this.db, p.id).some((u) => u.state === "building" || u.state === "judging" || (u.state === "ready" && !waitsForYou(u)));
     });
   }
 

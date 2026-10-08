@@ -3,10 +3,23 @@
 // FAKE_GLAB_STATE. It answers in GitLab's own shapes: `mr` commands print merge request JSON, and `glab api` serves
 // the REST v4 paths yagura uses. Tests steer it by editing the state file.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const statePath = process.env.FAKE_GLAB_STATE;
 const origin = process.env.FAKE_GLAB_ORIGIN;
+// Calls run in parallel like a real forge's API, so each one holds the state file's lock from its read to its last write.
+const lock = `${statePath}.lock`;
+for (let i = 0; ; i++) {
+  try {
+    mkdirSync(lock);
+    break;
+  } catch {
+    if (i > 2000) throw new Error(`fake forge state ${lock} stayed locked`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+  }
+}
+process.on("exit", () => rmSync(lock, { recursive: true, force: true }));
+for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => process.exit(1));
 const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, "utf8")) : { mrs: [], pipelines: [], calls: [] };
 const save = () => writeFileSync(statePath, JSON.stringify(state, null, 2));
 const git = (...args) => execFileSync("git", ["--git-dir", origin, ...args], { encoding: "utf8" }).trim();

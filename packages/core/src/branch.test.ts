@@ -2,7 +2,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
-import { checkoutUnit, createUnitBranch, mergeWithBase, unitBranch } from "./branch.js";
+import { checkoutUnit, commitBaseMerge, createUnitBranch, mergeWithBase, mergeWithoutForge, pushCheckout, syncCheckout, unitBranch } from "./branch.js";
+import { installRelay } from "./relay.js";
 import { commitAll, ensureMirror, git, resolveRef } from "./git.js";
 
 const author = { name: "dev", email: "dev@localhost" };
@@ -96,5 +97,52 @@ describe("mergeWithBase", () => {
       base: await resolveRef(mirror, "refs/remotes/origin/main"),
       files: ["greet.py"],
     });
+  });
+});
+
+describe("moving a unit's branch", () => {
+  const dev = { name: "yagura", email: "yagura@localhost" };
+
+  it("merges a moved base into the branch as a two-parent commit, publishes it, and brings a checkout up to it", async () => {
+    await createUnitBranch(mirror, branch, "main");
+    installRelay(mirror);
+    const checkout = join(root, "u1");
+    await checkoutUnit(mirror, checkout, branch);
+    writeFileSync(join(checkout, "greet.py"), "def greet():\n    return 'hello'\n");
+    await commitAll(checkout, "say hello", author);
+    expect(await pushCheckout(checkout, branch)).toBeNull();
+    await onMain("notes.md", "notes, edited on main\n");
+    const head = await resolveRef(mirror, `refs/heads/${branch}`);
+    const merge = await mergeWithBase(mirror, head, await resolveRef(mirror, "refs/remotes/origin/main"));
+    if (merge.kind !== "clean") throw new Error(merge.kind);
+    const merged = await commitBaseMerge(mirror, branch, merge, "Merge main into yagura/demo/u1", dev);
+    expect(await git(["log", "-1", "--format=%P%n%s%n%an", merged], { gitDir: mirror })).toBe(`${head} ${merge.base}\nMerge main into yagura/demo/u1\nyagura`);
+    expect(await resolveRef(forge, `refs/heads/${branch}`)).toBe(merged);
+    await syncCheckout(checkout, branch);
+    expect(await git(["rev-parse", "HEAD"], { cwd: checkout })).toBe(merged);
+  });
+
+  it("refuses yagura's own push of a rewritten checkout, with the relay's reason", async () => {
+    await createUnitBranch(mirror, branch, "main");
+    installRelay(mirror);
+    const checkout = join(root, "u1");
+    await checkoutUnit(mirror, checkout, branch);
+    writeFileSync(join(checkout, "greet.py"), "x\n");
+    await commitAll(checkout, "one", author);
+    await pushCheckout(checkout, branch);
+    await git(["commit", "--quiet", "--amend", "-m", "one, rewritten"], { cwd: checkout });
+    expect(await pushCheckout(checkout, branch)).toBe(`${branch} only moves forward; merge instead of rebasing, and never force-push`);
+  });
+
+  it("merges an approved head onto the base itself when the repo has no forge", async () => {
+    await createUnitBranch(mirror, branch, "main");
+    await onUnit("greet.py", "def greet():\n    return 'hello'\n");
+    await onMain("notes.md", "notes, edited on main\n");
+    const head = await resolveRef(mirror, `refs/heads/${branch}`);
+    const before = await resolveRef(forge, "refs/heads/main");
+    const merged = await mergeWithoutForge(mirror, head, "main", "U1: Say hello", dev);
+    expect(await resolveRef(forge, "refs/heads/main")).toBe(merged);
+    expect(await git(["log", "-1", "--format=%P%n%B", merged], { gitDir: forge })).toBe(`${before} ${head}\nU1: Say hello`);
+    expect(await git(["show", "main:greet.py"], { gitDir: forge })).toBe("def greet():\n    return 'hello'");
   });
 });

@@ -11,6 +11,8 @@ export interface HarnessRun {
   resume?: string;
   allowedTools?: string[];
   disallowedTools?: string[];
+  // A worker may push its own unit's branch; every other session is denied git push.
+  pushes?: boolean;
   // Extra Claude Code settings as JSON (hooks yagura needs), merged over the developer's own.
   settings?: string;
 }

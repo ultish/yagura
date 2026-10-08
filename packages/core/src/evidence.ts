@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { extname, join, relative } from "node:path";
 import type { Bootstrap } from "./config.js";
 import type { ArtifactId, AttemptId, ProjectId, Sha } from "./domain.js";
-import { isPristine, readFileAt, restorePristine } from "./git.js";
+import { git, headSha, restorePristine } from "./git.js";
 import { activeLease } from "./leases.js";
 import { layout } from "./paths.js";
 import { getAttempt, getRepo, getUnit, now, recordEvent, type Db } from "./store.js";
@@ -91,7 +91,9 @@ export function runShell(
   });
 }
 
-type RunRequest = { attemptId: AttemptId; at: At; label: string; command: string; timeoutSeconds?: number };
+type RunRequest = { attemptId: AttemptId; at: At; label?: string; command: string; timeoutSeconds?: number };
+
+export class UncommittedChanges extends Error {}
 
 export const runEvidence = (db: Db, boot: Bootstrap, req: RunRequest): Promise<EvidenceRun> => captureRun(db, boot, req);
 
@@ -101,11 +103,18 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
   if (attempt.role !== "worker" && attempt.role !== "judge") throw new Error(`attempt ${attempt.id} is not a worker or judge attempt`);
   if (attempt.state !== "queued" && attempt.state !== "running")
     throw new Error(`attempt ${attempt.id} is ${attempt.state}; evidence can only be captured while it runs`);
-  if (!attempt.worktreePath || !attempt.baseSha || !attempt.headSha) throw new Error(`attempt ${attempt.id} has no checkouts`);
-  const sha = req.at === "head" ? attempt.headSha : attempt.baseSha;
+  if (!attempt.worktreePath) throw new Error(`attempt ${attempt.id} has no checkout`);
+  if (req.at === "base" && attempt.role !== "judge") throw new Error("only the judge runs commands on the base");
   const cwd = req.at === "head" ? attempt.worktreePath : baseWorktree(attempt.worktreePath);
+  const label = req.label ?? req.command.slice(0, 60);
 
-  const tampered = !(await isPristine(cwd, sha));
+  // A run proves what a command did on one commit. A worker's uncommitted work is never thrown away to make that true, so it
+  // commits first; a judge's checkout is yagura's, so it is put back and the run flagged.
+  const sha = (await headSha(cwd)) as Sha;
+  const dirty = (await git(["status", "--porcelain"], { cwd })) !== "";
+  if (dirty && attempt.role === "worker")
+    throw new UncommittedChanges("commit your changes first: a recorded run proves what a command does on a commit, and your checkout has uncommitted changes");
+  const tampered = dirty;
   if (tampered) await restorePristine(cwd, sha);
 
   const evidenceDir = mkdtempSync(join(boot.home, "evidence-tmp-"));
@@ -118,7 +127,7 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
     req.timeoutSeconds ?? 300,
   );
   const durationMs = Date.now() - started;
-  await restorePristine(cwd, sha);
+  if (attempt.role === "judge") await restorePristine(cwd, sha);
 
   const run = db.transaction(() => {
     const runId = Number(
@@ -127,13 +136,13 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
           `INSERT INTO evidence_runs (attempt_id, at, sha, label, command, exit_code, timed_out, tampered, duration_ms, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(attempt.id, req.at, sha, req.label, req.command, result.exitCode, result.timedOut ? 1 : 0, tampered ? 1 : 0, durationMs, now()).lastInsertRowid,
+        .run(attempt.id, req.at, sha, label, req.command, result.exitCode, result.timedOut ? 1 : 0, tampered ? 1 : 0, durationMs, now()).lastInsertRowid,
     );
     const base = { projectId: unit.projectId, attemptId: attempt.id, evidenceRunId: runId };
-    const stdoutId = putArtifact(db, boot, { ...base, kind: "stdout", label: `${req.label}@${req.at} stdout`, data: result.stdout });
-    const stderrId = putArtifact(db, boot, { ...base, kind: "stderr", label: `${req.label}@${req.at} stderr`, data: result.stderr });
+    const stdoutId = putArtifact(db, boot, { ...base, kind: "stdout", label: `${label}@${req.at} stdout`, data: result.stdout });
+    const stderrId = putArtifact(db, boot, { ...base, kind: "stderr", label: `${label}@${req.at} stderr`, data: result.stderr });
     for (const file of walk(evidenceDir))
-      putArtifact(db, boot, { ...base, kind: "file", label: `${req.label}@${req.at} ${relative(evidenceDir, file)}`, data: readFileSync(file) });
+      putArtifact(db, boot, { ...base, kind: "file", label: `${label}@${req.at} ${relative(evidenceDir, file)}`, data: readFileSync(file) });
     db.prepare("UPDATE evidence_runs SET stdout_artifact_id = ?, stderr_artifact_id = ? WHERE id = ?").run(stdoutId, stderrId, runId);
     recordEvent(
       db,
@@ -142,7 +151,7 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
       {
         run: runId,
         at: req.at,
-        label: req.label,
+        label,
         exit: result.exitCode,
         tampered,
       },

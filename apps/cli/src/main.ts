@@ -70,7 +70,8 @@ import {
   openStore,
   parseClaudeLine,
   resolveSetting,
-  runWorkUnit,
+  runWorkerRound,
+  getRecord,
   setSetting,
   projectSkillChecks,
   clearSetting,
@@ -123,7 +124,7 @@ const USAGE = `yagura — agent orchestration
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --accept <text>...
                   [--context <text>...] [--base <branch>] [--after <unit#>...] [--playbook <name>] [--timebox <seconds>] [--issue <ref>...]
-  yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab land through pull/merge requests (forge.repo, forge.merge_method)
+  yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab merge through pull/merge requests (forge.repo names the repo on the forge)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]
   yagura env set <id> [--capacity <n>] [--name <text>] [--context <kube context>] [--pool <ns,ns> | --pool ""] [--base-url <url>]
@@ -156,8 +157,8 @@ const USAGE = `yagura — agent orchestration
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
   yagura unit requeue|drop <project> <unit#> [--note <text>]   requeue puts a stuck unit back to waiting; drop gives it up
-  yagura run <project> <unit#>           run a ready work unit
-  yagura evidence run --at base|head --label <name> -- <command>   (inside an agent session)
+  yagura run <project> <unit#>           run one worker round of a unit (debugging; the daemon does this)
+  yagura evidence run [--label <name>] [--at base] -- <command>   (inside an agent session: a recorded run on its commit)
   yagura show <project> [unit#]
   yagura git <repo> log|show|ls-tree|diff|grep|blame [args]   read a registered repo's mirror (trunk is origin/<default branch>)
   yagura logs <project> <unit#> [--attempt <n>]
@@ -400,13 +401,17 @@ async function main() {
       const unit = getUnitBySeq(db, projectId as ProjectId, Number(seq));
       console.log(`running ${projectId}/U${unit.seq}: ${unit.goal}`);
       await reapLeases(db, boot);
-      const attempt = await runWorkUnit(agentCtx(), unit.id);
+      if (unit.state === "waiting") transitionUnit(db, unit.id, "building", { round: { kind: "first" } });
+      await runWorkerRound(agentCtx(), unit.id);
+      const attempt = listAttempts(db, unit.id)
+        .filter((a) => a.role === "worker")
+        .at(-1)!;
       const after = getUnitBySeq(db, projectId as ProjectId, Number(seq));
       console.log(
         `\nU${after.seq} → ${after.state} · attempt ${attempt.n} ${attempt.state}` +
           `${attempt.handoffStatus ? ` (${attempt.handoffStatus})` : ""}` +
           `${attempt.failureMode ? ` · failure: ${attempt.failureMode}` : ""}` +
-          `\n  branch ${attempt.branch} @ ${attempt.headSha?.slice(0, 10)} · worktree ${attempt.worktreePath}` +
+          `\n  branch ${attempt.branch} @ ${attempt.headSha?.slice(0, 10)} · checkout ${attempt.worktreePath}` +
           `\n  handoff ${layout(boot).handoff(projectId as ProjectId, after.seq, attempt.n)}`,
       );
       return;
@@ -709,9 +714,15 @@ async function main() {
       const u = getUnitBySeq(db, project.id, Number(seq));
       console.log(`U${u.seq} [${u.state}] ${u.goal}\n  accept: ${u.acceptance.join(" / ")}${u.after.length ? `\n  after: ${u.after.length} unit(s)` : ""}`);
       if (u.notes.length) console.log(`  notes:\n${u.notes.map((n) => `    - ${n}`).join("\n")}`);
+      const moves = db.prepare("SELECT json_extract(data_json, '$.to') AS to_ FROM events WHERE type = 'unit.state' AND unit_id = ? ORDER BY id").all(u.id) as {
+        to_: string;
+      }[];
+      console.log(`  states: waiting → ${moves.map((m) => m.to_).join(" → ")}`);
       for (const a of listAttempts(db, u.id)) {
+        const verdict = a.role === "judge" ? getRecord(db, a.id, "judge") : null;
         console.log(
-          `  attempt ${a.n}: ${a.state} ${a.handoffStatus ?? ""} ${a.failureMode ?? ""} · ${a.model ?? "?"} · $${a.costUsd.toFixed(2)} · ctx peak ${a.contextPeak} · ${a.branch ?? a.headSha?.slice(0, 10) ?? ""}` +
+          `  attempt ${a.n} (${a.role ?? "?"}): ${a.state} ${verdict?.verdict ?? a.handoffStatus ?? ""} ${a.failureMode ?? ""} · ${a.model ?? "?"} · $${a.costUsd.toFixed(2)} · ctx peak ${a.contextPeak} · ${a.headSha?.slice(0, 10) ?? ""}` +
+            (verdict?.findings.length ? `\n    findings: ${verdict.findings.join(" / ")}` : "") +
             (a.missingSkills.length ? `\n    skipped required skills: ${a.missingSkills.join(", ")}` : ""),
         );
         for (const r of listEvidenceRuns(db, a.id))

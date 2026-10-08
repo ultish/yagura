@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
 import { isBuild, type Attempt, type Project, type Unit } from "./domain.js";
 import { layout } from "./paths.js";
+import { getRecord } from "./records.js";
 import { getProject, getUnit, listAttempts, listUnits, type Db } from "./store.js";
 
 const SUBJECT_MAX = 72;
@@ -19,15 +20,47 @@ export function unitLink(url: string | null, project: Project, unit: Unit): stri
   return url ? `${url.replace(/\/$/, "")}/p/${project.id}/u/${unit.seq}` : null;
 }
 
-// A ref to an issue yagura is answering (§30) closes it when a change to that issue's own repo merges; a change to another repo
-// of the project only refers to it.
-export function watchedIssues(db: Db, unit: Unit, refs: string[]): number[] {
-  if (!unit.repoId) return [];
-  const numbers = refs.flatMap((r) => {
+// A unit's ref to an issue in its own repo (`app#12`) closes that issue when it merges; refs to other repos only point at them.
+export function closesIssues(unit: Unit): number[] {
+  return unit.refs.flatMap((r) => {
     const m = /^(.+)#(\d+)$/.exec(r);
     return m && m[1] === unit.repoId ? [Number(m[2])] : [];
   });
-  return numbers.filter((n) => db.prepare("SELECT 1 FROM forge_issues WHERE repo_id = ? AND number = ?").get(unit.repoId, n));
+}
+
+// The pull request's description: what the unit must make true, the issues it closes, and where to follow it in yagura.
+export function pullRequestBody(project: Project, unit: Unit, url: string | null): string {
+  const link = unitLink(url, project, unit);
+  return [
+    unit.goal,
+    "",
+    "## Acceptance",
+    ...unit.acceptance.map((a) => `- ${a}`),
+    ...(closesIssues(unit).length ? ["", ...closesIssues(unit).map((n) => `Closes #${n}`)] : []),
+    "",
+    link ? `Built by yagura: ${project.id}/U${unit.seq}, ${link}` : `Built by yagura: ${project.id}/U${unit.seq}.`,
+  ].join("\n");
+}
+
+// The merge commit names the unit, the agents that built it, and the judge's approval, so main's history says how it was made.
+export function mergeMessage(db: Db, unit: Unit, pr: number | null, url: string | null): { subject: string; body: string } {
+  const project = getProject(db, unit.projectId);
+  const attempts = listAttempts(db, unit.id);
+  const workers = attempts.filter((a) => a.role === "worker" && a.state === "handed_off");
+  const judge = attempts.filter((a) => a.role === "judge").at(-1);
+  const approval = judge ? getRecord(db, judge.id, "judge") : null;
+  const link = unitLink(url, project, unit);
+  return {
+    subject: `${project.id}/U${unit.seq}: ${commitSubject(unit.goal)}${pr ? ` (#${pr})` : ""}`,
+    body: [
+      `Workers: ${workers.map((a) => `A${a.agentNo}${a.model ? ` (${a.model})` : ""}`).join(", ") || "none"}`,
+      ...(judge && approval?.verdict === "approve"
+        ? [`Judge: A${judge.agentNo} approved ${unit.approvedSha?.slice(0, 10) ?? ""}, on ${approval.runs.map((r) => `run:${r}`).join(", ")}`]
+        : []),
+      ...closesIssues(unit).map((n) => `Closes #${n}`),
+      ...(link ? [`yagura: ${link}`] : []),
+    ].join("\n"),
+  };
 }
 
 export interface Trace {

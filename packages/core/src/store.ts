@@ -113,6 +113,13 @@ export function transitionUnit(db: Db, unitId: UnitId, to: UnitState, data: Reco
   })();
 }
 
+// The move that put the unit in its current state, with the data it carried (a worker round, a reason).
+export function lastTransition(db: Db, unitId: UnitId): { ts: IsoTime; data: Record<string, unknown> } | null {
+  const r = db.prepare("SELECT ts, data_json FROM events WHERE unit_id = ? AND type = 'unit.state' ORDER BY id DESC LIMIT 1").get(unitId) as
+    { ts: IsoTime; data_json: string } | undefined;
+  return r ? { ts: r.ts, data: JSON.parse(r.data_json) as Record<string, unknown> } : null;
+}
+
 export function addRepo(db: Db, r: { id: string; url: string; defaultBranch: string; forge?: Forge; pushConfirmed?: boolean }): Repo {
   db.prepare("INSERT INTO repos (id, url, default_branch, forge, push_confirmed, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
     r.id,

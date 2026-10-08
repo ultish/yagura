@@ -50,9 +50,9 @@ export type UnitState = (typeof UNIT_STATES)[number];
 // The only moves between unit states (core-loop design, "The unit's life"). `stuck` is where the unit lead decides.
 export const UNIT_TRANSITIONS: Record<UnitState, readonly UnitState[]> = {
   waiting: ["building", "stuck", "dropped"],
-  building: ["judging", "stuck", "waiting", "merged", "dropped"],
-  judging: ["ready", "building", "stuck", "dropped"],
-  ready: ["merged", "building", "stuck", "dropped"],
+  building: ["building", "judging", "stuck", "waiting", "merged", "dropped"],
+  judging: ["judging", "ready", "building", "stuck", "dropped"],
+  ready: ["merged", "judging", "building", "stuck", "dropped"],
   stuck: ["waiting", "building", "judging", "ready", "dropped"],
   merged: [],
   dropped: [],

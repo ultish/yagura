@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -8,7 +8,7 @@ import type { RunContext } from "./agent.js";
 import { setSetting, type Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
 import { Engine } from "./engine.js";
-import { commitAll, diffRange, git } from "./git.js";
+import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
@@ -25,6 +25,7 @@ import {
   openStore,
   setMergePolicy,
   setProjectEnvironment,
+  setRepoForge,
   type Db,
 } from "./store.js";
 
@@ -40,10 +41,11 @@ const tsx = pathToFileURL(join(dirname(createRequire(import.meta.url).resolve("t
 let db: Db;
 let ctx: RunContext;
 let origin: string;
+let root: string;
 const project = "p" as ProjectId;
 
 beforeEach(async () => {
-  const root = mkdtempSync(join(tmpdir(), "yagura-engine-"));
+  root = mkdtempSync(join(tmpdir(), "yagura-engine-"));
   const seed = join(root, "seed");
   mkdirSync(seed, { recursive: true });
   writeFileSync(join(seed, "README.md"), "seed\n");
@@ -59,8 +61,34 @@ beforeEach(async () => {
   addEnvironment(db, { id: "local", name: "local", provider: "local-process", capacity: 2 });
   setProjectEnvironment(db, project, "local" as EnvironmentId);
   setMergePolicy(db, project, "auto");
+  setSetting(db, "global", "", "forge.poll_seconds", 1);
   process.env.FAKE_MODE = "engine";
+  process.env.FAKE_ORIGIN = origin;
+  ghState = join(root, "gh.json");
 });
+
+afterEach(() => {
+  for (const k of ["FAKE_JUDGE_CHANGES", "FAKE_BASE_MOVE", "FAKE_JUDGE"]) delete process.env[k];
+});
+
+let ghState: string;
+// The repo lands through pull requests on a fake GitHub over the same origin.
+function onFakeGithub() {
+  setRepoForge(db, "testbed" as RepoId, "gh", true);
+  setSetting(db, "repo", "testbed", "forge.repo", "ultish/testbed");
+  setSetting(db, "global", "", "forge.gh_bin", fixtures("fake-gh.mjs"));
+  process.env.FAKE_GH_ORIGIN = origin;
+  process.env.FAKE_GH_STATE = ghState;
+}
+const ghPrs = () =>
+  (JSON.parse(readFileSync(ghState, "utf8")) as { prs: { number: number; head: string; title: string; body: string; state: string; isDraft: boolean }[] }).prs;
+const states = (unitId: number) =>
+  (
+    db.prepare("SELECT json_extract(data_json, '$.to') AS to_ FROM events WHERE type = 'unit.state' AND unit_id = ? ORDER BY id").all(unitId) as {
+      to_: string;
+    }[]
+  ).map((r) => r.to_);
+const workUnits = () => listUnits(db, project).filter((u) => u.type === "work");
 
 describe("Engine", () => {
   it("stops starting work past 70% of the wall-clock budget, and raises an andon when it is spent", async () => {
@@ -96,38 +124,88 @@ describe("Engine", () => {
     setSetting(db, "project", project, "project.budget_usd", 100);
     setAndon(db, project, null);
     await engine.runUntilIdle();
-    expect(listUnits(db, project).filter((u) => u.type === "work" && u.state === "judging")).toHaveLength(2);
+    expect(listUnits(db, project).filter((u) => u.type === "work" && u.state === "merged")).toHaveLength(3);
   }, 60_000);
 
-  it("plans and runs disjoint units in parallel, leaves an overlapping one waiting, and ends each worker at judging", async () => {
-    const log: string[] = [];
-    await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();
+  it("takes a unit right the first time from its draft pull request to a merge commit on main", async () => {
+    onFakeGithub();
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
 
-    const work = listUnits(db, project).filter((u) => u.type === "work");
-    expect(work.map((u) => [u.goal, u.state])).toEqual([
-      ["write a", "judging"],
-      ["write b", "judging"],
-      ["write c", "waiting"],
+    const [a, b, c] = workUnits();
+    expect(workUnits().map((u) => [u.goal, u.state])).toEqual([
+      ["write a", "merged"],
+      ["write b", "merged"],
+      ["write c", "merged"],
     ]);
-    expect(listUnits(db, project).filter((u) => u.type !== "work" && u.type !== "plan")).toEqual([]);
+    expect(states(a!.id)).toEqual(["building", "judging", "ready", "merged"]);
+    expect(listAttempts(db, a!.id).map((x) => x.role)).toEqual(["worker", "judge"]);
+    expect(
+      ghPrs()
+        .map((p) => `${p.head} ${p.state} draft:${p.isDraft}`)
+        .sort(),
+    ).toEqual([`yagura/p/u${a!.seq} MERGED draft:false`, `yagura/p/u${b!.seq} MERGED draft:false`, `yagura/p/u${c!.seq} MERGED draft:false`]);
+    const pr = ghPrs().find((p) => p.head === `yagura/p/u${a!.seq}`)!;
+    expect(pr.title).toBe("write a");
+    expect(pr.body).toBe(`write a\n\n## Acceptance\n- a file exists\n\nBuilt by yagura: p/U${a!.seq}.`);
 
-    const events = db.prepare("SELECT id, type, unit_id FROM events WHERE type IN ('attempt.started', 'attempt.ended') ORDER BY id").all() as {
-      id: number;
-      type: string;
-      unit_id: number;
-    }[];
-    const at = (type: string, unitId: number) => events.find((e) => e.type === type && e.unit_id === unitId)!.id;
-    const [a, b] = work.map((u) => u.id);
-    expect(at("attempt.started", b!)).toBeLessThan(at("attempt.ended", a!));
+    const merge = getUnit(db, a!.id).mergedSha!;
+    const parents = (await git(["log", "-1", "--format=%P", merge], { gitDir: origin })).split(" ");
+    expect(parents).toHaveLength(2);
+    expect(parents[1]).toBe(getUnit(db, a!.id).approvedSha);
+    const message = await git(["log", "-1", "--format=%B", merge], { gitDir: origin });
+    expect(message).toMatch(
+      new RegExp(`^p/U${a!.seq}: write a \\(#\\d\\)\\n\\nWorkers: A\\d+ \\(fake-model\\)\\nJudge: A\\d+ approved [0-9a-f]{10}, on run:\\d+$`),
+    );
+    expect(await git(["show", `main:app/a/p-U${a!.seq}.txt`], { gitDir: origin })).toBe("work");
+    expect(getProject(db, project).state).toBe("closed");
+  }, 60_000);
 
-    const workAttempt = listAttempts(db, a!)[0]!;
-    const diff = await diffRange(layout(ctx.boot).mirror("testbed" as RepoId), workAttempt.baseSha!, workAttempt.headSha!);
-    expect(diff).toContain(`+++ b/app/a/p-U${work[0]!.seq}.txt\n@@ -0,0 +1 @@\n+work`);
+  it("sends a unit back to its own worker with the judge's findings, and merges it after the second judge approves", async () => {
+    onFakeGithub();
+    const planned = new Engine(ctx, { projectId: project, tickMs: 50 });
+    process.env.FAKE_JUDGE_CHANGES = "U2";
+    await planned.runUntilIdle();
+    const u2 = workUnits().find((u) => u.seq === 2)!;
+    expect(states(u2.id)).toEqual(["building", "judging", "building", "judging", "ready", "merged"]);
+    const attempts = listAttempts(db, u2.id);
+    expect(attempts.map((x) => [x.role, x.state])).toEqual([
+      ["worker", "handed_off"],
+      ["judge", "handed_off"],
+      ["worker", "handed_off"],
+      ["judge", "handed_off"],
+    ]);
+    expect(attempts[2]!.resumesAttemptId).toBe(attempts[0]!.id);
+    expect(await git(["show", `main:app/a/p-U2.txt`], { gitDir: origin })).toBe("work\n# fixed after findings: true");
+    expect(ghPrs().filter((p) => p.head === "yagura/p/u2")).toHaveLength(1);
+    const commits = await git(["log", "--format=%s", `${getUnit(db, u2.id).mergedSha}^2`, "--not", `${getUnit(db, u2.id).mergedSha}^1`], { gitDir: origin });
+    expect(commits.split("\n")).toContain("fix after findings");
+  }, 60_000);
 
-    const checkouts = join(ctx.boot.home, "worktrees", "testbed");
-    expect(readdirSync(checkouts).length).toBeGreaterThan(1);
-    const fallbacks = db.prepare("SELECT data_json FROM events WHERE type = 'parse.fallback'").all() as { data_json: string }[];
-    expect(fallbacks).toEqual([]);
+  it("merges a base that moved cleanly into a waiting unit's branch, and merges that unit after", async () => {
+    onFakeGithub();
+    setSetting(db, "project", project, "project.max_in_flight", 1);
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    const based = db.prepare("SELECT unit_id FROM events WHERE type = 'unit.base_merged'").all() as { unit_id: number }[];
+    expect(based.length).toBeGreaterThan(0);
+    const unit = getUnit(db, based[0]!.unit_id as never);
+    expect(unit.state).toBe("merged");
+    const branchLog = await git(["log", "--format=%s", `${unit.mergedSha}^2`, "-3"], { gitDir: origin });
+    expect(branchLog).toContain(`Merge main into yagura/p/u${unit.seq}`);
+  }, 60_000);
+
+  it("sends a conflict with the base back to the worker, who merges and resolves it, then the judge and the merge", async () => {
+    onFakeGithub();
+    process.env.FAKE_BASE_MOVE = "U2";
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    const u2 = workUnits().find((u) => u.seq === 2)!;
+    expect(states(u2.id)).toEqual(["building", "building", "judging", "ready", "merged"]);
+    const conflict = db
+      .prepare(
+        "SELECT json_extract(data_json, '$.round.kind') AS kind, json_extract(data_json, '$.round.files') AS files FROM events WHERE type = 'unit.state' AND unit_id = ? ORDER BY id LIMIT 1 OFFSET 1",
+      )
+      .get(u2.id);
+    expect(conflict).toEqual({ kind: "conflict", files: JSON.stringify(["app/a/p-U2.txt"]) });
+    expect(await git(["show", "main:app/a/p-U2.txt"], { gitDir: origin })).toBe("work, merged with the base");
   }, 60_000);
 
   it("sticks a unit that crashes before it starts instead of starting it again every tick", async () => {
@@ -136,9 +214,9 @@ describe("Engine", () => {
     await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();
     const work = listUnits(db, project).filter((u) => u.type === "work");
     expect(work.filter((u) => u.state === "stuck").length).toBeGreaterThan(0);
-    expect(log.filter((l) => l.startsWith("✗ work")).length).toBe(work.filter((u) => u.state === "stuck").length);
+    expect(log.filter((l) => l.startsWith("✗ worker")).length).toBe(work.filter((u) => u.state === "stuck").length);
     expect(db.prepare("SELECT data_json FROM events WHERE type = 'unit.state' AND json_extract(data_json, '$.to') = 'stuck' LIMIT 1").get()).toEqual({
-      data_json: JSON.stringify({ from: "waiting", to: "stuck", reason: "engine error before it started: no adapter for harness missing-harness" }),
+      data_json: JSON.stringify({ from: "building", to: "stuck", reason: "engine error: no adapter for harness missing-harness" }),
     });
   });
 

@@ -61,7 +61,7 @@ describe("claude command", () => {
     expect(claudeAdapter.command({ ...run, model: "opus" }).argv.slice(-2)).toEqual(["--model", "opus"]);
   });
 
-  it("passes allowed and denied tools as one list each, and always denies landing", () => {
+  it("passes allowed and denied tools as one list each, always denies pull request commands, and lets only a worker push", () => {
     const run = { prompt: "p", bin: null, model: null, permissionMode: "dontAsk", pluginDirs: [], addDirs: ["/h/projects/a"], extraArgs: [] };
     expect(claudeAdapter.command({ ...run, allowedTools: ["Skill", "Bash(yagura show:*)"], disallowedTools: ["Write", "Edit"] }).argv.slice(10)).toEqual([
       "--add-dir",
@@ -71,6 +71,7 @@ describe("claude command", () => {
       "--disallowed-tools",
       "Write,Edit,Bash(git push:*),Bash(gh pr:*),Bash(glab mr:*)",
     ]);
+    expect(claudeAdapter.command({ ...run, pushes: true }).argv.slice(-2)).toEqual(["--disallowed-tools", "Bash(gh pr:*),Bash(glab mr:*)"]);
   });
 });
 

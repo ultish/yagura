@@ -32,7 +32,7 @@ export async function renderReport(ctx: { db: Db; boot: Bootstrap }, threadId: n
   const landed = work
     .filter((u) => u.state === "merged")
     .map((u) => {
-      return `- U${u.seq} ${u.goal} — landed \`${u.mergedSha?.slice(0, 10) ?? "?"}\` on ${u.repoId} · \`yagura trace ${u.mergedSha?.slice(0, 10) ?? `${projectId}`}\``;
+      return `- U${u.seq} ${u.goal} — merged \`${u.mergedSha?.slice(0, 10) ?? "?"}\` on ${u.repoId} · \`yagura trace ${u.mergedSha?.slice(0, 10) ?? `${projectId}`}\``;
     });
   const blocked = work.filter((u) => u.state === "stuck").map((u) => `- U${u.seq} ${u.goal}: ${blockedReason(db, u)}`);
   const open = work.filter((u) => !["merged", "dropped", "stuck"].includes(u.state)).map((u) => `- U${u.seq} ${u.goal} (${u.state})`);
@@ -53,7 +53,7 @@ export async function renderReport(ctx: { db: Db; boot: Bootstrap }, threadId: n
     .map((g) => `- gate ${g.id}: ${g.question} [${g.options.join(" | ")}]`);
   const questions = listQuestions(db, threadId, { openOnly: true }).map((q) => `- Q${q.id}: ${q.text}`);
   const section = (title: string, lines: string[]) => (lines.length ? `\n\n### ${title}\n${lines.join("\n")}` : "");
-  return `${headline}${section("Landed", landed)}${section("Blocked", blocked)}${section("Still open", open)}${section("How to run it", run)}${section("Waiting on you", [...gates, ...questions])}`;
+  return `${headline}${section("Merged", landed)}${section("Stuck", blocked)}${section("Still open", open)}${section("How to run it", run)}${section("Waiting on you", [...gates, ...questions])}`;
 }
 
 export async function postReport(ctx: { db: Db; boot: Bootstrap }, threadId: number, projectId: ProjectId, r: ReportKind): Promise<void> {

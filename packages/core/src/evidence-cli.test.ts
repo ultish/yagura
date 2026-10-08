@@ -29,7 +29,7 @@ describe("evidence run", () => {
     expect(token).toMatch(/^[0-9a-f]{48}$/);
     db.close();
     const run = (t: string | undefined) =>
-      evidenceCli(["run", "--at", "head", "--label", "x", "--", "true"], {
+      evidenceCli(["run", "--", "true"], {
         ...process.env,
         YAGURA_HOME: home,
         YAGURA_ATTEMPT: String(attempt.id),
@@ -38,6 +38,6 @@ describe("evidence run", () => {
     const refused = { code: 2, output: "evidence run refused: YAGURA_EVIDENCE_TOKEN does not match this attempt's session\n" };
     expect(await run("0".repeat(48))).toEqual(refused);
     expect(await run(undefined)).toEqual(refused);
-    await expect(run(token)).rejects.toThrow(/has no checkouts/);
+    await expect(run(token)).rejects.toThrow(/has no checkout/);
   });
 });

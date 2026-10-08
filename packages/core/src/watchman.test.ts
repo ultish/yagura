@@ -227,7 +227,7 @@ describe("watchman turns", () => {
     expect(readFileSync(layout(boot).turnBrief(t.id, turn.human.id), "utf8")).toContain("[human #1]\nprototype a chain");
   });
 
-  it("goes from a message to a chain of two projects, builds the first one's work, and keeps the second waiting", async () => {
+  it("goes from a message to a chain of two projects, and builds the second only once the first has closed", async () => {
     const t = createThread(db, { title: "t", autonomy: "go" });
     const turn = await runWatchmanTurn(ctx, t.id, "prototype a chain");
     expect(turn.applied).toEqual({ repos: ["proto"], projects: ["proto-a", "proto-b"], environments: ["local"], units: {} });
@@ -240,18 +240,26 @@ describe("watchman turns", () => {
     expect(listQuestions(db, t.id)[0]).toMatchObject({ answer: "local", resolvedMessageId: second.reply!.id });
 
     await new Engine(ctx, { tickMs: 50 }).runUntilIdle();
-    expect(getProject(db, "proto-a" as ProjectId).state).toBe("active");
-    expect(
-      listUnits(db, "proto-a" as ProjectId)
-        .filter((u) => u.type === "work")
-        .map((u) => [u.goal, u.state]),
-    ).toEqual([
-      ["write a", "judging"],
-      ["write b", "judging"],
-      ["write c", "waiting"],
+    for (const p of ["proto-a", "proto-b"])
+      expect(
+        listUnits(db, p as ProjectId)
+          .filter((u) => u.type === "work")
+          .map((u) => [u.goal, u.state]),
+      ).toEqual([
+        ["write a", "merged"],
+        ["write b", "merged"],
+        ["write c", "merged"],
+      ]);
+    expect(db.prepare("SELECT project_id AS p, json_extract(data_json, '$.state') AS s FROM events WHERE type = 'project.state' ORDER BY id").all()).toEqual([
+      { p: "proto-a", s: "closed" },
+      { p: "proto-b", s: "active" },
+      { p: "proto-b", s: "closed" },
     ]);
-    expect(getProject(db, "proto-b" as ProjectId).state).toBe("framing");
-    expect(listMessages(db, t.id).filter((m) => m.role === "system" && m.body.includes("is done"))).toEqual([]);
+    expect(
+      listMessages(db, t.id)
+        .filter((m) => m.role === "system" && m.body.includes("is done"))
+        .map((m) => m.body.split("\n")[0]),
+    ).toEqual(["**proto-a is done.** all merged", "**proto-b is done.** all merged"]);
   }, 120_000);
 
   it("registers an existing repo from a proposal, checking it before storing and mirroring it on apply", async () => {
@@ -322,7 +330,9 @@ describe("watchman turns", () => {
     const { answerGate } = await import("./store.js");
     answerGate(db, gate.id, "start");
     await engine.runUntilIdle();
-    expect(getProject(db, "g2" as ProjectId).state).toBe("active");
+    expect(
+      db.prepare("SELECT json_extract(data_json, '$.state') AS s FROM events WHERE type = 'project.state' AND project_id = 'g2' ORDER BY id").all(),
+    ).toEqual([{ s: "active" }, { s: "closed" }]);
   }, 60_000);
 
   it("proposes environments with values, presets, and templates", async () => {

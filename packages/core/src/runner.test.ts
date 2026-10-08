@@ -5,14 +5,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import { setSetting, type Bootstrap } from "./config.js";
-import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
+import type { EnvironmentId, ProjectId, RepoId, UnitId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { claudeAdapter, parseClaudeLine } from "./harness/claude.js";
 import { addSteer, listSteers } from "./steer.js";
 import { unitStory } from "./story.js";
 import { layout } from "./paths.js";
-import { runWorkUnit } from "./runner.js";
+import { runWorkerRound, type RunContext } from "./runner.js";
 import { setEnvironmentNotes, setValue } from "./envvalues.js";
 import { getRecord } from "./records.js";
 import {
@@ -69,12 +69,19 @@ async function run(mode: string, timeboxSeconds = 60) {
     timeboxSeconds,
     maxAttempts: 2,
   });
-  const attempt = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
+  const attempt = await startRound(unit.id);
   return { unit: getUnit(db, unit.id), attempt, paths: layout(boot) };
 }
 
-describe("runWorkUnit", () => {
-  it("runs an agent in its own worktree and records a clean handoff", async () => {
+// The engine's move from waiting to a worker's first round, then the round itself; resolves with the round's attempt.
+async function startRound(unitId: UnitId, ctx: RunContext = { db, boot, adapters: { claude: fake }, cli }) {
+  transitionUnit(db, unitId, "building", { round: { kind: "first" } });
+  await runWorkerRound(ctx, unitId);
+  return listAttempts(db, unitId).at(-1)!;
+}
+
+describe("runWorkerRound", () => {
+  it("runs an agent in the unit's own checkout and records a clean handoff", async () => {
     const { unit, attempt, paths } = await run("success");
     expect(unit.state).toBe("judging");
     expect(listUnits(db, project).filter((u) => u.type !== "work")).toEqual([]);
@@ -142,7 +149,7 @@ describe("runWorkUnit", () => {
     expect(listAttempts(db, unit.id)).toHaveLength(1);
   });
 
-  it("refuses to run a unit that is not waiting", async () => {
+  it("refuses to run a unit that is not building", async () => {
     const unit = addUnit(db, {
       projectId: project,
       type: "work",
@@ -153,7 +160,7 @@ describe("runWorkUnit", () => {
       maxAttempts: 1,
     });
     transitionUnit(db, unit.id, "stuck");
-    await expect(runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id)).rejects.toThrow(/is stuck, not waiting/);
+    await expect(runWorkerRound({ db, boot, adapters: { claude: fake }, cli }, unit.id)).rejects.toThrow(/is stuck, not building/);
     expect(existsSync(layout(boot).mirror("testbed" as RepoId))).toBe(false);
   });
 
@@ -175,7 +182,7 @@ describe("runWorkUnit", () => {
     expect((await run("noskills")).unit.state).toBe("judging");
   });
 
-  it("stops a running agent on request and puts the unit back with the operator's note", async () => {
+  it("stops a running agent on request and puts the unit back with the developer's note", async () => {
     const { stopAttempt } = await import("./agent.js");
     process.env.FAKE_MODE = "hang";
     const unit = addUnit(db, {
@@ -187,7 +194,7 @@ describe("runWorkUnit", () => {
       timeboxSeconds: 60,
       maxAttempts: 1,
     });
-    const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
+    const running = startRound(unit.id);
     let attempt = listAttempts(db, unit.id)[0];
     for (let i = 0; i < 50 && !attempt?.pid; i++) {
       await new Promise((r) => setTimeout(r, 50));
@@ -196,7 +203,7 @@ describe("runWorkUnit", () => {
     expect(stopAttempt(db, attempt!.id, "wrong approach; use the store")).toBe(true);
     const done = await running;
     expect(done.state).toBe("stopped");
-    expect(getUnit(db, unit.id)).toMatchObject({ state: "waiting", notes: ["Operator stopped attempt 1: wrong approach; use the store"] });
+    expect(getUnit(db, unit.id)).toMatchObject({ state: "waiting", notes: ["The developer stopped attempt 1: wrong approach; use the store"] });
   });
 
   describe("the account's usage limit", () => {
@@ -238,7 +245,7 @@ describe("runWorkUnit", () => {
           timeboxSeconds: 60,
           maxAttempts: 1,
         });
-        const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
+        const running = startRound(unit.id);
         let attempt = listAttempts(db, unit.id)[0];
         for (let i = 0; i < 100 && !attempt?.limitedUntil; i++) {
           await new Promise((r) => setTimeout(r, 50));
@@ -268,7 +275,7 @@ describe("runWorkUnit", () => {
         timeboxSeconds,
         maxAttempts: 1,
       });
-      return { unit, running: runWorkUnit({ db, boot, adapters: { claude: claudeAdapter }, cli }, unit.id) };
+      return { unit, running: startRound(unit.id, { db, boot, adapters: { claude: claudeAdapter }, cli }) };
     };
     const runningAttempt = async (unitId: number) => {
       let attempt = listAttempts(db, unitId as never)[0];
@@ -342,7 +349,7 @@ describe("runWorkUnit", () => {
       process.env.FAKE_SKILLS = skills;
       try {
         const u = unitWith(scaffold);
-        const attempt = await runWorkUnit(ctx(), u.id);
+        const attempt = await startRound(u.id, ctx());
         return { unit: getUnit(db, u.id), attempt, brief: readFileSync(layout(boot).brief(project, u.seq, attempt.n), "utf8") };
       } finally {
         delete process.env.FAKE_SKILLS;

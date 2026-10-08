@@ -32,16 +32,17 @@ export function renderBrief(b: RenderedBrief): string {
   const env = Object.entries(b.env).map(([k, v]) => `${k}=${v}${b.envNotes?.[k] ? ` (${b.envNotes[k]})` : ""}`);
   return `# yagura brief
 
-You are running inside yagura. You cannot ask questions: everything you need is below. Work only in your worktree, commit to your branch, and prove the work with recorded runs. Then record your handoff as REPORT says.
+You are running inside yagura. You cannot ask questions: everything you need is below. Work only in your checkout, commit to your branch, and prove the work with recorded runs. Then record your handoff as REPORT says.
 
 ## GOAL
 ${b.goal}
 
 ## REPO
 - repo: ${b.repo.id}
-- worktree: ${b.repo.worktree} (your working directory)
-- branch: ${b.repo.branch}, starts at ${b.repo.baseSha}
-- commit your work to this branch; you may push this branch, never another
+- checkout: ${b.repo.worktree} (your working directory)
+- branch: ${b.repo.branch}, which started at ${b.repo.baseSha}
+- commit your work to this branch; you may push it (\`git push\`) whenever you like, never another branch, and never with force
+- a judge with no part in your work decides whether the goal is met, from your change and from runs it makes itself
 
 ## CONTEXT
 ${list(b.context)}
@@ -54,13 +55,13 @@ ${list(b.acceptance)}
 
 ## TESTS
 ${b.test ?? "yagura was not told how this environment runs the repo's tests: work out the command, use it, and say so in your decision log."}
-Run the command that proves your point with \`yagura evidence run -- <command>\`: yagura runs it itself and gives you a run id to cite.
+Commit, then run the command that proves your point with \`yagura evidence run -- <command>\`: yagura runs it itself on your commit and gives you a run id to cite.
 
 ## ENV
 ${list(env)}
 
 ## TIMEBOX
-${b.timeboxMinutes} minutes. If you run out, stop and hand off what you have with Status: partial.
+${b.timeboxMinutes} minutes. If you cannot finish, commit what you have and hand off stuck with the reason.
 
 ## FORBIDDEN
 ${list(b.forbidden)}

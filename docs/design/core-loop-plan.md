@@ -192,44 +192,44 @@ Each live lane runs against its own isolated checkout, a worktree, or an `Agent`
 
 **Files.**
 
-- [ ] Rewrite `packages/core/src/engine.ts`, `runner.ts`, `brief.ts`, and `audit.ts`.
-- [ ] Create `packages/core/src/judge.ts`.
-- [ ] Create `plugins/yagura/skills/yagura-judge/SKILL.md` and rewrite `plugins/yagura/skills/yagura-worker/SKILL.md`.
-- [ ] Edit `packages/core/src/harness/fixtures/fake-agent.mjs`.
+- [x] Rewrite `packages/core/src/engine.ts`, `runner.ts`, `brief.ts`, and `audit.ts`. Also `merge.ts` (ready, CI, the merge gate, base checks), `evidence.ts` (runs on the agent's own commit), and `resume.ts` (worker rounds).
+- [x] Create `packages/core/src/judge.ts`.
+- [x] Create `plugins/yagura/skills/yagura-judge/SKILL.md` and rewrite `plugins/yagura/skills/yagura-worker/SKILL.md`.
+- [x] Edit `packages/core/src/harness/fixtures/fake-agent.mjs`. It judges (`FAKE_JUDGE_CHANGES`, `FAKE_JUDGE=ask`), answers changes and conflict rounds, moves the base (`FAKE_BASE_MOVE`), and plans two units (`FAKE_UNITS=2`).
 
 **Build.**
 
-- [ ] Drive `waiting`, `building`, `judging`, `ready`, and `merged` from the engine, with every move through `transitionUnit`.
-- [ ] Order the judge's brief as goal and diff, its own recorded runs, then the worker's decision log and the last round's list, in `judge.ts`.
-- [ ] Mark the pull request ready on a recorded `approve`. Send a recorded `changes` to the resumed worker.
-- [ ] Check `mergeWithBase` at the three moments in the design, and send a conflict to the resumed worker.
-- [ ] Write the merge commit message in `audit.ts` with the unit, its workers, the judge's verdict, and `Closes #n`.
+- [x] Drive `waiting`, `building`, `judging`, `ready`, and `merged` from the engine, with every move through `transitionUnit`.
+- [x] Order the judge's brief as goal and diff, its own recorded runs, then the worker's decision log and the last round's list, in `judge.ts`.
+- [x] Mark the pull request ready on a recorded `approve`. Send a recorded `changes` to the resumed worker.
+- [x] Check `mergeWithBase` at the three moments in the design, and send a conflict to the resumed worker.
+- [x] Write the merge commit message in `audit.ts` with the unit, its workers, the judge's verdict, and `Closes #n`.
 
 **You see.**
 
-- [ ] `yagura show demo` lists a unit going `building`, `judging`, `building`, `judging`, `ready`, `merged`, and the fake `gh` state shows one pull request with every commit.
+- [x] `yagura show demo` lists a unit going `building`, `judging`, `building`, `judging`, `ready`, `merged`, and the fake `gh` state shows one pull request with every commit. `yagura show demo 3`: `states: waiting → building → judging → building → judging → ready → merged`, each attempt with its role and verdict; the fake `gh` state has one pull request per unit, merged, and main's merge commit for U3 has `work U3` and `fix after findings` on its second parent.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] `engine.test.ts` gains a unit right the first time, a unit with one round of changes, a clean merge with the base, and a conflict the worker resolves, each with literal expected states and pull request contents. Run `caffeinate -is pnpm -r test`.
+- [x] `engine.test.ts` gains a unit right the first time, a unit with one round of changes, a clean merge with the base, and a conflict the worker resolves, each with literal expected states and pull request contents. Run `caffeinate -is pnpm -r test`. core 216, web 33, daemon 22. Six repeated runs of the forge tests after fixing a lost-update race in the fakes, which had left a pull request a draft (yagura now marks a ready unit's draft ready again on every check).
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. One lane at the step head, per the boot recipe, by the developer's one-agent limit.
 
-- [ ] Lane 1. Run a two-unit project with the fake agent, one unit set to need a round of changes. Save `cl4-units.png`. Pass when both units reach `merged`, the second after one round, with two pull requests in the fake `gh` state.
+- [x] Lane 1. Run a two-unit project with the fake agent, one unit set to need a round of changes. Save `cl4-units.png`. Pass when both units reach `merged`, the second after one round, with two pull requests in the fake `gh` state. Real daemon on a scratch home, fake agent and fake `gh`: U2 merged in one round, U3 after one round of changes, project closed; PRs #1 and #2 merged; screenshot `/tmp/swarm-cl4/worker-1/cl4-units.png` (JPEG data).
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] Metric. Agent sessions per unit on the fake-agent demo project.
-- [ ] Probe. `sqlite3 <home>/yagura.db "select count(*) * 1.0 / count(distinct unit_id) from attempts"`, at `main` and at the head, on the same two-unit spec.
-- [ ] Baseline. Record the `main` value first.
-- [ ] Rule. The head must be at most 2 sessions per unit right first time. Fail at 3 or more.
+- [x] Metric. Agent sessions per unit on the fake-agent demo project.
+- [x] Probe. `sqlite3 <home>/yagura.db "select count(*) * 1.0 / count(distinct unit_id) from attempts"`, at `main` and at the head, on the same two-unit spec.
+- [x] Baseline. Record the `main` value first. Taken from the old loop's real Haiku demo (`/tmp/yagura-real-gh-demo-npm`), not the same fake spec: 1.22 by this query, because the old loop made every verify, review, and triage its own unit (33 units for 4 pieces of work); per work unit it is 9.25 sessions (37 non-planner sessions over 4 work units).
+- [x] Rule. The head must be at most 2 sessions per unit right first time. Fail at 3 or more. 2.0 by this query on the lane's home; per work unit, U2 (right first time) 2, U3 (one round of changes) 4.
 
 **Review gate.** None. CL4 is not review-gated.
 
 **Merge.**
 
-- [ ] The step's gates, lane, and probe pass at its last commit on `core-loop`.
-- [ ] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
+- [x] The step's gates, lane, and probe pass at its last commit on `core-loop`.
+- [x] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
 
 ## Give the unit lead its decisions (CL5)
 

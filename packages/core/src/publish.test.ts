@@ -14,8 +14,19 @@ import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
 import { listPublications, publishTestBuild, qualifiedVersion } from "./publish.js";
-import { runWorkUnit } from "./runner.js";
-import { addEnvironment, addProject, addRepo, getUnitBySeq, listAttempts, openStore, setMergePolicy, setProjectEnvironment, type Db } from "./store.js";
+import { runWorkerRound } from "./runner.js";
+import {
+  addEnvironment,
+  addProject,
+  addRepo,
+  getUnitBySeq,
+  listAttempts,
+  openStore,
+  setMergePolicy,
+  setProjectEnvironment,
+  transitionUnit,
+  type Db,
+} from "./store.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
 const fake: HarnessAdapter = {
@@ -83,7 +94,8 @@ describe("published artifacts", () => {
 
   it("publishes a worker's head as a snapshot under its own version, once, and leaves the snapshot where it is", async () => {
     const lib = getUnitBySeq(db, project, 1);
-    await runWorkUnit(ctx, lib.id);
+    transitionUnit(db, lib.id, "building", { round: { kind: "first" } });
+    await runWorkerRound(ctx, lib.id);
     const head = listAttempts(db, lib.id)[0]!.headSha!;
     db.prepare("UPDATE repos SET publish_json = ? WHERE id = 'lib'").run(JSON.stringify(PUBLISH));
 
@@ -102,7 +114,8 @@ describe("published artifacts", () => {
 
   it("records a failed publish with the command's reason", async () => {
     const lib = getUnitBySeq(db, project, 1);
-    await runWorkUnit(ctx, lib.id);
+    transitionUnit(db, lib.id, "building", { round: { kind: "first" } });
+    await runWorkerRound(ctx, lib.id);
     const head = listAttempts(db, lib.id)[0]!.headSha!;
     db.prepare("UPDATE repos SET publish_json = ? WHERE id = 'lib'").run(JSON.stringify({ ...PUBLISH, command: "exit 3" }));
     const pub = await publishTestBuild(ctx, lib.id, head);

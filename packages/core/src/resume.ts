@@ -1,4 +1,4 @@
-import type { Attempt, Unit } from "./domain.js";
+import type { Attempt, Sha } from "./domain.js";
 
 export function contextWindow(model: string | null): number {
   return /1m|\[1m\]/.test(model ?? "") ? 1_000_000 : 200_000;
@@ -20,23 +20,43 @@ export function chooseResume(attempts: Attempt[], opts: { enabled: boolean; canR
   return { resume: last, fresh: null };
 }
 
+// Why a worker is building again: its first round, the judge's findings, a conflict with the base, or a fresh start after a failure.
+export type WorkerRound =
+  | { kind: "first" }
+  | { kind: "changes"; findings: string[] }
+  | { kind: "conflict"; base: string; baseSha: Sha; files: string[] }
+  | { kind: "fresh"; reason: string };
+
+export function roundText(r: WorkerRound): string {
+  switch (r.kind) {
+    case "first":
+      return "Build the unit's goal.";
+    case "changes":
+      return `The judge looked at your work and asked for changes:\n${r.findings.map((f) => `- ${f}`).join("\n")}`;
+    case "conflict":
+      return `yagura could not merge \`${r.base}\` (now at ${r.baseSha}) into your branch; these files conflict:\n${r.files.map((f) => `- ${f}`).join("\n")}\n\nMerge the base into your branch with \`git merge ${r.baseSha}\`, resolve those files, run the tests, commit the merge, and hand off. Never rebase.`;
+    case "fresh":
+      return `A fresh worker takes over: ${r.reason}. The branch keeps what earlier workers committed.`;
+  }
+}
+
 export interface ResumePrompt {
   unit: string;
   attempt: number;
   resumes: number;
   branch: string;
-  why: string;
+  round: WorkerRound;
   timeboxMinutes: number;
   report: string;
 }
 
 export function renderResumePrompt(p: ResumePrompt): string {
-  return `# yagura: your unit was sent back
+  return `# yagura: your unit is back with you
 
-This is attempt ${p.attempt} of ${p.unit}, resuming your own session from attempt ${p.resumes}. You are in the same worktree on the same branch \`${p.branch}\`; your earlier commits are still there. Do what is asked below, commit, and hand off again. Everything in your brief still holds: METHOD and FORBIDDEN.
+This is attempt ${p.attempt} of ${p.unit}, resuming your own session from attempt ${p.resumes}. You are in the same checkout on the same branch \`${p.branch}\`, brought up to date with anything yagura merged into it. Do what is asked below, commit, and hand off again. Everything in your brief still holds.
 
 ## WHY
-${p.why}
+${roundText(p.round)}
 
 ## TIMEBOX
 ${p.timeboxMinutes} ${p.timeboxMinutes === 1 ? "minute" : "minutes"} for this round.
@@ -44,6 +64,3 @@ ${p.timeboxMinutes} ${p.timeboxMinutes === 1 ? "minute" : "minutes"} for this ro
 ## REPORT
 ${p.report}`;
 }
-
-// What the unit was last told, which a resumed worker reads first.
-export const sendBackReason = (unit: Unit) => unit.notes.at(-1) ?? "changes were asked for";

@@ -2,10 +2,23 @@
 // A stand-in for the gh CLI over a local bare repo (FAKE_GH_ORIGIN), with pull requests kept in FAKE_GH_STATE.
 // Tests steer it by editing the state file: checks, a forced mergeStateStatus, or a closed state.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const statePath = process.env.FAKE_GH_STATE;
 const origin = process.env.FAKE_GH_ORIGIN;
+// Calls run in parallel like a real forge's API, so each one holds the state file's lock from its read to its last write.
+const lock = `${statePath}.lock`;
+for (let i = 0; ; i++) {
+  try {
+    mkdirSync(lock);
+    break;
+  } catch {
+    if (i > 2000) throw new Error(`fake forge state ${lock} stayed locked`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+  }
+}
+process.on("exit", () => rmSync(lock, { recursive: true, force: true }));
+for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => process.exit(1));
 const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, "utf8")) : { prs: [], calls: [] };
 const save = () => writeFileSync(statePath, JSON.stringify(state, null, 2));
 const git = (...args) => execFileSync("git", ["--git-dir", origin, ...args], { encoding: "utf8" }).trim();
@@ -18,7 +31,10 @@ let stdin = "";
 process.stdin.on("data", (d) => (stdin += d));
 process.stdin.on("end", () => {
   // FAKE_GH_HANG: a call the forge never answers, as when a connection drops while the machine sleeps.
-  if (process.env.FAKE_GH_HANG) return void setInterval(() => {}, 60_000);
+  if (process.env.FAKE_GH_HANG) {
+    rmSync(lock, { recursive: true, force: true });
+    return void setInterval(() => {}, 60_000);
+  }
   state.calls.push([group, verb, ...rest.filter((a) => !a.includes("\n"))].join(" "));
   const pr = () => state.prs.find((p) => p.number === Number(rest[0]));
   if (group === "api" && verb === "graphql") {

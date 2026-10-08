@@ -178,18 +178,30 @@ function resumed(sessionId) {
   }
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
   if (process.env.YAGURA_ROLE === "manager") return manager();
-  const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
-  appendFileSync(file, `# fixed after findings: ${/run:\d+/.test(brief)}\n`);
-  const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
-  g("add", file);
-  g("commit", "-q", "-m", "fix after findings");
+  const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args], { encoding: "utf8" });
+  const merging = /git merge ([0-9a-f]{40})/.exec(brief);
+  let file;
+  if (merging) {
+    spawnSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "merge", "-q", merging[1]]);
+    const conflicted = g("diff", "--name-only", "--diff-filter=U").trim().split("\n").filter(Boolean);
+    for (const f of conflicted) writeFileSync(f, "work, merged with the base\n");
+    g("add", "-A");
+    g("commit", "-q", "--no-edit");
+    file = conflicted[0] ?? "nothing";
+  } else {
+    file =
+      g("ls-files", `app/*/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`).trim().split("\n")[0] ||
+      g("diff", "--name-only", "HEAD~1", "HEAD").trim().split("\n")[0];
+    appendFileSync(file, `# fixed after findings: ${/run:\d+|asked for changes/.test(brief)}\n`);
+    g("add", file);
+    g("commit", "-q", "-m", "fix after findings");
+  }
   emit({ type: "assistant", message: { content: [{ type: "text", text: "Fixed." }], usage: { input_tokens: 900, output_tokens: 20 } } });
   const prose = `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file}\n\n## Verification\nunit-verified\n`;
   if (canRecord())
     record([
       handoffCall("success", {
-        tier: "unit-verified",
-        did: [`fixed ${file}`],
+        did: [merging ? `merged the base and resolved ${file}` : `fixed ${file}`],
       }),
     ]);
   emit({
@@ -264,13 +276,31 @@ async function engine(role) {
     const delta = disagreed.length
       ? { add: disagreed.map((n) => ({ ...unit(`fix-d${n}`), disagreement: n })), summary: "fix forward" }
       : !workRows.length
-        ? { add: [unit("a"), unit("b"), unit("c", { after: ["a"] })], summary: "three units" }
+        ? process.env.FAKE_UNITS === "2"
+          ? { add: [unit("lib"), unit("app", { after: ["lib"] })], summary: "two units" }
+          : { add: [unit("a"), unit("b"), unit("c", { after: ["a"] })], summary: "three units" }
         : { done: workRows.every((s) => s === "merged"), summary: workRows.every((s) => s === "merged") ? "all merged" : "waiting" };
     if (canRecord()) {
       record([["plan", "--json", JSON.stringify(delta)]]);
       return finish(`Plan: ${delta.summary}.\n\n\`\`\`json\n{"add": [{"key": "decoy"}]}\n\`\`\``);
     }
     return finish("Plan:\n```json\n" + JSON.stringify(delta) + "\n```");
+  }
+  // FAKE_JUDGE_CHANGES=U2,U3: the judge asks those units for changes in their first round and approves after.
+  if (role === "judge") {
+    const ran = /run:(\d+)/.exec(yg("evidence", "run", "--", "true")?.out ?? "")?.[1];
+    const firstRound = /What the last round asked for:\n\(none\)/.test(brief);
+    const asks = (process.env.FAKE_JUDGE_CHANGES ?? "").split(",").includes(process.env.YAGURA_UNIT);
+    if (process.env.FAKE_JUDGE === "ask") {
+      record([["judge", "ask", "--question", "Should the greeting end with a full stop?"]]);
+      return finish("I need the developer.");
+    }
+    if (asks && firstRound) {
+      record([["judge", "changes", "--finding", `app:1 ${process.env.YAGURA_UNIT} must say it was fixed`]]);
+      return finish("Changes asked.");
+    }
+    record([["judge", "approve", "--runs", ran]]);
+    return finish(`Approved on run:${ran}.`);
   }
   if (role === "worker") {
     const base = `app/${/## GOAL\nwrite ([\w-]+)/.exec(brief)?.[1] ?? "unit"}`;
@@ -291,6 +321,19 @@ async function engine(role) {
     const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
     g("add", "-A");
     g("commit", "-q", "-m", `work ${process.env.YAGURA_UNIT}`);
+    const ran = canRecord()
+      ? /run:(\d+)/.exec(yg("evidence", "run", "--", "test", "-f", `${base}/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`)?.out ?? "")?.[0]
+      : null;
+    // FAKE_BASE_MOVE=U2: while U2 works, someone else changes the same file on main at the forge (FAKE_ORIGIN).
+    if (process.env.FAKE_BASE_MOVE === process.env.YAGURA_UNIT) {
+      const other = join(tmpdir(), `fake-other-${process.pid}`);
+      execFileSync("git", ["clone", "-q", process.env.FAKE_ORIGIN, other]);
+      mkdirSync(join(other, base), { recursive: true });
+      writeFileSync(join(other, base, `${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`), "theirs\n");
+      execFileSync("git", ["-c", "user.name=other", "-c", "user.email=o@x", "-C", other, "add", "-A"]);
+      execFileSync("git", ["-c", "user.name=other", "-c", "user.email=o@x", "-C", other, "commit", "-q", "-m", "someone else's change"]);
+      execFileSync("git", ["-C", other, "push", "-q", "origin", "HEAD:main"]);
+    }
     const followUps = process.env.FAKE_FOLLOWUPS ? `\n## Suggested follow-ups\n- ${process.env.FAKE_FOLLOWUPS}\n` : "\n## Suggested follow-ups\n- None.\n";
     return setTimeout(
       () =>
@@ -299,6 +342,7 @@ async function engine(role) {
           {
             tier: "unit-verified",
             did: [`wrote ${base}/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`],
+            evidence: ran ? [ran] : [],
             followUps: process.env.FAKE_FOLLOWUPS ? [process.env.FAKE_FOLLOWUPS] : [],
             forOthers: process.env.FAKE_WORKER_NOTE ? [process.env.FAKE_WORKER_NOTE] : [],
           },
