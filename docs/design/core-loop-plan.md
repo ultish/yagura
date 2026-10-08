@@ -97,7 +97,7 @@ Each live lane runs against its own isolated checkout, a worktree, or an `Agent`
 **Merge.**
 
 - [x] The step's gates, lane, and probe pass at its last commit on `core-loop`.
-- [ ] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
+- [x] Push `core-loop`. Pushed as `aad0de5`.
 
 ## Lay the new unit model and schema (CL2)
 
