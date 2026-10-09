@@ -7,7 +7,6 @@ import { valueMap } from "./envvalues.js";
 import { runShell } from "./evidence.js";
 import { addDetachedWorktree, ensureMirror, removeWorktree, resolveRef } from "./git.js";
 import { layout } from "./paths.js";
-import { releaseVersion } from "./publish.js";
 import { getRepo, type Db } from "./store.js";
 
 type Ctx = { db: Db; boot: Bootstrap };
@@ -57,7 +56,8 @@ export async function runIn(
 }
 
 // The version a check publishes under: never a release, never one a unit would use.
-export const checkVersion = (raw: string, sha: Sha) => `${releaseVersion(raw)}-yg-check-${sha.slice(0, 7)}${/-SNAPSHOT$/.test(raw.trim()) ? "-SNAPSHOT" : ""}`;
+export const checkVersion = (raw: string, sha: Sha) =>
+  `${raw.trim().replace(/-SNAPSHOT$/, "")}-yg-check-${sha.slice(0, 7)}${/-SNAPSHOT$/.test(raw.trim()) ? "-SNAPSHOT" : ""}`;
 
 const PUBLISHING = ["version", "publish-snapshot", "snapshot-available"];
 

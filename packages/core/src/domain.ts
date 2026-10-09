@@ -79,10 +79,10 @@ export class IllegalTransition extends Error {
 export const spendsAttempt = (a: { state: string; resumesAttemptId?: AttemptId | null; sessionId?: string | null; limitedUntil?: string | null }) =>
   a.state !== "stopped" && !a.limitedUntil && !(a.resumesAttemptId && !a.sessionId);
 
-// A test build of a verified head for its consumers, or the real version CI publishes once it lands (§14).
-export const PUBLICATION_KINDS = ["test", "release"] as const;
+// A test build of a merged library, published by yagura from its merge commit for the units after it.
+export const PUBLICATION_KINDS = ["test"] as const;
 export type PublicationKind = (typeof PUBLICATION_KINDS)[number];
-export const PUBLICATION_STATES = ["publishing", "published", "failed", "waiting", "unchanged", "removed", "left"] as const;
+export const PUBLICATION_STATES = ["publishing", "published", "failed"] as const;
 export type PublicationState = (typeof PUBLICATION_STATES)[number];
 
 // What a unit lead may decide: send the worker back with a note (`resume`) or start a fresh one (`fresh`), answer the judge's

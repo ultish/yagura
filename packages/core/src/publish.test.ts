@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -13,21 +13,11 @@ import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
-import { listPublications, publishTestBuild, qualifiedVersion } from "./publish.js";
+import { listPublications, qualifiedVersion } from "./publish.js";
+import { Engine } from "./engine.js";
+import { readiness } from "./schedule.js";
 import { saveAction } from "./actions.js";
-import { runWorkerRound } from "./runner.js";
-import {
-  addEnvironment,
-  addProject,
-  addRepo,
-  getUnitBySeq,
-  listAttempts,
-  openStore,
-  setMergePolicy,
-  setProjectEnvironment,
-  transitionUnit,
-  type Db,
-} from "./store.js";
+import { addEnvironment, addProject, addRepo, getUnitBySeq, openStore, setMergePolicy, setProjectEnvironment, type Db } from "./store.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
 const fake: HarnessAdapter = {
@@ -84,43 +74,45 @@ beforeEach(async () => {
   applyDelta(db, project, PlanDelta.parse({ add: [unit("lib", "lib"), unit("app", "app", ["lib"])] }), null);
 });
 
-describe("published artifacts", () => {
-  it("names a test build by project, unit, and head; a snapshot stays a snapshot whatever the pack's suffix says", () => {
-    expect(qualifiedVersion("1.5.0-SNAPSHOT\n", "Orders API" as ProjectId, 3, "a1b2c3d4e5f6" as never, "-SNAPSHOT")).toBe(
-      "1.5.0-yg-orders-api-u3-a1b2c3d-SNAPSHOT",
-    );
-    expect(qualifiedVersion("1.5.0-SNAPSHOT", "web" as ProjectId, 4, "a1b2c3d4e5f6" as never, "")).toBe("1.5.0-yg-web-u4-a1b2c3d-SNAPSHOT");
-    expect(qualifiedVersion("2.0.1", "web" as ProjectId, 12, "0123456789" as never, "")).toBe("2.0.1-yg-web-u12-0123456");
-    expect(qualifiedVersion("2.0.1", "web" as ProjectId, 12, "0123456789" as never, "-rc")).toBe("2.0.1-yg-web-u12-0123456-rc");
+const lib = () => getUnitBySeq(db, project, 1);
+const app = () => getUnitBySeq(db, project, 2);
+
+describe("test builds", () => {
+  it("names a test build by project, unit, and merge commit; a snapshot stays a snapshot", () => {
+    expect(qualifiedVersion("1.5.0-SNAPSHOT\n", "Orders API" as ProjectId, 3, "a1b2c3d4e5f6" as never)).toBe("1.5.0-yg-orders-api-u3-a1b2c3d-SNAPSHOT");
+    expect(qualifiedVersion("2.0.1", "web" as ProjectId, 12, "0123456789" as never)).toBe("2.0.1-yg-web-u12-0123456");
   });
 
-  it("publishes a worker's head as a snapshot under its own version, once, and leaves the snapshot where it is", async () => {
-    const lib = getUnitBySeq(db, project, 1);
-    transitionUnit(db, lib.id, "building", { round: { kind: "first" } });
-    await runWorkerRound(ctx, lib.id);
-    const head = listAttempts(db, lib.id)[0]!.headSha!;
+  it("publishes a merged library from its merge commit with the repo's actions, and the unit after it starts pinned to that version", async () => {
     publishActions();
-
-    const pub = await publishTestBuild(ctx, lib.id, head);
-    expect(pub).toMatchObject({
-      state: "published",
-      kind: "test",
-      sha: head,
-      baseVersion: "1.5.0",
-      version: `1.5.0-yg-p-u${lib.seq}-${head.slice(0, 7)}-SNAPSHOT`,
-    });
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    const [pub] = listPublications(db, lib().id);
+    expect(pub).toMatchObject({ state: "published", sha: lib().mergedSha, version: `1.5.0-yg-p-u1-${lib().mergedSha!.slice(0, 7)}-SNAPSHOT` });
     expect(existsSync(join(nexus, pub!.version!, "VERSION"))).toBe(true);
-    expect(await publishTestBuild(ctx, lib.id, head)).toBeNull();
-    expect(listPublications(db, lib.id)).toHaveLength(1);
-  }, 60_000);
+    expect(app().state).toBe("merged");
+    const brief = readFileSync(layout(ctx.boot).brief(project, app().seq, 1), "utf8");
+    expect(brief).toContain(
+      `- U1 (lib) is published as ${pub!.version}: depend on exactly this version wherever app uses lib. It is a test build, never a release.`,
+    );
+    expect(brief).toContain(`- YAGURA_VERSION_LIB=${pub!.version}`);
+  }, 90_000);
 
-  it("records a failed publish with the command's reason", async () => {
-    const lib = getUnitBySeq(db, project, 1);
-    transitionUnit(db, lib.id, "building", { round: { kind: "first" } });
-    await runWorkerRound(ctx, lib.id);
-    const head = listAttempts(db, lib.id)[0]!.headSha!;
-    publishActions("exit 3");
-    const pub = await publishTestBuild(ctx, lib.id, head);
-    expect(pub).toMatchObject({ state: "failed", reason: "publish exited 3: " });
-  }, 60_000);
+  it("keeps the unit after it waiting with the reason when publishing fails, and wakes the doctor", async () => {
+    publishActions("echo 'nexus said 401' >&2; exit 3");
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    expect(listPublications(db, lib().id).map((p) => [p.state, p.reason])).toEqual([["failed", "publish-snapshot exited 3: nexus said 401"]]);
+    expect(readiness(db, project).waiting.map((w) => [w.unit.seq, w.reason])).toEqual([
+      [2, "U1's test build failed: publish-snapshot exited 3: nexus said 401"],
+    ]);
+    const woken = db
+      .prepare(
+        "SELECT json_extract(data_json, '$.repo') AS repo, json_extract(data_json, '$.trigger') AS trigger FROM events WHERE type = 'doctor.woken' ORDER BY id",
+      )
+      .all();
+    expect(woken).toEqual([
+      { repo: "app", trigger: "first" },
+      { repo: "lib", trigger: "first" },
+      { repo: "lib", trigger: "broken" },
+    ]);
+  }, 90_000);
 });

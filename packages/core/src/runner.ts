@@ -9,6 +9,7 @@ import { resolveSetting } from "./config.js";
 import { isBuild, type Attempt, type EnvironmentId, type ProjectId, type RenderedBrief, type RepoId, type Sha, type Unit, type UnitId } from "./domain.js";
 import { listValues, valueMap } from "./envvalues.js";
 import { environmentSection } from "./actions.js";
+import { testBuildOf } from "./publish.js";
 import { classifyFailure, ensureRecorded, savedHandoff, sessionReport, syntheticFailureHandoff } from "./finish.js";
 import { forgeFor, getMergeRequest, saveMergeRequest } from "./forge.js";
 import { addDetachedWorktree, discardLeftovers, ensureMirror, git, headSha, resolveRef } from "./git.js";
@@ -124,13 +125,24 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
   const earlier = listAttempts(db, unit.id).filter((a) => a.role === "worker" && a.state === "handed_off");
   const projectSkills = requiredProjectSkills(db, unit);
   const references = await referenceCheckouts(ctx, project.id, unit.seq, attempt.n, setting("project.reference_repos"));
-  const envValues = valueMap(db, project.environmentId);
+  const builds = unit.after
+    .map((id) => getUnit(db, id))
+    .map((on) => ({ on, pub: testBuildOf(db, on) }))
+    .filter(({ pub }) => pub?.state === "published" && pub.version);
+  const envValues = {
+    ...valueMap(db, project.environmentId),
+    ...Object.fromEntries(builds.map(({ on, pub }) => [`YAGURA_VERSION_${on.repoId!.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`, pub!.version!])),
+  };
   const brief: RenderedBrief = {
     goal: unit.goal,
     repo: { id: repo.id, worktree: checkout, branch, baseSha: start },
     context: [
       ...unit.context,
       ...unit.notes.map((n) => `Note: ${n}`),
+      ...builds.map(
+        ({ on, pub }) =>
+          `U${on.seq} (${on.repoId}) is published as ${pub!.version}: depend on exactly this version wherever ${repo.id} uses ${on.repoId}. It is a test build, never a release.`,
+      ),
       ...(round.kind === "first" ? [] : [roundText(round)]),
       ...earlier.map((a) => `What worker A${a.agentNo} recorded:\n${describeRecords(db, a.id) ?? "(nothing)"}`),
     ],

@@ -1,4 +1,5 @@
 import { isBuild, spendsAttempt, type Attempt, type FailureMode, type ProjectId, type Unit } from "./domain.js";
+import { needsTestBuild, testBuildOf } from "./publish.js";
 import { listUnits, type Db } from "./store.js";
 
 export interface Readiness {
@@ -7,7 +8,8 @@ export interface Readiness {
   stuck: { unit: Unit; reason: string }[];
 }
 
-// A waiting unit is ready once every unit it comes after has merged; one that comes after a dropped unit can never start.
+// A waiting unit is ready once every unit it comes after has merged, and each of those that publishes has its test build out;
+// one that comes after a dropped unit can never start.
 export function readiness(db: Db, projectId: ProjectId): Readiness {
   const units = listUnits(db, projectId);
   const byId = new Map(units.map((u) => [u.id, u]));
@@ -18,7 +20,16 @@ export function readiness(db: Db, projectId: ProjectId): Readiness {
     const dropped = open.find((on) => on.state === "dropped");
     if (dropped) result.stuck.push({ unit: u, reason: `comes after U${dropped.seq}, which was dropped` });
     else if (open.length) result.waiting.push({ unit: u, reason: `waiting for U${open[0]!.seq} to merge (now ${open[0]!.state})` });
-    else result.ready.push(u);
+    else {
+      const build = u.after
+        .map((id) => byId.get(id)!)
+        .filter((on) => needsTestBuild(db, on))
+        .map((on) => ({ on, pub: testBuildOf(db, on) }))
+        .find(({ pub }) => pub?.state !== "published");
+      if (!build) result.ready.push(u);
+      else if (build.pub?.state === "failed") result.waiting.push({ unit: u, reason: `U${build.on.seq}'s test build failed: ${build.pub.reason}` });
+      else result.waiting.push({ unit: u, reason: `waiting for U${build.on.seq}'s test build` });
+    }
   }
   result.ready.sort((a, b) => a.seq - b.seq);
   return result;

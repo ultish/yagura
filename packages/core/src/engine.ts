@@ -39,6 +39,7 @@ import { postReport, reportKey, type ReportKind } from "./report.js";
 import { listThreads } from "./threads.js";
 import { listTurns, stopTurn } from "./turns.js";
 import { doctorWake, runDoctorRound } from "./doctor.js";
+import { publishDue, publishTestBuild } from "./publish.js";
 import { sweepWorktrees } from "./worktrees.js";
 import { savedHandoff } from "./finish.js";
 
@@ -241,6 +242,20 @@ export class Engine {
         `doctor ${repo.id} (${wake.trigger})`,
         () => runDoctorRound(this.ctx, project.id, repo.id, wake),
         (e) => this.log(`✗ doctor ${repo.id}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`),
+      );
+    }
+  }
+
+  // A merged library that units after it build on is published from its merge commit; a failed try is tried again once its actions change.
+  private publishes(project: Project): void {
+    for (const u of publishDue(this.db, project.id)) {
+      const key = `publish:${u.id}`;
+      if (this.inflight.has(key)) continue;
+      this.start(
+        key,
+        `publish U${u.seq} (${u.repoId})`,
+        () => publishTestBuild(this.ctx, u.id),
+        (e) => this.log(`✗ publish U${u.seq}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`),
       );
     }
   }
@@ -470,6 +485,7 @@ export class Engine {
         );
       this.spawn(project);
       this.doctors(project);
+      this.publishes(project);
     }
     this.baseMoves();
     this.report(this.scope());
@@ -485,6 +501,7 @@ export class Engine {
       if (p.andonReason || held) return true;
       if (this.planNeeded(p)) return false;
       if (p.environmentId && projectRepos(this.db, p.id).some((r) => doctorWake(this.db, p.id, r.id))) return false;
+      if (publishDue(this.db, p.id).length) return false;
       if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
       // A ready unit is settled only while it waits for the developer's go.
       const waitsForYou = (u: Unit) => listGates(this.db, p.id, "open").some((g) => g.unitId === u.id);
