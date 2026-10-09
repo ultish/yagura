@@ -148,6 +148,27 @@ export function groupOf(d: ProjectDetail, u: UnitView): Group {
   return "waiting";
 }
 
+// What the developer can do to a unit, on its page and its project row alike. The daemon refuses the rest.
+export type UnitAction = "answer" | "retry" | "ask-lead" | "stop" | "drop" | "disagree";
+export function unitActions(u: { state: string; type: string }, openGates: number, agentRunning: boolean): UnitAction[] {
+  const out: UnitAction[] = [];
+  if (openGates) out.push("answer");
+  if (u.state === "stuck" && !agentRunning) out.push("retry");
+  if (u.type === "work" && ((u.state === "stuck" && !agentRunning) || u.state === "ready")) out.push("ask-lead");
+  if (agentRunning) out.push("stop");
+  if (["waiting", "stuck", "ready"].includes(u.state) && !agentRunning) out.push("drop");
+  if (u.state === "merged") out.push("disagree");
+  return out;
+}
+
+// The unit's colour: vermilion when it needs the developer, pine once merged, amber while it moves.
+export function unitTone(state: string, openGates: number): "bell" | "lamp" | "pine" | "muted" {
+  if (openGates || state === "stuck") return "bell";
+  if (state === "merged") return "pine";
+  if (state === "dropped" || state === "waiting") return "muted";
+  return "lamp";
+}
+
 export function latestAttempt(u: UnitView): Attempt | null {
   return running(u.attempts) ?? u.attempts.at(-1) ?? null;
 }

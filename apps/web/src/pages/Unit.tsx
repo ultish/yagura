@@ -1,14 +1,20 @@
-import { useState } from "react";
-import { api, useApi, useQuery, type StoryEntry, type StoryLine, type UnitCode, type UnitStory } from "../api";
-import { clip, clock, duration, modelName, when } from "../lib/format";
+import { lazy, Suspense, useState } from "react";
+import type { RepoAt } from "./Repo";
+import type { UnitState } from "@yagura/core";
+import { api, useApi, useNow, useQuery, type StoryEntry, type StoryLine, type UnitCode, type UnitStory } from "../api";
+import { clip, clock, duration, modelName } from "../lib/format";
 import { Inline } from "../lib/markdown";
-import { byTime, saveOrder, savedOrder, type TimeOrder } from "../lib/sort";
+import { buildTimeline } from "../lib/timeline";
+import { unitActions, unitTone } from "../lib/units";
+import { StateMap } from "../scene/StateMap";
 import { RoleIcon } from "../ui/RoleIcon";
-import { DiffPanel, type DiffData } from "../ui/evidence";
 import { Link } from "../ui/Link";
 import { RunningDot } from "../ui/Running";
 import { DisagreeButton, DisagreeForm as Disagreement } from "../ui/Disagree";
 import { NoteForm, useAction } from "../ui/rows";
+import { useLog } from "./Agent";
+
+const RepoBrowser = lazy(() => import("./Repo"));
 
 const JUDGMENT: Record<string, string> = { chose: "choice", noted: "note" };
 
@@ -26,7 +32,7 @@ function Line({ l }: { l: StoryLine }) {
         <div key={d.id} className="story-disagreed">
           You disagreed: {d.reason}
           {d.state === "open" && " · the project lead will plan a follow-up"}
-          {d.state === "noted" && " · later verifiers on this repo will see it"}
+          {d.state === "noted" && " · later judges on this repo will see it"}
         </div>
       ))}
     </li>
@@ -38,32 +44,51 @@ export function DisagreeForm({ projectId, seq, entry, onDone }: { projectId: str
   return <Disagreement unit={{ projectId, seq }} options={entry.lines.map((l) => ({ ref: l.ref, text: l.text }))} initial={first.ref} onDone={onDone} />;
 }
 
-function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; reload: () => void }) {
+function Entry({
+  story,
+  entry,
+  picked,
+  onPick,
+  reload,
+}: {
+  story: UnitStory;
+  entry: StoryEntry;
+  picked: UnitState | null;
+  onPick: (s: UnitState) => void;
+  reload: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const a = entry.attempt;
   const dot = entry.actor === "person" ? "you" : entry.actor === "yagura" ? "yagura" : "agent";
+  const fit = picked ? (entry.state === picked ? " lit" : " dim") : "";
   return (
-    <div className={`story-entry ${dot}`}>
-      <div className="story-time mono">{clock(entry.at)}</div>
+    <li className={`story-entry ${dot}${fit}`}>
+      <button
+        type="button"
+        className="story-time mono"
+        onClick={() => entry.state && onPick(entry.state)}
+        title={entry.state ? `Show ${entry.state} on the graph` : undefined}
+      >
+        {new Date(entry.at).toTimeString().slice(0, 8)}
+      </button>
       <div className="story-body">
         <div className="story-head">
           <span className="story-who">
             <RoleIcon role={entry.actor} />
-            {a ? (
-              <Link to={`/a/${a.id}`}>
-                <b>{entry.who}</b>
-                {entry.actor !== "person" && ` · A${a.agentNo}`}
-              </Link>
-            ) : (
-              <b>{entry.who}</b>
-            )}
+            <b>{entry.who}</b>
             {a && entry.actor !== "person" && (
               <>
+                {` · A${a.agentNo}`}
                 {a.model && ` · ${modelName(a.model)}`} · ${a.costUsd.toFixed(2)}
               </>
             )}
           </span>
-          {entry.status && <span className={`chip story-${entry.status.tone}`}>{entry.status.text}</span>}
+          {entry.status && (
+            <span className={`chip story-${entry.status.tone}`}>
+              {entry.status.text === "working" && <RunningDot />}
+              {entry.status.text}
+            </span>
+          )}
           {a && (
             <Link className="story-open" to={`/a/${a.id}`}>
               open agent →
@@ -111,11 +136,59 @@ function Entry({ story, entry, reload }: { story: UnitStory; entry: StoryEntry; 
           />
         )}
       </div>
-    </div>
+    </li>
   );
 }
 
-function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
+function Timeline({
+  story,
+  picked,
+  onPick,
+  reload,
+}: {
+  story: UnitStory;
+  picked: UnitState | null;
+  onPick: (s: UnitState | null) => void;
+  reload: () => void;
+}) {
+  const items: React.ReactNode[] = [];
+  let round = 0;
+  for (const [i, e] of story.entries.entries()) {
+    if (e.round !== round && e.round > 0) {
+      const r = story.rounds[e.round - 1];
+      if (r)
+        items.push(
+          <li key={`r${r.n}`} className="story-round" aria-label={r.text}>
+            <span />
+            <span>{r.text}</span>
+          </li>,
+        );
+    }
+    round = e.round;
+    items.push(<Entry key={`${e.id}-${i}`} story={story} entry={e} picked={picked} onPick={onPick} reload={reload} />);
+  }
+  return (
+    <>
+      <div className="timeline-head">
+        <h2 className="serif">Timeline</h2>
+        {picked && (
+          <button type="button" className="btn sm" onClick={() => onPick(null)}>
+            Showing {picked} · show all
+          </button>
+        )}
+      </div>
+      <div className="story-legend">
+        <span>
+          <span className="s-pine">✓</span> checked by yagura against runs it recorded
+        </span>
+        <span>· choice / note: judgment nobody checked</span>
+      </div>
+      {items.length ? <ol className="story-ledger plain-list">{items}</ol> : <div className="muted">Nothing has happened on U{story.unit.seq} yet.</div>}
+    </>
+  );
+}
+
+function AgentsTab({ story }: { story: UnitStory }) {
   if (!story.agents.length) return <div className="muted">No agent has worked on U{story.unit.seq} yet.</div>;
   return (
     <div className="hub-table-wrap">
@@ -123,77 +196,46 @@ function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
         <thead>
           <tr>
             <th>Agent</th>
-            <th>When</th>
+            <th>Role</th>
+            <th>Outcome</th>
+            <th>Started</th>
             <th>Took</th>
             <th className="num">Cost</th>
-            <th>Outcome</th>
-            <th>What it did</th>
           </tr>
         </thead>
         <tbody>
-          {byTime(story.agents, (a) => a.startedAt, order).map((a) => (
-            <tr key={a.attemptId} className={a.counted ? undefined : "dim"}>
+          {story.agents.map((a) => (
+            <tr key={a.attemptId} className={a.counted || a.outcome === "running" ? undefined : "dim"}>
               <td>
-                <Link to={`/a/${a.attemptId}`}>
-                  {a.role} A{a.agentNo}
-                </Link>
+                <Link to={`/a/${a.attemptId}`}>A{a.agentNo}</Link>
                 {a.shared && <div className="muted hub-small">also planned other units</div>}
               </td>
-              <td className="mono">{when(a.startedAt, a.endedAt, false)}</td>
-              <td className="mono">{a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "—"}</td>
-              <td className="num mono">${a.costUsd.toFixed(2)}</td>
+              <td>{a.role}</td>
               <td>
                 <span className={`chip story-${a.tone}`}>
                   {a.outcome === "running" && <RunningDot />}
                   {a.counted || a.outcome === "running" ? a.outcome : `${a.outcome} · not counted`}
                 </span>
+                {a.note && (
+                  <div className="muted hub-small">
+                    <Inline text={clip(a.note.split("\n")[0]!, 160)} />
+                  </div>
+                )}
               </td>
-              <td>{a.note ? <Inline text={clip(a.note.split("\n")[0]!, 220)} /> : <span className="muted">—</span>}</td>
+              <td className="mono">{a.startedAt ? clock(a.startedAt) : "—"}</td>
+              <td className="mono">{a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "—"}</td>
+              <td className="num mono">${a.costUsd.toFixed(2)}</td>
             </tr>
           ))}
         </tbody>
       </table>
-      <p className="muted hub-small">
-        Every session that worked on U{story.unit.seq}: the planner run that planned it, its own attempts, and the judges and unit leads that worked on it.
-        Dimmed rows did not count.
-      </p>
-    </div>
-  );
-}
-
-// What this unit depends on and what depends on it, under the title: each linked, with where it stands.
-function DepStrip({ story }: { story: UnitStory }) {
-  const edges = story.dependencies;
-  if (!edges.length) return null;
-  const needs = edges.filter((e) => e.direction === "needs");
-  const feeds = edges.filter((e) => e.direction === "feeds");
-  const link = (e: UnitStory["dependencies"][number]) => (
-    <Link to={`/p/${story.projectId}/u/${e.other.seq}`}>
-      U{e.other.seq}
-      {e.other.repoId ? ` · ${e.other.repoId}` : ""}
-    </Link>
-  );
-  return (
-    <div className="dep-strip">
-      {needs.map((e) => (
-        <div key={`n${e.other.id}`} className="dep-row">
-          <span className="dep-k">Depends on</span>
-          {link(e)}
-          <span className={`chip story-${e.state.tone}`}>{e.state.text}</span>
-        </div>
-      ))}
-      {feeds.map((e) => (
-        <div key={`f${e.other.id}`} className="dep-row">
-          <span className="dep-k">Feeds</span>
-          {link(e)}
-          <span className={`chip story-${e.state.tone}`}>{e.state.text}</span>
-        </div>
-      ))}
+      <p className="muted hub-small">Dimmed rows did not count against the unit's tries.</p>
     </div>
   );
 }
 
 function DependenciesTab({ story }: { story: UnitStory }) {
+  if (!story.dependencies.length) return <p className="muted">No unit comes before or after this one.</p>;
   return (
     <div className="hub-table-wrap">
       <table className="hub-table">
@@ -214,7 +256,7 @@ function DependenciesTab({ story }: { story: UnitStory }) {
                 </Link>
                 <div className="muted">{clip(e.other.goal, 70)}</div>
               </td>
-              <td>{e.direction === "needs" ? `U${story.unit.seq} depends on it` : `depends on U${story.unit.seq}`}</td>
+              <td>{e.direction === "needs" ? `U${story.unit.seq} needs it merged first` : `waits for U${story.unit.seq}`}</td>
               <td>
                 <span className={`chip story-${e.state.tone}`}>{e.state.text}</span>
               </td>
@@ -226,190 +268,189 @@ function DependenciesTab({ story }: { story: UnitStory }) {
   );
 }
 
-// The same stuck-unit controls as the project page's row: retry with a note, ask the unit lead, cancel.
-function UnitActions({ projectId, unit, reload }: { projectId: string; unit: { seq: number; type: string; state: string }; reload: () => void }) {
-  const [mode, setMode] = useState<"retry" | "wake" | null>(null);
-  const action = useAction();
-  const base = `/api/projects/${projectId}/units/${unit.seq}`;
-  const canRetry = unit.state === "blocked";
-  const canWake = unit.type === "work" && ["blocked", "failed", "rejected"].includes(unit.state);
-  const canCancel = ["blocked", "ready", "draft"].includes(unit.state);
-  if (mode)
-    return (
-      <NoteForm
-        label={mode === "retry" ? "Retry" : "Ask the unit lead"}
-        placeholder={mode === "retry" ? "What should the next try do differently? (optional)" : "What should the unit lead look at? (optional)"}
-        submit={(note) => api(`${base}/${mode === "retry" ? "retry" : "wake"}`, { body: { note } })}
-        onDone={() => {
-          setMode(null);
-          reload();
-        }}
-      />
-    );
-  if (!canRetry && !canWake && !canCancel) return null;
-  return (
-    <div className="hub-ask-buttons" style={{ marginTop: 8 }}>
-      {canRetry && (
-        <button className="btn" type="button" onClick={() => setMode("retry")}>
-          Retry with a note
-        </button>
-      )}
-      {canWake && (
-        <button className="btn" type="button" onClick={() => setMode("wake")}>
-          Ask the unit lead
-        </button>
-      )}
-      {canCancel && (
-        <button className="btn" type="button" disabled={action.busy} onClick={() => action.run(() => api(`${base}/cancel`, { body: {} }).then(reload))}>
-          Cancel
-        </button>
-      )}
-      {action.error && <span className="s-bell">{action.error}</span>}
-    </div>
-  );
-}
-
-function OpenGates({ gates, reload }: { gates: UnitStory["gates"]; reload: () => void }) {
-  const action = useAction();
-  if (!gates.length) return null;
-  return (
-    <>
-      {gates.map((g) => (
-        <div key={g.id} className="hub-ask" role="group" aria-label="Waiting for you">
-          <div>
-            <b>Waiting for you</b> · {g.question}
-          </div>
-          <div className="hub-ask-buttons">
-            {g.options.map((o, i) => (
-              <button
-                key={o}
-                className={`btn${i === 0 ? " bell" : ""}`}
-                type="button"
-                disabled={action.busy}
-                onClick={() => action.run(() => api(`/api/gates/${g.id}/answer`, { body: { answer: o } }).then(reload))}
-              >
-                {o === "land" ? "Merge" : o === "hold" ? "Hold" : o === "publish" ? "Publish" : o}
-              </button>
-            ))}
-          </div>
-          {action.error && <div className="s-bell">{action.error}</div>}
-        </div>
-      ))}
-    </>
-  );
-}
-
 function CodeTab({ story }: { story: UnitStory }) {
   const u = story.unit;
   const { data, error } = useApi<{ code: UnitCode | null }>(u.repoId ? `/api/projects/${story.projectId}/units/${u.seq}/code` : null);
-  const shown = data?.code ?? null;
-  const diff = useApi<DiffData>(shown ? `/api/repos/${u.repoId}/diff-files?base=${shown.base}&head=${shown.commit.sha}` : null);
   if (!u.repoId) return <div className="muted">U{u.seq} does not change a repo.</div>;
   if (error) return <div className="s-bell">{error}</div>;
   if (!data) return <div className="muted">Loading…</div>;
   const code = data.code;
-  if (!code) return <div className="muted">U{u.seq} has no code yet: nothing has been handed off.</div>;
-  const from = `from=${story.projectId}/${u.seq}`;
-  const editor = (extra: string) => `/r/${u.repoId}?${code.source === "landed" ? `change=${code.commit.sha}&` : ""}${extra}${from}`;
+  if (!code) return <div className="muted">No commits on the branch yet.</div>;
+  const at: RepoAt =
+    code.source === "merged"
+      ? { change: code.commit.sha, from: `${story.projectId}/${u.seq}` }
+      : { change: code.commit.sha, ref: code.commit.sha, base: code.base, branch: code.branch ?? undefined, from: `${story.projectId}/${u.seq}` };
+  const full = `/r/${u.repoId}?${Object.entries(at)
+    .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+    .join("&")}`;
   return (
-    <div className="hub-code">
-      {code.source === "branch" && (
-        <div className="hub-note">
-          Not on trunk yet: this is branch <span className="mono">{code.branch}</span> against the trunk it started from. The editor shows trunk, so it opens
-          after U{u.seq} lands.
-        </div>
-      )}
-      {code.source === "landed" && (
-        <div className="hub-actions">
-          <Link className="btn sm lamp" to={editor("")}>
-            Open this change in the editor
-          </Link>
-          <span className="muted hub-small">
-            The commit that landed, <span className="mono">{code.commit.sha.slice(0, 7)}</span>, against trunk before it.
-          </span>
-        </div>
-      )}
-      {diff.error && <div className="s-bell">{diff.error}</div>}
-      {!diff.data && !diff.error && <div className="muted">Loading the diff…</div>}
-      {diff.data && (
-        <DiffPanel
-          data={diff.data}
-          stats={code.stats}
-          disagree={{ projectId: story.projectId, seq: u.seq }}
-          editorLink={code.source === "landed" ? (f) => editor(`file=${encodeURIComponent(f)}&`) : undefined}
-        />
-      )}
-      {code.truncated && <div className="muted repo-pad">The rest of this change is too large to show.</div>}
-    </div>
+    <>
+      <div className="hub-actions">
+        <span className="muted hub-small">
+          {code.source === "merged" ? (
+            <>
+              The merge, <span className="mono">{code.commit.sha.slice(0, 7)}</span>, against {story.base ?? "its base"} before it.
+            </>
+          ) : (
+            <>
+              Not merged yet: branch <span className="mono">{code.branch}</span> at <span className="mono">{code.commit.sha.slice(0, 7)}</span>, against where
+              it left {story.base ?? "its base"}.
+            </>
+          )}
+        </span>
+        <Link className="btn sm" to={full}>
+          Open it full size
+        </Link>
+      </div>
+      <Suspense fallback={<div className="muted">Loading the editor…</div>}>
+        <RepoBrowser key={code.commit.sha} id={u.repoId} at={at} embedded />
+      </Suspense>
+    </>
   );
 }
 
-function ManagerTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
-  if (!story.lead.length)
+function GateAnswer({ gate, reload }: { gate: UnitStory["gates"][number]; reload: () => void }) {
+  const [text, setText] = useState("");
+  const action = useAction();
+  const answer = (a: string) => action.run(() => api(`/api/gates/${gate.id}/answer`, { body: { answer: a } }).then(reload));
+  if (gate.options.length)
     return (
-      <div className="muted">
-        No decisions yet. U{story.unit.seq}'s unit lead is woken only when its worker is rejected, fails, or runs out of tries; a unit that goes smoothly never
-        needs it.
-      </div>
+      <>
+        {gate.options.map((o, i) => (
+          <button key={o} className={`btn${i === 0 ? " lamp" : ""}`} type="button" disabled={action.busy} onClick={() => answer(o)}>
+            {o === "land" ? "Merge" : o === "hold" ? "Hold" : o}
+          </button>
+        ))}
+        {action.error && <span className="s-bell">{action.error}</span>}
+      </>
     );
   return (
-    <div className="mgr">
-      <p className="muted">
-        Each time the unit lead is woken it is told what changed since its last decision and answers with one action. Open its run to read exactly what it was
-        told.
-      </p>
-      {byTime(story.lead, (t) => t.at, order).map((t) => (
-        <section key={t.decisionId} className="mgr-turn">
-          <div className="mgr-head mono">
-            {t.agentNo !== null ? `A${t.agentNo}` : "no run"} · {clock(t.at)} · {t.resumed ? "same session, told what changed" : "first wake"} · $
-            {t.costUsd.toFixed(2)}
-            {t.attemptId !== null && (
-              <>
-                {" · "}
-                <Link to={`/a/${t.attemptId}`}>open its run, brief, and log →</Link>
-              </>
-            )}
-          </div>
-          <div>
-            <b>Woken because</b> <Inline text={t.wake} />
-          </div>
-          <div>
-            <b>{t.actionText}</b>
-            {": "}
-            <Inline text={t.reason} />
-          </div>
-          {t.note && (
-            <div className="muted">
-              Note for the next worker: <Inline text={t.note} />
-            </div>
-          )}
-        </section>
-      ))}
-    </div>
+    <form
+      className="unit-now-actions"
+      style={{ flex: "1 1 100%", marginTop: 0 }}
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (text.trim()) answer(text.trim());
+      }}
+    >
+      <label className="unit-answer">
+        Your answer to the unit lead
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Say what it should do" />
+      </label>
+      <button className="btn lamp" type="submit" disabled={action.busy || !text.trim()}>
+        Send
+      </button>
+      {action.error && <span className="s-bell">{action.error}</span>}
+    </form>
   );
 }
 
-type HubTab = "story" | "agents" | "code" | "manager" | "deps";
+type Form = "retry" | "ask-lead" | "stop" | "drop" | "disagree" | null;
+
+function StatusCard({ story, tone, reload }: { story: UnitStory; tone: string; reload: () => void }) {
+  const [form, setForm] = useState<Form>(null);
+  const u = story.unit;
+  const base = `/api/projects/${story.projectId}/units/${u.seq}`;
+  const actions = unitActions(u, story.gates.length, !!story.running);
+  const done = () => {
+    setForm(null);
+    reload();
+  };
+  const role = story.running?.role.toLowerCase() ?? "agent";
+  const lines = story.entries.flatMap((e) => e.lines.map((l) => ({ ref: l.ref, text: l.text })));
+  return (
+    <section className={`unit-now tone-${tone}`} aria-label="Now">
+      <h2>{story.now.headline}</h2>
+      {story.now.detail.map((d, i) => (
+        <p key={i}>
+          <Inline text={d} />
+        </p>
+      ))}
+      {form === "retry" && (
+        <NoteForm
+          label="Retry"
+          placeholder="What should the next try do differently? (optional)"
+          submit={(note) => api(`${base}/retry`, { body: { note } })}
+          onDone={done}
+        />
+      )}
+      {form === "ask-lead" && (
+        <NoteForm
+          label="Ask the unit lead"
+          placeholder="What should the unit lead look at? (optional)"
+          submit={(note) => api(`${base}/wake`, { body: { note } })}
+          onDone={done}
+        />
+      )}
+      {form === "stop" && story.running && (
+        <NoteForm
+          label={`Stop the ${role}`}
+          placeholder="Note for whoever picks it up (optional)"
+          submit={(note) => api(`/api/attempts/${story.running!.attemptId}/stop`, { body: { note: note || null } })}
+          onDone={done}
+        />
+      )}
+      {form === "drop" && (
+        <NoteForm
+          label="Drop"
+          placeholder="Why drop it? (optional)"
+          submit={(reason) => api(`${base}/cancel`, { body: { reason: reason || "dropped by the developer" } })}
+          onDone={done}
+        />
+      )}
+      {form === "disagree" && lines.length > 0 && (
+        <Disagreement unit={{ projectId: story.projectId, seq: u.seq }} options={lines} initial={lines.at(-1)!.ref} onDone={done} />
+      )}
+      {!form && actions.length > 0 && (
+        <div className="unit-now-actions">
+          {story.gates.map((g) => (
+            <GateAnswer key={g.id} gate={g} reload={reload} />
+          ))}
+          {actions.includes("retry") && (
+            <button className="btn" type="button" onClick={() => setForm("retry")}>
+              Retry
+            </button>
+          )}
+          {actions.includes("stop") && (
+            <button className="btn" type="button" onClick={() => setForm("stop")}>
+              Stop the {role}
+            </button>
+          )}
+          {actions.includes("ask-lead") && (
+            <button className="btn" type="button" onClick={() => setForm("ask-lead")}>
+              Ask the unit lead…
+            </button>
+          )}
+          {actions.includes("drop") && (
+            <button className="btn story-disagree" type="button" onClick={() => setForm("drop")}>
+              Drop
+            </button>
+          )}
+          {actions.includes("disagree") && lines.length > 0 && <DisagreeButton onClick={() => setForm("disagree")} />}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function useLiveStep(running: UnitStory["running"]): string | null {
+  const lines = useLog(running?.attemptId ?? 0, !!running);
+  const now = useNow(5000);
+  if (!running) return null;
+  const step = buildTimeline(lines).steps.findLast((s) => s.kind === "tool");
+  const took = duration(now - Date.parse(running.startedAt));
+  return `A${running.agentNo} · ${took}${step?.kind === "tool" ? ` · ${clip(`${step.name}: ${step.summary}`, 52)}` : ""}`;
+}
+
+type Tab = "timeline" | "code" | "agents" | "deps";
 
 export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
   const { data: story, error, reload } = useApi<UnitStory>(`/api/projects/${projectId}/units/${seq}/story`);
   const query = useQuery();
-  const [order, setOrder] = useState<TimeOrder>(savedOrder);
-  const flip = () => {
-    const next: TimeOrder = order === "oldest" ? "newest" : "oldest";
-    saveOrder(next);
-    setOrder(next);
-  };
-  const tab: HubTab =
-    query.get("tab") === "deps"
-      ? "deps"
-      : query.get("tab") === "agents"
-        ? "agents"
-        : query.get("tab") === "code"
-          ? "code"
-          : query.get("tab") === "manager"
-            ? "manager"
-            : "story";
+  const [picked, setPicked] = useState<UnitState | null>(null);
+  const live = useLiveStep(story?.running ?? null);
+  const raw = query.get("tab");
+  const tab: Tab = raw === "code" || raw === "agents" || raw === "deps" ? raw : "timeline";
   if (error)
     return (
       <main style={{ padding: 36 }} className="s-bell">
@@ -423,93 +464,86 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
       </main>
     );
   const u = story.unit;
-  const running = story.entries.findLast((e) => e.attempt) ?? null;
+  const tone = unitTone(u.state, story.gates.length);
+  const own = story.agents.filter((a) => !a.shared);
+  const pick = (s: UnitState | null) => setPicked((p) => (s === null || p === s ? null : s));
+  const tabs: [Tab, string][] = [
+    ["timeline", "Timeline"],
+    ["code", "Code"],
+    ["agents", `Agents (${own.length})`],
+    ["deps", `Dependencies (${story.dependencies.length})`],
+  ];
   return (
     <main className="story">
       <div className="story-crumb mono">
-        <Link to={`/p/${projectId}`}>{projectId}</Link> / U{u.seq} · {u.type}
-        {u.repoId ? ` · ${u.repoId}` : ""}
+        <Link to={`/p/${projectId}`}>{projectId}</Link> / U{u.seq}
+        {u.repoId ? ` · ${u.repoId}` : ` · ${u.type}`}
       </div>
       <h1 className="serif story-title">
         <Inline text={u.goal} />
       </h1>
-      {u.context.length > 0 && (
-        <div className="story-why">
-          {u.context.map((para, i) => (
-            <p key={i}>
-              <Inline text={para} />
-            </p>
-          ))}
+      <dl className="unit-facts">
+        <div className="wide">
+          <dt>Acceptance</dt>
+          <dd>
+            {u.acceptance.length ? (
+              <ul>
+                {u.acceptance.map((a, i) => (
+                  <li key={i}>
+                    <Inline text={a} />
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span className="muted">none written</span>
+            )}
+          </dd>
         </div>
-      )}
-      <div className="facts">
-        <span className={`chip story-${u.state === "merged" ? "pine" : u.state === "stuck" ? "bell" : "amber"}`}>
-          {u.state === "merged" && u.mergedSha ? `merged ${u.mergedSha.slice(0, 7)}` : u.state}
-        </span>
-        {story.pr && (
-          <a href={story.pr.url} target="_blank" rel="noreferrer">
-            PR #{story.pr.number}
-          </a>
-        )}
-        <span className="mono">${story.costUsd.toFixed(2)}</span>
-        {story.started && <span>{when(story.started, story.ended, false)}</span>}
-        {(u.state === "building" || u.state === "judging") && running?.attempt && <Link to={`/a/${running.attempt.id}`}>running now · watch it live</Link>}
-      </div>
-      <DepStrip story={story} />
-      <UnitActions projectId={projectId} unit={u} reload={reload} />
-      <OpenGates gates={story.gates} reload={reload} />
-      <div className="hub-tabs" role="tablist">
-        {(
-          [
-            ["story", "Story", null],
-            ["agents", "Agents", story.agents.length],
-            ["code", "Code", u.repoId ? "" : null],
-            ...(story.dependencies.length ? ([["deps", "Dependencies", story.dependencies.length]] as const) : []),
-            ...(u.type === "work" ? ([["manager", "Unit lead", story.lead.length]] as const) : []),
-          ] as const
-        ).map(([k, label, n]) => (
+        <div>
+          <dt>Pull request</dt>
+          <dd>
+            {story.pr ? (
+              <a href={story.pr.url} target="_blank" rel="noreferrer">
+                #{story.pr.number} on {story.pr.repo}
+                {story.pr.draft ? " · draft" : ""}
+              </a>
+            ) : (
+              <span className="muted">none yet</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>Branch</dt>
+          <dd className="mono">{u.branch ? `${u.branch} → ${story.base ?? "base"}` : <span className="muted">not started</span>}</dd>
+        </div>
+        <div>
+          <dt>Spent</dt>
+          <dd>
+            ${story.costUsd.toFixed(2)} · {own.length} agent{own.length === 1 ? "" : "s"}
+            {story.started &&
+              (story.ended ? ` · ${clock(story.started).slice(0, 5)} to ${clock(story.ended).slice(0, 5)}` : ` · since ${clock(story.started).slice(0, 5)}`)}
+          </dd>
+        </div>
+      </dl>
+      <StatusCard story={story} tone={tone} reload={reload} />
+      <StateMap moves={story.moves} state={u.state} tone={tone} working={!!story.running} label={live} picked={picked} onPick={pick} />
+      <div className="hub-tabs" role="tablist" aria-label="Unit details">
+        {tabs.map(([k, label]) => (
           <Link
             key={k}
             role="tab"
             aria-selected={tab === k}
             className={tab === k ? "on" : ""}
-            to={`/p/${projectId}/u/${u.seq}${k === "story" ? "" : `?tab=${k}`}`}
+            to={`/p/${projectId}/u/${u.seq}${k === "timeline" ? "" : `?tab=${k}`}`}
           >
             {label}
-            {typeof n === "number" && <span className="hub-n">{n}</span>}
           </Link>
         ))}
-        {tab !== "code" && (
-          <button
-            type="button"
-            className="hub-sort"
-            onClick={flip}
-            title={order === "oldest" ? "Showing the oldest first; click for the newest first" : "Showing the newest first; click for the oldest first"}
-          >
-            {order === "oldest" ? "Oldest first ↑" : "Newest first ↓"}
-          </button>
-        )}
       </div>
-      {tab === "story" && (
-        <>
-          <div className="story-legend">
-            <span>
-              <span className="s-pine">✓</span> checked by yagura against runs it recorded
-            </span>
-            <span>· choice / note: judgment nobody checked</span>
-          </div>
-          <div className="story-ledger">
-            {byTime(story.entries, (e) => e.at, order).map((e, i) => (
-              <Entry key={`${e.at}-${i}`} story={story} entry={e} reload={reload} />
-            ))}
-            {!story.entries.length && <div className="muted">Nothing has happened on U{u.seq} yet.</div>}
-          </div>
-        </>
-      )}
-      {tab === "agents" && <AgentsTab story={story} order={order} />}
+      {tab === "timeline" && <Timeline story={story} picked={picked} onPick={pick} reload={reload} />}
       {tab === "code" && <CodeTab story={story} />}
+      {tab === "agents" && <AgentsTab story={story} />}
       {tab === "deps" && <DependenciesTab story={story} />}
-      {tab === "manager" && <ManagerTab story={story} order={order} />}
     </main>
   );
 }

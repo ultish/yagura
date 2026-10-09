@@ -7,7 +7,10 @@ import { followTheme, languageOf, monaco } from "../lib/monaco";
 import { Link } from "../ui/Link";
 import { DisagreeButton, DisagreeForm, type DisagreeOption } from "../ui/Disagree";
 
-type Tab = { kind: "file"; path: string } | { kind: "change"; sha: string; label: string };
+type Tab = { kind: "file"; path: string } | { kind: "change"; sha: string; label: string; base?: string };
+
+// Where the browser opens: trunk by default, or a unit's branch head (`ref`) whose change runs from `base`.
+export type RepoAt = { change?: string; base?: string; ref?: string; branch?: string; file?: string; line?: number; from?: string };
 const firstSentence = (text: string) => {
   const s = text.split("\n")[0]!.split(/(?<=[.!?])\s/)[0]!;
   return s.length > 160 ? `${s.slice(0, 157)}…` : s;
@@ -139,17 +142,19 @@ function History({
 function CodeView({
   repoId,
   path,
+  at,
   projectId,
   line,
   onPick,
 }: {
   repoId: string;
   path: string;
+  at: string | null;
   projectId: string | null;
   line: number | null;
   onPick: (c: CommitUnit, at: { line: number; text: string }) => void;
 }) {
-  const { data: file, error } = useApi<FileView>(`/api/repos/${repoId}/file?path=${encodeURIComponent(path)}`);
+  const { data: file, error } = useApi<FileView>(`/api/repos/${repoId}/file?path=${encodeURIComponent(path)}${at ? `&ref=${at}` : ""}`);
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   useEffect(() => {
@@ -222,14 +227,26 @@ function CodeView({
   return <div ref={host} className="repo-monaco" />;
 }
 
-function ChangeView({ repoId, sha, projectOf, onOpen }: { repoId: string; sha: string; projectOf: (c: CommitUnit) => string; onOpen: (path: string) => void }) {
+function ChangeView({
+  repoId,
+  sha,
+  base,
+  projectOf,
+  onOpen,
+}: {
+  repoId: string;
+  sha: string;
+  base?: string;
+  projectOf: (c: CommitUnit) => string;
+  onOpen: (path: string) => void;
+}) {
   const { data, error } = useApi<{
     commit: CommitUnit;
     base: string;
     files: string[];
     stats: Record<string, { added: number; removed: number }>;
     truncated: boolean;
-  }>(`/api/repos/${repoId}/change/${sha}`);
+  }>(`/api/repos/${repoId}/change/${sha}${base ? `?base=${base}` : ""}`);
   const diff = useApi<DiffData>(data ? `/api/repos/${repoId}/diff-files?base=${data.base}&head=${data.commit.sha}` : null);
   if (error) return <div className="s-bell repo-pad">{error}</div>;
   if (!data) return <div className="muted repo-pad">Loading…</div>;
@@ -241,7 +258,7 @@ function ChangeView({ repoId, sha, projectOf, onOpen }: { repoId: string; sha: s
         </div>
         {data.commit.verdict && <div className="s-pine">✓ {data.commit.verdict}</div>}
         <div className="muted mono" style={{ fontSize: 12 }}>
-          landed {clock(data.commit.date)} · {short(data.commit.sha)}
+          {base ? `branch head, against ${short(base)}` : "merged"} {clock(data.commit.date)} · {short(data.commit.sha)}
         </div>
       </div>
       <div className="repo-pad">
@@ -376,8 +393,11 @@ function Rail({
   );
 }
 
-export default function Repo({ id }: { id: string }) {
-  const { data: tree, error } = useApi<{ head: string; branch: string; files: string[] }>(`/api/repos/${id}/tree`);
+export default function Repo({ id, at, embedded = false }: { id: string; at?: RepoAt; embedded?: boolean }) {
+  const query = useQuery();
+  const get = (k: keyof RepoAt): string | null => (at ? (at[k] === undefined ? null : String(at[k])) : query.get(k));
+  const ref = get("ref");
+  const { data: tree, error } = useApi<{ head: string; branch: string; files: string[] }>(`/api/repos/${id}/tree${ref ? `?ref=${ref}` : ""}`);
   const { data: repos } = useApi<{ repo: { id: string }; projects: { id: string }[] }[]>("/api/repos");
   const [side, setSide] = useState<"explorer" | "history">("explorer");
   const [tabs, setTabs] = useState<Tab[]>([]);
@@ -392,15 +412,15 @@ export default function Repo({ id }: { id: string }) {
     setActive(tabKey(t));
     if (t.kind === "file") setLastFile(t.path);
   };
-  // Other pages link here at a change, a file, or a line: ?change=<sha>&file=<path>&line=<n>&from=<project>/<seq>.
-  const query = useQuery();
-  const from = /^([a-z][a-z0-9-]*)\/(\d+)$/.exec(query.get("from") ?? "");
-  const line = Number(query.get("line")) || null;
+  // Other pages link here at a change, a file, or a line: ?change=<sha>&file=<path>&line=<n>&from=<project>/<seq>,
+  // and at a unit's branch with &ref=<head>&base=<where it left>&branch=<name>.
+  const from = /^([a-z][a-z0-9-]*)\/(\d+)$/.exec(get("from") ?? "");
+  const line = Number(get("line")) || null;
   useEffect(() => {
     if (!tree || tabs.length) return;
-    const change = query.get("change");
-    const file = query.get("file");
-    if (change) open({ kind: "change", sha: change, label: from ? `U${from[2]}` : short(change) });
+    const change = get("change");
+    const file = get("file");
+    if (change) open({ kind: "change", sha: change, label: from ? `U${from[2]}` : short(change), base: get("base") ?? undefined });
     if (file && tree.files.includes(file)) open({ kind: "file", path: file });
     if (!change && !(file && tree.files.includes(file))) {
       const first = tree.files.find((f) => /^readme/i.test(f)) ?? tree.files[0];
@@ -410,7 +430,7 @@ export default function Repo({ id }: { id: string }) {
   const current = tabs.find((t) => tabKey(t) === active) ?? null;
   const filePath = current?.kind === "file" ? current.path : lastFile;
   // Arriving from a unit's change, the side panel is about that change until a line is picked.
-  const arrivedAt = query.get("change");
+  const arrivedAt = get("change");
   const railSha = current?.kind === "change" ? current.sha : arrivedAt;
   const { data: changeCommit } = useApi<{ commit: CommitUnit }>(railSha ? `/api/repos/${id}/change/${railSha}` : null);
   if (error)
@@ -428,14 +448,14 @@ export default function Repo({ id }: { id: string }) {
   const showingChange = current?.kind === "change" || (picked === null && arrivedAt !== null);
   const railCommit = current?.kind === "change" ? (changeCommit?.commit ?? null) : (picked ?? changeCommit?.commit ?? null);
   return (
-    <main className="repo">
+    <main className={embedded ? "repo embedded" : "repo"}>
       <div className="repo-bar">
         <b>{id}</b>
         <span className="mono">
-          {tree.branch} @ {short(tree.head)}
+          {get("branch") ?? tree.branch} @ {short(tree.head)}
         </span>
-        <span>read-only</span>
-        {from && (
+        <span>{ref ? "not merged · read-only" : "read-only"}</span>
+        {from && !embedded && (
           <span>
             opened from <Link to={`/p/${from[1]}/u/${from[2]}?tab=code`}>U{from[2]}'s change</Link>
           </span>
@@ -496,24 +516,29 @@ export default function Repo({ id }: { id: string }) {
               key={current.path}
               repoId={id}
               path={current.path}
+              at={ref}
               projectId={projectId}
-              line={current.path === query.get("file") ? line : null}
+              line={current.path === get("file") ? line : null}
               onPick={(c, at) => {
                 setPicked(c);
                 setPickedLine({ path: current.path, ...at });
               }}
             />
           )}
-          {current?.kind === "change" && <ChangeView repoId={id} sha={current.sha} projectOf={projectOf} onOpen={(path) => open({ kind: "file", path })} />}
+          {current?.kind === "change" && (
+            <ChangeView repoId={id} sha={current.sha} base={current.base} projectOf={projectOf} onOpen={(path) => open({ kind: "file", path })} />
+          )}
           {!current && <div className="muted repo-pad">Open a file from the explorer, or a change from the history.</div>}
         </section>
-        <Rail
-          commit={railCommit}
-          mode={showingChange ? "change" : "line"}
-          lineAt={showingChange ? null : pickedLine}
-          cameFrom={from ? { projectId: from[1]!, seq: Number(from[2]) } : null}
-          onShowChange={(c) => open({ kind: "change", sha: c.sha, label: projectOf(c) })}
-        />
+        {!embedded && (
+          <Rail
+            commit={railCommit}
+            mode={showingChange ? "change" : "line"}
+            lineAt={showingChange ? null : pickedLine}
+            cameFrom={from ? { projectId: from[1]!, seq: Number(from[2]) } : null}
+            onShowChange={(c) => open({ kind: "change", sha: c.sha, label: projectOf(c) })}
+          />
+        )}
       </div>
     </main>
   );

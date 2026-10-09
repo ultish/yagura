@@ -320,42 +320,42 @@ Each live lane runs against its own isolated checkout, a worktree, or an `Agent`
 
 **Files.**
 
-- [ ] Rewrite `packages/core/src/story.ts` and `apps/web/src/pages/Unit.tsx`.
-- [ ] Edit `apps/web/src/pages/Project.tsx` and `apps/web/src/lib/units.ts`.
+- [x] Rewrite `packages/core/src/story.ts` and `apps/web/src/pages/Unit.tsx`. Also new: `apps/web/src/lib/statemap.ts`, `apps/web/src/scene/StateMap.tsx`; `Repo.tsx` and `browse.ts` learned to open an unmerged branch head (the design's Code tab).
+- [x] Edit `apps/web/src/pages/Project.tsx` and `apps/web/src/lib/units.ts`. The project row and the unit page share `unitActions`.
 
 **Build.**
 
 - [x] Prototype two layouts of the unit page on real CL4 data first, and build the one the developer picks. Neither first pair (rounds; state rail and feed) was liked; the developer shaped a third over several rounds and agreed it on 2026-10-09: status card, compact state graphic, tabs with the timeline. The full description is in `docs/STATUS.md`; the canvas is https://claude.ai/artifact/RdSWDjxwHE5PWzgw6oCmmK.
-- [ ] Show the unit's states, each worker round, each judge verdict with its findings, the unit lead's decisions, and the pull request.
+- [x] Show the unit's states, each worker round, each judge verdict with its findings, the unit lead's decisions, and the pull request. Lead decisions seen on the CL5 lane's U2: "Round 2 · sent back by the unit lead, after a comment on PR #1".
 
 **You see.**
 
-- [ ] The unit page of a unit with one round of changes shows two worker rounds and two judge verdicts in order.
+- [x] The unit page of a unit with one round of changes shows two worker rounds and two judge verdicts in order (CL4 lane, demo/U3).
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] `story.test.ts` asserts the entries of a two-round unit. `apps/web/src/lib/lib.test.ts` asserts the state labels. Run `caffeinate -is pnpm -r test`.
+- [x] `story.test.ts` asserts the entries of a two-round unit. `apps/web/src/lib/lib.test.ts` asserts the state labels. Run `caffeinate -is pnpm -r test`. Core 232, web 36, daemon 23 pass.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. One lane at the step head, per the boot recipe, by the developer's one-agent limit.
 
-- [ ] Lane 1. Open the unit page of a two-round unit in night and day themes. Save `cl7-night.png` and `cl7-day.png`. Pass when both rounds, both verdicts, and the pull request link show without horizontal scroll.
+- [x] Lane 1. Open the unit page of a two-round unit in night and day themes. Save `cl7-night.png` and `cl7-day.png`. Pass when both rounds, both verdicts, and the pull request link show without horizontal scroll. Passed: scrollWidth equals the viewport at 1280 and at 390, chips read handed off, draft, changes, handed off, approved, ready, merged; shots in `/tmp/swarm-cl7/worker-1/`. Also seen live on a fresh project: the page followed U4 from waiting to judging without a reload, and a move seen live creates one travel animation along exactly that move.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] Metric. Unit page load to first paint.
-- [ ] Probe. Load the page 10 times through `control-ui`.
-- [ ] Baseline. Record the `main` unit page time first.
-- [ ] Rule. The head must not be slower. Fail at more than 20% slower.
+- [x] Metric. Unit page load to first paint, taken as the moment the first timeline entry exists (first paint alone is the "Loading…" text).
+- [x] Probe. Load the page 10 times through a headless Chrome DevTools script (no control-ui harness in this repo).
+- [x] Baseline. `main`: median 53 ms, then 54 ms (a copied, defused demo home, demo/U2, 8 entries). Head: 54 ms, then 56 ms (demo/U3, 8 entries).
+- [x] Rule. The head must not be slower. Fail at more than 20% slower. Head is 2 to 4% slower, inside the rule; the probe polls every 10 ms, so the gap is near its resolution.
 
 **Review gate.** The user reviews before merge.
 
-- [ ] Copy lane 1 screenshots into `docs/design/media/cl7-review-night.png` and `cl7-review-day.png`.
+- [x] Copy lane 1 screenshots into `docs/design/media/cl7-review-night.png` and `cl7-review-day.png`.
 - [ ] Record a 30 to 60 second video of the change on the lane's checkout. Save it as `docs/design/media/cl7-review.mp4`. Skip. A screenshot pair stands in, by the developer's one-agent limit.
 - [ ] Post the screenshots and the video in chat. Stop at merge-ready. Wait for the user's click.
 
 **Merge.**
 
-- [ ] The step's gates, lane, and probe pass at its last commit on `core-loop`.
+- [x] The step's gates, lane, and probe pass at its last commit on `core-loop`.
 - [ ] Push `core-loop`. The branch merges into `main` only in CL8, with a merge commit.
 
 ## Close out the design and merge (CL8)

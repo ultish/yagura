@@ -61,15 +61,22 @@ async function readCommits(db: Db, mirror: string, args: string[]): Promise<Comm
     });
 }
 
-export async function repoTree(db: Db, boot: Bootstrap, repoId: RepoId): Promise<{ head: Sha; branch: string; files: string[] }> {
+const commitish = (sha: string) => {
+  if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error(`${sha} is not a commit`);
+  return sha;
+};
+
+// Trunk unless `ref` names a commit, such as the head of a unit's branch that has not merged.
+export async function repoTree(db: Db, boot: Bootstrap, repoId: RepoId, ref?: string): Promise<{ head: Sha; branch: string; files: string[] }> {
   const { repo, mirror, trunk } = await mirrorOf(db, boot, repoId, true);
-  const head = (await git(["rev-parse", trunk], { gitDir: mirror })) as Sha;
+  const head = (await git(["rev-parse", ref ? `${commitish(ref)}^{commit}` : trunk], { gitDir: mirror })) as Sha;
   const files = (await git(["ls-tree", "-r", "--name-only", "-z", head], { gitDir: mirror })).split("\0").filter(Boolean);
   return { head, branch: repo.defaultBranch, files };
 }
 
-export async function repoFile(db: Db, boot: Bootstrap, repoId: RepoId, path: string): Promise<FileView> {
-  const { mirror, trunk } = await mirrorOf(db, boot, repoId);
+export async function repoFile(db: Db, boot: Bootstrap, repoId: RepoId, path: string, ref?: string): Promise<FileView> {
+  const { mirror, trunk: main } = await mirrorOf(db, boot, repoId);
+  const trunk = ref ? commitish(ref) : main;
   const size = Number(await git(["cat-file", "-s", `${trunk}:${path}`], { gitDir: mirror }));
   const empty = { path, text: null, blame: [], commits: {} };
   if (size > MAX_FILE_BYTES) return { ...empty, binary: false, tooLarge: true };
@@ -110,13 +117,16 @@ async function diffOf(mirror: string, base: string, head: string): Promise<Omit<
   return { files, stats, diff: diff.slice(0, MAX_DIFF_BYTES), truncated: diff.length > MAX_DIFF_BYTES };
 }
 
-// What one commit on trunk changed, against its first parent, as a merge request shows it.
-export async function repoChange(db: Db, boot: Bootstrap, repoId: RepoId, sha: string): Promise<Change> {
-  if (!/^[0-9a-f]{7,40}$/.test(sha)) throw new Error(`${sha} is not a commit`);
+// What one commit on trunk changed, against its first parent, as a merge request shows it; or, given `base`, everything
+// between that base and the commit, as a unit's branch shows against where it left its base.
+export async function repoChange(db: Db, boot: Bootstrap, repoId: RepoId, sha: string, base?: string): Promise<Change> {
+  commitish(sha);
   const { mirror } = await mirrorOf(db, boot, repoId);
   const [commit] = await readCommits(db, mirror, ["--no-walk", sha]);
   if (!commit) throw new Error(`commit ${sha} not found`);
-  const parent = await git(["rev-parse", "--verify", "--quiet", `${commit.sha}^1`], { gitDir: mirror }).catch(() => EMPTY_TREE);
+  const parent = base
+    ? await git(["rev-parse", "--verify", "--quiet", `${commitish(base)}^{commit}`], { gitDir: mirror })
+    : await git(["rev-parse", "--verify", "--quiet", `${commit.sha}^1`], { gitDir: mirror }).catch(() => EMPTY_TREE);
   return { commit, base: parent as Sha, ...(await diffOf(mirror, parent, commit.sha)) };
 }
 

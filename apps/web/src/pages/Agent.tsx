@@ -23,10 +23,11 @@ import { RunningDot } from "../ui/Running";
 import { DiffView, RunView } from "../ui/evidence";
 import { NoteForm, useAction } from "../ui/rows";
 
-function useLog(attemptId: number, live: boolean): LogLine[] {
+export function useLog(attemptId: number, live: boolean): LogLine[] {
   const [lines, setLines] = useState<LogLine[]>([]);
   useEffect(() => {
     setLines([]);
+    if (!attemptId) return;
     let source: EventSource | null = null;
     let cancelled = false;
     api<{ lines: LogLine[]; next: number }>(`/api/attempts/${attemptId}/log`).then((r) => {

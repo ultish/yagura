@@ -42,7 +42,7 @@ export type {
 };
 
 export interface UnitCode {
-  source: "landed" | "branch";
+  source: "merged" | "branch";
   branch: string | null;
   commit: CommitUnit;
   base: string;

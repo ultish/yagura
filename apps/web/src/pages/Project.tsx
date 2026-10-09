@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api, navigate, useApi, useNow, type ProjectDetail, type UnitView } from "../api";
 import { modelName, sha, spend, tokens } from "../lib/format";
 import { Package } from "lucide-react";
-import { type Group, groupOf, isBuild, jobName, latestAttempt, openGateFor, statusLine } from "../lib/units";
+import { type Group, groupOf, isBuild, jobName, latestAttempt, openGateFor, statusLine, unitActions } from "../lib/units";
 import { Inline } from "../lib/markdown";
 import { Beacons } from "../scene/Beacons";
 import { Link } from "../ui/Link";
@@ -26,7 +26,7 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
   const gate = openGateFor(d, u);
   const last = latestAttempt(u);
   const running = u.attempts.find((a) => a.state === "running");
-  const verifying = u.attempts.find((a) => a.state === "running" && a.role === "judge");
+  const can = unitActions(u, gate ? 1 : 0, !!running);
   const base = `/api/projects/${d.project.id}/units/${u.seq}`;
   const facts = last && (
     <>
@@ -104,29 +104,29 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
                   {o === "land" ? "Merge" : o === "hold" ? "Hold" : o}
                 </button>
               ))}
-            {u.state === "stuck" && (
+            {can.includes("retry") && (
               <button className="btn" type="button" onClick={() => setRetrying(true)}>
                 Retry with a note
               </button>
             )}
-            {u.type === "work" && ["blocked", "failed", "rejected"].includes(u.state) && (
+            {can.includes("ask-lead") && (
               <button className="btn" type="button" onClick={() => setWaking(true)}>
                 Ask the unit lead
               </button>
             )}
-            {(running || verifying) && (
-              <button className="btn" type="button" onClick={() => navigate(`/a/${(running ?? verifying)!.id}`)}>
+            {running && (
+              <button className="btn" type="button" onClick={() => navigate(`/a/${running.id}`)}>
                 Watch
               </button>
             )}
-            {running && (
+            {can.includes("stop") && (
               <button className="btn" type="button" onClick={() => setStopping(true)}>
                 Stop
               </button>
             )}
-            {["blocked", "ready", "draft"].includes(u.state) && (
+            {can.includes("drop") && (
               <button className="btn" type="button" disabled={action.busy} onClick={() => action.run(() => api(`${base}/cancel`, { body: {} }))}>
-                Cancel
+                Drop
               </button>
             )}
           </>

@@ -96,6 +96,16 @@ describe("browsing a repo's trunk", () => {
     expect(fromEmpty.files!.find((f) => f.path === "logo.png")).toMatchObject({ status: "added", binary: true, new: "" });
   });
 
+  it("reads a commit off trunk, such as an unmerged branch's head, against the base it left", async () => {
+    await repoTree(db, boot, repo);
+    expect(await repoTree(db, boot, repo, shas.trailered)).toEqual({ head: shas.trailered, branch: "main", files: ["app/main.py", "logo.png"] });
+    const file = await repoFile(db, boot, repo, "app/main.py", shas.trailered);
+    expect([file.text, file.blame]).toEqual(["a = 1\nb = 3", [shas.init, shas.trailered]]);
+    const branch = await repoChange(db, boot, repo, shas.landed, shas.init);
+    expect([branch.base, branch.files]).toEqual([shas.init, ["README.md", "app/main.py"]]);
+    await expect(repoTree(db, boot, repo, "main; rm -rf /")).rejects.toThrow("is not a commit");
+  });
+
   it("shows a unit's code: what landed, or its branch before it lands", async () => {
     await repoTree(db, boot, repo);
     const landed = await unitCode(db, boot, getUnitBySeq(db, "p" as ProjectId, 1));

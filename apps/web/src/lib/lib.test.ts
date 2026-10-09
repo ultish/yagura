@@ -14,7 +14,8 @@ import { groupHits, highlight } from "./search";
 import { mentionHref, mentionQuery } from "./mention";
 import { layoutScene, subLabel } from "./scene";
 import { buildTimeline } from "./timeline";
-import { groupOf, isBuild, roleOf, stages, statusLine } from "./units";
+import { groupOf, isBuild, roleOf, stages, statusLine, unitActions, unitTone } from "./units";
+import { edge, moveCounts, visited, wholePath } from "./statemap";
 
 const line = (n: number, at: number, events: LogLine["events"]): LogLine => ({ line: n, at, raw: "", events });
 
@@ -175,6 +176,51 @@ describe("unit stages and status", () => {
     const d = detail([u], { waiting: [{ unitId: 1, reason: "after U3, now building" }] });
     expect(stages(d, u, NOW)[1]!.light).toBe("wait");
     expect(statusLine(d, u, NOW).text).toBe("Waiting: after U3, now building.");
+  });
+});
+
+describe("the unit page's status card and state graphic", () => {
+  it("offers the developer only what the daemon accepts in each state", () => {
+    const work = (state: string) => ({ state, type: "work" });
+    expect(unitActions(work("stuck"), 1, false)).toEqual(["answer", "retry", "ask-lead", "drop"]);
+    expect(unitActions(work("stuck"), 0, true)).toEqual(["stop"]);
+    expect(unitActions(work("judging"), 0, true)).toEqual(["stop"]);
+    expect(unitActions(work("ready"), 1, false)).toEqual(["answer", "ask-lead", "drop"]);
+    expect(unitActions(work("merged"), 0, false)).toEqual(["disagree"]);
+    expect(unitActions(work("building"), 0, false)).toEqual([]);
+  });
+
+  it("colours a unit vermilion when it needs you, pine once merged, amber while it moves", () => {
+    expect(["building", "judging", "ready", "stuck", "merged", "dropped", "waiting"].map((s) => unitTone(s, 0))).toEqual([
+      "lamp",
+      "lamp",
+      "lamp",
+      "bell",
+      "pine",
+      "muted",
+      "muted",
+    ]);
+    expect(unitTone("ready", 1)).toBe("bell");
+  });
+
+  it("counts repeated moves and threads one path through a two-round unit", () => {
+    const moves = [
+      { from: "waiting", to: "building" },
+      { from: "building", to: "judging" },
+      { from: "judging", to: "building" },
+      { from: "building", to: "judging" },
+      { from: "judging", to: "ready" },
+    ] as const;
+    expect([...moveCounts(moves)]).toEqual([
+      ["waiting>building", 1],
+      ["building>judging", 2],
+      ["judging>building", 1],
+      ["judging>ready", 1],
+    ]);
+    expect([...visited(moves)].sort()).toEqual(["building", "judging", "ready", "waiting"]);
+    expect(wholePath(moves)).toBe("M70,55 L260,55 Q355,25 450,55 Q355,85 260,55 Q355,25 450,55 L640,55");
+    expect(edge("judging", "judging").d).toBe("M440,37 C416,-7 484,-7 460,37");
+    expect(edge("waiting", "stuck").d).toBe("M70,55 Q238.75,192.5 450,140");
   });
 });
 
