@@ -13,7 +13,8 @@ import { addSteer, listSteers } from "./steer.js";
 import { unitStory } from "./story.js";
 import { layout } from "./paths.js";
 import { runWorkerRound, type RunContext } from "./runner.js";
-import { setEnvironmentNotes, setValue } from "./envvalues.js";
+import { setValue } from "./envvalues.js";
+import { setAnswers } from "./actions.js";
 import { getRecord } from "./records.js";
 import {
   addEnvironment,
@@ -119,7 +120,7 @@ describe("runWorkerRound", () => {
   it("gives the agent the environment's values with their notes", async () => {
     addEnvironment(db, { id: "dev", name: "dev", provider: "local-process", capacity: 1 });
     setProjectEnvironment(db, project, "dev" as EnvironmentId);
-    setEnvironmentNotes(db, "dev" as EnvironmentId, "deps run in the cluster");
+    setAnswers(db, "dev" as EnvironmentId, { other: "deps run in the cluster" });
     setValue(db, "dev" as EnvironmentId, { name: "MARKER", value: "edited by fake agent", note: "the text every fake edit starts with" });
     const { unit, attempt, paths } = await run("success");
     const brief = readFileSync(paths.brief(project, unit.seq, attempt.n), "utf8");

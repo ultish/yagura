@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { api, navigate, useApi, useNow, type ProjectDetail, type UnitView } from "../api";
 import { modelName, sha, spend, tokens } from "../lib/format";
-import { Package } from "lucide-react";
 import { type Group, groupOf, isBuild, jobName, latestAttempt, openGateFor, statusLine, unitActions } from "../lib/units";
 import { Inline } from "../lib/markdown";
 import { Beacons } from "../scene/Beacons";
@@ -203,13 +202,7 @@ export function Project({ id }: { id: string }) {
             const units = work.filter((u) => u.repoId === r.id);
             const landed = units.filter((u) => u.state === "merged").length;
             return (
-              <Link
-                key={r.id}
-                className="repo-chip"
-                to={`/r/${r.id}`}
-                title={`${r.id}: open the repo browser${r.publish ? "; publishes an artifact other repos build on" : ""}`}
-              >
-                {r.publish && <Package size={13} strokeWidth={1.75} aria-hidden="true" />}
+              <Link key={r.id} className="repo-chip" to={`/r/${r.id}`} title={`${r.id}: open the repo browser`}>
                 {r.id}@{r.defaultBranch}
                 <span className="muted">{units.length ? `${landed}/${units.length} landed` : "no units"}</span>
               </Link>

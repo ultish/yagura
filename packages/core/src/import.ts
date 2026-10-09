@@ -60,7 +60,7 @@ export function importHome(db: Db, oldDbPath: string): ImportCounts {
         }
         return { ...r, key };
       });
-      const environments = copy(from, db, "environments");
+      const environments = copy(from, db, "environments", (r) => ({ ...r, answers_json: JSON.stringify(r.notes ? { other: r.notes } : {}) }));
       const environmentValues = copy(from, db, "environment_values");
       const templates = copy(from, db, "env_templates");
       const repos = copy(from, db, "repos", (r) => ({ ...r, revert_scan_sha: null }));

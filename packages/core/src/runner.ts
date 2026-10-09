@@ -7,7 +7,8 @@ import { WORKER_REPORT, renderBrief } from "./brief.js";
 import { checkoutUnit, commitBaseMerge, createUnitBranch, mergeWithBase, publishBranch, pushCheckout, syncCheckout, unitBranch } from "./branch.js";
 import { resolveSetting } from "./config.js";
 import { isBuild, type Attempt, type EnvironmentId, type ProjectId, type RenderedBrief, type RepoId, type Sha, type Unit, type UnitId } from "./domain.js";
-import { environmentNotes, listValues, valueMap } from "./envvalues.js";
+import { listValues, valueMap } from "./envvalues.js";
+import { answerLines } from "./actions.js";
 import { classifyFailure, ensureRecorded, savedHandoff, sessionReport, syntheticFailureHandoff } from "./finish.js";
 import { forgeFor, getMergeRequest, saveMergeRequest } from "./forge.js";
 import { addDetachedWorktree, discardLeftovers, ensureMirror, git, headSha, resolveRef } from "./git.js";
@@ -33,6 +34,7 @@ import {
   transitionUnit,
   updateAttempt,
   type Db,
+  getEnvironment,
 } from "./store.js";
 
 export type { RunContext } from "./agent.js";
@@ -129,7 +131,7 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
     context: [
       ...unit.context,
       ...unit.notes.map((n) => `Note: ${n}`),
-      ...(environmentNotes(db, project.environmentId) ? [`About this environment: ${environmentNotes(db, project.environmentId)}`] : []),
+      ...(project.environmentId ? answerLines(getEnvironment(db, project.environmentId).answers).map((l) => `About this environment: ${l}`) : []),
       ...(round.kind === "first" ? [] : [roundText(round)]),
       ...earlier.map((a) => `What worker A${a.agentNo} recorded:\n${describeRecords(db, a.id) ?? "(nothing)"}`),
     ],

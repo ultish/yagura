@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs";
 import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  ACTION_AUTHORS,
+  ACTION_RUNNERS,
+  ACTION_STATES,
   ATTEMPT_STATES,
   FAILURE_MODES,
   HANDOFF_STATUSES,
@@ -47,6 +50,21 @@ describe("schema", () => {
     ROLES.forEach((r) => db.prepare("UPDATE attempts SET role = ? WHERE id = ?").run(r, attempt));
     const insert = db.prepare("INSERT INTO agent_records (attempt_id, kind, key, data_json, created_at) VALUES (?, ?, ?, '{}', ?)");
     RECORD_KINDS.forEach((k) => insert.run(attempt, k, "x", now));
+    db.prepare("INSERT INTO environments (id, name, provider, capacity, created_at) VALUES ('dev', 'dev', 'local-process', 1, ?)").run(now);
+    const action = db
+      .prepare(
+        "INSERT INTO actions (environment_id, name, purpose, command, state, author, created_at, updated_at) VALUES ('dev', 't', 'u', 'c', 'unproven', 'you', ?, ?)",
+      )
+      .run(now, now).lastInsertRowid;
+    ACTION_STATES.forEach((s) => db.prepare("UPDATE actions SET state = ? WHERE id = ?").run(s, action));
+    ACTION_AUTHORS.forEach((a) => db.prepare("UPDATE actions SET author = ? WHERE id = ?").run(a, action));
+    ACTION_RUNNERS.forEach((by) =>
+      db
+        .prepare(
+          "INSERT INTO action_runs (environment_id, repo_id, sha, command, duration_ms, output, by, created_at) VALUES ('dev', 'testbed', 's', 'c', 1, '', ?, ?)",
+        )
+        .run(by, now),
+    );
   });
 
   it("rejects values outside the enums", () => {

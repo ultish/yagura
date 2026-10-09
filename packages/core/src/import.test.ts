@@ -88,8 +88,8 @@ describe("importHome", () => {
     expect(db.prepare("SELECT id, url, forge, push_confirmed, revert_scan_sha FROM repos").all()).toEqual([
       { id: "app", url: "https://example.com/app.git", forge: "gh", push_confirmed: 1, revert_scan_sha: null },
     ]);
-    expect(db.prepare("SELECT id, provider, capacity, notes FROM environments").all()).toEqual([
-      { id: "local", provider: "local-process", capacity: 2, notes: "runs on this machine" },
+    expect(db.prepare("SELECT id, provider, capacity, answers_json FROM environments").all()).toEqual([
+      { id: "local", provider: "local-process", capacity: 2, answers_json: '{"other":"runs on this machine"}' },
     ]);
     expect(db.prepare("SELECT role, kind, text FROM prompt_texts ORDER BY role").all()).toEqual([
       { role: "all", kind: "notes", text: "Python 3.9 only." },

@@ -214,7 +214,7 @@ ${sections.spec || "(no spec yet)"}${dropped.specSections ? `\n(${dropped.specSe
 ${b.catalog}
 
 ## LOOKING THINGS UP
-You can read, never change. Read, Grep, and Glob work in this thread's directory and in \`${b.projectsDir}/<project>/\` for each project in this thread (briefs/, handoffs/, logs/; each project's spec is in this brief). For anything else run \`yagura show <project> [unit#]\`, \`yagura logs\`, \`yagura trace <sha|issue>\`, \`yagura gates\`, \`yagura settings\`, \`yagura thread list|show|search|mentions\`, \`yagura env values|presets|notes\`, \`yagura template list\`, \`yagura project skills\`, or \`yagura git <repo> log|show|ls-tree|diff|grep|blame\` (trunk is \`origin/<default branch>\`). Every other tool and command is refused; look a fact up before you guess it or ask the developer for it.
+You can read, never change. Read, Grep, and Glob work in this thread's directory and in \`${b.projectsDir}/<project>/\` for each project in this thread (briefs/, handoffs/, logs/; each project's spec is in this brief). For anything else run \`yagura show <project> [unit#]\`, \`yagura logs\`, \`yagura trace <sha|issue>\`, \`yagura gates\`, \`yagura settings\`, \`yagura thread list|show|search|mentions\`, \`yagura env values|presets|answers|actions\`, \`yagura template list\`, \`yagura project skills\`, or \`yagura git <repo> log|show|ls-tree|diff|grep|blame\` (trunk is \`origin/<default branch>\`). Every other tool and command is refused; look a fact up before you guess it or ask the developer for it.
 
 ## CONVERSATION (most recent, oldest first)
 ${dropped.messages ? `(${dropped.messages} older message(s) omitted; search them with \`yagura thread search --thread ${b.thread.id} "<words>"\`)\n\n` : ""}${sections.history}
@@ -243,7 +243,7 @@ Reply to the developer in plain prose. Then end your final message with exactly 
       { "id": "billing", "existing": "git@gitlab.internal:team/billing.git", "forge": "glab" }
     ],
     "environments": [
-      { "id": "vm", "provider": "kube-namespace", "providerConfig": { "context": "rancher-desktop" }, "capacity": 1, "notes": "dependencies run in the cluster",
+      { "id": "vm", "provider": "kube-namespace", "providerConfig": { "context": "rancher-desktop" }, "capacity": 1, "answers": { "tests": "gradle test", "other": "dependencies run in the cluster" },
         "presets": ["helm"], "values": [{ "name": "REDIS_URL", "value": "redis://vm.internal:6379", "note": "Redis from this machine" }] },
       { "id": "vm2", "template": "spring-kube", "answers": { "REGISTRY_PULL": "vm2.internal:5000" } }
     ],

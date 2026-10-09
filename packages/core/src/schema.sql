@@ -21,7 +21,7 @@ CREATE TABLE environments (
   provider TEXT NOT NULL CHECK (provider IN ('kube-namespace', 'docker-compose', 'local-process', 'ios-sim')),
   provider_config_json TEXT NOT NULL DEFAULT '{}',
   capacity INTEGER NOT NULL CHECK (capacity >= 0),
-  notes TEXT NOT NULL DEFAULT '',
+  answers_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL
 );
 
@@ -48,7 +48,6 @@ CREATE TABLE repos (
   forge TEXT NOT NULL DEFAULT 'none' CHECK (forge IN ('none', 'glab', 'gh')),
   push_confirmed INTEGER NOT NULL DEFAULT 0 CHECK (push_confirmed IN (0, 1)),
   revert_scan_sha TEXT,
-  publish_json TEXT,
   created_at TEXT NOT NULL
 );
 
@@ -98,7 +97,7 @@ CREATE TABLE units (
   id INTEGER PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects (id),
   seq INTEGER NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('plan', 'work')),
+  type TEXT NOT NULL CHECK (type IN ('plan', 'work', 'doctor')),
   state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting', 'building', 'judging', 'ready', 'merged', 'stuck', 'dropped')),
   repo_id TEXT REFERENCES repos (id),
   base TEXT,
@@ -139,7 +138,7 @@ CREATE TABLE attempts (
   unit_id INTEGER NOT NULL REFERENCES units (id),
   n INTEGER NOT NULL,
   agent_no INTEGER,
-  role TEXT CHECK (role IN ('planner', 'worker', 'judge', 'lead', 'watchman')),
+  role TEXT CHECK (role IN ('planner', 'worker', 'judge', 'lead', 'watchman', 'doctor')),
   guidance_sha TEXT,
   state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'running', 'handed_off', 'failed', 'stopped')),
   harness TEXT NOT NULL,
@@ -485,3 +484,40 @@ CREATE TABLE forge_issues (
   created_at TEXT NOT NULL,
   PRIMARY KEY (repo_id, number)
 );
+
+CREATE TABLE actions (
+  id INTEGER PRIMARY KEY,
+  environment_id TEXT NOT NULL REFERENCES environments (id),
+  repo_id TEXT REFERENCES repos (id),
+  name TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  command TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('proven', 'edited', 'unproven', 'broken')),
+  author TEXT NOT NULL CHECK (author IN ('doctor', 'agent', 'you')),
+  author_attempt_id INTEGER REFERENCES attempts (id),
+  reason TEXT,
+  suggestion_json TEXT,
+  last_run_id INTEGER,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE UNIQUE INDEX actions_name ON actions (environment_id, coalesce(repo_id, ''), name);
+
+CREATE TABLE action_runs (
+  id INTEGER PRIMARY KEY,
+  action_id INTEGER REFERENCES actions (id) ON DELETE SET NULL,
+  environment_id TEXT NOT NULL REFERENCES environments (id),
+  repo_id TEXT NOT NULL REFERENCES repos (id),
+  sha TEXT NOT NULL,
+  command TEXT NOT NULL,
+  exit_code INTEGER,
+  timed_out INTEGER NOT NULL DEFAULT 0 CHECK (timed_out IN (0, 1)),
+  duration_ms INTEGER NOT NULL,
+  output TEXT NOT NULL,
+  by TEXT NOT NULL CHECK (by IN ('you', 'doctor', 'agent', 'yagura')),
+  attempt_id INTEGER REFERENCES attempts (id),
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX action_runs_action ON action_runs (action_id);

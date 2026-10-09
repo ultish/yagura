@@ -368,7 +368,7 @@ describe("watchman turns", () => {
     const propose = (proposal: unknown) => () => storeTurn(ctx, t.id, { body: "ok", turnLog: null, records: TurnRecords.parse({ proposal }) });
     const box = {
       id: "box",
-      notes: "deps in the cluster",
+      answers: { other: "deps in the cluster" },
       keep: { policy: "failed", hours: 1 },
       presets: ["kafka"],
       values: [
@@ -394,7 +394,7 @@ describe("watchman turns", () => {
     expect(await applyProposal(ctx, proposal!.id)).toEqual({ repos: ["box-repo"], environments: ["box"], projects: ["on-box"], units: {} });
     expect(getProject(db, "on-box" as ProjectId).environmentId).toBe("box");
     const env = getEnvironment(db, "box" as EnvironmentId);
-    expect(env.notes).toBe("deps in the cluster");
+    expect(env.answers.other).toBe("deps in the cluster");
     expect(listValues(db, "box" as EnvironmentId).map((v) => [v.name, v.source])).toEqual([
       ["FLAG_URL", "watchman"],
       ["KAFKA_BOOTSTRAP_LOCAL", "watchman"],

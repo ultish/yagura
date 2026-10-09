@@ -325,11 +325,11 @@ describe("daemon API", () => {
     });
     expect(await (await post("/api/environments/box/presets/registry", {})).json()).toEqual({ added: ["REGISTRY_PUSH", "REGISTRY_PULL"], skipped: [] });
     expect(await (await post("/api/environments/box/presets/registry", {})).json()).toEqual({ added: [], skipped: ["REGISTRY_PUSH", "REGISTRY_PULL"] });
-    await post("/api/environments/box/notes", { notes: "deps in cluster" });
+    await post("/api/environments/box/answers", { answers: { other: "deps in cluster" } });
     await post("/api/environments/box/values/REGISTRY_PULL/delete", {});
     const detail = (await (await get("/api/environments/box")).json()) as {
       values: { name: string; source: string }[];
-      environment: { notes: string };
+      environment: { answers: { other: string } };
       keep: unknown;
       presets: unknown[];
     };
@@ -337,7 +337,7 @@ describe("daemon API", () => {
       ["REDIS_URL", "you"],
       ["REGISTRY_PUSH", "registry"],
     ]);
-    expect(detail).toMatchObject({ environment: { notes: "deps in cluster" }, keep: { policy: { value: "never", source: "default" }, hours: { value: 2 } } });
+    expect(detail).toMatchObject({ environment: { answers: { other: "deps in cluster" } }, keep: { policy: { value: "never", source: "default" }, hours: { value: 2 } } });
     expect(detail.presets.length).toBeGreaterThan(3);
 
     expect((await post("/api/environments/box/template", { name: "box-shape", ask: ["REDIS_URL"] })).status).toBe(201);

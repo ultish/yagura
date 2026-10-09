@@ -7,6 +7,7 @@ import { runShell } from "./evidence.js";
 import { addDetachedWorktree, ensureMirror, removeWorktree } from "./git.js";
 import { layout } from "./paths.js";
 import { getProject, getRepo, getUnit, now, recordEvent, type Db } from "./store.js";
+import { findAction } from "./actions.js";
 
 export interface Publication {
   id: number;
@@ -141,8 +142,11 @@ export async function publishTestBuild(ctx: { db: Db; boot: Bootstrap }, unitId:
   const { db } = ctx;
   const unit = getUnit(db, unitId);
   const repo = getRepo(db, unit.repoId!);
-  const publish = repo.publish;
-  if (!publish || publicationAt(db, unit.id, "test", head)) return null;
+  const environmentId = getProject(db, unit.projectId).environmentId;
+  const contract = (name: string) => (environmentId ? findAction(db, environmentId, repo.id, name) : null)?.command;
+  const [version, command, available] = [contract("version"), contract("publish-snapshot"), contract("snapshot-available")];
+  if (!version || !command || !available || publicationAt(db, unit.id, "test", head)) return null;
+  const publish = { version, command, available, suffix: "" };
   const log = startLog(ctx, unit, "test", head);
   const id = insertPublication(db, unit, "test", head, "publishing", log);
   const refs = { projectId: unit.projectId, unitId: unit.id };

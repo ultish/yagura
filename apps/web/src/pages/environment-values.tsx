@@ -259,39 +259,17 @@ function SaveTemplate({ envId, names }: { envId: string; names: string[] }) {
 export function EnvironmentValues({ id, onChanged }: { id: string; onChanged: () => void }) {
   const { data, error, reload } = useApi<EnvironmentDetail>(`/api/environments/${id}`);
   const presets = useAction();
-  const notes = useAction();
-  const [noteText, setNoteText] = useState<string | null>(null);
   const refresh = () => {
     reload();
     onChanged();
   };
   if (error && !data) return <div className="s-bell">{error}</div>;
   if (!data) return <div className="muted">Loading values…</div>;
-  const text = noteText ?? data.environment.notes;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
       <div style={{ fontSize: 13 }}>
         {keepLine(data.keep)} <span className="muted">Change this in Settings.</span>
       </div>
-      <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 13 }}>
-        Notes for agents
-        <textarea value={text} onChange={(e) => setNoteText(e.target.value)} rows={2} style={{ ...field, resize: "vertical" }} />
-      </label>
-      <div>
-        <button
-          className="btn sm lamp"
-          type="button"
-          disabled={notes.busy || text === data.environment.notes}
-          onClick={() => void notes.run(async () => (await api(`/api/environments/${id}/notes`, { body: { notes: text } }), refresh()))}
-        >
-          Save notes
-        </button>
-      </div>
-      {notes.error && (
-        <div className="s-bell" style={{ fontSize: 13 }}>
-          {notes.error}
-        </div>
-      )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <span className="muted" style={{ fontSize: 13 }}>
           Add from a preset

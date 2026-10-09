@@ -14,6 +14,7 @@ import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta } from "./plan.js";
 import { listPublications, publishTestBuild, qualifiedVersion } from "./publish.js";
+import { saveAction } from "./actions.js";
 import { runWorkerRound } from "./runner.js";
 import {
   addEnvironment,
@@ -43,11 +44,12 @@ let nexus: string;
 let origins: { lib: string; app: string };
 
 // A folder stands in for Nexus: publishing copies into <version>/, and a version is available when its folder exists.
-const PUBLISH = {
-  version: "cat VERSION",
-  command: 'mkdir -p "$NEXUS/$YAGURA_VERSION" && cp VERSION "$NEXUS/$YAGURA_VERSION/"',
-  suffix: "-SNAPSHOT",
-  available: 'test -d "$NEXUS/$YAGURA_VERSION"',
+const publishActions = (command = 'mkdir -p "$NEXUS/$YAGURA_VERSION" && cp VERSION "$NEXUS/$YAGURA_VERSION/"') => {
+  const save = (name: string, cmd: string) =>
+    saveAction(db, { environmentId: "local" as EnvironmentId, repoId: "lib" as RepoId, name, use: `the ${name} contract`, command: cmd });
+  save("version", "cat VERSION");
+  save("publish-snapshot", command);
+  save("snapshot-available", 'test -d "$NEXUS/$YAGURA_VERSION"');
 };
 
 async function origin(root: string, name: string, publish = false): Promise<string> {
@@ -97,7 +99,7 @@ describe("published artifacts", () => {
     transitionUnit(db, lib.id, "building", { round: { kind: "first" } });
     await runWorkerRound(ctx, lib.id);
     const head = listAttempts(db, lib.id)[0]!.headSha!;
-    db.prepare("UPDATE repos SET publish_json = ? WHERE id = 'lib'").run(JSON.stringify(PUBLISH));
+    publishActions();
 
     const pub = await publishTestBuild(ctx, lib.id, head);
     expect(pub).toMatchObject({
@@ -117,7 +119,7 @@ describe("published artifacts", () => {
     transitionUnit(db, lib.id, "building", { round: { kind: "first" } });
     await runWorkerRound(ctx, lib.id);
     const head = listAttempts(db, lib.id)[0]!.headSha!;
-    db.prepare("UPDATE repos SET publish_json = ? WHERE id = 'lib'").run(JSON.stringify({ ...PUBLISH, command: "exit 3" }));
+    publishActions("exit 3");
     const pub = await publishTestBuild(ctx, lib.id, head);
     expect(pub).toMatchObject({ state: "failed", reason: "publish exited 3: " });
   }, 60_000);

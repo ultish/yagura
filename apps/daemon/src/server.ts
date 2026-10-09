@@ -101,7 +101,12 @@ import {
   applyPreset,
   PRESETS,
   saveTemplate,
-  setEnvironmentNotes,
+  setAnswers,
+  listActions,
+  listActionRuns,
+  saveAction,
+  deleteAction,
+  answerSuggestion,
   setValue,
   artifactContentType,
   artifactName,
@@ -429,10 +434,23 @@ export function createApp(opts: ServerOptions): Hono {
     if (!PRESETS.some((p) => p.id === c.req.param("preset"))) return c.json({ error: `no preset ${c.req.param("preset")}` }, 404);
     return c.json(applyPreset(db, c.req.param("id") as EnvironmentId, c.req.param("preset")));
   });
-  app.post("/api/environments/:id/notes", async (c) => {
-    setEnvironmentNotes(db, c.req.param("id") as EnvironmentId, ((await c.req.json()) as { notes: string }).notes ?? "");
-    return c.json({ ok: true });
+  app.post("/api/environments/:id/answers", async (c) =>
+    c.json(setAnswers(db, c.req.param("id") as EnvironmentId, ((await c.req.json()) as { answers: Record<string, string> }).answers ?? {})),
+  );
+  app.get("/api/environments/:id/actions", (c) =>
+    c.json(listActions(db, c.req.param("id") as EnvironmentId).map((a) => ({ ...a, runs: listActionRuns(db, a.id, 5) }))),
+  );
+  app.post("/api/environments/:id/actions", async (c) => {
+    const b = (await c.req.json()) as { id?: number; repoId?: string | null; name: string; use: string; command: string };
+    return c.json(saveAction(db, { ...b, environmentId: c.req.param("id") as EnvironmentId, repoId: (b.repoId || null) as RepoId | null }));
   });
+  app.post("/api/actions/:id/delete", (c) => {
+    deleteAction(db, Number(c.req.param("id")));
+    return c.json({ deleted: true });
+  });
+  app.post("/api/actions/:id/suggestion", async (c) =>
+    c.json(answerSuggestion(db, Number(c.req.param("id")), Boolean(((await c.req.json()) as { accept?: boolean }).accept))),
+  );
   app.post("/api/leases/:id/delete-kept", async (c) => c.json({ deleted: await deleteKept(db, boot, Number(c.req.param("id")) as never) }));
   app.get("/api/templates", (c) => c.json(listTemplates(db)));
   app.post("/api/environments/:id/template", async (c) => {

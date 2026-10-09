@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { resolveSetting, setSetting, type Bootstrap } from "./config.js";
 import type { AttemptId, EnvironmentId, ProjectId, RepoId } from "./domain.js";
-import { deleteValue, listValues, setEnvironmentNotes, setValue, valueMap } from "./envvalues.js";
+import { deleteValue, listValues, setValue, valueMap } from "./envvalues.js";
+import { setAnswers } from "./actions.js";
 import { acquireLease, releaseLease } from "./leases.js";
 import { addEnvironment, addProject, addRepo, addUnit, createAttempt, getEnvironment, openStore, type Db } from "./store.js";
 import { applyTemplate, deleteTemplate, exportTemplate, importTemplate, importTemplateFiles, listTemplates, saveTemplate } from "./templates.js";
@@ -62,10 +63,10 @@ describe("values in a slot", () => {
 });
 
 describe("environment templates", () => {
-  it("saves values, notes, and the keep policy, and applies them on another machine asking only for its own values", async () => {
+  it("saves values, answers, and the keep policy, and applies them on another machine asking only for its own values", async () => {
     setValue(db, dev, { name: "REGISTRY_PUSH", value: "localhost:5000", note: "push here" });
     setValue(db, dev, { name: "REGISTRY_PULL", value: "devbox:5000", note: "the cluster pulls here" });
-    setEnvironmentNotes(db, dev, "deps run in the cluster");
+    setAnswers(db, dev, { other: "deps run in the cluster" });
     setSetting(db, "environment", "dev", "lease.keep", "failed");
     saveTemplate(db, dev, { name: "spring-kube", description: "my dev box", ask: ["REGISTRY_PULL"] });
     const yaml = exportTemplate(db, "spring-kube");
@@ -80,7 +81,7 @@ describe("environment templates", () => {
       ["REGISTRY_PUSH", "localhost:5000", "push here", "template spring-kube"],
       ["REGISTRY_PULL", "vm2.internal:5000", "the cluster pulls here", "template spring-kube"],
     ]);
-    expect(getEnvironment(db, vm2)).toMatchObject({ notes: "deps run in the cluster" });
+    expect(getEnvironment(db, vm2).answers.other).toBe("deps run in the cluster");
     expect(resolveSetting(db, "lease.keep", { environmentId: vm2 })).toEqual({ value: "failed", source: "environment" });
     await expect(applyTemplate({ db, boot }, "spring-kube", { id: "vm2", answers: { REGISTRY_PULL: "x:1" } })).rejects.toThrow(
       "environment vm2 already exists",

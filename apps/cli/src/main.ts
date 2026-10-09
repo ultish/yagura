@@ -83,13 +83,11 @@ import {
   applyPreset,
   applyTemplate,
   deleteValue,
-  environmentNotes,
   getEnvironment,
   listTemplates,
   listValues,
   PRESETS,
   saveTemplate,
-  setEnvironmentNotes,
   setValue,
   exportTemplate,
   importTemplate,
@@ -116,6 +114,11 @@ import {
   clearHold,
   describeImport,
   importHome,
+  ANSWER_KEYS,
+  ANSWER_QUESTIONS,
+  type AnswerKey,
+  listActions,
+  setAnswers,
 } from "@yagura/core";
 
 const USAGE = `yagura — agent orchestration
@@ -135,7 +138,9 @@ const USAGE = `yagura — agent orchestration
   yagura env value rm <id> <NAME>
   yagura env preset <id> <preset>          add that preset's values; names already set are left alone
   yagura env presets
-  yagura env notes <id> | notes set <id> --text <text>
+  yagura env answers <id>                        the environment's answers: how tests run, publishing, images, running, never, other
+  yagura env answer <id> <tests|publish|images|run|never|other> --text <text>   answer one question in your own words
+  yagura env actions <id>                        the commands agents and yagura may run there, with what each is for and whether it is proven
   yagura template list
   yagura template save <env> <name> [--description <text>] [--ask <NAME>...]
   yagura template apply <name> --id <new env> [--name <text>] [--answer <NAME=value>...]
@@ -642,9 +647,7 @@ async function main() {
       }
       if (sub === "values" && id) {
         getEnvironment(db, id as EnvironmentId);
-        const notes = environmentNotes(db, id as EnvironmentId);
         const listed = listValues(db, id as EnvironmentId);
-        if (notes) console.log(notes);
         if (!listed.length) console.log(`environment ${id} has no values`);
         for (const v of listed) printValue(v);
         return;
@@ -678,17 +681,22 @@ async function main() {
         for (const preset of PRESETS) console.log(`${preset.id.padEnd(14)} ${preset.values.map((v) => v.name).join(", ")}`);
         return;
       }
-      if (sub === "notes" && a === "set" && b) {
-        const text = values.text;
-        if (typeof text !== "string") fail("env notes set needs --text");
-        else setEnvironmentNotes(db, b as EnvironmentId, text);
-        console.log(`environment ${b} notes saved`);
+      if (sub === "answer" && id && a) {
+        if (typeof values.text !== "string") fail("env answer needs --text");
+        setAnswers(db, id as EnvironmentId, { [a]: values.text });
+        console.log(`${id}: ${ANSWER_QUESTIONS[a as AnswerKey]} saved`);
         return;
       }
-      if (sub === "notes" && id && a !== "set") {
-        getEnvironment(db, id as EnvironmentId);
-        const notes = environmentNotes(db, id as EnvironmentId);
-        console.log(notes || `environment ${id} has no notes`);
+      if (sub === "answers" && id) {
+        const answers = getEnvironment(db, id as EnvironmentId).answers;
+        for (const k of ANSWER_KEYS) console.log(`${k.padEnd(8)} ${ANSWER_QUESTIONS[k]} ${answers[k] || "(not answered)"}`);
+        return;
+      }
+      if (sub === "actions" && id) {
+        const listed = listActions(db, id as EnvironmentId);
+        if (!listed.length) console.log(`environment ${id} has no actions yet; the doctor makes them from its answers`);
+        for (const x of listed)
+          console.log(`${x.name} [${x.repoId ?? "every repo"}] ${x.state}${x.reason ? ` (${x.reason})` : ""}\n  ${x.use}\n  $ ${x.command}`);
         return;
       }
       if (sub !== "add" || !id || !values.provider) fail(USAGE);

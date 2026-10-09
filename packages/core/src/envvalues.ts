@@ -73,16 +73,6 @@ export function deleteValue(db: Db, environmentId: EnvironmentId, name: string):
   return gone;
 }
 
-export function setEnvironmentNotes(db: Db, environmentId: EnvironmentId, notes: string): void {
-  getEnvironment(db, environmentId);
-  db.prepare("UPDATE environments SET notes = ? WHERE id = ?").run(notes, environmentId);
-}
-
-export function environmentNotes(db: Db, environmentId: EnvironmentId | null): string {
-  if (!environmentId) return "";
-  return (db.prepare("SELECT notes FROM environments WHERE id = ?").get(environmentId) as { notes: string } | undefined)?.notes ?? "";
-}
-
 export function valueBriefLines(db: Db, environmentId: EnvironmentId | null): string[] {
   if (!environmentId) return [];
   return listValues(db, environmentId).map((v) => `${v.name}=${v.value}${v.note ? ` (${v.note})` : ""}`);

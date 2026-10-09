@@ -4,7 +4,13 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import { resolveSetting, setSetting, SETTING_LAYERS, SETTINGS, type Bootstrap, type SettingKey } from "./config.js";
 import { PROVIDERS, type EnvironmentId } from "./domain.js";
-import { checkValueName, listValues, setEnvironmentNotes, setValue } from "./envvalues.js";
+import { checkValueName, listValues, setValue } from "./envvalues.js";
+import { setAnswers } from "./actions.js";
+import { ANSWER_KEYS } from "./domain.js";
+
+const Answers = z
+  .object(Object.fromEntries(ANSWER_KEYS.map((k) => [k, z.string().optional()])) as Record<(typeof ANSWER_KEYS)[number], z.ZodOptional<z.ZodString>>)
+  .strict();
 import { PROVIDERS_IMPL } from "./leases.js";
 import { applyPreset, PRESETS } from "./presets.js";
 import { addEnvironment, getEnvironment, now, recordEvent, type Db } from "./store.js";
@@ -20,7 +26,8 @@ export const EnvTemplate = z
     provider: z.enum(PROVIDERS),
     providerConfig: z.record(z.unknown()).default({}),
     capacity: z.number().int().min(0),
-    notes: z.string().default(""),
+    answers: Answers.optional(),
+    notes: z.string().optional(),
     keep: Keep.optional(),
     settings: z.record(z.unknown()).default({}),
     values: z
@@ -80,7 +87,7 @@ export function saveTemplate(db: Db, environmentId: EnvironmentId, input: { name
     provider: env.provider,
     providerConfig: env.providerConfig,
     capacity: env.capacity,
-    notes: env.notes,
+    answers: env.answers,
     keep: { policy: resolveSetting(db, "lease.keep", sctx).value, hours: resolveSetting(db, "lease.keep_hours", sctx).value },
     settings: Object.fromEntries(
       (
@@ -151,7 +158,7 @@ export const EnvironmentDraft = z
     provider: z.enum(PROVIDERS).default("local-process"),
     providerConfig: z.record(z.unknown()).default({}),
     capacity: z.number().int().min(0).default(1),
-    notes: z.string().default(""),
+    answers: Answers.optional(),
     keep: Keep.optional(),
     settings: z.record(z.unknown()).default({}),
     presets: z.array(z.string()).default([]),
@@ -175,7 +182,7 @@ export function draftFromTemplate(
     provider: t.provider,
     providerConfig: { ...t.providerConfig, ...(input.config ?? {}) },
     capacity: t.capacity,
-    notes: t.notes,
+    answers: { ...(t.notes ? { other: t.notes } : {}), ...(t.answers ?? {}) },
     keep: t.keep,
     settings: t.settings,
     values: t.values.map((v) => ({ name: v.name, value: v.ask ? answers[v.name]!.trim() : v.value, note: v.note })),
@@ -211,7 +218,7 @@ export function createEnvironment(db: Db, d: EnvironmentDraft, source: string): 
     addEnvironment(db, { id, name: d.name?.trim() || id, provider: d.provider, capacity: d.capacity, providerConfig: d.providerConfig });
     for (const v of d.values) setValue(db, id, { ...v, source });
     for (const p of d.presets) applyPreset(db, id, p);
-    setEnvironmentNotes(db, id, d.notes);
+    if (d.answers) setAnswers(db, id, d.answers);
     if (d.keep) {
       setSetting(db, "environment", id, "lease.keep", d.keep.policy);
       setSetting(db, "environment", id, "lease.keep_hours", d.keep.hours);

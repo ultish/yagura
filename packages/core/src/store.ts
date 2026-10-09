@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
-import { canTransition, IllegalTransition, type Role } from "./domain.js";
+import { canTransition, emptyAnswers, IllegalTransition, type Answers, type Role } from "./domain.js";
 import { MIGRATIONS } from "./migrations.js";
 import type {
   Attempt,
@@ -147,7 +147,6 @@ export function getRepo(db: Db, id: RepoId): Repo {
     defaultBranch: r.default_branch as string,
     forge: r.forge as Forge,
     pushConfirmed: r.push_confirmed === 1,
-    publish: r.publish_json ? (JSON.parse(r.publish_json as string) as Repo["publish"]) : null,
     createdAt: r.created_at as IsoTime,
   };
 }
@@ -476,7 +475,7 @@ export function getEnvironment(db: Db, id: EnvironmentId): Environment {
     provider: r.provider as Provider,
     providerConfig: JSON.parse(r.provider_config_json as string),
     capacity: r.capacity as number,
-    notes: r.notes as string,
+    answers: { ...emptyAnswers(), ...(JSON.parse(r.answers_json as string) as Partial<Answers>) },
     createdAt: r.created_at as IsoTime,
   };
 }

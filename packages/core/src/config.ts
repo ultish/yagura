@@ -45,9 +45,21 @@ export function loadBootstrap(env: NodeJS.ProcessEnv = process.env): Bootstrap {
 
 const WATCHMAN_TOOLS = [
   "Skill",
-  ...["show", "logs", "trace", "gates", "settings", "git", "thread", "env values", "env presets", "env notes", "template list", "project skills"].map(
-    (c) => `Bash(yagura ${c}:*)`,
-  ),
+  ...[
+    "show",
+    "logs",
+    "trace",
+    "gates",
+    "settings",
+    "git",
+    "thread",
+    "env values",
+    "env presets",
+    "env answers",
+    "env actions",
+    "template list",
+    "project skills",
+  ].map((c) => `Bash(yagura ${c}:*)`),
 ];
 
 export const SETTINGS = {

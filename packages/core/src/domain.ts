@@ -27,12 +27,12 @@ export const MERGE_POLICIES = ["auto", "human"] as const;
 export type MergePolicy = (typeof MERGE_POLICIES)[number];
 
 // A work unit changes a repo and ends as a merged pull request; a plan unit is the job row of one planning session.
-export const UNIT_TYPES = ["plan", "work"] as const;
+export const UNIT_TYPES = ["plan", "work", "doctor"] as const;
 export type UnitType = (typeof UNIT_TYPES)[number];
 
 export const isBuild = (u: { type: UnitType }) => u.type === "work";
 
-export const ROLES = ["planner", "worker", "judge", "lead", "watchman"] as const;
+export const ROLES = ["planner", "worker", "judge", "lead", "watchman", "doctor"] as const;
 export type Role = (typeof ROLES)[number];
 export const ROLE_NAMES: Record<Role, string> = {
   planner: "project lead",
@@ -40,9 +40,10 @@ export const ROLE_NAMES: Record<Role, string> = {
   judge: "judge",
   lead: "unit lead",
   watchman: "watchman",
+  doctor: "doctor",
 };
 
-export const ROLE_OF: Record<UnitType, Role> = { plan: "planner", work: "worker" };
+export const ROLE_OF: Record<UnitType, Role> = { plan: "planner", work: "worker", doctor: "doctor" };
 
 export const UNIT_STATES = ["waiting", "building", "judging", "ready", "merged", "stuck", "dropped"] as const;
 export type UnitState = (typeof UNIT_STATES)[number];
@@ -140,7 +141,65 @@ export interface Environment {
   provider: Provider;
   providerConfig: Record<string, unknown>;
   capacity: number;
-  notes: string;
+  answers: Answers;
+  createdAt: IsoTime;
+}
+
+// The developer's own words on how an environment works, one answer per question; agents read them, the doctor turns them into actions.
+export const ANSWER_KEYS = ["tests", "publish", "images", "run", "never", "other"] as const;
+export type AnswerKey = (typeof ANSWER_KEYS)[number];
+export type Answers = Record<AnswerKey, string>;
+export const emptyAnswers = (): Answers => Object.fromEntries(ANSWER_KEYS.map((k) => [k, ""])) as Answers;
+export const ANSWER_QUESTIONS: Record<AnswerKey, string> = {
+  tests: "How are tests run?",
+  publish: "How are libraries published, and where to?",
+  images: "How are images built and pushed?",
+  run: "How is the app run or deployed?",
+  never: "What must agents never do here?",
+  other: "Anything else about this environment",
+};
+
+// A command an agent or yagura may run in an environment, with what it is for. Only yagura's own runs prove or break one.
+export const ACTION_STATES = ["proven", "edited", "unproven", "broken"] as const;
+export type ActionState = (typeof ACTION_STATES)[number];
+export const ACTION_AUTHORS = ["doctor", "agent", "you"] as const;
+export type ActionAuthor = (typeof ACTION_AUTHORS)[number];
+export const ACTION_RUNNERS = ["you", "doctor", "agent", "yagura"] as const;
+export type ActionRunner = (typeof ACTION_RUNNERS)[number];
+// yagura runs these itself after a library unit merges, so they keep a fixed name and contract.
+export const CONTRACT_ACTIONS = ["version", "publish-snapshot", "snapshot-available"] as const;
+
+export interface Action {
+  id: number;
+  environmentId: EnvironmentId;
+  // null: every repo in the environment.
+  repoId: RepoId | null;
+  name: string;
+  use: string;
+  command: string;
+  state: ActionState;
+  author: ActionAuthor;
+  authorAttemptId: AttemptId | null;
+  reason: string | null;
+  suggestion: { command: string; why: string } | null;
+  lastRunId: number | null;
+  createdAt: IsoTime;
+  updatedAt: IsoTime;
+}
+
+export interface ActionRun {
+  id: number;
+  actionId: number | null;
+  environmentId: EnvironmentId;
+  repoId: RepoId;
+  sha: Sha;
+  command: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  durationMs: number;
+  output: string;
+  by: ActionRunner;
+  attemptId: AttemptId | null;
   createdAt: IsoTime;
 }
 
@@ -154,16 +213,7 @@ export interface Repo {
   forge: Forge;
   // A remote repo without a forge lands by pushing to trunk only when someone chose that (§23).
   pushConfirmed: boolean;
-  // How yagura publishes a snapshot of a unit's head for the units that build on it (§14); null when the repo does not publish.
-  publish: PublishConfig | null;
   createdAt: IsoTime;
-}
-
-export interface PublishConfig {
-  version: string;
-  command: string;
-  suffix: string;
-  available: string;
 }
 
 export interface Project {

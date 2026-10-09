@@ -1,6 +1,6 @@
 # Environment answers, actions, and the doctor (draft for the developer)
 
-Status: draft, 2026-10-10. Extends `core-loop.md` for CL8. Nothing here is built yet.
+Status: agreed 2026-10-10 (layout B, tabs). Extends `core-loop.md` for CL8.
 
 ## Why
 
@@ -31,24 +31,27 @@ An action is a command an agent or yagura can run, saved with what it is for.
 |---|---|
 | name | Short and unique within its scope: `publish-snapshot`, `build-image`, `test-one-file`. |
 | use | When to use it, in plain words: "publishes this library to Nexus as a snapshot; run after a change other repos need". |
-| command | The shell command, run with the environment's values. It may read inputs such as `$YAGURA_VERSION` or `$TEST_FILE`. |
-| inputs | The variables the command reads, each with a line on what it is. |
+| command | The shell command, run with the environment's values. It may read inputs such as `$YAGURA_VERSION` or `$TEST_CLASS`, named in its use text. |
 | scope | One repo in this environment, or every repo in it. |
-| proof | The recorded run that last passed: run id, commit, time. |
+| proof | yagura's last run of it: the repo, commit, exit code, output, and time. |
 | state | `proven`, `edited` (changed by the developer, not run since), `unproven` (written by the developer, never run), `broken` (its last run failed, with the reason). |
 | author | `doctor`, `agent` (with its agent number), or `you`. |
 
 ### Who writes them
 
 - **The doctor** proposes actions from the answers and the repo, whatever it finds worth having. Nothing limits the kinds.
-- **An agent** that works out a useful command can propose one with `yagura action propose --name … --use … -- <command>`. yagura saves it only when the agent cites a passing recorded run of that command on that repo.
+- **An agent** that works out a useful command can propose one with `yagura action propose --name … --use … -- <command>`. yagura runs the command itself on the agent's repo and saves the action only when that run passes; a failing run is shown to the agent and nothing is saved.
 - **The developer** adds, edits, renames, rewords, and deletes actions on the environment page. An edit is saved at once and marked `edited`; **Run now** proves it as a recorded run.
 - The doctor never overwrites an action the developer edited or wrote. When it thinks one is wrong, it attaches a suggested change that the developer accepts or dismisses.
 
 ### Who uses them
 
 - Every worker, judge, and unit lead brief lists the actions that apply to its repo: name, use, command, inputs, and state. Agents run one through `yagura evidence run -- <command>`, so the run is recorded and can be cited.
-- When a run of an action's command fails, the action becomes `broken` with the run as the reason, and the doctor looks at it on its next run.
+- An action becomes `broken` only when one of yagura's own runs of it fails (Run now, a doctor's check, publishing), or when an agent reports it with `yagura action broken --name … --reason "…"`. A failing test inside a worker's session usually means the code is wrong, not the command, so it changes nothing. A broken action wakes the doctor.
+
+### Proof
+
+Every run that proves or breaks an action is yagura's own, kept in the action's run log: the repo, commit, command, exit code, the tail of its output, and how long it took. yagura runs it in a clean checkout of the repo's base with the environment's values. Agents' recorded runs stay what they are (evidence for the judge); they never prove an action.
 
 ### Actions yagura runs itself
 
