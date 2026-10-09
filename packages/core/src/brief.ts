@@ -53,9 +53,9 @@ ${list(b.readonly.map((r) => `${r.repoId} at ${r.path} @ ${r.sha}${r.version ? `
 ## ACCEPTANCE
 ${list(b.acceptance)}
 
-## TESTS
-${b.test ?? "yagura was not told how this environment runs the repo's tests: work out the command, use it, and say so in your decision log."}
-Commit, then run the command that proves your point with \`yagura evidence run -- <command>\`: yagura runs it itself on your commit and gives you a run id to cite.
+## ENVIRONMENT
+${b.environment}
+Commit before a recorded run: yagura runs it on your commit and gives you a run id to cite.
 
 ## ENV
 ${list(env)}

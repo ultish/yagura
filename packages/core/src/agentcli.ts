@@ -21,7 +21,8 @@ const READS: Record<string, (args: string[]) => boolean> = {
   evidence: () => true,
   settings: (a) => !a.includes("import"),
   thread: (a) => a.length === 0 || ["list", "show", "search", "mentions"].includes(a[0]!),
-  env: (a) => a[0] === "values" || a[0] === "presets" || (a[0] === "notes" && !a.includes("set")),
+  env: (a) => ["values", "presets", "answers", "actions"].includes(a[0] ?? ""),
+  action: (a) => a[0] === "propose" || a[0] === "broken",
   template: (a) => a[0] === "list",
   project: (a) => a[0] === "skills",
 };
@@ -31,7 +32,7 @@ export function agentRefusal(argv: string[], env: NodeJS.ProcessEnv): string | n
   if (!role) return null;
   const [command = "", ...args] = argv;
   if (READS[command]?.(args)) return null;
-  return `yagura ${[command, ...args].join(" ").slice(0, 80)}: refused for the ${role} role. Agents may only read yagura (show, logs, trace, gates, settings, thread list|show|search|mentions, env values|presets|notes, template list, project skills, git); record your work with the record commands (handoff, verdict, finding, rule, amend, review-finding, decide, plan).\n`;
+  return `yagura ${[command, ...args].join(" ").slice(0, 80)}: refused for the ${role} role. Agents may only read yagura (show, logs, trace, gates, settings, thread list|show|search|mentions, env values|presets|answers|actions, template list, project skills, git); record your work with the record commands (${RECORD_COMMANDS.join(", ")}), and offer or report actions with \`yagura action propose|broken\`.\n`;
 }
 
 export const GIT_READS = ["log", "show", "ls-tree", "diff", "grep", "blame"] as const;

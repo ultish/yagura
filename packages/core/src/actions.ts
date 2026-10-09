@@ -281,3 +281,27 @@ export function answerSuggestion(db: Db, id: number, accept: boolean): Action {
   recordEvent(db, "action.suggestion", {}, { action: id, accepted: accept });
   return getAction(db, id);
 }
+
+// What every agent's brief says about its environment: the developer's answers, then the actions for its repo and how to use them.
+export function environmentSection(db: Db, environmentId: EnvironmentId | null, repoId: RepoId | null): string {
+  if (!environmentId) return "This project has no environment, so yagura knows nothing about how things run here: work it out and say so in your decision log.";
+  const env = getEnvironment(db, environmentId);
+  const words = answerLines(env.answers);
+  const actions = repoId ? actionsFor(db, environmentId, repoId) : [];
+  const line = (a: Action) => `- \`${a.name}\` (${a.state}${a.reason ? `: ${a.reason}` : ""}): ${a.use}\n  \`${a.command}\``;
+  return [
+    `Environment ${environmentId}, in the developer's words:`,
+    ...(words.length ? words.map((w) => `- ${w}`) : ["- (no answers yet)"]),
+    "",
+    repoId ? `Actions for ${repoId}: commands for this environment, each proven or broken by yagura's own runs.` : "",
+    ...actions.map(line),
+    ...(repoId && !actions.some((a) => a.name === "test")
+      ? ["- No action runs this repo's tests yet: work out the command from the answers above, use it, and say so in your decision log."]
+      : []),
+    "",
+    "Run an action's command with `yagura evidence run -- <command>` so the run is recorded and can be cited.",
+    'When one does not work here, say so: `yagura action broken --name <name> --reason "…"`. When you work out a command worth keeping, offer it: `yagura action propose --name <name> --use "<when to use it>" -- <command>`; yagura runs it on a clean checkout and keeps it only if it passes.',
+  ]
+    .filter((l, i, all) => l !== "" || all[i - 1] !== "")
+    .join("\n");
+}

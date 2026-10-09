@@ -215,10 +215,9 @@ describe("settings", () => {
     expect(() => setSetting(db, "environment", "dev", "max_attempts", 9)).toThrow(
       "max_attempts cannot be set per environment; it can be set globally or per project or repo",
     );
-    setSetting(db, "environment", "dev", "test.command", "npm test");
+    setSetting(db, "environment", "dev", "timebox.judge_seconds", 600);
     expect(describeSettings(db, { environmentId: "dev" as never }, "environment").map((s) => [s.key, s.source])).toEqual([
-      ["timebox.judge_seconds", "default"],
-      ["test.command", "environment"],
+      ["timebox.judge_seconds", "environment"],
       ["skills.scaffold", "default"],
       ["skills.work", "default"],
       ["lease.keep", "default"],

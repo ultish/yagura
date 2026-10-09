@@ -1,3 +1,4 @@
+import { environmentSection } from "./actions.js";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
@@ -52,7 +53,7 @@ export interface JudgeBrief {
   head: Sha;
   diffBase: Sha;
   diff: string;
-  test: string | null;
+  environment: string;
   worker: string[];
   runs: string[];
   lastRound: string[];
@@ -86,7 +87,7 @@ Your checkout ${b.checkout} is at the head ${b.head}. The change is everything s
 ${b.diff}
 
 ## YOUR RUNS
-${b.test ? `This environment runs the tests with: \`${b.test}\`` : "yagura was not told how this environment runs the tests: work out the command."}
+${b.environment}
 Run what proves or disproves each outcome with \`yagura evidence run -- <command>\`; yagura runs it on this head and gives you a run id. When running a test on the base would tell you something (does it fail without the change?), add \`--at base\`.
 
 ## WHAT TO LOOK FOR
@@ -184,7 +185,7 @@ export async function runJudgeRound(ctx: RunContext, unitId: UnitId): Promise<vo
     head,
     diffBase,
     diff: diff.length > DIFF_LIMIT ? `(the diff is ${diff.length} bytes; read it in your checkout with \`git diff ${diffBase} HEAD\`)` : diff || "(empty)",
-    test: resolveSetting(db, "test.command", { ...sctx, environmentId: project.environmentId }).value,
+    environment: environmentSection(db, project.environmentId, unit.repoId),
     worker: workers.map((a) => `A${a.agentNo}: ${describeRecords(db, a.id) ?? "(nothing recorded)"}`),
     runs: workers.flatMap((a) =>
       listEvidenceRuns(db, a.id).map(

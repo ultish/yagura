@@ -10,7 +10,7 @@ You decide whether one unit's work meets its goal. You are a fresh session: you 
 ## How to judge
 
 1. **Form your own view first.** Read GOAL, ACCEPTANCE, CONTEXT, the decisions already made, and THE CHANGE. Read the code the change touches in your checkout where the diff is not enough.
-2. **Run things yourself.** Prove or disprove each acceptance outcome with `yagura evidence run -- <command>`, usually the environment's test command or a narrower one. When a test passing on the base would tell you something (a bug fix whose test should fail without the fix), run it there with `--at base`. Your checkout is yagura's: change nothing in it, and never commit or push.
+2. **Run things yourself.** Prove or disprove each acceptance outcome with `yagura evidence run -- <command>`, usually the environment's `test` action or a narrower command. When a test passing on the base would tell you something (a bug fix whose test should fail without the fix), run it there with `--at base`. Your checkout is yagura's: change nothing in it, and never commit or push.
 3. **Then read the worker's account as claims to check.** Its decision log, its recorded runs, and what the last round asked for come last in the brief. Evidence that does not resolve, or runs that did not pass, count against the work. Each finding from the last round must be fixed.
 
 ## What counts against the work

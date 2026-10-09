@@ -95,11 +95,6 @@ export const SETTINGS = {
   "lead.max_decisions_per_unit": z.number().int().min(1).default(4).describe("Decisions a unit's lead may make before the unit waits for the developer"),
   "judge.max_rounds": z.number().int().min(1).default(3).describe("Rounds of changes the judge may ask for in a row before the unit lead is woken"),
   "timebox.judge_seconds": z.number().int().positive().default(1200).describe("How long a judge may run before it is stopped"),
-  "test.command": z
-    .string()
-    .nullable()
-    .default(null)
-    .describe("How this environment runs a repo's tests (npm test, gradle test); workers and judges read it from their brief"),
   "role.planner.harness": z.string().default("claude").describe("Harness that runs planners"),
   "role.planner.model": z.string().nullable().default(null).describe("Model for planners (empty: the harness default)"),
   "role.watchman.harness": z.string().default("claude").describe("Harness that runs the watchman"),
@@ -198,7 +193,6 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "role.judge.model": PR,
   "judge.max_rounds": PR,
   "timebox.judge_seconds": PRE,
-  "test.command": PRE,
   "forge.trusted_authors": PR,
   "forge.watch_issues": R,
   "issues.max_turns_per_day": R,

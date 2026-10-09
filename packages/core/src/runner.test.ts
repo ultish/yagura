@@ -125,7 +125,7 @@ describe("runWorkerRound", () => {
     const { unit, attempt, paths } = await run("success");
     const brief = readFileSync(paths.brief(project, unit.seq, attempt.n), "utf8");
     expect(brief).toContain("## ENV\n- MARKER=edited by fake agent (the text every fake edit starts with)\n");
-    expect(brief).toContain("- About this environment: deps run in the cluster");
+    expect(brief).toContain("## ENVIRONMENT\nEnvironment dev, in the developer's words:\n- deps run in the cluster\n");
     expect(unit.state).toBe("judging");
     expect(attempt).toMatchObject({ state: "handed_off" });
   });

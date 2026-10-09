@@ -103,7 +103,7 @@ The check is `git merge-tree --write-tree <unit branch> <base>`, which computes 
 
 ## Recorded runs
 
-`yagura evidence run -- <command>` is how an agent runs something whose result counts as evidence. The agent chooses the command: usually the environment's test command, or a narrower one (one test file, one check) when that proves the point better. yagura runs it itself in the unit's checkout, with the environment's values, and records the command, the commit it ran on, the exit code, the output, and the time. The agent gets the output and a run id (`run:42`) to cite.
+`yagura evidence run -- <command>` is how an agent runs something whose result counts as evidence. The agent chooses the command: usually the environment's `test` action, or a narrower one (one test file, one check) when that proves the point better. yagura runs it itself in the unit's checkout, with the environment's values, and records the command, the commit it ran on, the exit code, the output, and the time. The agent gets the output and a run id (`run:42`) to cite.
 
 An agent cannot write a run itself, so a cited run is proof that the command ran on that commit with that result. A claim with no run behind it ("tests pass") is just a claim.
 
@@ -149,7 +149,7 @@ Plans a project's goal into units: goal, acceptance, context, repo, base, order.
 
 ## The test command
 
-Each environment's settings say how a repo's tests run (`gradle test`, `npm test`); the developer sets it there with the rest of the environment. Workers and the judge read it from their brief. When it is missing, the agent works out a command, uses it, and says so in its decision log, and the unit lead asks the developer to add it.
+The environment's `test` action says how a repo's tests run (`docs/design/environment-actions.md`): the doctor works it out from the developer's answers and proves it, and the developer can edit it. Workers, judges, and unit leads read every action for their repo in their brief. When there is no `test` action, the agent works out a command, uses it, says so in its decision log, and may offer it with `yagura action propose`.
 
 ## The few hard rules yagura enforces
 

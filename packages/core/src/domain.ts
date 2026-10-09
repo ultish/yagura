@@ -304,8 +304,8 @@ export interface RenderedBrief {
   context: string[];
   readonly: { repoId: RepoId; path: string; sha: Sha; version?: string }[];
   acceptance: string[];
-  // How the environment runs the repo's tests, or null when it does not say.
-  test: string | null;
+  // The environment's answers and actions, as \`environmentSection\` writes them.
+  environment: string;
   env: Record<string, string>;
   envNotes?: Record<string, string>;
   timeboxMinutes: number;

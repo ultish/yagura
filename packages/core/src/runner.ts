@@ -8,7 +8,7 @@ import { checkoutUnit, commitBaseMerge, createUnitBranch, mergeWithBase, publish
 import { resolveSetting } from "./config.js";
 import { isBuild, type Attempt, type EnvironmentId, type ProjectId, type RenderedBrief, type RepoId, type Sha, type Unit, type UnitId } from "./domain.js";
 import { listValues, valueMap } from "./envvalues.js";
-import { answerLines } from "./actions.js";
+import { environmentSection } from "./actions.js";
 import { classifyFailure, ensureRecorded, savedHandoff, sessionReport, syntheticFailureHandoff } from "./finish.js";
 import { forgeFor, getMergeRequest, saveMergeRequest } from "./forge.js";
 import { addDetachedWorktree, discardLeftovers, ensureMirror, git, headSha, resolveRef } from "./git.js";
@@ -131,13 +131,12 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
     context: [
       ...unit.context,
       ...unit.notes.map((n) => `Note: ${n}`),
-      ...(project.environmentId ? answerLines(getEnvironment(db, project.environmentId).answers).map((l) => `About this environment: ${l}`) : []),
       ...(round.kind === "first" ? [] : [roundText(round)]),
       ...earlier.map((a) => `What worker A${a.agentNo} recorded:\n${describeRecords(db, a.id) ?? "(nothing)"}`),
     ],
     readonly: references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
     acceptance: unit.acceptance,
-    test: resolveSetting(db, "test.command", { ...sctx, environmentId: project.environmentId }).value,
+    environment: environmentSection(db, project.environmentId, repo.id),
     env: envValues,
     envNotes: Object.fromEntries(
       listValues(db, project.environmentId as EnvironmentId)

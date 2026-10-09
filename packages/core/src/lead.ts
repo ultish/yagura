@@ -1,3 +1,4 @@
+import { environmentSection } from "./actions.js";
 import { mkdirSync } from "node:fs";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
@@ -181,6 +182,9 @@ ${unit.notes.length ? `- notes:\n${unit.notes.map((n) => `  - ${n}`).join("\n")}
 
 ## THE RECORD
 ${record.join("\n\n") || "(nothing yet)"}
+
+## THE ENVIRONMENT
+${environmentSection(db, project.environmentId, unit.repoId)}
 
 ## YOUR CHOICES
 ${Object.values(ACTIONS)
