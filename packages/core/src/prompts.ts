@@ -9,7 +9,7 @@ import { now, type Db } from "./store.js";
 // Each role's prompt has a contract yagura parses (the brief: handoff format, evidence and scope rules; visible, never
 // editable) and guidance on how to do the job (its overlay skill's body), which the developer may override globally or
 // per project. Notes are extra standing orders per role, or for every role ("all").
-export const PROMPT_ROLES = ["planner", "worker", "judge", "lead", "watchman"] as const;
+export const PROMPT_ROLES = ["planner", "worker", "judge", "lead", "watchman", "doctor"] as const;
 export type PromptRole = (typeof PROMPT_ROLES)[number];
 export const PROMPT_SCOPES = ["global", "project"] as const;
 export type PromptScope = (typeof PROMPT_SCOPES)[number];

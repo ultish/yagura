@@ -95,7 +95,7 @@ export const ATTEMPT_STATES = ["queued", "running", "handed_off", "failed", "sto
 export type AttemptState = (typeof ATTEMPT_STATES)[number];
 
 // What an agent records through its yagura commands; the engine reads these, never the final message.
-export const RECORD_KINDS = ["handoff", "judge", "decision", "plan"] as const;
+export const RECORD_KINDS = ["handoff", "judge", "decision", "plan", "doctor"] as const;
 export type RecordKind = (typeof RECORD_KINDS)[number];
 
 export const HANDOFF_STATUSES = ["done", "stuck"] as const;

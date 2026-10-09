@@ -70,6 +70,7 @@ export const REQUIRED_SKILLS: Partial<Record<Role, readonly string[]>> = {
   judge: ["yagura:yagura-judge"],
   lead: ["yagura:yagura-unit-lead"],
   watchman: ["yagura:yagura-watchman"],
+  doctor: ["yagura:yagura-doctor"],
 };
 
 export function missingSkills(role: Role, loaded: readonly string[], project: readonly string[] = []): string[] {

@@ -217,6 +217,9 @@ describe("settings", () => {
     );
     setSetting(db, "environment", "dev", "timebox.judge_seconds", 600);
     expect(describeSettings(db, { environmentId: "dev" as never }, "environment").map((s) => [s.key, s.source])).toEqual([
+      ["role.doctor.harness", "default"],
+      ["role.doctor.model", "default"],
+      ["timebox.doctor_seconds", "default"],
       ["timebox.judge_seconds", "environment"],
       ["skills.scaffold", "default"],
       ["skills.work", "default"],

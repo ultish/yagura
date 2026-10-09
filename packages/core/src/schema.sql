@@ -173,7 +173,7 @@ CREATE INDEX attempts_state ON attempts (state);
 CREATE TABLE agent_records (
   id INTEGER PRIMARY KEY,
   attempt_id INTEGER NOT NULL REFERENCES attempts (id),
-  kind TEXT NOT NULL CHECK (kind IN ('handoff', 'judge', 'decision', 'plan')),
+  kind TEXT NOT NULL CHECK (kind IN ('handoff', 'judge', 'decision', 'plan', 'doctor')),
   key TEXT NOT NULL DEFAULT '',
   data_json TEXT NOT NULL,
   created_at TEXT NOT NULL,

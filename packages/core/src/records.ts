@@ -61,11 +61,18 @@ export const DecisionRecord = z
     if (d.action !== "ask" && d.question) issue("--question only goes with ask", "question");
   });
 
+// The doctor's report on its repo: what works (with the action that does it), what fails and why, what it cannot tell.
+export const DoctorRecord = z
+  .object({ works: lines, fails: lines, unknown: lines })
+  .strict()
+  .refine((d) => d.works.length + d.fails.length + d.unknown.length > 0, { message: "report at least one line: --works, --fails, or --unknown" });
+
 export const RECORD_SCHEMAS = {
   handoff: HandoffRecord,
   judge: JudgeRecord,
   decision: DecisionRecord,
   plan: PlanDelta,
+  doctor: DoctorRecord,
 } as const;
 export type LiveRecordKind = keyof typeof RECORD_SCHEMAS;
 export type RecordData<K extends LiveRecordKind> = z.output<(typeof RECORD_SCHEMAS)[K]>;
@@ -76,6 +83,7 @@ export const ROLE_RECORDS: Partial<Record<Role, readonly LiveRecordKind[]>> = {
   judge: ["judge"],
   lead: ["decision", "plan"],
   planner: ["plan"],
+  doctor: ["doctor"],
 };
 
 export const issuesOf = (e: z.ZodError) => e.issues.map((i) => `${i.path.join(".") || "(input)"}: ${i.message}`).join("; ");
@@ -144,6 +152,8 @@ export function missingRecords(db: Db, attemptId: AttemptId, role: Role): string
       return has("plan") ? [] : ["no plan: write the delta to a file and run `yagura plan --file <path>`"];
     case "watchman":
       return [];
+    case "doctor":
+      return has("doctor") ? [] : ['no report: run `yagura doctor --works "…" --fails "…" --unknown "…"` with what you found'];
     default:
       return has("handoff") ? [] : ['no handoff: run `yagura handoff done` when the unit\'s goal is met, or `yagura handoff stuck --reason "…"`'];
   }

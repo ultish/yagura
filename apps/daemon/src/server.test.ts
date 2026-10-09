@@ -133,7 +133,7 @@ describe("daemon API", () => {
       allNotes: string | null;
     };
     const view = (await (await get(`/api/prompts?project=${project}`)).json()) as View;
-    expect(view.roles.map((r) => r.role)).toEqual(["planner", "worker", "judge", "lead"]);
+    expect(view.roles.map((r) => r.role)).toEqual(["planner", "worker", "judge", "lead", "doctor"]);
     expect(view.roles.find((r) => r.role === "worker")).toMatchObject({ source: "default", lastAttemptId: expect.any(Number) });
     const set = (await (
       await put({ scope: "project", projectId: project, role: "planner", kind: "guidance", text: "One unit per feature, with its tests." })

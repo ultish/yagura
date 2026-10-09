@@ -27,6 +27,7 @@ import {
   recordEvent,
   setAndon,
   projectCost,
+  projectRepos,
   setProjectState,
   transitionUnit,
   updateAttempt,
@@ -37,6 +38,7 @@ import { answerIssue, listIssues, pollIssues, watchedRepos } from "./issues.js";
 import { postReport, reportKey, type ReportKind } from "./report.js";
 import { listThreads } from "./threads.js";
 import { listTurns, stopTurn } from "./turns.js";
+import { doctorWake, runDoctorRound } from "./doctor.js";
 import { sweepWorktrees } from "./worktrees.js";
 import { savedHandoff } from "./finish.js";
 
@@ -225,6 +227,24 @@ export class Engine {
     }
   }
 
+  // A repo gets a doctor when none has looked at it in this environment, when the developer asks, or when an action for it broke.
+  // One doctor per repo and environment at a time, whichever project woke it.
+  private doctors(project: Project): void {
+    if (!project.environmentId) return;
+    for (const repo of projectRepos(this.db, project.id)) {
+      const key = `doctor:${project.environmentId}:${repo.id}`;
+      if (this.inflight.has(key)) continue;
+      const wake = doctorWake(this.db, project.id, repo.id);
+      if (!wake || !this.slotFree(project, resolveSetting(this.db, "role.doctor.harness", { projectId: project.id }).value)) continue;
+      this.start(
+        key,
+        `doctor ${repo.id} (${wake.trigger})`,
+        () => runDoctorRound(this.ctx, project.id, repo.id, wake),
+        (e) => this.log(`✗ doctor ${repo.id}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`),
+      );
+    }
+  }
+
   // A unit leaving waiting starts its first round, or a fresh worker when an earlier one stopped or failed.
   private roundFromWaiting(u: Unit) {
     const round = currentRound(this.db, u.id);
@@ -294,7 +314,7 @@ export class Engine {
 
   private maybeClose(project: Project): boolean {
     const delta = latestDelta(this.db, project.id);
-    const units = listUnits(this.db, project.id).filter((u) => u.type !== "plan");
+    const units = listUnits(this.db, project.id).filter(isBuild);
     if (!delta?.done || this.planNeeded(project) || units.some((u) => !TERMINAL_STATES.has(u.state) && u.state !== "stuck")) return false;
     if ([...this.inflight.keys()].some((k) => k === `plan:${project.id}`)) return false;
     setProjectState(this.db, project.id, "closed");
@@ -449,6 +469,7 @@ export class Engine {
           () => undefined,
         );
       this.spawn(project);
+      this.doctors(project);
     }
     this.baseMoves();
     this.report(this.scope());
@@ -463,6 +484,7 @@ export class Engine {
       if (p.state !== "active") return true;
       if (p.andonReason || held) return true;
       if (this.planNeeded(p)) return false;
+      if (p.environmentId && projectRepos(this.db, p.id).some((r) => doctorWake(this.db, p.id, r.id))) return false;
       if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
       // A ready unit is settled only while it waits for the developer's go.
       const waitsForYou = (u: Unit) => listGates(this.db, p.id, "open").some((g) => g.unitId === u.id);

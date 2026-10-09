@@ -124,6 +124,7 @@ import {
   getAction,
   runAction,
   actionAgentCli,
+  requestDoctor,
 } from "@yagura/core";
 
 const USAGE = `yagura — agent orchestration
@@ -149,6 +150,7 @@ const USAGE = `yagura — agent orchestration
   yagura action run <env> <name> [--repo <id>]   run it now on a clean checkout of the repo's main; proves or breaks it
   yagura action rm <env> <name> [--repo <id>]
   yagura action propose --name <name> --use <text> [--all] -- <command> | broken --name <name> --reason <text>   (inside an agent session)
+  yagura env doctor <id> [--note <text>]         ask for a doctor on each repo of the active projects in the environment
   yagura env actions <id>                        the commands agents and yagura may run there, with what each is for and whether it is proven
   yagura template list
   yagura template save <env> <name> [--description <text>] [--ask <NAME>...]
@@ -699,6 +701,11 @@ async function main() {
         if (typeof values.text !== "string") fail("env answer needs --text");
         setAnswers(db, a as EnvironmentId, { [b]: values.text });
         console.log(`${a}: ${ANSWER_QUESTIONS[b as AnswerKey]} saved`);
+        return;
+      }
+      if (sub === "doctor" && id) {
+        requestDoctor(db, id as EnvironmentId, values.note ?? "");
+        console.log(`asked for a doctor on every repo of the active projects in ${id}; the daemon starts it`);
         return;
       }
       if (sub === "answers" && id) {

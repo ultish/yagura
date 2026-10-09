@@ -247,6 +247,12 @@ async function engine(role) {
   }
   // FAKE_LEAD=<action> decides that; otherwise the lead answers by what woke it: a comment is sent to the worker with a reply on the
   // pull request, a judge's question is answered, anything else gets a fresh worker.
+  // The fake doctor offers a test action that always passes and reports it; FAKE_DOCTOR=fail offers one that cannot pass.
+  if (role === "doctor") {
+    const proposed = yg("action", "propose", "--name", "test", "--use", "Runs the whole suite.", "--", process.env.FAKE_DOCTOR === "fail" ? "false" : "true");
+    record([["doctor", ...(proposed?.code === 0 ? ["--works", "tests: test"] : ["--fails", "tests: the fake command failed"])]]);
+    return finish("Doctor done.");
+  }
   if (role === "lead") {
     const woken = /## WHY YOU WERE WOKEN\n(.*)/.exec(brief)?.[1] ?? "";
     const action = process.env.FAKE_LEAD ?? (/commented/.test(woken) ? "resume" : /judge asks/.test(woken) ? "answer" : "fresh");

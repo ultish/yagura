@@ -109,6 +109,8 @@ import {
   answerSuggestion,
   getAction,
   runAction,
+  doctorReports,
+  requestDoctor,
   setValue,
   artifactContentType,
   artifactName,
@@ -456,6 +458,11 @@ export function createApp(opts: ServerOptions): Hono {
     );
     return c.json({ started: true }, 202);
   });
+  app.get("/api/environments/:id/doctor", (c) => c.json(doctorReports(db, c.req.param("id") as EnvironmentId)));
+  app.post("/api/environments/:id/doctor", async (c) => {
+    requestDoctor(db, c.req.param("id") as EnvironmentId, String(((await c.req.json().catch(() => ({}))) as { note?: string }).note ?? ""));
+    return c.json({ asked: true });
+  });
   app.post("/api/actions/:id/delete", (c) => {
     deleteAction(db, Number(c.req.param("id")));
     return c.json({ deleted: true });
@@ -654,6 +661,7 @@ export function createApp(opts: ServerOptions): Hono {
     judge: "work",
     lead: "work",
     watchman: "",
+    doctor: "doctor",
   };
   const promptsView = (projectId: string | null) => ({
     projectId,
