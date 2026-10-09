@@ -5,8 +5,7 @@ import { RoleLabel } from "../ui/RoleIcon";
 import { plural, since } from "../lib/format";
 import { Link } from "../ui/Link";
 import { Row, useAction } from "../ui/rows";
-import { ScopedSettings } from "../ui/settings";
-import { EnvironmentValues, NewFromTemplate, Templates } from "./environment-values";
+import { NewFromTemplate, Templates } from "./environment-values";
 
 const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "7px 10px", fontSize: 13 } as const;
 const PROVIDERS = ["local-process", "kube-namespace"];
@@ -134,9 +133,9 @@ function AddEnvironment({ onAdded }: { onAdded: () => void }) {
         </div>
       )}
       <div className="muted" style={{ fontSize: 13 }}>
-        Verification runs inside a slot of the project's environment. local-process gives each slot a private directory and a free port on this machine.
-        kube-namespace gives each slot its own namespace labelled yagura=1 (or one from your pool, where only yagura-labelled resources are deleted). yagura
-        checks nothing up front: if a verifier cannot reach something here, verification on this environment pauses and asks you.
+        Agents run inside a slot of the project's environment. local-process gives each slot a private directory and a free port on this machine. kube-namespace
+        gives each slot its own namespace labelled yagura=1 (or one from your pool, where only yagura-labelled resources are deleted). Open an environment to
+        say how it works in your own words; the doctor turns that into actions agents and yagura run.
       </div>
       {action.error && (
         <div className="s-bell" style={{ fontSize: 13 }}>
@@ -305,8 +304,6 @@ function Holders({ v }: { v: EnvironmentView }) {
 export function Environments() {
   const { data, error, reload } = useApi<EnvironmentView[]>("/api/environments");
   const [editing, setEditing] = useState<string | null>(null);
-  const [settings, setSettings] = useState<string | null>(null);
-  const [valuesFor, setValuesFor] = useState<string | null>(null);
   return (
     <main style={{ padding: "26px 36px 48px", display: "flex", flexDirection: "column", gap: 24 }}>
       <h1 className="serif" style={{ margin: 0, fontSize: 34, fontWeight: 600 }}>
@@ -334,7 +331,8 @@ export function Environments() {
             return (
               <Row
                 key={e.id}
-                seq={e.id}
+                seq={<Link to={`/e/${e.id}`}>{e.id}</Link>}
+                to={`/e/${e.id}`}
                 goal={
                   <>
                     {e.name}{" "}
@@ -347,11 +345,6 @@ export function Environments() {
                 tone={o.tone}
                 facts={
                   <>
-                    {v.pausedBy !== null && (
-                      <span className="s-bell">
-                        verification paused: <Link to="/gates">gate {v.pausedBy}</Link>
-                      </span>
-                    )}
                     {settingsOf(v) && <span>{settingsOf(v)}</span>}
                     {v.projects.length ? (
                       <span>
@@ -380,18 +373,13 @@ export function Environments() {
                         }}
                       />
                     )}
-                    {settings === e.id && <ScopedSettings scope="environment" id={e.id} />}
-                    {valuesFor === e.id && <EnvironmentValues id={e.id} onChanged={reload} />}
                   </>
                 }
                 actions={
                   <>
-                    <button className="btn" type="button" aria-expanded={valuesFor === e.id} onClick={() => setValuesFor(valuesFor === e.id ? null : e.id)}>
-                      Values
-                    </button>
-                    <button className="btn" type="button" aria-expanded={settings === e.id} onClick={() => setSettings(settings === e.id ? null : e.id)}>
-                      Settings
-                    </button>
+                    <Link className="btn" to={`/e/${e.id}`}>
+                      Open
+                    </Link>
                     {editing !== e.id && (
                       <button className="btn" type="button" onClick={() => setEditing(e.id)}>
                         Edit

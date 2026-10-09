@@ -1,6 +1,6 @@
 # Environment answers, actions, and the doctor (draft for the developer)
 
-Status: agreed 2026-10-10 (layout B, tabs). Extends `core-loop.md` for CL8.
+Status: agreed and built 2026-10-10 (layout B, tabs). Extends `core-loop.md` for CL8.
 
 ## Why
 

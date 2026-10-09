@@ -919,6 +919,130 @@ button.story-time {
 button.story-time:hover {
   color: var(--info);
 }
+.env-now {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+}
+.env-tab {
+  margin-top: 16px;
+}
+.env-tab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.env-answer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px 20px;
+  margin: 8px 0 12px;
+}
+.env-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--soft);
+}
+.env-actions td {
+  vertical-align: top;
+}
+.env-actions tr.env-broken {
+  background: var(--panel-off);
+}
+.env-name {
+  font: inherit;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.env-name:hover {
+  color: var(--amber-text);
+  text-decoration: underline;
+}
+.env-yagura {
+  font-family: inherit;
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pine);
+}
+.env-command {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.env-suggestion {
+  margin-top: 8px;
+  border: 1px dashed var(--bad-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+  font-size: 13.5px;
+}
+.env-suggestion b {
+  color: var(--bell-text);
+  font-weight: 600;
+}
+.env-action-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px 16px;
+  background: var(--bg2);
+  border: 1px solid var(--btnline);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin: 8px 0;
+}
+.env-action-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.env-action-form .wide {
+  grid-column: 1 / -1;
+}
+.env-form-note {
+  grid-column: 1 / -1;
+  font-size: 13px;
+  color: var(--amber-text);
+}
+.env-doctor section + section {
+  margin-top: 18px;
+}
+.env-doctor h3 {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: baseline;
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+.env-report {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.env-report li {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 10px;
+  font-size: 14px;
+}
 @media (max-width: 640px) {
   .story-entry {
     grid-template-columns: minmax(0, 1fr);
@@ -1233,6 +1357,7 @@ button.story-time:hover {
 /* The unit hub: Story, Agents, and Code as tabs of one unit. */
 .hub-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0;
   border-bottom: 1px solid var(--line2);
   margin: 14px 0 16px;
@@ -1308,6 +1433,7 @@ button.story-time:hover {
   font-size: 12px;
 }
 .hub-table-wrap {
+  position: relative;
   overflow-x: auto;
 }
 .hub-table {

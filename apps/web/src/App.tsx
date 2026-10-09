@@ -12,6 +12,7 @@ import { Home } from "./pages/Home";
 import { Project } from "./pages/Project";
 import { Projects } from "./pages/Projects";
 import { Environments } from "./pages/Environments";
+import { Environment } from "./pages/Environment";
 import { Gates } from "./pages/Gates";
 import { Repos } from "./pages/Repos";
 import { Settings } from "./pages/Settings";
@@ -43,7 +44,7 @@ const NAV = [
   { to: "/agents", label: "Agents", match: (p: string) => p.startsWith("/agents") || p.startsWith("/a/") },
   { to: "/gates", label: "Gates", match: (p: string) => p === "/gates" },
   { to: "/repos", label: "Repos", match: (p: string) => p === "/repos" || p.startsWith("/r/") },
-  { to: "/environments", label: "Environments", match: (p: string) => p === "/environments" },
+  { to: "/environments", label: "Environments", match: (p: string) => p === "/environments" || p.startsWith("/e/") },
   { to: "/settings", label: "Settings", match: (p: string) => p === "/settings" || p === "/prompts" },
 ];
 
@@ -122,6 +123,7 @@ function Routes() {
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)\/(\d+)\/?$/.exec(path))) return <UnitAgent projectId={m[1]!} seq={Number(m[2])} n={Number(m[3])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/u\/(\d+)\/?$/.exec(path))) return <Unit key={path} projectId={m[1]!} seq={Number(m[2])} />;
   if ((m = /^\/p\/([a-z][a-z0-9-]*)\/?$/.exec(path))) return <Project id={m[1]!} />;
+  if ((m = /^\/e\/([a-z][a-z0-9-]*)\/?$/.exec(path))) return <Environment key={m[1]} id={m[1]!} />;
   if ((m = /^\/r\/([a-z][a-z0-9-]*)\/?$/.exec(path)))
     return (
       <Suspense

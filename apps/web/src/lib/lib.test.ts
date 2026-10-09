@@ -502,3 +502,14 @@ describe("atEnd", () => {
     expect(atEnd({ scrollY: 0, viewport: 800, height: 600 })).toBe(true);
   });
 });
+
+describe("the browser bundle", () => {
+  it("takes only types from @yagura/core's main entry; values come from @yagura/core/domain, which imports nothing", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const root = new URL("..", import.meta.url).pathname;
+    const files = (readdirSync(root, { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f) && !f.endsWith(".test.ts"));
+    const offenders = files.filter((f) => /^import (?!type )[^;]*from "@yagura\/core";/m.test(readFileSync(join(root, f), "utf8")));
+    expect(offenders).toEqual([]);
+  });
+});
