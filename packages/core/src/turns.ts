@@ -103,11 +103,11 @@ export function listTurns(db: Db, recent = 20): WatchmanTurn[] {
   ).map(toTurn);
 }
 
-export function stopTurn(db: Db, id: number): boolean {
+export function stopTurn(db: Db, id: number, reason = "you stopped the watchman"): boolean {
   const turn = getTurn(db, id);
   if (turn.state !== "running") return false;
   endTurn(db, id, "stopped");
-  recordEvent(db, "watchman.stopped", {}, { thread: turn.threadId, turn: id });
+  recordEvent(db, "watchman.stopped", {}, { thread: turn.threadId, turn: id, reason });
   if (turn.pid)
     try {
       process.kill(-turn.pid, "SIGTERM");

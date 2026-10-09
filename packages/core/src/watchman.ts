@@ -744,12 +744,19 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
       logPath: log,
     });
     const stopped = getTurn(db, turnId).state === "stopped";
+    const why = stopped
+      ? (db
+          .prepare(
+            "SELECT json_extract(data_json, '$.reason') AS r FROM events WHERE type = 'watchman.stopped' AND json_extract(data_json, '$.turn') = ? ORDER BY id DESC LIMIT 1",
+          )
+          .get(turnId) as { r: string | null } | undefined)
+      : undefined;
     if (result.final?.text.trim() && !result.final.isError && !result.timedOut) return { text: result.final.text, problem: null, lost: false };
     return {
       text: null,
       lost: Boolean(resume) && !started && !stopped,
       problem: stopped
-        ? "you stopped the watchman"
+        ? (why?.r ?? "you stopped the watchman")
         : result.timedOut
           ? "the watchman ran out of time"
           : `the watchman ended without a reply (exit ${result.exitCode ?? result.signal})`,

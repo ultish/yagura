@@ -36,6 +36,7 @@ import { activeHold } from "./limits.js";
 import { answerIssue, listIssues, pollIssues, watchedRepos } from "./issues.js";
 import { postReport, reportKey, type ReportKind } from "./report.js";
 import { listThreads } from "./threads.js";
+import { listTurns, stopTurn } from "./turns.js";
 import { sweepWorktrees } from "./worktrees.js";
 import { savedHandoff } from "./finish.js";
 
@@ -540,6 +541,7 @@ export class Engine {
     }
     for (const a of this.db.prepare("SELECT id FROM attempts WHERE state = 'running'").all() as { id: number }[])
       stopAttempt(this.db, a.id as never, "yagura daemon shut down");
+    for (const t of listTurns(this.db).filter((x) => x.state === "running")) stopTurn(this.db, t.id, "the yagura daemon shut down; send your message again");
     await Promise.allSettled(this.inflight.values());
   }
 

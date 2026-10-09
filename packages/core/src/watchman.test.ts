@@ -551,6 +551,30 @@ describe("watchman turns", () => {
     expect((await runWatchmanTurn(ctx, t.id, "prototype a chain")).problem).toBeNull();
     expect(listTurns(db).map((x) => x.state)).toEqual(["done", "stopped"]);
   });
+
+  it("stops a running turn when the daemon shuts down, and tells the thread why", async () => {
+    const { Engine } = await import("./engine.js");
+    const t = createThread(db, { title: "t" });
+    process.env.FAKE_DELAY_MS = "20000";
+    try {
+      const turn = runWatchmanTurn(ctx, t.id, "prototype a chain");
+      let running = runningTurn(db, t.id);
+      for (let i = 0; i < 100 && !running?.pid; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        running = runningTurn(db, t.id);
+      }
+      const pid = running!.pid!;
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      const abort = new AbortController();
+      const daemon = new Engine(ctx, { tickMs: 50 }).runForever(abort.signal);
+      abort.abort();
+      await daemon;
+      expect((await turn).problem).toBe("the yagura daemon shut down; send your message again");
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      delete process.env.FAKE_DELAY_MS;
+    }
+  });
 });
 
 describe("specs in the store", () => {
