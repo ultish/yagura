@@ -190,7 +190,36 @@ if (command === "evidence") {
   process.stdout.write(result.output);
   process.exit(result.code);
 }
+// Help and unknown commands answer before anything opens a home: `yagura daemon --help` once started a real daemon.
+const HELP_FLAGS = new Set(["--help", "-h"]);
+const usageOf = (cmd: string) => {
+  const out: string[] = [];
+  let mine = false;
+  for (const l of USAGE.split("\n").slice(1)) {
+    const named = /^ {2}yagura ([\w-]+)/.exec(l);
+    if (named) mine = named[1] === cmd;
+    else if (!/^ {3,}/.test(l)) mine = false;
+    if (mine) out.push(l);
+  }
+  return out.length ? out.join("\n") : null;
+};
+if (!command || command === "help" || HELP_FLAGS.has(command)) {
+  console.log((rest[0] && usageOf(rest[0])) ?? USAGE);
+  process.exit(0);
+}
+if (rest.some((a) => HELP_FLAGS.has(a))) {
+  console.log(usageOf(command) ?? USAGE);
+  process.exit(0);
+}
+if (!usageOf(command)) {
+  process.stderr.write(`yagura: no command "${command}"\n${USAGE}\n`);
+  process.exit(2);
+}
 if (command === "daemon") {
+  if (rest.length) {
+    process.stderr.write(`yagura daemon takes no arguments (got ${rest.join(" ")}); set YAGURA_HOME, YAGURA_BIND, YAGURA_PORT instead\n`);
+    process.exit(2);
+  }
   const { startDaemon } = await import("@yagura/daemon");
   await startDaemon([process.execPath, fileURLToPath(import.meta.url)]);
   process.exit(0);
