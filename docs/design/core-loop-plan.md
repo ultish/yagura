@@ -325,7 +325,7 @@ Each live lane runs against its own isolated checkout, a worktree, or an `Agent`
 
 **Build.**
 
-- [ ] Prototype two layouts of the unit page on real CL4 data first, and build the one the developer picks.
+- [x] Prototype two layouts of the unit page on real CL4 data first, and build the one the developer picks. Neither first pair (rounds; state rail and feed) was liked; the developer shaped a third over several rounds and agreed it on 2026-10-09: status card, compact state graphic, tabs with the timeline. The full description is in `docs/STATUS.md`; the canvas is https://claude.ai/artifact/RdSWDjxwHE5PWzgw6oCmmK.
 - [ ] Show the unit's states, each worker round, each judge verdict with its findings, the unit lead's decisions, and the pull request.
 
 **You see.**
