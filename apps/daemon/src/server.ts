@@ -107,6 +107,8 @@ import {
   saveAction,
   deleteAction,
   answerSuggestion,
+  getAction,
+  runAction,
   setValue,
   artifactContentType,
   artifactName,
@@ -443,6 +445,16 @@ export function createApp(opts: ServerOptions): Hono {
   app.post("/api/environments/:id/actions", async (c) => {
     const b = (await c.req.json()) as { id?: number; repoId?: string | null; name: string; use: string; command: string };
     return c.json(saveAction(db, { ...b, environmentId: c.req.param("id") as EnvironmentId, repoId: (b.repoId || null) as RepoId | null }));
+  });
+  app.post("/api/actions/:id/run", async (c) => {
+    const id = Number(c.req.param("id"));
+    const repoId = (((await c.req.json().catch(() => ({}))) as { repoId?: string }).repoId || null) as RepoId | null;
+    const a = getAction(db, id);
+    if (!a.repoId && !repoId) return c.json({ error: `${a.name} applies to every repo here; say which repo to run it on` }, 400);
+    void runAction({ db, boot }, id, repoId, { by: "you" }).catch((e: unknown) =>
+      recordEvent(db, "action.run_failed", {}, { action: id, error: e instanceof Error ? e.message : String(e) }),
+    );
+    return c.json({ started: true }, 202);
   });
   app.post("/api/actions/:id/delete", (c) => {
     deleteAction(db, Number(c.req.param("id")));

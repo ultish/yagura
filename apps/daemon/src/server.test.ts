@@ -337,7 +337,10 @@ describe("daemon API", () => {
       ["REDIS_URL", "you"],
       ["REGISTRY_PUSH", "registry"],
     ]);
-    expect(detail).toMatchObject({ environment: { answers: { other: "deps in cluster" } }, keep: { policy: { value: "never", source: "default" }, hours: { value: 2 } } });
+    expect(detail).toMatchObject({
+      environment: { answers: { other: "deps in cluster" } },
+      keep: { policy: { value: "never", source: "default" }, hours: { value: 2 } },
+    });
     expect(detail.presets.length).toBeGreaterThan(3);
 
     expect((await post("/api/environments/box/template", { name: "box-shape", ask: ["REDIS_URL"] })).status).toBe(201);

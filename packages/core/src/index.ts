@@ -40,6 +40,7 @@ export * from "./gates.js";
 export * from "./kube.js";
 export * from "./envvalues.js";
 export * from "./actions.js";
+export * from "./actionrun.js";
 export * from "./presets.js";
 export * from "./templates.js";
 export * from "./resume.js";

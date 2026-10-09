@@ -119,6 +119,10 @@ import {
   type AnswerKey,
   listActions,
   setAnswers,
+  saveAction,
+  deleteAction,
+  getAction,
+  runAction,
 } from "@yagura/core";
 
 const USAGE = `yagura — agent orchestration
@@ -140,6 +144,9 @@ const USAGE = `yagura — agent orchestration
   yagura env presets
   yagura env answers <id>                        the environment's answers: how tests run, publishing, images, running, never, other
   yagura env answer <id> <tests|publish|images|run|never|other> --text <text>   answer one question in your own words
+  yagura action add <env> <name> --use <when to use it> [--repo <id>] -- <command>   save an action of yours (unproven until it runs)
+  yagura action run <env> <name> [--repo <id>]   run it now on a clean checkout of the repo's main; proves or breaks it
+  yagura action rm <env> <name> [--repo <id>]
   yagura env actions <id>                        the commands agents and yagura may run there, with what each is for and whether it is proven
   yagura template list
   yagura template save <env> <name> [--description <text>] [--ask <NAME>...]
@@ -681,10 +688,10 @@ async function main() {
         for (const preset of PRESETS) console.log(`${preset.id.padEnd(14)} ${preset.values.map((v) => v.name).join(", ")}`);
         return;
       }
-      if (sub === "answer" && id && a) {
+      if (sub === "answer" && a && b) {
         if (typeof values.text !== "string") fail("env answer needs --text");
-        setAnswers(db, id as EnvironmentId, { [a]: values.text });
-        console.log(`${id}: ${ANSWER_QUESTIONS[a as AnswerKey]} saved`);
+        setAnswers(db, a as EnvironmentId, { [b]: values.text });
+        console.log(`${a}: ${ANSWER_QUESTIONS[b as AnswerKey]} saved`);
         return;
       }
       if (sub === "answers" && id) {
@@ -940,6 +947,39 @@ async function main() {
       if (sub === "set" && more[0] && (values.autonomy === "go" || values.autonomy === "propose")) {
         setThreadAutonomy(db, Number(more[0]), values.autonomy);
         console.log(`thread ${more[0]} autonomy → ${values.autonomy}`);
+        return;
+      }
+      fail(USAGE);
+      return;
+    }
+    case "action": {
+      const { positionals, values } = args({ use: { type: "string" }, repo: { type: "string" } });
+      const [sub, envId, name, ...command] = positionals;
+      if (!sub || !envId || !name) fail(USAGE);
+      const environmentId = envId as EnvironmentId;
+      const repoId = (values.repo ?? null) as RepoId | null;
+      const named = () =>
+        listActions(db, environmentId).find((x) => x.name === name && (x.repoId === repoId || (!values.repo && x.repoId !== null))) ??
+        fail(`no action ${name}${repoId ? ` for ${repoId}` : ""} in ${environmentId}`);
+      if (sub === "add") {
+        if (!values.use || !command.length) fail('action add needs --use "<when to use it>" and the command after --');
+        const saved = saveAction(db, { environmentId, repoId, name: name!, use: values.use!, command: command.join(" ") });
+        console.log(`${saved.name} saved in ${environmentId} (${saved.state}); prove it with \`yagura action run ${environmentId} ${saved.name}\``);
+        return;
+      }
+      if (sub === "rm") {
+        deleteAction(db, named().id);
+        console.log(`removed ${name} from ${environmentId}`);
+        return;
+      }
+      if (sub === "run") {
+        for (const r of await runAction({ db, boot }, named().id, repoId, { by: "you" }))
+          console.log(
+            `${r.exitCode === 0 && !r.timedOut ? "✓" : "✗"} ${r.command} on ${r.repoId}@${r.sha.slice(0, 7)} (${r.timedOut ? "timed out" : `exit ${r.exitCode}`})\n${r.output.trim().split("\n").slice(-5).join("\n")}`,
+          );
+        const after = getAction(db, named().id);
+        console.log(`${after.name}: ${after.state}${after.reason ? ` (${after.reason})` : ""}`);
+        if (after.state === "broken") process.exitCode = 1;
         return;
       }
       fail(USAGE);
