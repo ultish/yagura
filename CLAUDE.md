@@ -35,7 +35,7 @@ pnpm dev                      # dev mode: rebuilds core/daemon/cli on change, re
 - No narrative comments; comment only a non-obvious why.
 - Formatting is Prettier's job (`.claude/settings.json` runs it after each edit); never align or wrap by hand.
 - Commits: Conventional Commits, author Jimmy <ultish@gmail.com>, no attribution trailers. Push to `origin main` (github.com/ultish/yagura).
-- UI work: discuss subjective design choices with the user and prototype options before building. Colors only through the CSS variables in `apps/web/src/theme.css` (amber = alive, vermilion = needs you, pine = landed); motion only for real state, off under reduced motion.
+- UI work: discuss subjective design choices with the user and prototype options before building. Colors only through the CSS variables in `apps/web/src/theme.css` (amber = alive, vermilion = needs you, pine = merged).
 - To try the whole system without spending money, point `harness.claude.bin` at a wrapper that runs `packages/core/src/harness/fixtures/fake-agent.mjs` with `FAKE_MODE=engine` (and `FAKE_DELAY_MS` to watch it) in a scratch `YAGURA_HOME`.
 
 ## Related repos
