@@ -23,6 +23,7 @@ const READS: Record<string, (args: string[]) => boolean> = {
   thread: (a) => a.length === 0 || ["list", "show", "search", "mentions"].includes(a[0]!),
   env: (a) => ["values", "presets", "answers", "actions"].includes(a[0] ?? ""),
   action: (a) => a[0] === "propose" || a[0] === "broken",
+  doctor: (a) => a[0] === "report",
   template: (a) => a[0] === "list",
   project: (a) => a[0] === "skills",
 };

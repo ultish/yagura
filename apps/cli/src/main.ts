@@ -125,6 +125,7 @@ import {
   runAction,
   actionAgentCli,
   requestDoctor,
+  doctorCli,
 } from "@yagura/core";
 
 const USAGE = `yagura — agent orchestration
@@ -149,8 +150,9 @@ const USAGE = `yagura — agent orchestration
   yagura action add <env> <name> --use <when to use it> [--repo <id>] -- <command>   save an action of yours (unproven until it runs)
   yagura action run <env> <name> [--repo <id>]   run it now on a clean checkout of the repo's main; proves or breaks it
   yagura action rm <env> <name> [--repo <id>]
-  yagura action propose --name <name> --use <text> [--all] -- <command> | broken --name <name> --reason <text>   (inside an agent session)
-  yagura env doctor <id> [--note <text>]         ask for a doctor on each repo of the active projects in the environment
+  yagura action propose --name <name> --use <text> [--all] -- <command> | broken --name <name> --reason <text>   (inside an agent session or doctor run)
+  yagura doctor report [--works <text>] [--fails <text>] [--unknown <text>]   (inside a doctor run)
+  yagura env doctor <id> [--note <text>]         ask for a doctor on each repo of the projects in the environment
   yagura env actions <id>                        the commands agents and yagura may run there, with what each is for and whether it is proven
   yagura template list
   yagura template save <env> <name> [--description <text>] [--ask <NAME>...]
@@ -198,6 +200,11 @@ if (refusal) {
 }
 if ((RECORD_COMMANDS as readonly string[]).includes(command ?? "")) {
   const result = await recordCli(process.argv.slice(2));
+  process.stdout.write(result.output);
+  process.exit(result.code);
+}
+if (command === "doctor" && rest[0] === "report") {
+  const result = await doctorCli(rest);
   process.stdout.write(result.output);
   process.exit(result.code);
 }
@@ -705,7 +712,7 @@ async function main() {
       }
       if (sub === "doctor" && id) {
         requestDoctor(db, id as EnvironmentId, values.note ?? "");
-        console.log(`asked for a doctor on every repo of the active projects in ${id}; the daemon starts it`);
+        console.log(`asked for a doctor on every repo of the projects in ${id}; the daemon starts it`);
         return;
       }
       if (sub === "answers" && id) {

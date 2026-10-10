@@ -27,12 +27,12 @@ export const MERGE_POLICIES = ["auto", "human"] as const;
 export type MergePolicy = (typeof MERGE_POLICIES)[number];
 
 // A work unit changes a repo and ends as a merged pull request; a plan unit is the job row of one planning session.
-export const UNIT_TYPES = ["plan", "work", "doctor"] as const;
+export const UNIT_TYPES = ["plan", "work"] as const;
 export type UnitType = (typeof UNIT_TYPES)[number];
 
 export const isBuild = (u: { type: UnitType }) => u.type === "work";
 
-export const ROLES = ["planner", "worker", "judge", "lead", "watchman", "doctor"] as const;
+export const ROLES = ["planner", "worker", "judge", "lead", "watchman"] as const;
 export type Role = (typeof ROLES)[number];
 export const ROLE_NAMES: Record<Role, string> = {
   planner: "project lead",
@@ -40,10 +40,9 @@ export const ROLE_NAMES: Record<Role, string> = {
   judge: "judge",
   lead: "unit lead",
   watchman: "watchman",
-  doctor: "doctor",
 };
 
-export const ROLE_OF: Record<UnitType, Role> = { plan: "planner", work: "worker", doctor: "doctor" };
+export const ROLE_OF: Record<UnitType, Role> = { plan: "planner", work: "worker" };
 
 export const UNIT_STATES = ["waiting", "building", "judging", "ready", "merged", "stuck", "dropped"] as const;
 export type UnitState = (typeof UNIT_STATES)[number];
@@ -95,7 +94,7 @@ export const ATTEMPT_STATES = ["queued", "running", "handed_off", "failed", "sto
 export type AttemptState = (typeof ATTEMPT_STATES)[number];
 
 // What an agent records through its yagura commands; the engine reads these, never the final message.
-export const RECORD_KINDS = ["handoff", "judge", "decision", "plan", "doctor"] as const;
+export const RECORD_KINDS = ["handoff", "judge", "decision", "plan"] as const;
 export type RecordKind = (typeof RECORD_KINDS)[number];
 
 export const HANDOFF_STATUSES = ["done", "stuck"] as const;
@@ -185,6 +184,38 @@ export interface Action {
   lastRunId: number | null;
   createdAt: IsoTime;
   updatedAt: IsoTime;
+}
+
+// A doctor run looks after one repo in one environment: not a unit of work, so it is numbered on its own (D1, D2, …).
+export const DOCTOR_TRIGGERS = ["setup", "asked", "broken"] as const;
+export type DoctorTrigger = (typeof DOCTOR_TRIGGERS)[number];
+export const DOCTOR_RUN_STATES = ["running", "done", "failed", "stopped"] as const;
+export type DoctorRunState = (typeof DOCTOR_RUN_STATES)[number];
+
+export interface DoctorReport {
+  works: string[];
+  fails: string[];
+  unknown: string[];
+}
+
+export interface DoctorRun {
+  id: number;
+  environmentId: EnvironmentId;
+  repoId: RepoId;
+  // The project whose setup woke it, when one did.
+  projectId: ProjectId | null;
+  trigger: DoctorTrigger;
+  detail: string;
+  state: DoctorRunState;
+  pid: number | null;
+  model: string | null;
+  harness: string;
+  contextPeak: number;
+  costUsd: number;
+  report: DoctorReport | null;
+  logPath: string;
+  startedAt: IsoTime;
+  endedAt: IsoTime | null;
 }
 
 export interface ActionRun {

@@ -434,7 +434,7 @@ function StatusCard({ story, tone, reload }: { story: UnitStory; tone: string; r
 }
 
 function useLiveStep(running: UnitStory["running"]): string | null {
-  const lines = useLog(running?.attemptId ?? 0, !!running);
+  const lines = useLog(running ? `/api/attempts/${running.attemptId}` : null, !!running);
   const now = useNow(5000);
   if (!running) return null;
   const step = buildTimeline(lines).steps.findLast((s) => s.kind === "tool");

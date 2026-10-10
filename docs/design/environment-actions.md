@@ -74,18 +74,17 @@ Publishing the merged commit means the version never moves under the unit that u
 
 ## The doctor
 
-An agent session per repo, per project, in the project's environment.
+A doctor run looks after one repo in one environment. It is not a unit of work, so it has no unit number: doctor runs are numbered on their own, D1, D2, and each has its own page (`/d/<n>`) with why it was woken, its report, and every step of its session.
 
-- **Runs** when a project starts on an environment, when the developer presses **Run doctor**, when a saved action breaks, and when yagura needs a contract action a repo does not have.
+- **Runs** when a project that is not closed is set up on an environment, once for each of its repos no doctor has looked at there yet; whenever the developer asks (**Run the doctor**, or `yagura env doctor <env>`), for every repo of every project on the environment, closed ones included; and when an action breaks. One run per repo and environment at a time. Doctor runs count toward the agent caps and belong to no project's budget.
 - **Reads** the environment's answers and values, the repo, and the actions already saved.
-- **Does**, for each thing the answers or the repo call for: works out the command, runs it in a scratch checkout as a recorded run, and proposes the action with that run as its proof. A failing command is reported, not saved.
-- **Reports** per action: works (with the command and run), fails (with why), or cannot tell (the environment does not say). The report shows on the environment page and the project page.
-- **Asks** the developer, through a gate with a free-text answer, when an answer is missing and yagura needs it (a library repo with no way to publish).
+- **Does**, for each thing the answers or the repo call for: works out the command, tries it in a throwaway checkout of the repo's main branch, and offers it with `yagura action propose`, which yagura proves with its own run. A failing command is reported, not saved.
+- **Reports** with `yagura doctor report`: works (with the action), fails (with why), or cannot tell (the environment does not say). The report shows on the environment page and the run's page. A run that ends without a report is reminded once in the same session.
 - **Changes** nothing in the repo, and pushes nothing.
 
 ## The environment page
 
-Each environment gets its own page, `/e/<id>`, with sections in this order: Answers, Actions, the last doctor report, Values, Settings. The list at `/environments` links to it. A mock is linked from `docs/STATUS.md`.
+Each environment gets its own page, `/e/<id>`: a status card (what is broken or not yet run, and **Run the doctor**), then tabs: How it works, Actions, Doctor runs, Values, Settings. The list at `/environments` links to it.
 
 ## What goes away
 

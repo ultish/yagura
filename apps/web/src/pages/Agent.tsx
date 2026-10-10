@@ -23,18 +23,19 @@ import { RunningDot } from "../ui/Running";
 import { DiffView, RunView } from "../ui/evidence";
 import { NoteForm, useAction } from "../ui/rows";
 
-export function useLog(attemptId: number, live: boolean): LogLine[] {
+// A session's log, and its new lines while it runs; `base` is the session's API path (an attempt's, or a doctor run's).
+export function useLog(base: string | null, live: boolean): LogLine[] {
   const [lines, setLines] = useState<LogLine[]>([]);
   useEffect(() => {
     setLines([]);
-    if (!attemptId) return;
+    if (!base) return;
     let source: EventSource | null = null;
     let cancelled = false;
-    api<{ lines: LogLine[]; next: number }>(`/api/attempts/${attemptId}/log`).then((r) => {
+    api<{ lines: LogLine[]; next: number }>(`${base}/log`).then((r) => {
       if (cancelled) return;
       setLines(r.lines);
       if (!live) return;
-      source = new EventSource(streamUrl(`/api/attempts/${attemptId}/stream?from=${r.next}`));
+      source = new EventSource(streamUrl(`${base}/stream?from=${r.next}`));
       source.addEventListener("line", (e) => setLines((ls) => [...ls, JSON.parse((e as MessageEvent<string>).data) as LogLine]));
       source.addEventListener("end", () => source?.close());
     });
@@ -42,7 +43,7 @@ export function useLog(attemptId: number, live: boolean): LogLine[] {
       cancelled = true;
       source?.close();
     };
-  }, [attemptId, live]);
+  }, [base, live]);
   return lines;
 }
 
@@ -104,7 +105,7 @@ function SteerBox({ attemptId }: { attemptId: number }) {
   );
 }
 
-function StepRow({ step, start, live }: { step: Step; start: number | null; live: boolean }) {
+export function StepRow({ step, start, live }: { step: Step; start: number | null; live: boolean }) {
   const time = (
     <span className="mono muted" style={{ fontSize: 11.5, width: 52, flexShrink: 0, paddingTop: 3 }}>
       {rel(step.at, start)}
@@ -411,7 +412,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
   const now = useNow(1000);
   const { data: d, error } = useApi<AttemptDetail>(`/api/attempts/${attemptId}`);
   const live = d?.attempt.state === "running" || d?.attempt.state === "queued";
-  const lines = useLog(attemptId, !!live);
+  const lines = useLog(`/api/attempts/${attemptId}`, !!live);
   const timeline = useMemo(() => buildTimeline(lines), [lines]);
   const [stopping, setStopping] = useState(false);
   const [view, setView] = useState<"log" | "diff" | "run">("log");

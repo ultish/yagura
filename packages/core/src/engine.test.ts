@@ -163,9 +163,9 @@ describe("Engine", () => {
   it("sends a unit back to its own worker with the judge's findings, and merges it after the second judge approves", async () => {
     onFakeGithub();
     const planned = new Engine(ctx, { projectId: project, tickMs: 50 });
-    process.env.FAKE_JUDGE_CHANGES = "U3";
+    process.env.FAKE_JUDGE_CHANGES = "U2";
     await planned.runUntilIdle();
-    const u2 = workUnits().find((u) => u.seq === 3)!;
+    const u2 = workUnits().find((u) => u.seq === 2)!;
     expect(states(u2.id)).toEqual(["building", "judging", "building", "judging", "ready", "merged"]);
     const attempts = listAttempts(db, u2.id);
     expect(attempts.map((x) => [x.role, x.state])).toEqual([
@@ -175,8 +175,8 @@ describe("Engine", () => {
       ["judge", "handed_off"],
     ]);
     expect(attempts[2]!.resumesAttemptId).toBe(attempts[0]!.id);
-    expect(await git(["show", `main:app/a/p-U3.txt`], { gitDir: origin })).toBe("work\n# fixed after findings: true");
-    expect(ghPrs().filter((p) => p.head === "yagura/p/u3")).toHaveLength(1);
+    expect(await git(["show", `main:app/a/p-U2.txt`], { gitDir: origin })).toBe("work\n# fixed after findings: true");
+    expect(ghPrs().filter((p) => p.head === "yagura/p/u2")).toHaveLength(1);
     const commits = await git(["log", "--format=%s", `${getUnit(db, u2.id).mergedSha}^2`, "--not", `${getUnit(db, u2.id).mergedSha}^1`], { gitDir: origin });
     expect(commits.split("\n")).toContain("fix after findings");
   }, 60_000);
@@ -195,28 +195,28 @@ describe("Engine", () => {
 
   it("sends a conflict with the base back to the worker, who merges and resolves it, then the judge and the merge", async () => {
     onFakeGithub();
-    process.env.FAKE_BASE_MOVE = "U3";
+    process.env.FAKE_BASE_MOVE = "U2";
     await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
-    const u2 = workUnits().find((u) => u.seq === 3)!;
+    const u2 = workUnits().find((u) => u.seq === 2)!;
     expect(states(u2.id)).toEqual(["building", "building", "judging", "ready", "merged"]);
     const conflict = db
       .prepare(
         "SELECT json_extract(data_json, '$.round.kind') AS kind, json_extract(data_json, '$.round.files') AS files FROM events WHERE type = 'unit.state' AND unit_id = ? ORDER BY id LIMIT 1 OFFSET 1",
       )
       .get(u2.id);
-    expect(conflict).toEqual({ kind: "conflict", files: JSON.stringify(["app/a/p-U3.txt"]) });
-    expect(await git(["show", "main:app/a/p-U3.txt"], { gitDir: origin })).toBe("work, merged with the base");
+    expect(conflict).toEqual({ kind: "conflict", files: JSON.stringify(["app/a/p-U2.txt"]) });
+    expect(await git(["show", "main:app/a/p-U2.txt"], { gitDir: origin })).toBe("work, merged with the base");
   }, 60_000);
 
   it("wakes the unit lead when a worker is stuck, and the fresh worker it starts takes the unit to a merge", async () => {
-    process.env.FAKE_WORKER_STUCK = "U3";
+    process.env.FAKE_WORKER_STUCK = "U2";
     await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
-    const u2 = workUnits().find((u) => u.seq === 3)!;
+    const u2 = workUnits().find((u) => u.seq === 2)!;
     expect(states(u2.id)).toEqual(["building", "stuck", "building", "judging", "ready", "merged"]);
     expect(listAttempts(db, u2.id).map((x) => x.role)).toEqual(["worker", "lead", "worker", "judge"]);
     expect(
       workUnits()
-        .filter((u) => u.seq !== 3)
+        .filter((u) => u.seq !== 2)
         .flatMap((u) => listAttempts(db, u.id).map((x) => x.role)),
     ).not.toContain("lead");
   }, 60_000);
@@ -256,42 +256,43 @@ describe("Engine", () => {
   }, 60_000);
 });
 
-describe("the doctor", () => {
-  const doctors = () => listUnits(db, project).filter((u) => u.type === "doctor");
+describe("doctor runs", () => {
   const env = "local" as EnvironmentId;
+  const testbed = "testbed" as RepoId;
 
-  it("looks at each repo once when the project starts, and its proven actions reach the workers' briefs", async () => {
+  it("run once per repo when a project is set up on the environment, take no unit number, and their proven actions reach the briefs", async () => {
     const { listActions } = await import("./actions.js");
+    const { listDoctorRuns } = await import("./doctor.js");
     await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
-    expect(doctors().map((u) => [u.goal, u.state])).toEqual([["Doctor: testbed in local", "merged"]]);
+    expect(listDoctorRuns(db, env).map((r) => [`D${r.id}`, r.repoId, r.trigger, r.projectId, r.state, r.report])).toEqual([
+      ["D1", "testbed", "setup", "p", "done", { works: ["tests: test"], fails: [], unknown: [] }],
+    ]);
+    expect(listUnits(db, project).map((u) => [u.seq, u.type])).toEqual([
+      [1, "plan"],
+      [2, "work"],
+      [3, "work"],
+      [4, "work"],
+      [5, "plan"],
+    ]);
     expect(listActions(db, env).map((a) => [a.name, a.repoId, a.state, a.author])).toEqual([["test", "testbed", "proven", "doctor"]]);
-    const workerBrief = readFileSync(layout(ctx.boot).brief(project, workUnits().at(-1)!.seq, 1), "utf8");
-    expect(workerBrief).toContain("- `test` (proven): Runs the whole suite.\n  `true`");
   }, 60_000);
 
-  it("is woken once by a broken action, never again by its own failed fix, and again when the developer asks", async () => {
+  it("wake once for a broken action, never again for their own failed fix, and whenever the developer asks, closed projects included", async () => {
     const { findAction, reportBroken } = await import("./actions.js");
-    const { doctorWake, requestDoctor } = await import("./doctor.js");
+    const { doctorWakes, requestDoctor, runDoctor } = await import("./doctor.js");
     await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
-    const test = findAction(db, env, "testbed" as RepoId, "test")!;
-    reportBroken(db, test.id, "gradle: command not found", null as never);
-    expect(doctorWake(db, project, "testbed" as RepoId)).toEqual({
-      trigger: "broken",
-      detail: "An action for this repo is broken.\n- test: gradle: command not found",
-    });
-
+    expect(getProject(db, project).state).toBe("closed");
+    reportBroken(db, findAction(db, env, testbed, "test")!.id, "gradle: command not found", null);
+    expect(doctorWakes(db, env)).toEqual([
+      { repoId: "testbed", trigger: "broken", detail: "An action for this repo is broken.\n- test: gradle: command not found", projectId: null },
+    ]);
     process.env.FAKE_DOCTOR = "fail";
-    const { runDoctorRound } = await import("./doctor.js");
-    await runDoctorRound(ctx, project, "testbed" as RepoId, doctorWake(db, project, "testbed" as RepoId)!);
-    expect(doctors().map((u) => u.state)).toEqual(["merged", "merged"]);
-    expect(findAction(db, env, "testbed" as RepoId, "test")!.state).toBe("broken");
-    expect(doctorWake(db, project, "testbed" as RepoId)).toBeNull();
-
-    delete process.env.FAKE_DOCTOR;
+    expect((await runDoctor(ctx, env, doctorWakes(db, env)[0]!)).report).toEqual({ works: [], fails: ["tests: the fake command failed"], unknown: [] });
+    expect(findAction(db, env, testbed, "test")!.state).toBe("broken");
+    expect(doctorWakes(db, env)).toEqual([]);
     requestDoctor(db, env, "nexus is back up");
-    expect(doctorWake(db, project, "testbed" as RepoId)).toEqual({
-      trigger: "asked",
-      detail: "The developer asked for a doctor.\nThey said: nexus is back up",
-    });
+    expect(doctorWakes(db, env)).toEqual([
+      { repoId: "testbed", trigger: "asked", detail: "The developer asked for a doctor.\nThey said: nexus is back up", projectId: null },
+    ]);
   }, 90_000);
 });

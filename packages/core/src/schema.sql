@@ -97,7 +97,7 @@ CREATE TABLE units (
   id INTEGER PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects (id),
   seq INTEGER NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('plan', 'work', 'doctor')),
+  type TEXT NOT NULL CHECK (type IN ('plan', 'work')),
   state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting', 'building', 'judging', 'ready', 'merged', 'stuck', 'dropped')),
   repo_id TEXT REFERENCES repos (id),
   base TEXT,
@@ -138,7 +138,7 @@ CREATE TABLE attempts (
   unit_id INTEGER NOT NULL REFERENCES units (id),
   n INTEGER NOT NULL,
   agent_no INTEGER,
-  role TEXT CHECK (role IN ('planner', 'worker', 'judge', 'lead', 'watchman', 'doctor')),
+  role TEXT CHECK (role IN ('planner', 'worker', 'judge', 'lead', 'watchman')),
   guidance_sha TEXT,
   state TEXT NOT NULL DEFAULT 'queued' CHECK (state IN ('queued', 'running', 'handed_off', 'failed', 'stopped')),
   harness TEXT NOT NULL,
@@ -173,7 +173,7 @@ CREATE INDEX attempts_state ON attempts (state);
 CREATE TABLE agent_records (
   id INTEGER PRIMARY KEY,
   attempt_id INTEGER NOT NULL REFERENCES attempts (id),
-  kind TEXT NOT NULL CHECK (kind IN ('handoff', 'judge', 'decision', 'plan', 'doctor')),
+  kind TEXT NOT NULL CHECK (kind IN ('handoff', 'judge', 'decision', 'plan')),
   key TEXT NOT NULL DEFAULT '',
   data_json TEXT NOT NULL,
   created_at TEXT NOT NULL,
@@ -518,3 +518,26 @@ CREATE TABLE action_runs (
 );
 
 CREATE INDEX action_runs_action ON action_runs (action_id);
+
+CREATE TABLE doctor_runs (
+  id INTEGER PRIMARY KEY,
+  environment_id TEXT NOT NULL REFERENCES environments (id),
+  repo_id TEXT NOT NULL REFERENCES repos (id),
+  project_id TEXT REFERENCES projects (id),
+  trigger TEXT NOT NULL CHECK (trigger IN ('setup', 'asked', 'broken')),
+  detail TEXT NOT NULL DEFAULT '',
+  state TEXT NOT NULL DEFAULT 'running' CHECK (state IN ('running', 'done', 'failed', 'stopped')),
+  pid INTEGER,
+  model TEXT,
+  harness TEXT NOT NULL,
+  session_id TEXT,
+  context_peak INTEGER NOT NULL DEFAULT 0,
+  cost_usd REAL NOT NULL DEFAULT 0,
+  token TEXT,
+  report_json TEXT,
+  log_path TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  ended_at TEXT
+);
+
+CREATE INDEX doctor_runs_repo ON doctor_runs (environment_id, repo_id);

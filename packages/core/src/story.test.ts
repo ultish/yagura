@@ -54,7 +54,7 @@ beforeEach(async () => {
     FAKE_ORIGIN: origin,
     FAKE_GH_ORIGIN: origin,
     FAKE_GH_STATE: join(root, "gh.json"),
-    FAKE_JUDGE_CHANGES: "U3",
+    FAKE_JUDGE_CHANGES: "U2",
   });
 });
 
@@ -65,7 +65,7 @@ afterEach(() => {
 describe("unitStory", () => {
   it("tells a unit sent back once as two rounds, each a worker then a judge, ending in the merge", async () => {
     await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
-    const u2 = listUnits(db, project).find((u) => u.type === "work" && u.seq === 3)!;
+    const u2 = listUnits(db, project).find((u) => u.type === "work" && u.seq === 2)!;
     const story = unitStory(db, boot, u2);
 
     expect(story.moves.map((m) => `${m.from}>${m.to}`)).toEqual([
@@ -89,7 +89,7 @@ describe("unitStory", () => {
     ]);
     const [first, , sentBack, again, approved] = path;
     expect(sentBack!.body).toBe("Sent it back with 1 finding.");
-    expect(sentBack!.lines.map((l) => l.text)).toEqual(["app:1 U3 must say it was fixed"]);
+    expect(sentBack!.lines.map((l) => l.text)).toEqual(["app:1 U2 must say it was fixed"]);
     expect(again!.body).toMatch(new RegExp(`^Resumed A${first!.attempt!.agentNo}'s session`));
     expect(again!.body).toMatch(/\. .+ Handed off at [0-9a-f]{7}\.$/);
     expect(approved!.lines.map((l) => [l.text, l.checks])).toEqual([

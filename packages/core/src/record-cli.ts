@@ -16,7 +16,6 @@ const KIND: Record<Exclude<RecordCommand, "check-done">, LiveRecordKind> = {
   judge: "judge",
   decide: "decision",
   plan: "plan",
-  doctor: "doctor",
 };
 
 const OPTIONS = {
@@ -33,9 +32,6 @@ const OPTIONS = {
   file: { type: "string" },
   json: { type: "string" },
   hook: { type: "boolean" },
-  works: { type: "string", multiple: true },
-  fails: { type: "string", multiple: true },
-  unknown: { type: "string", multiple: true },
 } as const;
 
 type Values = ReturnType<typeof parseArgs<{ options: typeof OPTIONS; allowPositionals: true; strict: true; args: string[] }>>["values"];
@@ -67,8 +63,6 @@ function build(db: Db, attemptId: AttemptId, command: Exclude<RecordCommand, "ch
       if (typeof runs === "string") return { problem: runs };
       return { key: "", data: { verdict: pos[0], runs, findings: v.finding ?? [], question: v.question ?? null } };
     }
-    case "doctor":
-      return { key: "", data: { works: v.works ?? [], fails: v.fails ?? [], unknown: v.unknown ?? [] } };
     case "decide":
       return { key: "", data: { action: pos[0], reason: v.reason, note: one(v.note), question: v.question ?? null, reply: v.reply ?? null } };
     case "plan": {

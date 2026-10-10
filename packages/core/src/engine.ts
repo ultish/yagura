@@ -1,6 +1,6 @@
 import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
-import { TERMINAL_STATES, isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
+import { TERMINAL_STATES, isBuild, type EnvironmentId, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
 import { layout } from "./paths.js";
 import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
@@ -38,7 +38,7 @@ import { answerIssue, listIssues, pollIssues, watchedRepos } from "./issues.js";
 import { postReport, reportKey, type ReportKind } from "./report.js";
 import { listThreads } from "./threads.js";
 import { listTurns, stopTurn } from "./turns.js";
-import { doctorWake, runDoctorRound } from "./doctor.js";
+import { doctorWakes, runDoctor, runningDoctorRuns, stopDoctorRun } from "./doctor.js";
 import { publishDue, publishTestBuild } from "./publish.js";
 import { sweepWorktrees } from "./worktrees.js";
 import { savedHandoff } from "./finish.js";
@@ -171,12 +171,18 @@ export class Engine {
 
   // An agent slot is free under every cap: across yagura, on the harness, and in the project.
   private slotFree(project: Project, harness: string): boolean {
-    if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return false;
-    if (runningAttempts(this.db, { harness }) >= resolveSetting(this.db, "max_parallel_per_harness").value) return false;
+    if (!this.agentFree(harness)) return false;
     return (
       runningAttempts(this.db, { projectId: project.id }) + this.pendingStarts(project.id) <
       resolveSetting(this.db, "project.max_in_flight", { projectId: project.id }).value
     );
+  }
+
+  // Under the caps across yagura and on the harness; doctor runs count, though they belong to no project.
+  private agentFree(harness: string): boolean {
+    const doctors = runningDoctorRuns(this.db);
+    if (runningAttempts(this.db) + doctors + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return false;
+    return runningAttempts(this.db, { harness }) + doctors < resolveSetting(this.db, "max_parallel_per_harness").value;
   }
 
   private unitTask(unitId: UnitId, label: string, work: () => Promise<unknown>, quiet = false): void {
@@ -228,22 +234,24 @@ export class Engine {
     }
   }
 
-  // A repo gets a doctor when none has looked at it in this environment, when the developer asks, or when an action for it broke.
-  // One doctor per repo and environment at a time, whichever project woke it.
-  private doctors(project: Project): void {
-    if (!project.environmentId) return;
-    for (const repo of projectRepos(this.db, project.id)) {
-      const key = `doctor:${project.environmentId}:${repo.id}`;
-      if (this.inflight.has(key)) continue;
-      const wake = doctorWake(this.db, project.id, repo.id);
-      if (!wake || !this.slotFree(project, resolveSetting(this.db, "role.doctor.harness", { projectId: project.id }).value)) continue;
-      this.start(
-        key,
-        `doctor ${repo.id} (${wake.trigger})`,
-        () => runDoctorRound(this.ctx, project.id, repo.id, wake),
-        (e) => this.log(`✗ doctor ${repo.id}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`),
-      );
-    }
+  // The environments the engine looks after: those of the projects in its scope, whatever state they are in.
+  private environments(): EnvironmentId[] {
+    return [...new Set(this.scope().flatMap((p) => (p.environmentId ? [p.environmentId] : [])))];
+  }
+
+  // A doctor run looks after one repo in one environment; it is not a unit, and one runs per repo and environment at a time.
+  private doctors(): void {
+    for (const env of this.environments())
+      for (const wake of doctorWakes(this.db, env)) {
+        const key = `doctor:${env}:${wake.repoId}`;
+        if (this.inflight.has(key) || !this.agentFree(resolveSetting(this.db, "role.doctor.harness", { environmentId: env }).value)) continue;
+        this.start(
+          key,
+          `doctor ${env}/${wake.repoId} (${wake.trigger})`,
+          () => runDoctor(this.ctx, env, wake),
+          (e) => this.log(`✗ doctor ${env}/${wake.repoId}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`),
+        );
+      }
   }
 
   // A merged library that units after it build on is published from its merge commit; a failed try is tried again once its actions change.
@@ -484,9 +492,9 @@ export class Engine {
           () => undefined,
         );
       this.spawn(project);
-      this.doctors(project);
       this.publishes(project);
     }
+    if (!hold) this.doctors();
     this.baseMoves();
     this.report(this.scope());
   }
@@ -496,11 +504,11 @@ export class Engine {
     const projects = this.scope();
     if (projects.some((p) => this.activationDue(p)) || this.dueReports(projects).length) return false;
     const held = activeHold(this.db) !== null;
+    if (!held && this.environments().some((env) => doctorWakes(this.db, env).length)) return false;
     return projects.every((p) => {
       if (p.state !== "active") return true;
       if (p.andonReason || held) return true;
       if (this.planNeeded(p)) return false;
-      if (p.environmentId && projectRepos(this.db, p.id).some((r) => doctorWake(this.db, p.id, r.id))) return false;
       if (publishDue(this.db, p.id).length) return false;
       if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
       // A ready unit is settled only while it waits for the developer's go.
@@ -581,6 +589,8 @@ export class Engine {
     for (const a of this.db.prepare("SELECT id FROM attempts WHERE state = 'running'").all() as { id: number }[])
       stopAttempt(this.db, a.id as never, "yagura daemon shut down");
     for (const t of listTurns(this.db).filter((x) => x.state === "running")) stopTurn(this.db, t.id, "the yagura daemon shut down; send your message again");
+    for (const { id } of this.db.prepare("SELECT id FROM doctor_runs WHERE state = 'running'").all() as { id: number }[])
+      stopDoctorRun(this.db, id, "yagura daemon shut down");
     await Promise.allSettled(this.inflight.values());
   }
 

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import type { DoctorReport } from "@yagura/core";
+import type { DoctorRun } from "@yagura/core";
+import { DoctorReportList } from "./DoctorRun";
 import { ANSWER_KEYS, ANSWER_QUESTIONS, type Action, type ActionRun, type Answers } from "@yagura/core/domain";
 import { api, useApi, useQuery, type EnvironmentDetail, type RepoView } from "../api";
 import { clock } from "../lib/format";
@@ -264,68 +265,39 @@ function ActionsTab({ envId, actions, repos, reload }: { envId: string; actions:
   );
 }
 
-function DoctorTab({ reports }: { reports: DoctorReport[] }) {
-  if (!reports.length) return <p className="muted">No doctor has run here yet. It runs when an active project on this environment starts.</p>;
+function DoctorTab({ runs }: { runs: DoctorRun[] }) {
+  if (!runs.length)
+    return <p className="muted">No doctor has run here yet. One runs on each repo when a project is set up on this environment, or when you ask.</p>;
   return (
     <div className="env-doctor">
-      {reports.map((r) => (
-        <section key={r.repoId}>
+      {runs.map((r) => (
+        <section key={r.id}>
           <h3>
+            <Link to={`/d/${r.id}`} className="mono">
+              D{r.id}
+            </Link>
             <span className="mono">{r.repoId}</span>
             <span className="muted hub-small">
-              {r.running && <RunningDot />}
-              {r.running ? "looking now" : r.startedAt ? clock(r.startedAt) : ""} · project <Link to={`/p/${r.projectId}`}>{r.projectId}</Link>
-              {r.attemptId !== null && (
-                <>
-                  {" · "}
-                  <Link to={`/a/${r.attemptId}`}>A{r.agentNo}</Link> · ${r.costUsd.toFixed(2)}
-                </>
-              )}
+              {r.state === "running" && <RunningDot />}
+              {r.state === "running" ? "looking now" : r.state} · {clock(r.startedAt)} · woken because {TRIGGER[r.trigger]} · ${r.costUsd.toFixed(2)}
             </span>
           </h3>
-          {!r.report && !r.running && <p className="s-bell">This doctor ended without a report.</p>}
-          {r.report && (
-            <ul className="env-report">
-              {r.report.works.map((t) => (
-                <li key={`w${t}`}>
-                  <span className="s-pine">works</span> <Inline text={t} />
-                </li>
-              ))}
-              {r.report.fails.map((t) => (
-                <li key={`f${t}`}>
-                  <span className="s-bell">fails</span> <Inline text={t} />
-                </li>
-              ))}
-              {r.report.unknown.map((t) => (
-                <li key={`u${t}`}>
-                  <span className="story-amber">can't tell</span> <Inline text={t} />
-                </li>
-              ))}
-            </ul>
-          )}
+          {r.state !== "running" && !r.report && <p className="s-bell">This run ended without a report.</p>}
+          {r.report && <DoctorReportList report={r.report} />}
         </section>
       ))}
     </div>
   );
 }
 
-function StatusCard({
-  id,
-  actions,
-  reports,
-  active,
-  reload,
-}: {
-  id: string;
-  actions: ActionView[];
-  reports: DoctorReport[];
-  active: boolean;
-  reload: () => void;
-}) {
+const TRIGGER: Record<DoctorRun["trigger"], string> = { setup: "a project was set up", asked: "you asked", broken: "an action broke" };
+
+function StatusCard({ id, actions, runs, reload }: { id: string; actions: ActionView[]; runs: DoctorRun[]; reload: () => void }) {
   const ask = useAction();
   const broken = actions.filter((a) => a.state === "broken");
-  const running = reports.filter((r) => r.running);
-  const failing = reports.flatMap((r) => (r.report?.fails ?? []).map((f) => `${r.repoId}: ${f}`));
+  const running = runs.filter((r) => r.state === "running");
+  const latest = runs.filter((r, i) => runs.findIndex((x) => x.repoId === r.repoId) === i);
+  const failing = latest.flatMap((r) => (r.report?.fails ?? []).map((f) => `${r.repoId}: ${f}`));
   const untried = actions.filter((a) => a.state === "unproven" || a.state === "edited");
   const tone = broken.length || failing.length ? "bell" : running.length || untried.length ? "lamp" : actions.length ? "pine" : "muted";
   const headline = running.length
@@ -344,7 +316,6 @@ function StatusCard({
     ...failing.filter((f) => !broken.some((a) => f.includes(a.name))),
     ...untried.map((a) => `${a.name}: run it to prove it.`),
     ...(!actions.length ? ["Answer how this environment works, then run the doctor."] : []),
-    ...(!active ? ["The doctor runs for active projects; no project here is active."] : []),
   ];
   return (
     <section className={`unit-now tone-${tone}`} aria-label="Now">
@@ -360,7 +331,7 @@ function StatusCard({
         <button
           className="btn lamp"
           type="button"
-          disabled={ask.busy || running.length > 0 || !active}
+          disabled={ask.busy || running.length > 0}
           onClick={() => void ask.run(() => api(`/api/environments/${id}/doctor`, { body: { note: "" } }).then(reload))}
         >
           Run the doctor
@@ -374,7 +345,7 @@ function StatusCard({
 export function Environment({ id }: { id: string }) {
   const detail = useApi<EnvironmentDetail>(`/api/environments/${id}`);
   const actions = useApi<ActionView[]>(`/api/environments/${id}/actions`);
-  const doctor = useApi<DoctorReport[]>(`/api/environments/${id}/doctor`);
+  const doctor = useApi<DoctorRun[]>(`/api/environments/${id}/doctor`);
   const repos = useApi<RepoView[]>("/api/repos");
   const query = useQuery();
   const raw = query.get("tab");
@@ -392,7 +363,7 @@ export function Environment({ id }: { id: string }) {
   const tabs: [Tab, string][] = [
     ["answers", `How it works (${answered} of ${ANSWER_KEYS.length} answered)`],
     ["actions", `Actions (${actions.data.length})`],
-    ["doctor", `Doctor reports (${doctor.data.length})`],
+    ["doctor", `Doctor runs (${doctor.data.length})`],
     ["values", `Values (${detail.data.values.length})`],
     ["settings", "Settings"],
   ];
@@ -424,7 +395,7 @@ export function Environment({ id }: { id: string }) {
           </dd>
         </div>
       </dl>
-      <StatusCard id={id} actions={actions.data} reports={doctor.data} active={detail.data.projects.some((p) => p.state === "active")} reload={reload} />
+      <StatusCard id={id} actions={actions.data} runs={doctor.data} reload={reload} />
       <div className="hub-tabs" role="tablist" aria-label="Environment">
         {tabs.map(([k, label]) => (
           <Link key={k} role="tab" aria-selected={tab === k} className={tab === k ? "on" : ""} to={`/e/${id}${k === "actions" ? "" : `?tab=${k}`}`}>
@@ -435,7 +406,7 @@ export function Environment({ id }: { id: string }) {
       <div className="env-tab">
         {tab === "answers" && <AnswersTab key={JSON.stringify(env.answers)} id={id} answers={env.answers} reload={reload} />}
         {tab === "actions" && <ActionsTab envId={id} actions={actions.data} repos={repoIds} reload={reload} />}
-        {tab === "doctor" && <DoctorTab reports={doctor.data} />}
+        {tab === "doctor" && <DoctorTab runs={doctor.data} />}
         {tab === "values" && <EnvironmentValues id={id} onChanged={reload} />}
         {tab === "settings" && <ScopedSettings scope="environment" id={id} />}
       </div>

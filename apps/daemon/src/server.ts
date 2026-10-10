@@ -109,7 +109,9 @@ import {
   answerSuggestion,
   getAction,
   runAction,
-  doctorReports,
+  listDoctorRuns,
+  getDoctorRun,
+  stopDoctorRun,
   requestDoctor,
   setValue,
   artifactContentType,
@@ -194,9 +196,12 @@ function eventsSince(db: Db, since: number, projectId: string | null, limit = 50
 function readLog(opts: ServerOptions, attemptId: AttemptId, from: number) {
   const attempt = getAttempt(opts.db, attemptId);
   const unit = getUnit(opts.db, attempt.unitId);
-  const path = layout(opts.boot).log(unit.projectId, unit.seq, attempt.n);
-  const adapter = (opts.adapters ?? { claude: claudeAdapter })[attempt.harness] ?? claudeAdapter;
-  if (!existsSync(path)) return { attempt, lines: [] as { line: number; at: number | null; raw: string; events: unknown[] }[], next: from };
+  return { attempt, ...readLogFile(opts, layout(opts.boot).log(unit.projectId, unit.seq, attempt.n), attempt.harness, from) };
+}
+
+function readLogFile(opts: ServerOptions, path: string, harness: string, from: number) {
+  const adapter = (opts.adapters ?? { claude: claudeAdapter })[harness] ?? claudeAdapter;
+  if (!existsSync(path)) return { lines: [] as { line: number; at: number | null; raw: string; events: unknown[] }[], next: from };
   const complete = readFileSync(path, "utf8").split("\n").slice(0, -1);
   const timesPath = logTimesPath(path);
   const times = existsSync(timesPath) ? readFileSync(timesPath, "utf8").split("\n").map(Number) : [];
@@ -207,7 +212,7 @@ function readLog(opts: ServerOptions, attemptId: AttemptId, from: number) {
     } catch {}
     return { line: from + i, at: times[from + i] || null, raw, events };
   });
-  return { attempt, lines, next: from + lines.length };
+  return { lines, next: from + lines.length };
 }
 
 export function createApp(opts: ServerOptions): Hono {
@@ -458,7 +463,33 @@ export function createApp(opts: ServerOptions): Hono {
     );
     return c.json({ started: true }, 202);
   });
-  app.get("/api/environments/:id/doctor", (c) => c.json(doctorReports(db, c.req.param("id") as EnvironmentId)));
+  app.get("/api/environments/:id/doctor", (c) => c.json(listDoctorRuns(db, c.req.param("id") as EnvironmentId)));
+  app.get("/api/doctor-runs/:id", (c) => c.json(getDoctorRun(db, Number(c.req.param("id")))));
+  app.get("/api/doctor-runs/:id/log", (c) => {
+    const run = getDoctorRun(db, Number(c.req.param("id")));
+    return c.json(readLogFile(opts, run.logPath, run.harness, Number(c.req.query("from") ?? 0)));
+  });
+  app.get("/api/doctor-runs/:id/stream", (c: Context) =>
+    streamSSE(c, async (stream) => {
+      const id = Number(c.req.param("id"));
+      let from = Number(c.req.query("from") ?? 0);
+      while (!stream.aborted) {
+        const run = getDoctorRun(db, id);
+        const { lines, next } = readLogFile(opts, run.logPath, run.harness, from);
+        for (const l of lines) await stream.writeSSE({ id: String(l.line), event: "line", data: JSON.stringify(l) });
+        from = next;
+        if (run.state !== "running" && !lines.length) {
+          await stream.writeSSE({ event: "end", data: JSON.stringify({ state: run.state }) });
+          return;
+        }
+        await stream.sleep(pollMs);
+      }
+    }),
+  );
+  app.post("/api/doctor-runs/:id/stop", (c) => {
+    const stopped = stopDoctorRun(db, Number(c.req.param("id")), "stopped by the developer");
+    return stopped ? c.json({ stopped }) : c.json({ error: "that doctor run is not running" }, 409);
+  });
   app.post("/api/environments/:id/doctor", async (c) => {
     requestDoctor(db, c.req.param("id") as EnvironmentId, String(((await c.req.json().catch(() => ({}))) as { note?: string }).note ?? ""));
     return c.json({ asked: true });
@@ -661,7 +692,7 @@ export function createApp(opts: ServerOptions): Hono {
     judge: "work",
     lead: "work",
     watchman: "",
-    doctor: "doctor",
+    doctor: "",
   };
   const promptsView = (projectId: string | null) => ({
     projectId,

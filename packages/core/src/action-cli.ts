@@ -3,13 +3,33 @@ import { parseArgs } from "node:util";
 import { adoptProposal, findAction, reportBroken } from "./actions.js";
 import { inCheckout, runIn } from "./actionrun.js";
 import { loadBootstrap } from "./config.js";
-import type { AttemptId, RepoId } from "./domain.js";
+import type { AttemptId, EnvironmentId, RepoId } from "./domain.js";
+import { doctorRunOf } from "./doctor.js";
 import { layout } from "./paths.js";
 import { getAttempt, getProject, getUnit, openStore } from "./store.js";
 
 const USAGE = `usage: yagura action propose --name <name> --use "<when to use it>" [--all] -- <command>
        yagura action broken --name <name> --reason "<what went wrong>"
 `;
+
+// Who is calling: a doctor run, or an agent's session in a unit, each proven by the token yagura gave that session.
+function callerOf(
+  db: ReturnType<typeof openStore>,
+  env: NodeJS.ProcessEnv,
+): { environmentId: EnvironmentId | null; repoId: RepoId | null; attemptId: AttemptId | null; author: "doctor" | "agent" } | string {
+  if (env.YAGURA_DOCTOR_RUN) {
+    const run = doctorRunOf(db, env);
+    return typeof run === "string" ? run : { environmentId: run.environmentId, repoId: run.repoId, attemptId: null, author: "doctor" };
+  }
+  const attemptId = Number(env.YAGURA_ATTEMPT) as AttemptId;
+  const row = db.prepare("SELECT evidence_token FROM attempts WHERE id = ?").get(attemptId) as { evidence_token: string | null } | undefined;
+  const given = Buffer.from(env.YAGURA_EVIDENCE_TOKEN ?? "");
+  const expected = Buffer.from(row?.evidence_token ?? "");
+  if (!expected.length || given.length !== expected.length || !timingSafeEqual(given, expected))
+    return "refused: YAGURA_EVIDENCE_TOKEN does not match this attempt's session";
+  const unit = getUnit(db, getAttempt(db, attemptId).unitId);
+  return { environmentId: getProject(db, unit.projectId).environmentId, repoId: unit.repoId, attemptId, author: "agent" };
+}
 
 // An agent offers a command it found useful (yagura runs it on a clean checkout and saves it only when it passes), or says a saved
 // one does not work. Both act on the environment of the agent's own project, for the agent's own repo (--all: every repo there).
@@ -24,21 +44,15 @@ export async function actionAgentCli(argv: string[], env: NodeJS.ProcessEnv = pr
   const command = split === -1 ? "" : argv.slice(split + 1).join(" ");
   const sub = positionals[0];
   if ((sub !== "propose" && sub !== "broken") || !values.name) return { code: 2, output: USAGE };
-  if (!env.YAGURA_ATTEMPT) return { code: 2, output: "yagura action only works inside a yagura agent session (YAGURA_ATTEMPT is not set)\n" };
+  if (!env.YAGURA_ATTEMPT && !env.YAGURA_DOCTOR_RUN) return { code: 2, output: "yagura action only works inside a yagura agent session or doctor run\n" };
   const boot = loadBootstrap(env);
   const db = openStore(layout(boot).db);
   try {
-    const attemptId = Number(env.YAGURA_ATTEMPT) as AttemptId;
-    const row = db.prepare("SELECT evidence_token FROM attempts WHERE id = ?").get(attemptId) as { evidence_token: string | null } | undefined;
-    const given = Buffer.from(env.YAGURA_EVIDENCE_TOKEN ?? "");
-    const expected = Buffer.from(row?.evidence_token ?? "");
-    if (!expected.length || given.length !== expected.length || !timingSafeEqual(given, expected))
-      return { code: 2, output: "yagura action refused: YAGURA_EVIDENCE_TOKEN does not match this attempt's session\n" };
-    const attempt = getAttempt(db, attemptId);
-    const unit = getUnit(db, attempt.unitId);
-    const environmentId = getProject(db, unit.projectId).environmentId;
-    if (!environmentId || !unit.repoId) return { code: 1, output: "your unit has no environment or repo, so it has no actions\n" };
-    const repoId: RepoId = unit.repoId;
+    const caller = callerOf(db, env);
+    if (typeof caller === "string") return { code: 2, output: `yagura action ${caller}\n` };
+    if (!caller.environmentId || !caller.repoId) return { code: 1, output: "your work has no environment or repo, so it has no actions\n" };
+    const { environmentId, attemptId } = caller;
+    const repoId: RepoId = caller.repoId;
     if (sub === "broken") {
       const action = findAction(db, environmentId, repoId, values.name);
       if (!action) return { code: 1, output: `no action ${values.name} applies to ${repoId}; \`yagura env actions ${environmentId}\` lists them\n` };
@@ -47,7 +61,7 @@ export async function actionAgentCli(argv: string[], env: NodeJS.ProcessEnv = pr
     }
     if (!values.use || !command) return { code: 2, output: USAGE };
     const run = await inCheckout({ db, boot }, repoId, null, (dir, sha) =>
-      runIn({ db, boot }, { dir, sha, environmentId, repoId, actionId: null, command, by: attempt.role === "doctor" ? "doctor" : "agent", attemptId }),
+      runIn({ db, boot }, { dir, sha, environmentId, repoId, actionId: null, command, by: caller.author, attemptId }),
     );
     const status = run.timedOut ? "timed out" : `exit ${run.exitCode}`;
     const tail = run.output.trim().split("\n").slice(-20).join("\n");
@@ -58,7 +72,7 @@ export async function actionAgentCli(argv: string[], env: NodeJS.ProcessEnv = pr
       repoId: values.all ? null : repoId,
       name: values.name,
       use: values.use,
-      author: attempt.role === "doctor" ? "doctor" : "agent",
+      author: caller.author,
       attemptId,
       run,
     });

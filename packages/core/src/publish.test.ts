@@ -104,14 +104,9 @@ describe("test builds", () => {
     expect(readiness(db, project).waiting.map((w) => [w.unit.seq, w.reason])).toEqual([
       [2, "U1's test build failed: publish-snapshot exited 3: nexus said 401"],
     ]);
-    const woken = db
-      .prepare(
-        "SELECT json_extract(data_json, '$.repo') AS repo, json_extract(data_json, '$.trigger') AS trigger FROM events WHERE type = 'doctor.woken' ORDER BY id",
-      )
-      .all();
-    expect(woken).toEqual([
-      { repo: "app", trigger: "first" },
-      { repo: "lib", trigger: "first" },
+    expect(db.prepare("SELECT repo_id AS repo, trigger FROM doctor_runs ORDER BY id").all()).toEqual([
+      { repo: "app", trigger: "setup" },
+      { repo: "lib", trigger: "setup" },
       { repo: "lib", trigger: "broken" },
     ]);
   }, 90_000);

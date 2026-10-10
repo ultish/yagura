@@ -250,7 +250,7 @@ async function engine(role) {
   // The fake doctor offers a test action that always passes and reports it; FAKE_DOCTOR=fail offers one that cannot pass.
   if (role === "doctor") {
     const proposed = yg("action", "propose", "--name", "test", "--use", "Runs the whole suite.", "--", process.env.FAKE_DOCTOR === "fail" ? "false" : "true");
-    record([["doctor", ...(proposed?.code === 0 ? ["--works", "tests: test"] : ["--fails", "tests: the fake command failed"])]]);
+    record([["doctor", "report", ...(proposed?.code === 0 ? ["--works", "tests: test"] : ["--fails", "tests: the fake command failed"])]]);
     return finish("Doctor done.");
   }
   if (role === "lead") {

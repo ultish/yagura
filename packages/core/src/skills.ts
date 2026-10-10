@@ -64,7 +64,7 @@ export function skillMethod(skills: string[]): string {
   return skills.length ? ` Then load these project skills with the Skill tool before you change anything, and follow them: ${skills.join(", ")}.` : "";
 }
 
-export const REQUIRED_SKILLS: Partial<Record<Role, readonly string[]>> = {
+export const REQUIRED_SKILLS: Partial<Record<Role | "doctor", readonly string[]>> = {
   worker: ["yagura:yagura-worker", "pstack:poteto-mode", "pstack:principle-prove-it-works", "pstack:principle-test-behavior-not-implementation"],
   planner: ["yagura:yagura-planner"],
   judge: ["yagura:yagura-judge"],
@@ -73,7 +73,7 @@ export const REQUIRED_SKILLS: Partial<Record<Role, readonly string[]>> = {
   doctor: ["yagura:yagura-doctor"],
 };
 
-export function missingSkills(role: Role, loaded: readonly string[], project: readonly string[] = []): string[] {
+export function missingSkills(role: Role | "doctor", loaded: readonly string[], project: readonly string[] = []): string[] {
   const bare = (s: string) => s.slice(s.indexOf(":") + 1);
   return [...(REQUIRED_SKILLS[role] ?? []), ...project].filter((req) => !loaded.some((l) => l === req || bare(l) === bare(req)));
 }

@@ -208,7 +208,7 @@ export function failure(run: ActionRun): string {
 }
 
 // An agent says a saved action does not work; it stays broken until a run of it passes.
-export function reportBroken(db: Db, id: number, reason: string, attemptId: AttemptId): Action {
+export function reportBroken(db: Db, id: number, reason: string, attemptId: AttemptId | null): Action {
   if (!reason.trim()) throw new Error("say what went wrong");
   db.prepare("UPDATE actions SET state = 'broken', reason = ?, updated_at = ? WHERE id = ?").run(reason.trim(), now(), id);
   recordEvent(db, "action.broken", {}, { action: id, attempt: attemptId, reason });
@@ -225,7 +225,7 @@ export function adoptProposal(
     name: string;
     use: string;
     author: Exclude<ActionAuthor, "you">;
-    attemptId: AttemptId;
+    attemptId: AttemptId | null;
     run: ActionRun;
   },
 ): { action: Action; suggested: boolean } {
