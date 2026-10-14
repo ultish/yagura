@@ -147,6 +147,9 @@ Values (names agents and commands read from the environment): ${
       .join(", ") || "(none)"
   }
 
+## METHOD
+Load the yagura-doctor skill first and follow it.
+
 ## REPORT
 Offer each action with \`yagura action propose\` first; the report says what you found, the actions are what agents use. Then record:
 - \`${REPORT_USAGE}\`, one flag per line, repeated as needed.

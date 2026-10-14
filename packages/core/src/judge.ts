@@ -108,6 +108,9 @@ ${list(b.runs)}
 What the last round asked for:
 ${list(b.lastRound)}
 
+## METHOD
+Load the yagura-judge skill first and follow it.
+
 ## REPORT
 ${JUDGE_REPORT}
 
