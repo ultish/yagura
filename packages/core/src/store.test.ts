@@ -147,6 +147,18 @@ describe("store", () => {
     ]);
   });
 
+  it("cancels a unit lead's open question when the unit leaves stuck, so it cannot block the merge unseen", () => {
+    const u = newUnit();
+    for (const to of ["building", "stuck"] as const) transitionUnit(db, u.id, to);
+    const lead = addGate(db, { projectId: u.projectId, unitId: u.id, kind: "lead", question: "U1's unit lead asks: why?", options: [] });
+    const other = addGate(db, { projectId: u.projectId, unitId: u.id, kind: "question", question: "Which one?", options: [] });
+    transitionUnit(db, u.id, "building");
+    expect(db.prepare("SELECT id, state FROM gates ORDER BY id").all()).toEqual([
+      { id: lead, state: "cancelled" },
+      { id: other, state: "open" },
+    ]);
+  });
+
   it("allows every move UNIT_TRANSITIONS lists and refuses every other", () => {
     const at = (state: UnitState) => {
       const u = newUnit();

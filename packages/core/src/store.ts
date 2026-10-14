@@ -110,13 +110,23 @@ export function transitionUnit(db: Db, unitId: UnitId, to: UnitState, data: Reco
     if (!canTransition(row.state, to)) throw new IllegalTransition(unitId, row.state, to);
     db.prepare("UPDATE units SET state = ?, updated_at = ? WHERE id = ?").run(to, now(), unitId);
     recordEvent(db, "unit.state", { projectId: row.project_id, unitId }, { from: row.state, to, ...data });
-    // A merge question is about the head that was ready; once the unit leaves ready it no longer has an answer.
-    if (row.state === "ready")
-      for (const g of db.prepare("SELECT id FROM gates WHERE unit_id = ? AND kind = 'land' AND state = 'open'").all(unitId) as { id: number }[]) {
-        db.prepare("UPDATE gates SET state = 'cancelled', resolved_at = ? WHERE id = ?").run(now(), g.id);
-        recordEvent(db, "gate.cancelled", { projectId: row.project_id, unitId }, { gate: g.id, reason: `the unit went ${to}` });
-      }
+    // A merge question is about the head that was ready; once the unit leaves ready it no longer has an answer. A lead's question to the
+    // developer is about being stuck: a retry or a new decision moves the unit on, and an open question would block its merge unseen.
+    if (row.state === "ready") cancelOpenGates(db, unitId, ["land"], `the unit went ${to}`);
+    if (row.state === "stuck") cancelOpenGates(db, unitId, ["lead"], `the unit went ${to}`);
   })();
+}
+
+export function cancelOpenGates(db: Db, unitId: UnitId, kinds: string[], reason: string): void {
+  const open = db.prepare("SELECT id, project_id, kind FROM gates WHERE unit_id = ? AND state = 'open'").all(unitId) as {
+    id: number;
+    project_id: ProjectId;
+    kind: string;
+  }[];
+  for (const g of open.filter((g) => kinds.includes(g.kind))) {
+    db.prepare("UPDATE gates SET state = 'cancelled', resolved_at = ? WHERE id = ?").run(now(), g.id);
+    recordEvent(db, "gate.cancelled", { projectId: g.project_id, unitId }, { gate: g.id, reason });
+  }
 }
 
 // The move that put the unit in its current state, with the data it carried (a worker round, a reason).

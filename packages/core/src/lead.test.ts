@@ -201,6 +201,28 @@ describe("the unit lead", () => {
     });
   });
 
+  it("tells the unit lead in its brief to load its own skill, which yagura requires of it", async () => {
+    const id = stuck(["building"], { reason: "stuck", trigger: "worker-stuck" });
+    await runLeadRound(ctx, id, pendingWake(db, getUnit(db, id))!);
+    const lead = listAttempts(db, id)
+      .filter((a) => a.role === "lead")
+      .at(-1)!;
+    const brief = readFileSync(layout(ctx.boot).brief(project, getUnit(db, id).seq, lead.n), "utf8");
+    expect(brief).toContain("## METHOD\nLoad the yagura-unit-lead skill first and follow it.");
+  });
+
+  it("closes its own open question when the developer answers with a note instead and it decides again", async () => {
+    process.env.FAKE_LEAD = "ask";
+    const id = stuck(["building"], { reason: "stuck", trigger: "worker-stuck" });
+    await runLeadRound(ctx, id, pendingWake(db, getUnit(db, id))!);
+    const gate = listGates(db, project, "open").find((g) => g.unitId === id)!;
+    process.env.FAKE_LEAD = "reply";
+    expect(askLead(db, getUnit(db, id), "the library is published now")).toBeNull();
+    await runLeadRound(ctx, id, pendingWake(db, getUnit(db, id))!);
+    expect(listGates(db, project).find((g) => g.id === gate.id)!.state).toBe("cancelled");
+    expect(listGates(db, project, "open")).toEqual([]);
+  });
+
   it("reads the developer's note on a stuck unit first, and drops the unit when it decides so", async () => {
     process.env.FAKE_LEAD = "drop";
     const id = stuck(["building"], { reason: "stuck", trigger: "worker-stuck" });

@@ -16,6 +16,7 @@ import {
   addGate,
   addUnitNote,
   createAttempt,
+  cancelOpenGates,
   getAttempt,
   getProject,
   getRepo,
@@ -193,6 +194,9 @@ ${Object.values(ACTIONS)
 
 Read more with \`yagura show ${project.id} ${unit.seq}\`, \`yagura logs ${project.id} ${unit.seq}\`, and \`yagura git ${unit.repoId} log|show|diff\`. You can read, never change.
 
+## METHOD
+Load the yagura-unit-lead skill first and follow it.
+
 ## REPORT
 ${LEAD_REPORT}
 
@@ -268,6 +272,7 @@ export async function applyDecision(ctx: RunContext, unit: Unit, attempt: Attemp
     await forge.reply(mr.number, thread ? { id: thread.thread, kind: thread.kind } : { id: "", kind: "comment" }, by(d.reply), `lead-${attempt.id}`);
   }
   recordEvent(db, "lead.decided", refs, { action: d.action, reason: d.reason, trigger: wake.trigger });
+  cancelOpenGates(db, unit.id, ["lead"], "the unit lead decided again");
   switch (d.action) {
     case "resume":
       return transitionUnit(db, unit.id, "building", { round: { kind: "lead", note: d.note! } satisfies WorkerRound, by: "lead" });
