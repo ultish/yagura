@@ -7,7 +7,8 @@ import type { ArtifactId, AttemptId, ProjectId, Sha } from "./domain.js";
 import { git, headSha, restorePristine } from "./git.js";
 import { activeLease } from "./leases.js";
 import { layout } from "./paths.js";
-import { getAttempt, getRepo, getUnit, now, recordEvent, type Db } from "./store.js";
+import { builtBefore, unitEnv } from "./publish.js";
+import { getAttempt, getProject, getRepo, getUnit, now, recordEvent, type Db } from "./store.js";
 
 const MAX_CAPTURE = 5 * 1024 * 1024;
 const KILL_GRACE_MS = 5_000;
@@ -123,7 +124,14 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
   const result = await runShell(
     req.command,
     cwd,
-    { ...process.env, ...(lease?.vars ?? {}), YAGURA_EVIDENCE: evidenceDir, YAGURA_AT: req.at, YAGURA_SHA: sha },
+    {
+      ...process.env,
+      ...unitEnv(db, getProject(db, unit.projectId).environmentId, builtBefore(db, unit)),
+      ...(lease?.vars ?? {}),
+      YAGURA_EVIDENCE: evidenceDir,
+      YAGURA_AT: req.at,
+      YAGURA_SHA: sha,
+    },
     req.timeoutSeconds ?? 300,
   );
   const durationMs = Date.now() - started;

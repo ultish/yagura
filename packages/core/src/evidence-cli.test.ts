@@ -1,12 +1,15 @@
-import { mkdtempSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { attemptRecorder } from "./agent.js";
-import type { ProjectId, RepoId } from "./domain.js";
+import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
+import { setValue } from "./envvalues.js";
 import { evidenceCli } from "./evidence-cli.js";
+import { readArtifact, runEvidence } from "./evidence.js";
 import { layout } from "./paths.js";
-import { addProject, addRepo, addUnit, createAttempt, openStore, updateAttempt } from "./store.js";
+import { addEnvironment, addProject, addRepo, addUnit, createAttempt, openStore, updateAttempt } from "./store.js";
 
 describe("evidence run", () => {
   it("refuses a caller that does not hold the attempt's token", async () => {
@@ -39,5 +42,37 @@ describe("evidence run", () => {
     expect(await run("0".repeat(48))).toEqual(refused);
     expect(await run(undefined)).toEqual(refused);
     await expect(run(token)).rejects.toThrow(/has no checkout/);
+  });
+
+  it("runs a recorded command with the environment's values", async () => {
+    const home = mkdtempSync(join(tmpdir(), "yagura-evenv-"));
+    const boot = { home, packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+    const db = openStore(layout(boot).db);
+    const checkout = mkdtempSync(join(tmpdir(), "yagura-evenv-checkout-"));
+    writeFileSync(join(checkout, "f.txt"), "x");
+    for (const args of [
+      ["init", "-q", "-b", "main"],
+      ["add", "."],
+      ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"],
+    ])
+      execFileSync("git", args, { cwd: checkout });
+    addEnvironment(db, { id: "e", name: "e", provider: "local-process", capacity: 1 });
+    setValue(db, "e" as EnvironmentId, { name: "NEXUS_URL", value: "file:///maven" });
+    addRepo(db, { id: "r", url: "/r", defaultBranch: "main" });
+    addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: ["r" as RepoId], environmentId: "e" as EnvironmentId });
+    const unit = addUnit(db, {
+      projectId: "p" as ProjectId,
+      type: "work",
+      repoId: "r" as RepoId,
+      goal: "g",
+      acceptance: [],
+      timeboxSeconds: 60,
+      maxAttempts: 1,
+    });
+    const attempt = createAttempt(db, unit.id, "claude", null);
+    updateAttempt(db, attempt.id, { role: "worker", worktreePath: checkout });
+    const run = await runEvidence(db, boot, { attemptId: attempt.id, at: "head", command: 'printf %s "$NEXUS_URL"' });
+    expect(readArtifact(db, boot, run.stdoutArtifactId!).toString()).toBe("file:///maven");
+    db.close();
   });
 });

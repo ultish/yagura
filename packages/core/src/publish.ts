@@ -1,7 +1,8 @@
 import { findAction } from "./actions.js";
 import { inCheckout, runIn } from "./actionrun.js";
 import type { Bootstrap } from "./config.js";
-import type { ProjectId, PublicationKind, PublicationState, RepoId, Sha, Unit, UnitId } from "./domain.js";
+import type { EnvironmentId, ProjectId, PublicationKind, PublicationState, RepoId, Sha, Unit, UnitId } from "./domain.js";
+import { valueMap } from "./envvalues.js";
 import { getProject, getUnit, listUnits, now, recordEvent, type Db } from "./store.js";
 
 export interface Publication {
@@ -42,6 +43,29 @@ export function testBuildOf(db: Db, unit: Unit): Publication | null {
   const r = db.prepare("SELECT * FROM publications WHERE unit_id = ? AND kind = 'test' AND sha = ? ORDER BY id DESC LIMIT 1").get(unit.id, unit.mergedSha) as
     Record<string, unknown> | undefined;
   return r ? fromRow(r) : null;
+}
+
+export interface BuiltBefore {
+  on: Unit;
+  pub: Publication & { version: string };
+}
+
+// The units this one comes after whose test build is published: what it must depend on, exactly.
+export function builtBefore(db: Db, unit: Unit): BuiltBefore[] {
+  return unit.after
+    .map((id) => getUnit(db, id))
+    .flatMap((on) => {
+      const pub = testBuildOf(db, on);
+      return pub?.state === "published" && pub.version ? [{ on, pub: { ...pub, version: pub.version } }] : [];
+    });
+}
+
+// What is in the shell of a unit's agent and of every command yagura records for it: the environment's values and the version of each library built before it.
+export function unitEnv(db: Db, environmentId: EnvironmentId | null, builds: BuiltBefore[]): Record<string, string> {
+  return {
+    ...valueMap(db, environmentId),
+    ...Object.fromEntries(builds.map(({ on, pub }) => [`YAGURA_VERSION_${on.repoId!.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`, pub.version])),
+  };
 }
 
 // The release version is what CI publishes from main: the build's version without a snapshot marker.
