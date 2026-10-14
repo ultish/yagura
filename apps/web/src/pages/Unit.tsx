@@ -4,6 +4,7 @@ import type { UnitState } from "@yagura/core";
 import { api, useApi, useNow, useQuery, type StoryEntry, type StoryLine, type UnitCode, type UnitStory } from "../api";
 import { clip, clock, duration, modelName } from "../lib/format";
 import { Inline } from "../lib/markdown";
+import { byTime, saveOrder, savedOrder, type TimeOrder } from "../lib/sort";
 import { buildTimeline } from "../lib/timeline";
 import { unitActions, unitTone } from "../lib/units";
 import { StateMap } from "../scene/StateMap";
@@ -145,11 +146,13 @@ function Timeline({
   picked,
   onPick,
   reload,
+  order,
 }: {
   story: UnitStory;
   picked: UnitState | null;
   onPick: (s: UnitState | null) => void;
   reload: () => void;
+  order: TimeOrder;
 }) {
   const items: React.ReactNode[] = [];
   let round = 0;
@@ -167,6 +170,7 @@ function Timeline({
     round = e.round;
     items.push(<Entry key={`${e.id}-${i}`} story={story} entry={e} picked={picked} onPick={onPick} reload={reload} />);
   }
+  if (order === "newest") items.reverse();
   return (
     <>
       <div className="timeline-head">
@@ -188,7 +192,7 @@ function Timeline({
   );
 }
 
-function AgentsTab({ story }: { story: UnitStory }) {
+function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
   if (!story.agents.length) return <div className="muted">No agent has worked on U{story.unit.seq} yet.</div>;
   return (
     <div className="hub-table-wrap">
@@ -204,7 +208,7 @@ function AgentsTab({ story }: { story: UnitStory }) {
           </tr>
         </thead>
         <tbody>
-          {story.agents.map((a) => (
+          {byTime(story.agents, (a) => a.startedAt, order).map((a) => (
             <tr key={a.attemptId} className={a.counted || a.outcome === "running" ? undefined : "dim"}>
               <td>
                 <Link to={`/a/${a.attemptId}`}>A{a.agentNo}</Link>
@@ -448,6 +452,12 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
   const { data: story, error, reload } = useApi<UnitStory>(`/api/projects/${projectId}/units/${seq}/story`);
   const query = useQuery();
   const [picked, setPicked] = useState<UnitState | null>(null);
+  const [order, setOrder] = useState<TimeOrder>(savedOrder);
+  const flip = () => {
+    const next: TimeOrder = order === "oldest" ? "newest" : "oldest";
+    saveOrder(next);
+    setOrder(next);
+  };
   const live = useLiveStep(story?.running ?? null);
   const raw = query.get("tab");
   const tab: Tab = raw === "code" || raw === "agents" || raw === "deps" ? raw : "timeline";
@@ -539,10 +549,20 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             {label}
           </Link>
         ))}
+        {(tab === "timeline" || tab === "agents") && (
+          <button
+            type="button"
+            className="hub-sort"
+            onClick={flip}
+            title={order === "oldest" ? "Showing the oldest first; click for the newest first" : "Showing the newest first; click for the oldest first"}
+          >
+            {order === "oldest" ? "Oldest first ↑" : "Newest first ↓"}
+          </button>
+        )}
       </div>
-      {tab === "timeline" && <Timeline story={story} picked={picked} onPick={pick} reload={reload} />}
+      {tab === "timeline" && <Timeline story={story} picked={picked} onPick={pick} reload={reload} order={order} />}
       {tab === "code" && <CodeTab story={story} />}
-      {tab === "agents" && <AgentsTab story={story} />}
+      {tab === "agents" && <AgentsTab story={story} order={order} />}
       {tab === "deps" && <DependenciesTab story={story} />}
     </main>
   );
