@@ -485,7 +485,9 @@ function nowOf(
     case "ready": {
       const judge = last("judge");
       const merge = s.gates.find((g) => g.kind === "land");
+      const asked = s.gates.find((g) => g.kind === "lead");
       const said = judge ? `Judge A${judge.attempt!.agentNo}: ${judge.body ?? "approved."}` : "The judge approved it.";
+      if (asked) return { headline: "Approved, but held by an open question to you.", detail: [said, `Its unit lead asks you: ${asked.question}`] };
       return merge
         ? { headline: "Approved. Waits for your go to merge.", detail: [said, `${pr} is out of draft.`] }
         : { headline: "Approved. Waits for CI and the merge.", detail: [said, `${pr} is out of draft.`] };

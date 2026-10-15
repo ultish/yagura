@@ -13,7 +13,21 @@ import type { HarnessAdapter } from "./harness/adapter.js";
 import { parseClaudeLine } from "./harness/claude.js";
 import { layout } from "./paths.js";
 import { unitStory } from "./story.js";
-import { addEnvironment, addProject, addRepo, listUnits, openStore, setMergePolicy, setProjectEnvironment, setRepoForge, type Db } from "./store.js";
+import {
+  addEnvironment,
+  addGate,
+  addProject,
+  addRepo,
+  addUnit,
+  getUnit,
+  listUnits,
+  openStore,
+  setMergePolicy,
+  setProjectEnvironment,
+  setRepoForge,
+  transitionUnit,
+  type Db,
+} from "./store.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
 const fake: HarnessAdapter = {
@@ -98,4 +112,22 @@ describe("unitStory", () => {
     expect(story.pr).toMatchObject({ number: expect.any(Number), draft: false });
     expect(story.now).toEqual({ headline: `Merged into main as ${u2.mergedSha!.slice(0, 7)}.`, detail: [`2 rounds of work, PR #${story.pr!.number}.`] });
   }, 60_000);
+
+  it("says a ready unit is held while its unit lead's question to the developer is open", () => {
+    const unit = addUnit(db, {
+      projectId: project,
+      type: "work",
+      repoId: "testbed" as RepoId,
+      goal: "g",
+      acceptance: ["a"],
+      timeboxSeconds: 60,
+      maxAttempts: 3,
+    });
+    for (const to of ["building", "judging", "ready"] as const) transitionUnit(db, unit.id, to);
+    expect(unitStory(db, boot, getUnit(db, unit.id)).now.headline).toBe("Approved. Waits for CI and the merge.");
+    addGate(db, { projectId: project, unitId: unit.id, kind: "lead", question: "U1's unit lead asks: which Nexus?", options: [] });
+    const now = unitStory(db, boot, getUnit(db, unit.id)).now;
+    expect(now.headline).toBe("Approved, but held by an open question to you.");
+    expect(now.detail).toContain("Its unit lead asks you: U1's unit lead asks: which Nexus?");
+  });
 });
