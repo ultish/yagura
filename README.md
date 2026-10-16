@@ -39,15 +39,44 @@ pnpm -r build
 pnpm -r test
 ```
 
-`yagura daemon` starts the engine, the API, and the dashboard on one port. Runtime state lives in `~/.yagura`, or wherever `YAGURA_HOME` points, and never in the repo. Every `yagura` command opens that home's database and migrates it, so set a scratch home before you try anything:
+The CLI is `apps/cli/dist/main.js`. Put it on your PATH once, for example `chmod +x apps/cli/dist/main.js && ln -s "$PWD/apps/cli/dist/main.js" ~/.local/bin/yagura`, or `alias yagura='node /path/to/yagura/apps/cli/dist/main.js'`. The commands below assume `yagura` works.
+
+Runtime state lives in `~/.yagura`, or wherever `YAGURA_HOME` points, and never in the repo. Every `yagura` command opens that home's database and migrates it, so set a scratch home before you try anything. Never run a command without one while experimenting.
+
+### Your first project
 
 ```sh
-export YAGURA_HOME=$(mktemp -d)
-yagura set role.worker.model '"claude-haiku-4-5-20251001"'
-yagura repo add <git URL> --id <id>
+export YAGURA_HOME=$(mktemp -d)      # drop this line for your real home
+yagura repo add <git URL> --id app   # github.com goes through pull requests; see below for GitLab
 yagura env add local --provider local-process
-yagura daemon
+yagura env answer local tests --text "run the tests with gradle test"
+yagura env answer local publish --text "snapshots go to our Nexus; never release"
+yagura env value set local NEXUS_URL http://nexus.internal:8081
+yagura daemon                        # in its own terminal: engine, API, and dashboard on one port
 ```
+
+Then, in another terminal with the same `YAGURA_HOME`:
+
+```sh
+yagura env doctor local              # a doctor agent turns your answers into proven actions
+yagura env actions local             # check that `test` (and the publish actions) are proven
+yagura project new demo --goal "<what you want done>" --predicate "<how anyone can tell it is done>" --repo app --env local
+yagura show demo
+```
+
+Open the dashboard at `http://127.0.0.1:7300`. Questions for you show up as gates (`yagura gates`).
+
+Models default to the harness default. To pick them per role and cap spend: `yagura set role.worker.model '"claude-haiku-4-5-20251001"'` (same for `judge`, `lead`, `planner`, `doctor`) and `yagura set project.budget_usd 5 --scope project --id demo`.
+
+### Setting it up on a work VM
+
+- **Install without internet.** `pnpm install` needs a registry. Point pnpm at your internal mirror, or copy a populated pnpm store to the VM. `better-sqlite3` builds natively, so the VM needs `gcc`, `make` and Python; after any Node switch run `pnpm rebuild better-sqlite3`.
+- **Harness.** Install and log in `claude` on the VM (or set `harness.claude.bin`), with your plugins and skills, including pstack. `yagura project skills <id>` checks a project's required skills are installed where agents run.
+- **Internal GitLab.** Log in with `glab auth login --hostname <host>`, then `yagura set forge.glab_hosts '["<host>"]'`. A repo from that host registers through merge requests with `yagura repo add <url> --id <id>`; any other remote needs `--forge gh|glab` or `--land push`. If the repo path on the forge differs from the URL, `yagura repo set <id>` and `yagura set forge.repo '"group/name"' --scope repo --id <id>`.
+- **Reaching the dashboard from another machine.** The daemon binds to localhost on port 7300. For access from a Windows host, start it with `YAGURA_BIND=<vm-hostname>` (or `0.0.0.0`) and `YAGURA_PORT`, and open that port in the VM firewall. Beyond localhost the dashboard asks for the token in `$YAGURA_HOME/token` (`YAGURA_TOKEN_FILE` moves it). Browser notifications need HTTPS, or Chrome's `unsafely-treat-insecure-origin-as-secure` flag for that origin.
+- **Keep it alive.** Run the daemon under `tmux` or a systemd user service. On a Mac use `caffeinate -is`.
+
+The air-gapped VM setup has not been run end to end yet; treat this list as a checklist, not a proven recipe.
 
 For development, `pnpm dev` rebuilds on change, restarts the daemon, and runs Vite with hot reload on `:5173`. Its home is `~/.yagura-dev`.
 
