@@ -76,15 +76,13 @@ describe("mentions", () => {
     const { addRepo, addProject, addUnit, createAttempt } = await import("./store.js");
     const { messagesMentioning, parseMentions, suggestMentions } = await import("./mentions.js");
     addRepo(db, { id: "r", url: "/r", defaultBranch: "main" });
-    addProject(db, { id: "kafka-diff", name: "k", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["r" as never] });
+    addProject(db, { id: "kafka-diff", name: "k", goal: "g", predicate: "p", repos: ["r" as never] });
     const u = addUnit(db, {
       projectId: "kafka-diff" as never,
       type: "work",
       repoId: "r" as never,
       goal: "ignore timestamps",
-      writeScope: ["a"],
       acceptance: ["a"],
-      verify: "v",
       timeboxSeconds: 60,
       maxAttempts: 2,
     });

@@ -6,14 +6,14 @@ import { assertThreadFree, beginTurn, currentSession, endSession, endTurn, getTu
 import { z } from "zod";
 import { runAgentSession, write, type RunContext, type SessionRecorder } from "./agent.js";
 import { resolveSetting } from "./config.js";
-import { PASS_TIERS, type Environment, type EnvironmentId, type ProjectId, type RepoId } from "./domain.js";
+import { type Environment, type EnvironmentId, type ProjectId, type RepoId } from "./domain.js";
 import { listValues } from "./envvalues.js";
 import { PROVIDERS_IMPL } from "./leases.js";
 import { PRESETS } from "./presets.js";
 import { listTemplates } from "./templates.js";
 import { installedSkills } from "./skills.js";
 import { describeMention, resolveMentions } from "./mentions.js";
-import { missingSkills } from "./pack.js";
+import { missingSkills } from "./skills.js";
 import { layout } from "./paths.js";
 import { lastDrainEventId, latestDelta } from "./planner.js";
 import { WORK_PLAYBOOKS } from "./plan.js";
@@ -183,7 +183,7 @@ export function renderWatchmanBrief(b: WatchmanBrief): string {
   const { sections, dropped } = b.context;
   return `# yagura watchman brief
 
-You are yagura's watchman: the developer's front door. You turn conversation into projects that yagura's own agents plan, build, verify, and land, and you keep the thread's memory in structured records. You never write code and never touch repos yourself. This brief starts a session: later messages in this thread resume it and bring only what changed. yagura's records, not this session, are the truth: when a session is cleared or lost, the next one starts again from them.
+You are yagura's watchman: the developer's front door. You turn conversation into projects that yagura's own agents plan, build, judge, and merge, and you keep the thread's memory in structured records. You never write code and never touch repos yourself. This brief starts a session: later messages in this thread resume it and bring only what changed. yagura's records, not this session, are the truth: when a session is cleared or lost, the next one starts again from them.
 
 ## THREAD
 - thread ${b.thread.id}: ${b.thread.title}
@@ -214,7 +214,7 @@ ${sections.spec || "(no spec yet)"}${dropped.specSections ? `\n(${dropped.specSe
 ${b.catalog}
 
 ## LOOKING THINGS UP
-You can read, never change. Read, Grep, and Glob work in this thread's directory and in \`${b.projectsDir}/<project>/\` for each project in this thread (briefs/, handoffs/, logs/; each project's spec is in this brief). For anything else run \`yagura show <project> [unit#]\`, \`yagura logs\`, \`yagura trace <sha|issue>\`, \`yagura gates\`, \`yagura settings\`, \`yagura thread list|show|search|mentions\`, \`yagura env values|presets|notes\`, \`yagura template list\`, \`yagura project skills\`, or \`yagura git <repo> log|show|ls-tree|diff|grep|blame\` (trunk is \`origin/<default branch>\`). Every other tool and command is refused; look a fact up before you guess it or ask the developer for it.
+You can read, never change. Read, Grep, and Glob work in this thread's directory and in \`${b.projectsDir}/<project>/\` for each project in this thread (briefs/, handoffs/, logs/; each project's spec is in this brief). For anything else run \`yagura show <project> [unit#]\`, \`yagura logs\`, \`yagura trace <sha|issue>\`, \`yagura gates\`, \`yagura settings\`, \`yagura thread list|show|search|mentions\`, \`yagura env values|presets|answers|actions\`, \`yagura template list\`, \`yagura project skills\`, or \`yagura git <repo> log|show|ls-tree|diff|grep|blame\` (trunk is \`origin/<default branch>\`). Every other tool and command is refused; look a fact up before you guess it or ask the developer for it.
 
 ## CONVERSATION (most recent, oldest first)
 ${dropped.messages ? `(${dropped.messages} older message(s) omitted; search them with \`yagura thread search --thread ${b.thread.id} "<words>"\`)\n\n` : ""}${sections.history}
@@ -239,21 +239,21 @@ Reply to the developer in plain prose. Then end your final message with exactly 
   "proposal": {
     "summary": "what applying this starts and why",
     "repos": [
-      { "id": "kafka-diff", "description": "one line", "verifyPack": { "provider": "local-process", "checks": [{ "name": "unit", "command": "python3 -m unittest -v", "tier": "unit-verified" }] } },
+      { "id": "kafka-diff", "description": "one line" },
       { "id": "billing", "existing": "git@gitlab.internal:team/billing.git", "forge": "glab" }
     ],
     "environments": [
-      { "id": "vm", "provider": "kube-namespace", "providerConfig": { "context": "rancher-desktop" }, "capacity": 1, "notes": "dependencies run in the cluster",
+      { "id": "vm", "provider": "kube-namespace", "providerConfig": { "context": "rancher-desktop" }, "capacity": 1, "answers": { "tests": "gradle test", "other": "dependencies run in the cluster" },
         "presets": ["helm"], "values": [{ "name": "REDIS_URL", "value": "redis://vm.internal:6379", "note": "Redis from this machine" }] },
       { "id": "vm2", "template": "spring-kube", "answers": { "REGISTRY_PULL": "vm2.internal:5000" } }
     ],
     "projects": [{
       "id": "kafka-diff", "goal": "…", "predicate": "checkable done condition", "repos": ["kafka-diff"],
-      "environment": null, "merge": "auto", "land": "pr", "minTier": "unit-verified", "after": [], "phaseGate": false,
+      "environment": null, "merge": "auto", "land": "pr", "after": [], "phaseGate": false,
       "spec": "# kafka-diff\\n\\n## Scope\\n…", "units": [],
-      "skills": { "scaffold": ["setup-gradle"], "work": [], "pack": [], "verify": [] }, "references": ["billing"]
+      "skills": { "scaffold": ["setup-gradle"], "work": [] }, "references": ["billing"]
     }],
-    "amend": [{ "project": "kafka-diff", "units": [{ "key": "ignore-ts", "repo": "kafka-diff", "goal": "…", "write": ["src/**"], "accept": ["…"], "verify": "…" }] }]
+    "amend": [{ "project": "kafka-diff", "units": [{ "key": "ignore-ts", "repo": "kafka-diff", "goal": "…", "acceptance": ["…"], "context": ["…"], "refs": ["kafka-diff#12"] }] }]
   }
 }
 \`\`\`
@@ -296,7 +296,6 @@ function catalog(db: Db, boot: RunContext["boot"]): string {
         .join(", ") || "(none)"
     }`,
     `- existing project ids (taken): ${projects.map((p) => `${p.id} [${p.state}]`).join(", ") || "(none)"}`,
-    `- tiers, strongest first: ${PASS_TIERS.join(", ")}`,
     `- unit playbooks: ${WORK_PLAYBOOKS.join(", ")}`,
   ].join("\n");
 }
@@ -745,12 +744,19 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
       logPath: log,
     });
     const stopped = getTurn(db, turnId).state === "stopped";
+    const why = stopped
+      ? (db
+          .prepare(
+            "SELECT json_extract(data_json, '$.reason') AS r FROM events WHERE type = 'watchman.stopped' AND json_extract(data_json, '$.turn') = ? ORDER BY id DESC LIMIT 1",
+          )
+          .get(turnId) as { r: string | null } | undefined)
+      : undefined;
     if (result.final?.text.trim() && !result.final.isError && !result.timedOut) return { text: result.final.text, problem: null, lost: false };
     return {
       text: null,
       lost: Boolean(resume) && !started && !stopped,
       problem: stopped
-        ? "you stopped the watchman"
+        ? (why?.r ?? "you stopped the watchman")
         : result.timedOut
           ? "the watchman ran out of time"
           : `the watchman ended without a reply (exit ${result.exitCode ?? result.signal})`,

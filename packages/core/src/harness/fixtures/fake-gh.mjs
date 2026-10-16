@@ -2,10 +2,23 @@
 // A stand-in for the gh CLI over a local bare repo (FAKE_GH_ORIGIN), with pull requests kept in FAKE_GH_STATE.
 // Tests steer it by editing the state file: checks, a forced mergeStateStatus, or a closed state.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const statePath = process.env.FAKE_GH_STATE;
 const origin = process.env.FAKE_GH_ORIGIN;
+// Calls run in parallel like a real forge's API, so each one holds the state file's lock from its read to its last write.
+const lock = `${statePath}.lock`;
+for (let i = 0; ; i++) {
+  try {
+    mkdirSync(lock);
+    break;
+  } catch {
+    if (i > 2000) throw new Error(`fake forge state ${lock} stayed locked`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+  }
+}
+process.on("exit", () => rmSync(lock, { recursive: true, force: true }));
+for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => process.exit(1));
 const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, "utf8")) : { prs: [], calls: [] };
 const save = () => writeFileSync(statePath, JSON.stringify(state, null, 2));
 const git = (...args) => execFileSync("git", ["--git-dir", origin, ...args], { encoding: "utf8" }).trim();
@@ -18,7 +31,10 @@ let stdin = "";
 process.stdin.on("data", (d) => (stdin += d));
 process.stdin.on("end", () => {
   // FAKE_GH_HANG: a call the forge never answers, as when a connection drops while the machine sleeps.
-  if (process.env.FAKE_GH_HANG) return void setInterval(() => {}, 60_000);
+  if (process.env.FAKE_GH_HANG) {
+    rmSync(lock, { recursive: true, force: true });
+    return void setInterval(() => {}, 60_000);
+  }
   state.calls.push([group, verb, ...rest.filter((a) => !a.includes("\n"))].join(" "));
   const pr = () => state.prs.find((p) => p.number === Number(rest[0]));
   if (group === "api" && verb === "graphql") {
@@ -47,33 +63,6 @@ process.stdin.on("end", () => {
         },
       },
     });
-  }
-  // REST: a line comment on a pull request, or a reply to one (yagura's own reviewer).
-  if (group === "api") {
-    const path = [verb, ...rest].find((a) => /^repos\//.test(a));
-    const m = /^repos\/[^/]+\/[^/]+\/pulls\/(\d+)\/comments(?:\/(\d+)\/replies)?$/.exec(path ?? "");
-    if (!m) fail(`unknown api ${path}`);
-    const p = state.prs.find((x) => x.number === Number(m[1]));
-    if (!p) fail(`no pull request ${m[1]}`);
-    const body = JSON.parse(stdin);
-    p.threads = p.threads ?? [];
-    if (m[2]) {
-      const t = p.threads.find((x) => x.restId === Number(m[2]));
-      if (!t) fail(`no comment ${m[2]}`);
-      t.comments.push({ author: { login: "ultish" }, body: body.body });
-      return out({ id: Number(m[2]) * 100 + t.comments.length });
-    }
-    if (process.env.FAKE_GH_LINE_REFUSED) fail("gh: Validation Failed (HTTP 422): pull_request_review_thread.line must be part of the diff");
-    const id = 1000 + p.threads.length;
-    p.threads.push({
-      id: `PRRT_${id}`,
-      restId: id,
-      isResolved: false,
-      path: body.path,
-      line: body.line,
-      comments: [{ author: { login: "ultish" }, body: body.body }],
-    });
-    return out({ id });
   }
   if (group === "run") {
     const runs = state.runs ?? [];
@@ -111,7 +100,17 @@ process.stdin.on("end", () => {
   if (verb === "create") {
     const number = state.prs.length + 1;
     const url = `https://github.com/${flag("--repo")}/pull/${number}`;
-    state.prs.push({ number, url, head: flag("--head"), base: flag("--base"), title: flag("--title"), body: stdin, state: "OPEN", checks: [] });
+    state.prs.push({
+      number,
+      url,
+      head: flag("--head"),
+      base: flag("--base"),
+      title: flag("--title"),
+      body: stdin,
+      state: "OPEN",
+      isDraft: rest.includes("--draft"),
+      checks: [],
+    });
     save();
     return console.log(url);
   }
@@ -130,6 +129,7 @@ process.stdin.on("end", () => {
     }
     return out({
       state: p.state,
+      isDraft: p.isDraft ?? false,
       mergeable: merge === "DIRTY" ? "CONFLICTING" : "MERGEABLE",
       mergeStateStatus: merge,
       statusCheckRollup: p.checks,
@@ -137,17 +137,32 @@ process.stdin.on("end", () => {
       mergeCommit: p.mergeCommit ? { oid: p.mergeCommit } : null,
     });
   }
+  if (verb === "edit") {
+    p.body = stdin;
+    return save();
+  }
+  if (verb === "ready") {
+    p.isDraft = false;
+    return save();
+  }
   if (verb === "merge") {
+    if (!rest.includes("--merge")) fail("yagura merges only with a merge commit");
+    if (p.isDraft) fail("Pull request is still a draft");
     const head = git("rev-parse", `refs/heads/${p.head}`);
     if (flag("--match-head-commit") !== head) fail("head commit does not match");
-    // A rebase merge rewrites the commit: same tree and message, new committer, so a new SHA.
-    const message = git("log", "-1", "--format=%B", head);
+    const tree = execFileSync("git", ["--git-dir", origin, "merge-tree", "--write-tree", `refs/heads/${p.base}`, head], { encoding: "utf8" }).split("\n")[0];
     const env = { ...process.env, GIT_COMMITTER_NAME: "GitHub", GIT_COMMITTER_EMAIL: "noreply@github.com", GIT_COMMITTER_DATE: "2030-01-01T00:00:00Z" };
-    const merged = execFileSync("git", ["--git-dir", origin, "commit-tree", `${head}^{tree}`, "-p", `refs/heads/${p.base}`, "-m", message], {
+    const message = `${flag("--subject")}\n\n${stdin}`;
+    const merged = execFileSync("git", ["--git-dir", origin, "commit-tree", tree, "-p", `refs/heads/${p.base}`, "-p", head, "-m", message], {
       encoding: "utf8",
       env,
     }).trim();
     git("update-ref", `refs/heads/${p.base}`, merged);
+    // Like GitHub: a merge into the default branch closes the issues its pull request or merge message says it closes.
+    for (const m of `${p.body ?? ""}\n${message}`.matchAll(/\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?) #(\d+)/gi)) {
+      const issue = (state.issues ?? []).find((i) => i.number === Number(m[1]));
+      if (issue) issue.state = "CLOSED";
+    }
     Object.assign(p, { state: "MERGED", mergeCommit: merged, headRefOid: head });
     save();
     return;

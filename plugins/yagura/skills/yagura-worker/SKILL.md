@@ -1,26 +1,29 @@
 ---
 name: yagura-worker
-description: Use when a prompt is a yagura brief (starts with "# yagura brief") and you are its worker. Sets how to combine the brief with pstack's poteto-mode inside yagura, which owns landing, PRs, loops, and the decision trail.
+description: Use when a prompt is a yagura brief (starts with "# yagura brief") or a yagura round prompt ("# yagura: your unit is back with you") and you are its worker. Sets how to build a unit's goal with pstack's poteto-mode inside yagura, which owns the pull request, the merge, and the loop.
 ---
 
 # yagura worker
 
-You are one worker in a yagura project. The daemon that started you owns everything outside your worktree. Your only product is the change on your branch and the handoff you record with `yagura handoff`.
+You are the worker on one unit of a yagura project. The unit says what must be true when it is done; how to get there is yours. A judge with no part in your work decides whether the goal is met, from your change and from runs it makes itself. yagura owns everything else: the branch's pull request, keeping the branch merged with its base, the merge, and the loop.
 
 ## Rules that override pstack
 
-- **The brief is the task.** GOAL, SCOPE, ACCEPTANCE, and VERIFY are fixed. You cannot ask questions; when something is ambiguous, pick the reading that best serves GOAL, do it, and record the choice with `--decision` on your handoff.
-- **Stay inside SCOPE where you can.** SCOPE is the planner's estimate, made before the work existed. yagura diffs your branch against its base when you finish. If the work truly needs a path outside "Expected to write" (a test for your change, a caller you must update), change it and record each such path with its reason as `--outside-scope "<path>=<why>"` on your handoff; the verifier and reviewer judge those reasons. A path outside SCOPE with no reason rejects the attempt, and the paths under "Never write" (the verify pack) are rejected regardless.
-- **Commit to your branch; nothing else in git.** No push, rebase, merge, branch switch, or new branch. Your branch is exactly what you commit: anything left uncommitted when you exit is saved aside and discarded, never added to your branch. Commit deliberately with clear messages, and leave generated files (caches, build output) uncommitted.
-- **Skip pstack's landing and orchestration steps.** Do not run Opening a PR, Babysit, Shipping, Orchestrate, Autonomous run, Pause safely, Session pickup, worktree cleanup, or show-me-your-work. Do not arm `/loop` or any wake mechanism. yagura does all of these.
-- **Load poteto-mode and use it for the work itself.** Invoke the `pstack:poteto-mode` skill with the Skill tool before you start; working "in its style" without loading it counts as skipping it, and yagura rejects the attempt. Follow the playbook METHOD names, its principles, and its verification standard. Where a playbook step says to open a PR or hand to a human, record your handoff and stop instead.
-- **Pin the version you are given.** When READONLY says a repo is "published as" a version (also in `$YAGURA_VERSION_<REPO>`), or CONTEXT says an upstream landed with one, depend on exactly that version wherever this repo declares the dependency, and build against it rather than the checkout. No range, no `latest`, no snapshot of your own. It stays pinned to that version when it lands.
-- **Prove it, tests first.** Load `pstack:principle-prove-it-works` and `pstack:principle-test-behavior-not-implementation` with the Skill tool. For new or fixed behaviour, write the test first, run it on the unchanged code and see it fail, then make the change and see it pass. Assert concrete values through the code's public interface. Commit the test with the change: the verifier runs your test itself on trunk and on your head, so a test that passes without your change proves nothing.
-- **Verify before you hand off.** Run the VERIFY commands yourself and record what you actually ran with `--evidence`. Report the strongest tier your evidence supports; a later verifier will check it.
-- **Respect the timebox.** If you are running out of time, stop and record `yagura handoff partial` with what remains.
+- **The brief is the task.** GOAL and ACCEPTANCE are fixed. You cannot ask questions. When something is ambiguous, pick the reading that best serves GOAL, do it, and record the choice with `--decision`.
+- **Goals, not files.** Change whatever the goal needs. A change with nothing to do with the goal counts against the work when the judge looks.
+- **Your branch only, and only forward.** Commit to your branch and push it with `git push` whenever you like: it backs the work up. Never push another branch, never force-push, never rebase. To bring in other work, merge it. yagura refuses anything else, and it pushes your branch itself at every hand-off.
+- **No pull request commands.** yagura opens the pull request as a draft, keeps it current, takes it out of draft when the judge approves, and merges it. `gh pr` and `glab mr` are denied.
+- **Skip pstack's landing and orchestration steps.** Do not run Opening a PR, Babysit, Shipping, Orchestrate, Autonomous run, Pause safely, Session pickup, or worktree cleanup, and do not arm `/loop`. Where a playbook step says to open a PR or hand to a human, record your hand-off and stop.
+- **Load poteto-mode and use it for the work.** Invoke `pstack:poteto-mode` with the Skill tool before you start, and follow the playbook METHOD names. Working "in its style" without loading it counts as skipping it, and the unit is sent back.
+- **Prove it, tests first.** Load `pstack:principle-prove-it-works` and `pstack:principle-test-behavior-not-implementation`. For new or fixed behaviour, write the test first, see it fail on the unchanged code, then make the change and see it pass. Assert concrete values through the code's public interface. A test that passes whatever the code does proves nothing, and the judge checks for that.
+- **Recorded runs are your evidence.** Commit, then run what proves each outcome with `yagura evidence run -- <command>`. yagura runs it on your commit and gives you a run id (`run:42`). It refuses while your checkout has uncommitted changes. A claim with no run behind it is only a claim.
+- **No stand-ins.** No placeholders, empty functions, stubs, TODOs, or skipped tests in place of required behaviour, unless CONTEXT says another unit fills them in.
+- **Pin the version you are given.** When READONLY says a repo is "published as" a version (also in `$YAGURA_VERSION_<REPO>`), depend on exactly that version, with no range or `latest`.
 
-- **Tell the other units only what they must know.** Other units may be running beside you in this repo. Record with `--for-others` only what changes how they work: a function whose signature or meaning you changed, a file you moved or renamed, a convention you set. Leave it out when there is nothing; status and reassurance go in `--note`. Anything you record here wakes a manager, who decides whether to pass it on.
+## When the unit comes back to you
 
-## The handoff
+A round prompt resumes your own session with the reason. When the judge asked for changes, do what each finding says. When yagura could not merge the base, merge it with the `git merge` it gives you, resolve the files it names, run the tests, and commit the merge. Then hand off again. Earlier commits stay on the branch.
 
-Record it with `yagura handoff <success|partial|blocked>` and the flags the brief's REPORT lists; yagura reads only that, never your final message. The command checks what you give it at once and says what to fix; running it again replaces your handoff, so repeat what you recorded before. `yagura check-done` says what is still missing. Then end with a short report for the developer in any form. A session that ends without a recorded handoff is asked for it once, then counts as a failed attempt.
+## The hand-off
+
+Record it with `yagura handoff done` when the goal is met and shown, or `yagura handoff stuck --reason "…"` when you cannot go on. Add `--did` for each thing you did, `--evidence` with run ids, commits, and `file:line`, `--decision` for each choice the brief did not settle, `--note` for assumptions, and `--follow-up` for work worth doing next. This is your decision log: the judge and the unit lead read it. yagura reads only what you record, never your final message. Running the command again replaces the hand-off, so repeat what you recorded before. `yagura check-done` says what is still missing. Then end with a short report for the developer.

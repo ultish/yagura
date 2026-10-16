@@ -21,7 +21,16 @@ import { applyProposal, proposalRoutes } from "./proposal.js";
 import { editSpec, parseSpec, relevantSections, renderSpec } from "./spec.js";
 import { addProject, addRepo, getEnvironment, getProject, getRepo, listGates, listUnits, openStore, type Db } from "./store.js";
 import { createThread, getProposal, getThread, linkThreadProject, listDecisions, listMessages, listProposals, listQuestions } from "./threads.js";
-import { assembleContext, clearWatchmanSession, parseReply, runWatchmanTurn, storeTurn, TurnRecords, type ContextParts } from "./watchman.js";
+import {
+  assembleContext,
+  clearWatchmanSession,
+  parseReply,
+  renderWatchmanBrief,
+  runWatchmanTurn,
+  storeTurn,
+  TurnRecords,
+  type ContextParts,
+} from "./watchman.js";
 import { listTurns, runningTurn, stopTurn, TurnBusy } from "./turns.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
@@ -80,6 +89,25 @@ describe("spec sections", () => {
   });
 });
 
+describe("the watchman brief's REPORT example", () => {
+  it("is a turn the schema accepts, so a watchman that copies it is not refused", () => {
+    const brief = renderWatchmanBrief({
+      thread: { id: 1, title: "t", autonomy: "propose" },
+      decisions: "",
+      questions: "",
+      proposals: "",
+      catalog: "",
+      standing: "",
+      mentioned: "",
+      projectsDir: "/p",
+      context: { sections: { status: "", spec: "", history: "" }, dropped: { messages: 0, specSections: 0 } } as never,
+      message: { id: 1, body: "hi" },
+    });
+    const example = /```yagura\n([\s\S]*?)\n```/.exec(brief)![1]!;
+    expect(TurnRecords.safeParse(JSON.parse(example)).error?.issues ?? []).toEqual([]);
+  });
+});
+
 describe("parseReply", () => {
   it("treats a reply without a yagura block as conversation with no records", () => {
     expect(parseReply("Which topic?")).toEqual({ body: "Which topic?", records: TurnRecords.parse({}), error: null });
@@ -104,7 +132,7 @@ describe("watchman turns", () => {
 
   beforeEach(() => {
     const root = mkdtempSync(join(tmpdir(), "yagura-watchman-"));
-    boot = { home: join(root, "home"), packsDir: "", skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
+    boot = { home: join(root, "home"), skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
     db = openStore(layout(boot).db);
     ctx = { db, boot, adapters: { claude: fake }, cli: [process.execPath, "--import", tsx, fixtures("evidence-shim.ts")] };
     process.env.FAKE_MODE = "engine";
@@ -114,8 +142,8 @@ describe("watchman turns", () => {
     const runs: HarnessRun[] = [];
     ctx.adapters = { claude: { ...fake, command: (run) => (runs.push(run), fake.command(run)) } };
     addRepo(db, { id: "proto" as RepoId, url: "/nowhere", defaultBranch: "main" });
-    addProject(db, { id: "a" as ProjectId, name: "a", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["proto" as RepoId] });
-    addProject(db, { id: "b" as ProjectId, name: "b", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["proto" as RepoId] });
+    addProject(db, { id: "a" as ProjectId, name: "a", goal: "g", predicate: "p", repos: ["proto" as RepoId] });
+    addProject(db, { id: "b" as ProjectId, name: "b", goal: "g", predicate: "p", repos: ["proto" as RepoId] });
     const t = createThread(db, { title: "t" });
     linkThreadProject(db, t.id, "a" as ProjectId);
     await runWatchmanTurn(ctx, t.id, "hello");
@@ -143,7 +171,7 @@ describe("watchman turns", () => {
   it("stores nothing when any record is invalid", () => {
     const t = createThread(db, { title: "t" });
     addRepo(db, { id: "r", url: "/nowhere", defaultBranch: "main" });
-    addProject(db, { id: "linked", name: "l", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["r" as RepoId] });
+    addProject(db, { id: "linked", name: "l", goal: "g", predicate: "p", repos: ["r" as RepoId] });
     linkThreadProject(db, t.id, "linked" as ProjectId);
     const attempt = (records: unknown) => () => storeTurn(ctx, t.id, { body: "b", records: TurnRecords.parse(records), turnLog: null });
     expect(attempt({ decisions: [{ text: "a" }], answered: [{ question: "Q9", answer: "x" }] })).toThrow(/Q9 does not exist/);
@@ -227,7 +255,7 @@ describe("watchman turns", () => {
     expect(readFileSync(layout(boot).turnBrief(t.id, turn.human.id), "utf8")).toContain("[human #1]\nprototype a chain");
   });
 
-  it("goes from a message to two chained projects built, landed, and reported back", async () => {
+  it("goes from a message to a chain of two projects, and builds the second only once the first has closed", async () => {
     const t = createThread(db, { title: "t", autonomy: "go" });
     const turn = await runWatchmanTurn(ctx, t.id, "prototype a chain");
     expect(turn.applied).toEqual({ repos: ["proto"], projects: ["proto-a", "proto-b"], environments: ["local"], units: {} });
@@ -240,31 +268,26 @@ describe("watchman turns", () => {
     expect(listQuestions(db, t.id)[0]).toMatchObject({ answer: "local", resolvedMessageId: second.reply!.id });
 
     await new Engine(ctx, { tickMs: 50 }).runUntilIdle();
-    for (const p of ["proto-a", "proto-b"] as ProjectId[]) {
-      expect(getProject(db, p).state).toBe("closed");
+    for (const p of ["proto-a", "proto-b"])
       expect(
-        listUnits(db, p)
+        listUnits(db, p as ProjectId)
           .filter((u) => u.type === "work")
-          .every((u) => u.state === "landed"),
-      ).toBe(true);
-    }
-    const aClosed = db
-      .prepare("SELECT MIN(id) AS id FROM events WHERE project_id = 'proto-a' AND type = 'project.state' AND json_extract(data_json, '$.state') = 'closed'")
-      .get() as { id: number };
-    const bStarted = db.prepare("SELECT MIN(id) AS id FROM events WHERE project_id = 'proto-b' AND type = 'plan.drain_started'").get() as { id: number };
-    expect(bStarted.id).toBeGreaterThan(aClosed.id);
-
-    const reports = listMessages(db, t.id).filter((m) => m.role === "system" && m.body.includes("is done"));
-    expect(reports.map((m) => m.body.split("\n")[0])).toEqual(["**proto-a is done.** all landed", "**proto-b is done.** all landed"]);
-    expect(reports[0]!.body).toMatch(/### Landed\n- U\d+ write a — landed `[0-9a-f]{10}` on proto, verified unit-verified/);
-    expect(reports[0]!.body).toContain("- unit (unit-verified): `test -f README.md`");
+          .map((u) => [u.goal, u.state]),
+      ).toEqual([
+        ["write a", "merged"],
+        ["write b", "merged"],
+        ["write c", "merged"],
+      ]);
+    expect(db.prepare("SELECT project_id AS p, json_extract(data_json, '$.state') AS s FROM events WHERE type = 'project.state' ORDER BY id").all()).toEqual([
+      { p: "proto-a", s: "closed" },
+      { p: "proto-b", s: "active" },
+      { p: "proto-b", s: "closed" },
+    ]);
     expect(
-      listGates(db, null, "open")
-        .filter((g) => g.kind === "report")
-        .map((g) => g.projectId),
-    ).toEqual(["proto-a", "proto-b"]);
-    const files = await git(["ls-tree", "-r", "--name-only", "main"], { cwd: layout(boot).newRepo("proto") });
-    expect(files.split("\n").filter((f) => f.startsWith("app/")).length).toBe(6);
+      listMessages(db, t.id)
+        .filter((m) => m.role === "system" && m.body.includes("is done"))
+        .map((m) => m.body.split("\n")[0]),
+    ).toEqual(["**proto-a is done.** all merged", "**proto-b is done.** all merged"]);
   }, 120_000);
 
   it("registers an existing repo from a proposal, checking it before storing and mirroring it on apply", async () => {
@@ -284,14 +307,14 @@ describe("watchman turns", () => {
     expect(turn.problem).toBeNull();
     expect(db.prepare("SELECT COUNT(*) AS n FROM repos").get()).toEqual({ n: 0 });
     expect(await applyProposal(ctx, turn.proposal!.id)).toMatchObject({ repos: ["billing"], projects: ["billing-work"] });
-    expect(getRepo(db, "billing" as RepoId)).toMatchObject({ url: origin, defaultBranch: "trunk", packStatus: "unproven" });
+    expect(getRepo(db, "billing" as RepoId)).toMatchObject({ url: origin, defaultBranch: "trunk" });
     expect(existsSync(layout(boot).mirror("billing" as RepoId))).toBe(true);
 
     const again = await runWatchmanTurn(ctx, t.id, `register billing-2 ${origin}`);
     expect(again.problem).toBe(`proposal: ${origin} is already registered as repo billing`);
   });
 
-  it("rejects an existing repo it cannot read, and accepts one without a verify pack, which gets a pack unit later", async () => {
+  it("rejects an existing repo it cannot read, and registers a readable one", async () => {
     const t = createThread(db, { title: "t" });
     const missing = await runWatchmanTurn(ctx, t.id, `register ghost ${join(boot.home, "ghost")}`);
     expect(missing.problem).toMatch(/^proposal: repo ghost: cannot read .*ghost as a git repo/);
@@ -302,22 +325,21 @@ describe("watchman turns", () => {
     await commitAll(seed, "init", { name: "t", email: "t@localhost" });
     const bare = join(boot.home, "..", "nopack.git");
     await git(["clone", "--quiet", "--bare", seed, bare]);
-    const packless = await runWatchmanTurn(ctx, t.id, `register nopack ${bare}`);
-    expect(packless.problem).toBeNull();
-    await applyProposal(ctx, packless.proposal!.id);
-    expect(getRepo(db, "nopack" as RepoId).packStatus).toBe("missing");
+    const readable = await runWatchmanTurn(ctx, t.id, `register nopack ${bare}`);
+    expect(readable.problem).toBeNull();
+    await applyProposal(ctx, readable.proposal!.id);
+    expect(getRepo(db, "nopack" as RepoId)).toMatchObject({ url: bare, defaultBranch: "main" });
   });
 
   it("waits at a phase gate before starting the next project in a chain", async () => {
     const t = createThread(db, { title: "t" });
-    const pack = { provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] };
     const { proposal } = storeTurn(ctx, t.id, {
       body: "ok",
       turnLog: null,
       records: TurnRecords.parse({
         proposal: {
           summary: "gated",
-          repos: [{ id: "gate-repo", verifyPack: pack }],
+          repos: [{ id: "gate-repo" }],
           projects: [
             { id: "g1", goal: "g", predicate: "p", repos: ["gate-repo"] },
             { id: "g2", goal: "g", predicate: "p", repos: ["gate-repo"], after: ["g1"], phaseGate: true, merge: "auto" },
@@ -336,16 +358,17 @@ describe("watchman turns", () => {
     const { answerGate } = await import("./store.js");
     answerGate(db, gate.id, "start");
     await engine.runUntilIdle();
-    expect(getProject(db, "g2" as ProjectId).state).toBe("closed");
+    expect(
+      db.prepare("SELECT json_extract(data_json, '$.state') AS s FROM events WHERE type = 'project.state' AND project_id = 'g2' ORDER BY id").all(),
+    ).toEqual([{ s: "active" }, { s: "closed" }]);
   }, 60_000);
 
   it("proposes environments with values, presets, and templates", async () => {
     const t = createThread(db, { title: "t" });
-    const pack = { provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] };
     const propose = (proposal: unknown) => () => storeTurn(ctx, t.id, { body: "ok", turnLog: null, records: TurnRecords.parse({ proposal }) });
     const box = {
       id: "box",
-      notes: "deps in the cluster",
+      answers: { other: "deps in the cluster" },
       keep: { policy: "failed", hours: 1 },
       presets: ["kafka"],
       values: [
@@ -363,7 +386,7 @@ describe("watchman turns", () => {
 
     const { proposal } = propose({
       summary: "box and a project on it",
-      repos: [{ id: "box-repo", verifyPack: pack }],
+      repos: [{ id: "box-repo" }],
       environments: [box],
       projects: [{ id: "on-box", goal: "g", predicate: "p", repos: ["box-repo"], environment: "box" }],
     })();
@@ -371,7 +394,7 @@ describe("watchman turns", () => {
     expect(await applyProposal(ctx, proposal!.id)).toEqual({ repos: ["box-repo"], environments: ["box"], projects: ["on-box"], units: {} });
     expect(getProject(db, "on-box" as ProjectId).environmentId).toBe("box");
     const env = getEnvironment(db, "box" as EnvironmentId);
-    expect(env.notes).toBe("deps in the cluster");
+    expect(env.answers.other).toBe("deps in the cluster");
     expect(listValues(db, "box" as EnvironmentId).map((v) => [v.name, v.source])).toEqual([
       ["FLAG_URL", "watchman"],
       ["KAFKA_BOOTSTRAP_LOCAL", "watchman"],
@@ -392,7 +415,6 @@ describe("watchman turns", () => {
   it("sets a proposed project's skills and reference repos, refusing a reference that is not registered", async () => {
     const t = createThread(db, { title: "t" });
     addRepo(db, { id: "billing", url: "/billing", defaultBranch: "main" });
-    const pack = { provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] };
     const propose = (references: string[]) => () =>
       storeTurn(ctx, t.id, {
         body: "ok",
@@ -400,7 +422,7 @@ describe("watchman turns", () => {
         records: TurnRecords.parse({
           proposal: {
             summary: "a service",
-            repos: [{ id: "svc", verifyPack: pack }],
+            repos: [{ id: "svc" }],
             projects: [{ id: "svc", goal: "g", predicate: "p", repos: ["svc"], skills: { scaffold: ["setup-gradle"], work: ["setup-gradle"] }, references }],
           },
         }),
@@ -410,7 +432,6 @@ describe("watchman turns", () => {
     await applyProposal(ctx, proposal!.id);
     const at = { projectId: "svc" as ProjectId };
     expect(resolveSetting(db, "skills.scaffold", at)).toMatchObject({ value: ["setup-gradle"], source: "project" });
-    expect(resolveSetting(db, "skills.pack", at)).toMatchObject({ value: [], source: "default" });
     expect(resolveSetting(db, "project.reference_repos", at).value).toEqual(["billing"]);
   });
 
@@ -530,6 +551,30 @@ describe("watchman turns", () => {
     expect((await runWatchmanTurn(ctx, t.id, "prototype a chain")).problem).toBeNull();
     expect(listTurns(db).map((x) => x.state)).toEqual(["done", "stopped"]);
   });
+
+  it("stops a running turn when the daemon shuts down, and tells the thread why", async () => {
+    const { Engine } = await import("./engine.js");
+    const t = createThread(db, { title: "t" });
+    process.env.FAKE_DELAY_MS = "20000";
+    try {
+      const turn = runWatchmanTurn(ctx, t.id, "prototype a chain");
+      let running = runningTurn(db, t.id);
+      for (let i = 0; i < 100 && !running?.pid; i++) {
+        await new Promise((r) => setTimeout(r, 50));
+        running = runningTurn(db, t.id);
+      }
+      const pid = running!.pid!;
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      const abort = new AbortController();
+      const daemon = new Engine(ctx, { tickMs: 50 }).runForever(abort.signal);
+      abort.abort();
+      await daemon;
+      expect((await turn).problem).toBe("the yagura daemon shut down; send your message again");
+      expect(() => process.kill(pid, 0)).toThrow();
+    } finally {
+      delete process.env.FAKE_DELAY_MS;
+    }
+  });
 });
 
 describe("specs in the store", () => {
@@ -540,10 +585,10 @@ describe("specs in the store", () => {
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     const home = mkdtempSync(join(tmpdir(), "yagura-spec-"));
-    const b = { home, packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+    const b = { home, skillsDir: "", bind: "", port: 0, tokenFile: "" };
     const d = openStore(":memory:");
     addRepo(d, { id: "r", url: "file:///x", defaultBranch: "main" });
-    addProject(d, { id: "sp" as ProjectId, name: "S", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["r" as never] });
+    addProject(d, { id: "sp" as ProjectId, name: "S", goal: "g", predicate: "p", repos: ["r" as never] });
     mkdirSync(join(home, "projects", "sp"), { recursive: true });
     writeFileSync(layout(b).spec("sp" as ProjectId), "# sp\n\n## Goal\n\nship\n");
     expect(importSpecFiles(d, b)).toEqual([layout(b).spec("sp" as ProjectId)]);

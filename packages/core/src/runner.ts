@@ -1,80 +1,44 @@
 import { promptPlugin, standingFor } from "./prompts.js";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { attemptRecorder, runAgentSession, stopRequested, write, type RunContext } from "./agent.js";
-import { WORKER_REPORT, packContract, renderBrief } from "./brief.js";
+import { closesIssues, commitSubject, pullRequestBody } from "./audit.js";
+import { WORKER_REPORT, renderBrief } from "./brief.js";
+import { checkoutUnit, commitBaseMerge, createUnitBranch, mergeWithBase, publishBranch, pushCheckout, syncCheckout, unitBranch } from "./branch.js";
 import { resolveSetting } from "./config.js";
-import {
-  isBuild,
-  type Attempt,
-  type EnvironmentId,
-  type ProjectId,
-  type Rejection,
-  type RenderedBrief,
-  type RepoId,
-  type Sha,
-  type Unit,
-  type UnitId,
-} from "./domain.js";
-import { chooseResume, rejectionFindings, renderResumePrompt } from "./resume.js";
+import { isBuild, type Attempt, type EnvironmentId, type ProjectId, type RenderedBrief, type RepoId, type Sha, type Unit, type UnitId } from "./domain.js";
+import { listValues } from "./envvalues.js";
+import { environmentSection } from "./actions.js";
+import { builtBefore, unitEnv } from "./publish.js";
+import { classifyFailure, ensureRecorded, savedHandoff, sessionReport, syntheticFailureHandoff } from "./finish.js";
+import { forgeFor, getMergeRequest, saveMergeRequest } from "./forge.js";
+import { addDetachedWorktree, discardLeftovers, ensureMirror, git, headSha, resolveRef } from "./git.js";
+import { layout } from "./paths.js";
+import { describeRecords } from "./records.js";
+import { installRelay, PUSH_BRANCH_VAR } from "./relay.js";
+import { chooseResume, renderResumePrompt, roundText, type WorkerRound } from "./resume.js";
+import { failurePolicy } from "./schedule.js";
 import { requiredProjectSkills, skillMethod } from "./skills.js";
-import { mountSources, sourceEnv } from "./sources.js";
-import { upstreamArtifact } from "./publish.js";
-import { managerForcesFresh } from "./manager.js";
-import { environmentNotes, listValues, valueMap } from "./envvalues.js";
-import { LEASE_VARS } from "./leases.js";
-import { addDetachedWorktree, addedLines, addWorktree, changedPaths, discardLeftovers, ensureMirror, headSha, mergesCleanly, resolveRef } from "./git.js";
-import { amendmentContext } from "./amend.js";
-import { ensureRecorded, readHandoff, reportOf, sessionReport } from "./finish.js";
-import { classifyFailure, syntheticFailureHandoff } from "./handoff.js";
-import { layout, unitRef } from "./paths.js";
-import { assessScope } from "./scope.js";
 import {
-  getEnvironment,
-  addUnit,
   addUnitNote,
   createAttempt,
   getAttempt,
   getProject,
   getRepo,
   getUnit,
+  lastTransition,
   listAttempts,
-  listDeps,
   now,
   recordEvent,
+  setApprovedSha,
+  setUnitBranch,
   transitionUnit,
   updateAttempt,
   type Db,
+  getEnvironment,
 } from "./store.js";
 
 export type { RunContext } from "./agent.js";
-
-export function addVerifyUnit(db: Db, target: Unit): Unit {
-  const verify = addUnit(db, {
-    projectId: target.projectId,
-    type: "verify",
-    repoId: target.repoId,
-    targetUnitId: target.id,
-    goal: `Verify U${target.seq}: ${target.goal}`,
-    writeScope: [],
-    acceptance: target.acceptance,
-    verify: target.verify,
-    timeboxSeconds: resolveSetting(db, "timebox.verify_seconds", {
-      projectId: target.projectId,
-      repoId: target.repoId,
-      environmentId: getProject(db, target.projectId).environmentId,
-    }).value,
-    maxAttempts: 1,
-  });
-  transitionUnit(db, verify.id, "ready");
-  return getUnit(db, verify.id);
-}
-
-export function queueVerification(db: Db, target: Unit): Unit {
-  const verify = addVerifyUnit(db, target);
-  transitionUnit(db, target.id, "verifying", { verifyUnit: verify.seq });
-  return verify;
-}
 
 // Read-only trunk checkouts of repos that already do it right; a resumed attempt keeps the paths its session saw.
 async function referenceCheckouts(ctx: RunContext, projectId: ProjectId, seq: number, n: number, repoIds: string[]) {
@@ -94,33 +58,35 @@ async function referenceCheckouts(ctx: RunContext, projectId: ProjectId, seq: nu
   return out;
 }
 
-// What the next attempt (or the resumed session) is told about a scope rejection.
-export function scopeNote(attempt: number, paths: string[], hard: boolean): string {
-  return hard
-    ? `Attempt ${attempt} wrote ${paths.join(", ")}, which yagura never allows (the verify pack). Leave it alone.`
-    : `Attempt ${attempt} changed ${paths.join(", ")} outside SCOPE without saying why. If the path is not needed, revert it and commit; if it is, record it with the reason the work needs it: yagura handoff --outside-scope "<path>=<why>" (running it again replaces your handoff, so repeat the rest).`;
+// The round the unit is building for, carried by the move that put it in building.
+export function currentRound(db: Db, unitId: UnitId): WorkerRound {
+  const round = lastTransition(db, unitId)?.data.round as WorkerRound | undefined;
+  if (round) return round;
+  return listAttempts(db, unitId).some((a) => a.role === "worker") ? { kind: "fresh", reason: "the earlier worker stopped" } : { kind: "first" };
 }
 
-function releasedUpstreams(db: Db, unit: Unit): string[] {
-  return listDeps(db, unit.projectId)
-    .filter((d) => d.unitId === unit.id && d.kind === "needs-landed")
-    .flatMap((d) => {
-      const up = getUnit(db, d.dependsOn);
-      const a = upstreamArtifact(db, up, unit.repoId);
-      return a && "version" in a ? [`U${up.seq} landed in ${up.repoId}, and its build is published as ${a.version}; depend on exactly that version.`] : [];
-    });
+// The worker attempt that already handed off in this round, when yagura stopped before acting on it.
+function handedOffThisRound(db: Db, unitId: UnitId): Attempt | null {
+  const since = lastTransition(db, unitId)?.ts ?? "";
+  const last = listAttempts(db, unitId)
+    .filter((a) => a.role === "worker")
+    .at(-1);
+  return last && last.state === "handed_off" && (last.startedAt ?? "") >= since ? last : null;
 }
 
-export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Attempt> {
+const baseOf = (db: Db, unit: Unit) => unit.base ?? getRepo(db, unit.repoId!).defaultBranch;
+
+// One worker round of a building unit, then what yagura does with its hand-off. Run again after a crash, it picks up where it stopped.
+export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<void> {
   const { db, boot } = ctx;
   const unit = getUnit(db, unitId);
-  if (!isBuild(unit)) throw new Error(`U${unit.seq} is a ${unit.type} unit; use the runner for its type`);
-  const isPack = unit.type === "pack";
-  if (unit.state !== "ready") throw new Error(`U${unit.seq} is ${unit.state}, not ready`);
-  if (!unit.repoId || !unit.verify) throw new Error(`U${unit.seq} has no repo or verify recipe`);
+  if (!isBuild(unit)) throw new Error(`U${unit.seq} is a ${unit.type} unit`);
+  if (unit.state !== "building") throw new Error(`U${unit.seq} is ${unit.state}, not building`);
+  const done = handedOffThisRound(db, unitId);
+  if (done) return afterHandoff(ctx, unit, done);
 
   const project = getProject(db, unit.projectId);
-  const repo = getRepo(db, unit.repoId);
+  const repo = getRepo(db, unit.repoId!);
   const sctx = { projectId: project.id, repoId: repo.id };
   const setting = <K extends Parameters<typeof resolveSetting>[1]>(k: K) => resolveSetting(db, k, sctx).value;
   const harnessId = setting("role.worker.harness");
@@ -130,58 +96,53 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
 
   const mirror = paths.mirror(repo.id);
   await ensureMirror(repo.url, mirror);
-  const choice = chooseResume(listAttempts(db, unit.id), {
-    enabled: setting("work.resume_on_rejection") && !managerForcesFresh(db, unit),
-    canResume: adapter.canResume,
-    maxContext: setting("work.resume_max_context"),
-  });
-  const from = choice.resume && existsSync(choice.resume.worktreePath!) ? choice.resume : null;
-  const fresh = choice.fresh ?? (choice.resume && !from ? `attempt ${choice.resume.n}'s worktree is gone` : null);
-
-  const attempt = createAttempt(db, unit.id, harnessId, setting("role.worker.model"));
-  const refs = { projectId: project.id, unitId: unit.id, attemptId: attempt.id };
-  if (fresh) recordEvent(db, "attempt.fresh", refs, { reason: fresh });
-  const base = from ? from.baseSha! : await resolveRef(mirror, `origin/${repo.defaultBranch}`);
-  const branch = from ? from.branch! : `${setting("git.branch_prefix")}/${project.id}/${unitRef(unit.seq)}-${attempt.n}`;
-  const worktree = from ? from.worktreePath! : paths.worktree(repo.id, project.id, unit.seq, attempt.n);
-  if (!from) {
-    mkdirSync(dirname(worktree), { recursive: true });
-    await addWorktree(mirror, worktree, branch, base);
+  installRelay(mirror);
+  const base = baseOf(db, unit);
+  const branch = unitBranch(setting("git.branch_prefix"), project.id, unit.seq);
+  const start = await createUnitBranch(mirror, branch, base);
+  setUnitBranch(db, unit.id, branch);
+  const checkout = paths.checkout(repo.id, project.id, unit.seq);
+  if (existsSync(checkout)) await syncCheckout(checkout, branch);
+  else {
+    mkdirSync(dirname(checkout), { recursive: true });
+    await checkoutUnit(mirror, checkout, branch);
   }
 
+  const round = currentRound(db, unitId);
+  const choice =
+    round.kind === "changes" || round.kind === "conflict" || round.kind === "lead"
+      ? chooseResume(listAttempts(db, unit.id), {
+          enabled: setting("work.resume_on_rejection"),
+          canResume: adapter.canResume,
+          maxContext: setting("work.resume_max_context"),
+        })
+      : { resume: null, fresh: null };
+  const from = choice.resume;
+  const attempt = createAttempt(db, unit.id, harnessId, setting("role.worker.model"));
+  const refs = { projectId: project.id, unitId: unit.id, attemptId: attempt.id };
+  if (choice.fresh) recordEvent(db, "attempt.fresh", refs, { reason: choice.fresh });
+
+  const earlier = listAttempts(db, unit.id).filter((a) => a.role === "worker" && a.state === "handed_off");
   const projectSkills = requiredProjectSkills(db, unit);
-  const sources = await mountSources(ctx, unit, worktree);
-  const references = await referenceCheckouts(ctx, project.id, unit.seq, from?.n ?? attempt.n, setting("project.reference_repos"));
-  const packForbid = isPack ? [] : [`${repo.verifyPackPath}/**`];
-  const env = project.environmentId ? getEnvironment(db, project.environmentId) : null;
-  const envValues = valueMap(db, project.environmentId);
+  const references = await referenceCheckouts(ctx, project.id, unit.seq, attempt.n, setting("project.reference_repos"));
+  const builds = builtBefore(db, unit);
+  const envValues = unitEnv(db, project.environmentId, builds);
   const brief: RenderedBrief = {
     goal: unit.goal,
-    repo: { id: repo.id, worktree, branch, baseSha: base },
-    scope: { write: unit.writeScope, forbid: unit.forbidScope, hard: packForbid },
+    repo: { id: repo.id, worktree: checkout, branch, baseSha: start },
     context: [
-      ...(unit.description ? [`Why this unit exists: ${unit.description}`] : []),
-      ...amendmentContext(db, unit.id),
-      ...(isPack
-        ? packContract({
-            packPath: repo.verifyPackPath,
-            provider: env?.provider ?? "local-process",
-            leaseVars: LEASE_VARS[env?.provider ?? "local-process"] ?? [],
-            minTier: project.minTier,
-            reason: unit.context[0] ?? "This repo has no usable verify pack on trunk",
-          })
-        : []),
-      ...(isPack ? unit.context.slice(1) : unit.context),
-      ...unit.notes.map((n) => `Note from an earlier attempt: ${n}`),
-      ...releasedUpstreams(db, unit),
-      ...(environmentNotes(db, project.environmentId) ? [`About this environment: ${environmentNotes(db, project.environmentId)}`] : []),
+      ...unit.context,
+      ...unit.notes.map((n) => `Note: ${n}`),
+      ...builds.map(
+        ({ on, pub }) =>
+          `U${on.seq} (${on.repoId}) is published as ${pub.version}: depend on exactly this version wherever ${repo.id} uses ${on.repoId}. It is a test build, never a release.`,
+      ),
+      ...(round.kind === "first" ? [] : [roundText(round)]),
+      ...earlier.map((a) => `What worker A${a.agentNo} recorded:\n${describeRecords(db, a.id) ?? "(nothing)"}`),
     ],
-    readonly: [
-      ...sources.map((s) => ({ repoId: s.repoId, path: s.path, sha: s.sha, version: s.version })),
-      ...references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
-    ],
+    readonly: references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
     acceptance: unit.acceptance,
-    verify: unit.verify,
+    environment: environmentSection(db, project.environmentId, repo.id),
     env: envValues,
     envNotes: Object.fromEntries(
       listValues(db, project.environmentId as EnvironmentId)
@@ -190,20 +151,15 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
     ),
     timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
     forbidden: [
-      "no git push, rebase, merge, or branch switching",
-      "nothing outside SCOPE",
-      isPack
-        ? "do not change the code the pack verifies"
-        : `do not edit the verify pack at ${repo.verifyPackPath}; if your change stops it working, say what broke under Notes and the verifier will fix the pack`,
+      `pushing any branch but ${branch}, force-pushing, or rebasing: merge instead`,
+      "opening, readying, merging, or closing a pull request: yagura does that",
     ],
     method:
-      (isPack
-        ? "Load the yagura-pack skill first and follow it."
-        : `Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and follow its ${unit.playbook ?? "feature"} playbook. Then load pstack:principle-prove-it-works and pstack:principle-test-behavior-not-implementation, and write the test that proves the change before the change itself. All four are required: an attempt that does not load them is rejected.`) +
+      `Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and follow its ${unit.playbook ?? "feature"} playbook. Then load pstack:principle-prove-it-works and pstack:principle-test-behavior-not-implementation, and write the test that proves the change before the change itself. All four are required: an attempt that does not load them is sent back.` +
       (unit.scaffold ? " This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more." : "") +
       skillMethod(projectSkills),
     report: WORKER_REPORT,
-    standing: standingFor(db, project.id, isPack ? "pack" : "worker"),
+    standing: standingFor(db, project.id, "worker"),
   };
   const briefText = from
     ? renderResumePrompt({
@@ -211,7 +167,7 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         attempt: attempt.n,
         resumes: from.n,
         branch,
-        ...rejectionFindings(db, boot, unit, from),
+        round,
         timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
         report: WORKER_REPORT,
       })
@@ -219,10 +175,16 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
   write(paths.brief(project.id, unit.seq, attempt.n), briefText);
 
   const startedAt = now();
-  transitionUnit(db, unit.id, "running", { attempt: attempt.n, ...(from ? { resumes: from.n } : {}) });
-  updateAttempt(db, attempt.id, { state: "running", startedAt, worktreePath: worktree, branch, baseSha: base, resumesAttemptId: from?.id ?? null, sources });
+  updateAttempt(db, attempt.id, {
+    state: "running",
+    startedAt,
+    worktreePath: checkout,
+    branch,
+    baseSha: start,
+    resumesAttemptId: from?.id ?? null,
+  });
 
-  const role = isPack ? "pack" : "worker";
+  const role = "worker";
   const work = (prompt: string, resume: string | undefined, reminder = false) =>
     runAgentSession(ctx, {
       recorder: attemptRecorder(db, {
@@ -239,116 +201,46 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
         bin: harnessId === "claude" ? setting("harness.claude.bin") : null,
         model: setting("role.worker.model"),
         permissionMode: setting("harness.claude.permission_mode"),
-        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role: isPack ? "pack" : "worker" })],
-        addDirs: [...sources.map((s) => s.path), ...references.map((r) => r.path)],
+        pluginDirs: [promptPlugin(db, boot, project.id, { attemptId: attempt.id, role })],
+        addDirs: references.map((r) => r.path),
         extraArgs: setting("harness.claude.extra_args"),
         resume,
+        pushes: true,
       },
-      cwd: worktree,
-      env: { ...envValues, ...sourceEnv(sources) },
+      cwd: checkout,
+      env: { ...envValues, [PUSH_BRANCH_VAR]: branch },
       timeboxSeconds: unit.timeboxSeconds,
       logPath: reminder ? paths.log(project.id, unit.seq, attempt.n).replace(/\.jsonl$/, ".resume.jsonl") : paths.log(project.id, unit.seq, attempt.n),
     });
   const first = await work(briefText, from?.sessionId ?? undefined);
-  let session = first;
   const endedAt = now();
 
   const stop = stopRequested(db, attempt.id);
   if (stop.stopped) {
-    await discardLeftovers(worktree);
+    await discardLeftovers(checkout);
     updateAttempt(db, attempt.id, { state: "stopped", endedAt, exitCode: first.exitCode });
-    if (stop.note) addUnitNote(db, unit.id, `Operator stopped attempt ${attempt.n}: ${stop.note}`);
-    transitionUnit(db, unit.id, "ready", { reason: "stopped by operator", attempt: attempt.n });
-    recordEvent(db, "attempt.ended", { projectId: project.id, unitId: unit.id, attemptId: attempt.id }, { stopped: true });
-    return getAttempt(db, attempt.id);
-  }
-
-  if (from && !getAttempt(db, attempt.id).sessionId) {
-    const reason = `resuming attempt ${from.n}'s session failed to start: ${session.final?.text || session.stderrTail.trim() || `exit ${session.exitCode}`}`;
-    updateAttempt(db, attempt.id, { state: "failed", endedAt, exitCode: session.exitCode, failureMode: "harness-error" });
-    recordEvent(db, "attempt.resume_failed", refs, { reason });
-    transitionUnit(db, unit.id, "ready", { reason, attempt: attempt.n });
-    return runWorkUnit(ctx, unitId);
+    if (stop.note) addUnitNote(db, unit.id, `The developer stopped attempt ${attempt.n}: ${stop.note}`);
+    transitionUnit(db, unit.id, "waiting", { reason: "stopped by the developer", attempt: attempt.n });
+    recordEvent(db, "attempt.ended", refs, { stopped: true });
+    return;
   }
 
   // The handoff comes from what the agent recorded with yagura handoff; a clean session that recorded nothing is asked once.
-  session = await ensureRecorded(db, attempt.id, role, first, (prompt, sessionId) => work(prompt, sessionId, true));
-  const leftovers = await discardLeftovers(worktree);
+  const session = await ensureRecorded(db, attempt.id, role, first, (prompt, sessionId) => work(prompt, sessionId, true));
+  const leftovers = await discardLeftovers(checkout);
   if (leftovers.paths.length) write(paths.leftovers(project.id, unit.seq, attempt.n), leftovers.patch);
-  const head = await headSha(worktree);
-  const touched = await changedPaths(worktree, base);
-  const reject = (rejection: Rejection, data: Record<string, unknown>) => {
-    updateAttempt(db, attempt.id, { rejection, ...(rejection === "code-fault" ? {} : { failureMode: "scope" as const }) });
-    transitionUnit(db, unit.id, "rejected", data);
-  };
-  const final = session.final;
+  const head = (await headSha(checkout)) as Sha;
   const report = sessionReport(first, session);
-  const handoff = readHandoff(db, attempt.id, [reportOf(session), reportOf(first)]);
+  const handoff = savedHandoff(db, attempt.id);
+  recordEvent(db, "attempt.ended", refs, { exit: session.exitCode, signal: session.signal, timedOut: session.timedOut, leftovers: leftovers.paths });
 
-  if (handoff) {
-    write(paths.handoff(project.id, unit.seq, attempt.n), report ?? "");
-    db.prepare("INSERT INTO search (body, kind, ref_id, project_id) VALUES (?, 'handoff', ?, ?)").run(report ?? "", String(attempt.id), project.id);
-    updateAttempt(db, attempt.id, {
-      state: "handed_off",
-      endedAt,
-      exitCode: session.exitCode,
-      headSha: head,
-      handoffStatus: handoff.status,
-      selfTier: handoff.verification === "not-verified" ? null : handoff.verification,
-    });
-    transitionUnit(db, unit.id, "handed_off", { attempt: attempt.n, status: handoff.status, head, leftovers: leftovers.paths });
-    const scope = assessScope(touched, unit.writeScope, unit.forbidScope, packForbid, handoff.outsideScope);
-    const violations = [...scope.hard, ...scope.unjustified];
-    if (!violations.length && scope.justified.length)
-      recordEvent(
-        db,
-        "attempt.beyond_scope",
-        { projectId: project.id, unitId: unit.id, attemptId: attempt.id },
-        { paths: scope.justified.map((v) => v.path), reason: handoff.outsideScope },
-      );
-    if (violations.length) {
-      addUnitNote(
-        db,
-        unit.id,
-        scopeNote(
-          attempt.n,
-          (scope.hard.length ? scope.hard : scope.unjustified).map((v) => v.path),
-          scope.hard.length > 0,
-        ),
-      );
-      reject("scope", { reason: "scope", violations });
-    } else if (handoff.status === "blocked") {
-      transitionUnit(db, unit.id, "blocked", { reason: "agent reported blocked" });
-    } else if (head === base) {
-      transitionUnit(db, unit.id, "blocked", { reason: "handed off with no commits" });
-    } else if (session.missingSkills.length && setting("method.enforce_required_skills")) {
-      addUnitNote(
-        db,
-        unit.id,
-        `Attempt ${attempt.n} skipped required skills (${session.missingSkills.join(", ")}). Load each of them with the Skill tool before doing any work.`,
-      );
-      updateAttempt(db, attempt.id, { rejection: "skills" });
-      transitionUnit(db, unit.id, "rejected", { reason: "skipped required skills", missing: session.missingSkills });
-    } else {
-      await ensureMirror(repo.url, mirror);
-      const trunk = await resolveRef(mirror, `origin/${repo.defaultBranch}`);
-      if (trunk !== base && !(await mergesCleanly(mirror, trunk, head))) {
-        addUnitNote(
-          db,
-          unit.id,
-          `Attempt ${attempt.n} conflicted with ${repo.defaultBranch} at ${trunk.slice(0, 10)}, which moved while it worked; the next attempt starts from the new trunk.`,
-        );
-        updateAttempt(db, attempt.id, { rejection: "conflict" });
-        transitionUnit(db, unit.id, "rejected", { reason: "conflicts with trunk", trunk });
-      } else queueVerification(db, getUnit(db, unit.id));
-    }
-  } else {
+  if (!handoff) {
     const facts = {
       timedOut: session.timedOut,
       exitCode: session.exitCode,
       signal: session.signal,
-      finalText: final?.text ?? null,
-      finalIsError: final?.isError ?? true,
+      finalText: session.final?.text ?? null,
+      finalIsError: session.final?.isError ?? true,
       stderrTail: session.stderrTail,
     };
     const mode = classifyFailure(facts);
@@ -366,8 +258,93 @@ export async function runWorkUnit(ctx: RunContext, unitId: UnitId): Promise<Atte
       }),
     );
     updateAttempt(db, attempt.id, { state: "failed", endedAt, exitCode: session.exitCode, headSha: head, failureMode: mode });
-    transitionUnit(db, unit.id, "failed", { attempt: attempt.n, mode });
+    const policy = failurePolicy(getUnit(db, unit.id), listAttempts(db, unit.id));
+    transitionUnit(db, unit.id, policy.action === "retry" ? "waiting" : "stuck", { attempt: attempt.n, mode, reason: policy.reason });
+    return;
   }
-  recordEvent(db, "attempt.ended", refs, { exit: session.exitCode, signal: session.signal, timedOut: session.timedOut, touched });
-  return getAttempt(db, attempt.id);
+
+  write(paths.handoff(project.id, unit.seq, attempt.n), report ?? "");
+  db.prepare("INSERT INTO search (body, kind, ref_id, project_id) VALUES (?, 'handoff', ?, ?)").run(report ?? "", String(attempt.id), project.id);
+  updateAttempt(db, attempt.id, { state: "handed_off", endedAt, exitCode: session.exitCode, headSha: head, handoffStatus: handoff.status });
+  if (handoff.status === "stuck")
+    return transitionUnit(db, unit.id, "stuck", {
+      attempt: attempt.n,
+      reason: handoff.reason ?? "the worker said it is stuck",
+      trigger: round.kind === "conflict" ? "conflict" : "worker-stuck",
+    });
+  if (session.missingSkills.length && setting("method.enforce_required_skills")) {
+    addUnitNote(
+      db,
+      unit.id,
+      `Attempt ${attempt.n} skipped required skills (${session.missingSkills.join(", ")}). Load each of them with the Skill tool first.`,
+    );
+    return transitionUnit(db, unit.id, "stuck", { attempt: attempt.n, reason: "skipped required skills", missing: session.missingSkills });
+  }
+  return afterHandoff(ctx, getUnit(db, unit.id), getAttempt(db, attempt.id));
+}
+
+// After a worker hands off done: yagura pushes the branch, keeps its draft pull request current, and makes sure it merges with
+// its base before the judge looks; a conflict goes straight back to the worker.
+async function afterHandoff(ctx: RunContext, unit: Unit, attempt: Attempt): Promise<void> {
+  const { db, boot } = ctx;
+  const project = getProject(db, unit.projectId);
+  const repo = getRepo(db, unit.repoId!);
+  const mirror = layout(boot).mirror(repo.id);
+  const branch = unit.branch!;
+  const base = baseOf(db, unit);
+  const setting = <K extends Parameters<typeof resolveSetting>[1]>(k: K) => resolveSetting(db, k, { projectId: project.id, repoId: repo.id }).value;
+  const refused = await pushCheckout(attempt.worktreePath!, branch);
+  if (refused) return transitionUnit(db, unit.id, "stuck", { attempt: attempt.n, reason: `yagura could not push the branch: ${refused}` });
+  await publishBranch(mirror, branch);
+
+  await ensureMirror(repo.url, mirror);
+  let head = await resolveRef(mirror, `refs/heads/${branch}`);
+  const baseSha = await resolveRef(mirror, `refs/remotes/origin/${base}`);
+  const own = await git(["merge-base", "--is-ancestor", head, baseSha], { gitDir: mirror }).then(
+    () => false,
+    () => true,
+  );
+  if (!own) return transitionUnit(db, unit.id, "stuck", { attempt: attempt.n, reason: "the worker handed off done with no commits of its own" });
+
+  await openOrUpdateDraft(ctx, unit, head, baseSha);
+  const merge = await mergeWithBase(mirror, head, baseSha);
+  if (merge.kind === "conflict")
+    return transitionUnit(db, unit.id, "building", {
+      attempt: attempt.n,
+      round: { kind: "conflict", base, baseSha, files: merge.files } satisfies WorkerRound,
+    });
+  if (merge.kind === "clean") {
+    head = await commitBaseMerge(mirror, branch, merge, `Merge ${base} into ${branch}`, {
+      name: setting("git.author_name"),
+      email: setting("git.author_email"),
+    });
+    recordEvent(db, "unit.base_merged", { projectId: project.id, unitId: unit.id }, { base: merge.base, head });
+  }
+  updateAttempt(db, attempt.id, { headSha: head });
+  setApprovedSha(db, unit.id, null);
+  transitionUnit(db, unit.id, "judging", { attempt: attempt.n, head });
+}
+
+// The unit's draft pull request, opened at its first hand-off and kept current after; a repo without a forge has none.
+export async function openOrUpdateDraft(ctx: RunContext, unit: Unit, head: Sha, baseSha: Sha): Promise<void> {
+  const { db } = ctx;
+  const repo = getRepo(db, unit.repoId!);
+  const forge = forgeFor(db, repo);
+  if (!forge) return;
+  const project = getProject(db, unit.projectId);
+  const body = pullRequestBody(project, unit, resolveSetting(db, "yagura.url").value);
+  const existing = getMergeRequest(db, unit.id);
+  const pr = existing ?? (await forge.openDraft({ branch: unit.branch!, base: baseOf(db, unit), title: commitSubject(unit.goal), body }));
+  if (existing) await forge.updateBody(existing.number, body);
+  else recordEvent(db, "pr.opened", { projectId: project.id, unitId: unit.id }, { number: pr.number, url: pr.url, closes: closesIssues(unit) });
+  saveMergeRequest(db, {
+    unitId: unit.id,
+    forge: repo.forge,
+    forgeRepo: forge.repo,
+    number: pr.number,
+    url: pr.url,
+    branch: unit.branch!,
+    headSha: head,
+    baseSha,
+  });
 }

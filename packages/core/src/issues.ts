@@ -222,14 +222,14 @@ function milestones(db: Db, row: IssueRow): { key: string; text: string }[] {
   const work = units.flatMap((u) => {
     const label = `U${u.seq}${u.repo_id && u.repo_id !== row.repoId ? ` (${u.repo_id})` : ""}`;
     const blocks = (
-      db.prepare("SELECT COUNT(*) AS n FROM events WHERE unit_id = ? AND type = 'unit.state' AND json_extract(data_json, '$.to') = 'blocked'").get(u.id) as {
+      db.prepare("SELECT COUNT(*) AS n FROM events WHERE unit_id = ? AND type = 'unit.state' AND json_extract(data_json, '$.to') = 'stuck'").get(u.id) as {
         n: number;
       }
     ).n;
     return [
       ...(u.url ? [{ key: `u${u.id}-pr`, text: `${label} is up for review: ${u.url}` }] : []),
-      ...(u.state === "landed" ? [{ key: `u${u.id}-landed`, text: `${label} landed.` }] : []),
-      ...(u.state === "blocked" ? [{ key: `u${u.id}-blocked${blocks}`, text: `${label} is blocked and waits for the developer.` }] : []),
+      ...(u.state === "merged" ? [{ key: `u${u.id}-landed`, text: `${label} merged.` }] : []),
+      ...(u.state === "stuck" ? [{ key: `u${u.id}-blocked${blocks}`, text: `${label} is stuck and waits for the developer.` }] : []),
     ];
   });
   return [...decided, ...work];

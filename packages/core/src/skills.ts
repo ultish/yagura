@@ -2,10 +2,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { resolveSetting, type Bootstrap } from "./config.js";
-import type { ProjectId, Unit } from "./domain.js";
+import type { ProjectId, Role, Unit } from "./domain.js";
 import { getProject, projectRepos, type Db } from "./store.js";
 
-export const SKILL_PURPOSES = ["scaffold", "work", "pack", "verify", "review"] as const;
+export const SKILL_PURPOSES = ["scaffold", "work"] as const;
 export type SkillPurpose = (typeof SKILL_PURPOSES)[number];
 
 export const claudeConfigDir = (env: NodeJS.ProcessEnv = process.env) => env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
@@ -34,7 +34,7 @@ export const isInstalled = (installed: Set<string>, skill: string) =>
 // The project skills a session must load, on top of the role's own required skills.
 export function requiredProjectSkills(db: Db, unit: Pick<Unit, "projectId" | "repoId" | "type" | "scaffold">): string[] {
   const at = { projectId: unit.projectId, repoId: unit.repoId ?? undefined, environmentId: getProject(db, unit.projectId).environmentId };
-  const purpose: SkillPurpose = unit.type === "pack" ? "pack" : unit.type === "verify" ? "verify" : unit.scaffold ? "scaffold" : "work";
+  const purpose: SkillPurpose = unit.scaffold ? "scaffold" : "work";
   return resolveSetting(db, `skills.${purpose}`, at).value;
 }
 
@@ -62,4 +62,18 @@ export function projectSkillChecks(db: Db, boot: Bootstrap, projectId: ProjectId
 
 export function skillMethod(skills: string[]): string {
   return skills.length ? ` Then load these project skills with the Skill tool before you change anything, and follow them: ${skills.join(", ")}.` : "";
+}
+
+export const REQUIRED_SKILLS: Partial<Record<Role | "doctor", readonly string[]>> = {
+  worker: ["yagura:yagura-worker", "pstack:poteto-mode", "pstack:principle-prove-it-works", "pstack:principle-test-behavior-not-implementation"],
+  planner: ["yagura:yagura-planner"],
+  judge: ["yagura:yagura-judge"],
+  lead: ["yagura:yagura-unit-lead"],
+  watchman: ["yagura:yagura-watchman"],
+  doctor: ["yagura:yagura-doctor"],
+};
+
+export function missingSkills(role: Role | "doctor", loaded: readonly string[], project: readonly string[] = []): string[] {
+  const bare = (s: string) => s.slice(s.indexOf(":") + 1);
+  return [...(REQUIRED_SKILLS[role] ?? []), ...project].filter((req) => !loaded.some((l) => l === req || bare(l) === bare(req)));
 }

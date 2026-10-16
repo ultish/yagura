@@ -14,6 +14,8 @@ export function layout(boot: Bootstrap) {
     project,
     mirror: (r: RepoId) => join(boot.home, "cache", "repos", `${r}.git`),
     worktree: (r: RepoId, p: ProjectId, seq: number, n: number) => join(boot.home, "worktrees", r, `${p}-${attemptRef(seq, n)}`),
+    // The unit's own checkout, which every worker round uses; the judge gets a fresh one beside it each round.
+    checkout: (r: RepoId, p: ProjectId, seq: number) => join(boot.home, "worktrees", r, `${p}-${unitRef(seq)}`),
     standingOrders: (p: ProjectId) => join(project(p), "standing-orders.md"),
     spec: (p: ProjectId) => join(project(p), "spec.md"),
     thread: (t: number) => join(boot.home, "threads", String(t)),
@@ -24,8 +26,9 @@ export function layout(boot: Bootstrap) {
     brief: (p: ProjectId, seq: number, n: number) => join(project(p), "briefs", `${attemptRef(seq, n)}.md`),
     handoff: (p: ProjectId, seq: number, n: number) => join(project(p), "handoffs", `${attemptRef(seq, n)}.md`),
     log: (p: ProjectId, seq: number, n: number) => join(project(p), "logs", `${attemptRef(seq, n)}.jsonl`),
-    publishLog: (p: ProjectId, seq: number, kind: string, sha: string) => join(project(p), "logs", `${unitRef(seq)}.publish-${kind}-${sha.slice(0, 10)}.log`),
     daemonLog: join(boot.home, "logs", "daemon.log"),
+    doctorLog: (id: number) => join(boot.home, "doctor", `d${id}.jsonl`),
+    doctorBrief: (id: number) => join(boot.home, "doctor", `d${id}.brief.md`),
     leftovers: (p: ProjectId, seq: number, n: number) => join(project(p), "leftovers", `${attemptRef(seq, n)}.patch`),
   };
 }

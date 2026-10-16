@@ -34,7 +34,10 @@ describe("agentRefusal", () => {
       "thread mentions @sbx/U3",
       "env values box",
       "env presets",
-      "env notes box",
+      "env answers box",
+      "env actions box",
+      "action propose --name test --use x -- true",
+      "action broken --name test --reason x",
       "template list",
       "project skills sbx",
       "git sbx log --oneline origin/main",
@@ -57,8 +60,10 @@ describe("agentRefusal", () => {
       "thread set 4 --autonomy go",
       "thread clear 4",
       "thread --autonomy go set 4",
-      "env notes set box --text x",
-      "env notes --text x set box",
+      "env answer box tests --text x",
+      "action add box test --use x -- true",
+      "action run box test",
+      "action rm box test",
       "env value set box A 1",
       "template save box t",
       "talk hello",
@@ -80,7 +85,7 @@ describe("gitRead", () => {
 
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), "yagura-agentcli-"));
-    boot = { home: join(root, "home"), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+    boot = { home: join(root, "home"), skillsDir: "", bind: "", port: 0, tokenFile: "" };
     db = openStore(layout(boot).db);
     const seed = join(root, "seed");
     mkdirSync(seed);

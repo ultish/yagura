@@ -11,7 +11,7 @@ const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString
 beforeEach(() => {
   db = openStore(":memory:");
   addRepo(db, { id: "svc", url: "file:///svc", defaultBranch: "main" });
-  addProject(db, { id: project, name: "P", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["svc" as RepoId] });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "x", repos: ["svc" as RepoId] });
 });
 
 function gate(kind: string, options: string[], defaultOption: string | null, ageHours: number): number {

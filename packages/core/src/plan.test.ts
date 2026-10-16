@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { ProjectId, RepoId } from "./domain.js";
-import { applyDelta, extractDelta, PlanRejected, scopesOverlap, type PlanDelta } from "./plan.js";
+import { applyDelta, PlanDelta, PlanRejected } from "./plan.js";
 import { setSetting } from "./config.js";
 import { addProject, addRepo, getUnitBySeq, listDeps, listGates, listUnits, openStore, transitionUnit, type Db } from "./store.js";
 
@@ -11,24 +11,12 @@ beforeEach(() => {
   db = openStore(":memory:");
   addRepo(db, { id: "svc", url: "file:///svc", defaultBranch: "main" });
   addRepo(db, { id: "other", url: "file:///other", defaultBranch: "main" });
-  addProject(db, { id: project, name: "P", goal: "g", predicate: "x", minTier: "unit-verified", repos: ["svc" as RepoId] });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "x", repos: ["svc" as RepoId] });
 });
 
-const unit = (key: string, write: string[], extra: Record<string, unknown> = {}) => ({
-  key,
-  repo: "svc",
-  goal: `do ${key}`,
-  write,
-  accept: [`${key} works`],
-  verify: "make test",
-  ...extra,
-});
+const unit = (key: string, extra: Record<string, unknown> = {}) => ({ key, repo: "svc", goal: `do ${key}`, acceptance: [`${key} works`], ...extra });
 
-const delta = (d: Record<string, unknown>): PlanDelta => {
-  const r = extractDelta("```json\n" + JSON.stringify(d) + "\n```");
-  if (!r.ok) throw new Error(r.reason);
-  return r.delta;
-};
+const delta = (d: Record<string, unknown>): PlanDelta => PlanDelta.parse(d);
 
 describe("unit defaults", () => {
   it("takes timebox and tries from the repo layer, and the project layer over it", () => {
@@ -36,7 +24,7 @@ describe("unit defaults", () => {
     setSetting(db, "repo", "svc", "max_attempts", 5);
     setSetting(db, "repo", "svc", "timebox.work_seconds", 600);
     setSetting(db, "project", project, "timebox.work_seconds", 300);
-    applyDelta(db, project, delta({ add: [unit("a", ["a/**"]), unit("b", ["b/**"], { repo: "other" })] }), null);
+    applyDelta(db, project, delta({ add: [unit("a"), unit("b", { repo: "other" })] }), null);
     expect(listUnits(db, project).map((u) => [u.repoId, u.maxAttempts, u.timeboxSeconds])).toEqual([
       ["svc", 5, 300],
       ["other", 2, 300],
@@ -44,125 +32,107 @@ describe("unit defaults", () => {
   });
 });
 
-describe("extractDelta", () => {
-  it("takes the last json block and fills defaults", () => {
-    const r = extractDelta('draft:\n```json\n{"add": []}\n```\nfinal:\n```json\n{"done": true, "summary": "all landed"}\n```');
-    expect(r).toEqual({ ok: true, delta: { add: [], amend: [], retry: [], cancel: [], gates: [], done: true, summary: "all landed" } });
-  });
-
-  it("explains what is wrong with a malformed delta", () => {
-    expect(extractDelta("no plan here")).toMatchObject({ ok: false, reason: expect.stringMatching(/no ```json/) });
-    expect(extractDelta("```json\n{add: []}\n```")).toMatchObject({ ok: false, reason: expect.stringMatching(/not valid JSON/) });
-    expect(extractDelta('```json\n{"add":[{"key":"a","repo":"svc","goal":"g","write":[],"accept":["x"],"verify":"v"}]}\n```')).toMatchObject({
-      ok: false,
-      reason: expect.stringMatching(/add\.0\.write/),
+describe("PlanDelta", () => {
+  it("fills defaults", () => {
+    expect(PlanDelta.parse({ done: true, summary: "all merged" })).toEqual({
+      add: [],
+      amend: [],
+      retry: [],
+      cancel: [],
+      gates: [],
+      done: true,
+      summary: "all merged",
     });
-    expect(extractDelta('```json\n{"surprise": 1}\n```')).toMatchObject({ ok: false, reason: expect.stringMatching(/surprise/) });
   });
-});
 
-describe("scopesOverlap", () => {
-  it.each([
-    [["app/**"], ["app/orders.py"], true],
-    [["app/a/**"], ["app/b/**"], false],
-    [["**"], ["docs/**"], true],
-    [["tests/test_orders.py"], ["tests/test_orders.py"], true],
-    [["app/**"], ["application/**"], false],
-  ])("%j vs %j -> %s", (a, b, expected) => {
-    expect(scopesOverlap(a, b)).toBe(expected);
+  it("says what is wrong with a malformed delta", () => {
+    const why = (d: unknown) => {
+      const r = PlanDelta.safeParse(d);
+      return r.success ? null : r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+    };
+    expect(why({ add: [{ key: "a", repo: "svc", goal: "g", acceptance: [] }] })).toMatch(/add\.0\.acceptance/);
+    expect(why({ surprise: 1 })).toMatch(/surprise/);
+    expect(why({ add: [{ ...unit("a"), write: ["app/**"] }] })).toMatch(/write/);
+    expect(why({ add: [{ ...unit("a"), verify: "make test" }] })).toMatch(/verify/);
+    expect(why({ gates: [{ question: "q", options: ["a", "b"], default: "c" }] })).toMatch(/default must be one of its options/);
   });
 });
 
 describe("applyDelta", () => {
-  it("keeps the planner's reason for a unit as its description", () => {
-    applyDelta(
+  it("creates waiting units with their goal, acceptance, context, base, and refs", () => {
+    const r = applyDelta(
       db,
       project,
-      delta({ add: [unit("a", ["a/**"], { why: "The checkout page needs a total before payment can be wired." }), unit("b", ["b/**"])] }),
+      delta({ add: [unit("a", { context: ["why: checkout needs a total"], base: "release-1", refs: ["svc#12"] }), unit("b")] }),
       null,
     );
-    expect(getUnitBySeq(db, project, 1).description).toBe("The checkout page needs a total before payment can be wired.");
-    expect(getUnitBySeq(db, project, 2).description).toBeNull();
+    expect(r.added.map((u) => [u.seq, u.state, u.playbook, u.base])).toEqual([
+      [1, "waiting", "feature", "release-1"],
+      [2, "waiting", "feature", null],
+    ]);
+    expect(getUnitBySeq(db, project, 1)).toMatchObject({ goal: "do a", acceptance: ["a works"], context: ["why: checkout needs a total"], refs: ["svc#12"] });
   });
 
-  it("creates ready units, resolves deps by key and by U-number, and serializes overlapping scopes", () => {
-    const first = applyDelta(db, project, delta({ add: [unit("store", ["app/store/**"])] }), null);
-    expect(first.added.map((u) => [u.seq, u.state, u.playbook])).toEqual([[1, "ready", "feature"]]);
-    applyDelta(
-      db,
-      project,
-      delta({
-        add: [
-          unit("api", ["app/api/**"], { deps: [{ on: "U1" }] }),
-          unit("store-fix", ["app/store/fix.py"]),
-          unit("docs", ["docs/**"], { deps: [{ on: "api", kind: "needs-source" }] }),
-        ],
-      }),
-      null,
-    );
+  it("resolves after by key and by U-number", () => {
+    applyDelta(db, project, delta({ add: [unit("store")] }), null);
+    applyDelta(db, project, delta({ add: [unit("api", { after: ["U1"] }), unit("docs", { after: ["api"] })] }), null);
+    expect(getUnitBySeq(db, project, 2).after).toEqual([getUnitBySeq(db, project, 1).id]);
     expect(
       listDeps(db, project)
-        .map((d) => `U${d.unitId}->U${d.dependsOn}:${d.kind}`)
+        .map((d) => `U${d.unitId}->U${d.dependsOn}`)
         .sort(),
-    ).toEqual(["U2->U1:needs-landed", "U3->U1:scope-overlap", "U4->U2:needs-source"]);
+    ).toEqual(["U2->U1", "U3->U2"]);
   });
 
   it("rejects the whole delta on any error, leaving nothing behind", () => {
-    const bad = delta({ add: [unit("a", ["app/**"]), unit("b", ["lib/**"], { deps: [{ on: "nope" }] })] });
+    const bad = delta({ add: [unit("a"), unit("b", { after: ["nope"] })] });
     expect(() => applyDelta(db, project, bad, null)).toThrow(PlanRejected);
     expect(listUnits(db, project)).toEqual([]);
-    expect(() => applyDelta(db, project, delta({ add: [unit("a", ["x/**"], { repo: "other" })] }), null)).toThrow(/not part of this project/);
-    expect(() => applyDelta(db, project, delta({ add: [unit("a", ["x/**"]), unit("a", ["y/**"])] }), null)).toThrow(/duplicate key/);
-  });
-
-  it("keeps the verify pack out of work units, warning the planner, and refuses a unit that only writes the pack", () => {
-    const r = applyDelta(db, project, delta({ add: [unit("pack-and-smoke", [".agents/verify/**", "tests/test_smoke.py"])] }), null);
-    expect(getUnitBySeq(db, project, 1).writeScope).toEqual(["tests/test_smoke.py"]);
-    expect(r.warnings).toEqual(["pack-and-smoke: dropped .agents/verify from its write scope; verifiers maintain the verify pack"]);
-    expect(() => applyDelta(db, project, delta({ add: [unit("pack", [".agents/verify/verify.json"])] }), null)).toThrow(
-      "pack only writes the verify pack (.agents/verify); verifiers maintain the pack, so leave it out of the plan",
-    );
+    expect(() => applyDelta(db, project, delta({ add: [unit("a", { repo: "other" })] }), null)).toThrow(/not part of this project/);
+    expect(() => applyDelta(db, project, delta({ add: [unit("a"), unit("a")] }), null)).toThrow(/duplicate key/);
   });
 
   it("rejects dependency cycles", () => {
-    const d = delta({ add: [unit("a", ["a/**"], { deps: [{ on: "b" }] }), unit("b", ["b/**"], { deps: [{ on: "a" }] })] });
+    const d = delta({ add: [unit("a", { after: ["b"] }), unit("b", { after: ["a"] })] });
     expect(() => applyDelta(db, project, d, null)).toThrow(/cycle/);
     expect(listUnits(db, project)).toEqual([]);
   });
 
-  it("amends only units that have not started, and retries blocked ones with a note and a fresh attempt", () => {
-    applyDelta(db, project, delta({ add: [unit("a", ["a/**"]), unit("b", ["b/**"])] }), null);
-    applyDelta(db, project, delta({ amend: [{ unit: "U1", goal: "sharper goal" }] }), null);
-    expect(getUnitBySeq(db, project, 1).goal).toBe("sharper goal");
-    const u2 = getUnitBySeq(db, project, 2);
-    transitionUnit(db, u2.id, "blocked");
-    applyDelta(db, project, delta({ retry: [{ unit: "U2", note: "split the migration out first" }] }), null);
-    expect(getUnitBySeq(db, project, 2)).toMatchObject({ state: "ready", notes: ["Planner: split the migration out first"] });
-    expect(() => applyDelta(db, project, delta({ retry: [{ unit: "U1", note: "x" }] }), null)).toThrow(/only blocked, failed, or rejected/);
+  it("refuses to come after a dropped unit", () => {
+    applyDelta(db, project, delta({ add: [unit("a")] }), null);
+    transitionUnit(db, getUnitBySeq(db, project, 1).id, "dropped");
+    expect(() => applyDelta(db, project, delta({ add: [unit("b", { after: ["U1"] })] }), null)).toThrow("b comes after U1, which was dropped");
   });
 
-  it("rewires a unit that has not started by amending its deps, keeping scope-overlap order, and refuses a cycle", () => {
-    applyDelta(
-      db,
-      project,
-      delta({ add: [unit("pack", ["ci/**"]), unit("core", ["app/core/**"], { deps: [{ on: "pack" }] }), unit("cli", ["app/**"], { deps: [{ on: "core" }] })] }),
-      null,
-    );
-    transitionUnit(db, getUnitBySeq(db, project, 1).id, "blocked");
-    applyDelta(db, project, delta({ amend: [{ unit: "U2", deps: [] }], add: [unit("docs", ["docs/**"])] }), null);
-    applyDelta(db, project, delta({ amend: [{ unit: "U3", deps: [{ on: "U4", kind: "needs-landed" }] }] }), null);
+  it("amends only units that have not started, and retries stuck ones with a note and a fresh attempt", () => {
+    applyDelta(db, project, delta({ add: [unit("a"), unit("b")] }), null);
+    applyDelta(db, project, delta({ amend: [{ unit: "U1", goal: "sharper goal", acceptance: ["a sharper"] }] }), null);
+    expect(getUnitBySeq(db, project, 1)).toMatchObject({ goal: "sharper goal", acceptance: ["a sharper"] });
+    const u2 = getUnitBySeq(db, project, 2);
+    transitionUnit(db, u2.id, "stuck");
+    applyDelta(db, project, delta({ retry: [{ unit: "U2", note: "split the migration out first" }] }), null);
+    expect(getUnitBySeq(db, project, 2)).toMatchObject({ state: "waiting", notes: ["Planner: split the migration out first"] });
+    expect(() => applyDelta(db, project, delta({ retry: [{ unit: "U1", note: "x" }] }), null)).toThrow(/only stuck units can be retried/);
+    transitionUnit(db, getUnitBySeq(db, project, 1).id, "building");
+    expect(() => applyDelta(db, project, delta({ amend: [{ unit: "U1", goal: "x" }] }), null)).toThrow(/already started \(building\)/);
+  });
+
+  it("rewires a unit that has not started by amending its after, and refuses a cycle", () => {
+    applyDelta(db, project, delta({ add: [unit("pack"), unit("core", { after: ["pack"] }), unit("cli", { after: ["core"] })] }), null);
+    applyDelta(db, project, delta({ amend: [{ unit: "U2", after: [] }], add: [unit("docs")] }), null);
+    applyDelta(db, project, delta({ amend: [{ unit: "U3", after: ["U4"] }] }), null);
     expect(
       listDeps(db, project)
-        .map((d) => `U${d.unitId}->U${d.dependsOn}:${d.kind}`)
+        .map((d) => `U${d.unitId}->U${d.dependsOn}`)
         .sort(),
-    ).toEqual(["U3->U2:scope-overlap", "U3->U4:needs-landed"]);
-    expect(() => applyDelta(db, project, delta({ amend: [{ unit: "U4", deps: [{ on: "U3" }] }] }), null)).toThrow(/cycle/);
+    ).toEqual(["U3->U4"]);
+    expect(() => applyDelta(db, project, delta({ amend: [{ unit: "U4", after: ["U3"] }] }), null)).toThrow(/cycle/);
     expect(listDeps(db, project).filter((d) => d.unitId === 4)).toEqual([]);
   });
 
-  it("cancels idle units, warns about running ones, and opens planner gates", () => {
-    applyDelta(db, project, delta({ add: [unit("a", ["a/**"]), unit("b", ["b/**"])] }), null);
-    transitionUnit(db, getUnitBySeq(db, project, 2).id, "running");
+  it("drops idle units, warns about ones being built, and opens planner gates", () => {
+    applyDelta(db, project, delta({ add: [unit("a"), unit("b")] }), null);
+    transitionUnit(db, getUnitBySeq(db, project, 2).id, "building");
     const r = applyDelta(
       db,
       project,
@@ -175,8 +145,8 @@ describe("applyDelta", () => {
       }),
       null,
     );
-    expect(getUnitBySeq(db, project, 1).state).toBe("abandoned");
-    expect(r.warnings).toEqual(["U2 is running and was not cancelled; cancel it again after it hands off"]);
+    expect(getUnitBySeq(db, project, 1).state).toBe("dropped");
+    expect(r.warnings).toEqual(["U2 is being built and was not cancelled; cancel it again once it is not"]);
     expect(listGates(db, project, "open")).toMatchObject([{ kind: "planner", question: "Keep codes case-sensitive?", defaultOption: "yes" }]);
   });
 });

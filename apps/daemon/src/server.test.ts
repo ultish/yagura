@@ -33,7 +33,7 @@ let app: ReturnType<typeof createApp>;
 const project = "orders" as ProjectId;
 
 beforeEach(() => {
-  boot = { home: mkdtempSync(join(tmpdir(), "yagura-api-")), packsDir: "", skillsDir: "", bind: "0.0.0.0", port: 0, tokenFile: "" };
+  boot = { home: mkdtempSync(join(tmpdir(), "yagura-api-")), skillsDir: "", bind: "0.0.0.0", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
   addRepo(db, { id: "testbed", url: "file:///tb", defaultBranch: "main" });
   addProject(db, {
@@ -41,7 +41,7 @@ beforeEach(() => {
     name: "Orders",
     goal: "ship it",
     predicate: "done",
-    minTier: "unit-verified",
+
     repos: ["testbed" as RepoId],
     refs: ["gitlab#7"],
   });
@@ -50,14 +50,11 @@ beforeEach(() => {
     type: "work",
     repoId: "testbed" as RepoId,
     goal: "Implement create",
-    writeScope: ["app/**"],
     acceptance: ["a"],
-    verify: "v",
     timeboxSeconds: 60,
     maxAttempts: 2,
   });
-  transitionUnit(db, unit.id, "ready");
-  transitionUnit(db, unit.id, "running");
+  transitionUnit(db, unit.id, "building");
   const attempt = createAttempt(db, unit.id, "claude", null);
   updateAttempt(db, attempt.id, { state: "running", pid: 999999 });
   const log = layout(boot).log(project, unit.seq, attempt.n);
@@ -80,19 +77,25 @@ const post = (path: string, body: unknown) =>
   app.request(path, { method: "POST", headers: { authorization: "Bearer secret", "content-type": "application/json" }, body: JSON.stringify(body) });
 
 describe("daemon API", () => {
-  it("wakes a stuck unit's unit lead with the developer's note, and says why when it cannot", async () => {
+  it("wakes a stuck unit's lead with the developer's note, says why when it cannot, and retries a stuck unit", async () => {
     const url = `/api/projects/${project}/units/1/wake`;
-    db.prepare("UPDATE units SET state = 'running' WHERE seq = 1").run();
     const refused = await post(url, { note: "look" });
     expect(refused.status).toBe(409);
-    expect(((await refused.json()) as { error: string }).error).toBe("U1 is running; the unit lead looks at blocked, failed, or rejected units");
-    db.prepare("UPDATE units SET state = 'blocked' WHERE seq = 1").run();
+    expect(((await refused.json()) as { error: string }).error).toBe("U1 is building; the unit lead looks at a stuck or ready unit");
+    db.prepare("UPDATE units SET state = 'stuck' WHERE seq = 1").run();
     expect((await post(url, { note: "I want emojis" })).status).toBe(200);
-    const manager = db.prepare("SELECT context_json FROM units WHERE type = 'manager'").get() as { context_json: string };
-    expect(JSON.parse(manager.context_json)).toEqual(["The developer asked you to look at U1 now: I want emojis. Answer what they wrote first.", "asked"]);
+    expect(db.prepare("SELECT json_extract(data_json, '$.note') AS note FROM events WHERE type = 'lead.wake'").all()).toEqual([{ note: "I want emojis" }]);
+    const lead = createAttempt(db, 1 as never, "claude", null);
+    updateAttempt(db, lead.id, { state: "running", role: "lead" });
     const twice = await post(url, {});
     expect(twice.status).toBe(409);
     expect(((await twice.json()) as { error: string }).error).toBe("U1's unit lead is already deciding");
+    updateAttempt(db, lead.id, { state: "handed_off" });
+    expect((await post(`/api/projects/${project}/units/1/retry`, { note: "try the store" })).status).toBe(200);
+    expect(db.prepare("SELECT state, notes_json FROM units WHERE seq = 1").get()).toEqual({
+      state: "waiting",
+      notes_json: JSON.stringify(["The developer: try the store"]),
+    });
   });
 
   it("imports, lists, exports, and deletes environment templates, all in the store", async () => {
@@ -130,7 +133,7 @@ describe("daemon API", () => {
       allNotes: string | null;
     };
     const view = (await (await get(`/api/prompts?project=${project}`)).json()) as View;
-    expect(view.roles.map((r) => r.role)).toEqual(["planner", "worker", "verifier", "reviewer", "review-triage", "rebase", "pack", "manager"]);
+    expect(view.roles.map((r) => r.role)).toEqual(["planner", "worker", "judge", "lead", "doctor"]);
     expect(view.roles.find((r) => r.role === "worker")).toMatchObject({ source: "default", lastAttemptId: expect.any(Number) });
     const set = (await (
       await put({ scope: "project", projectId: project, role: "planner", kind: "guidance", text: "One unit per feature, with its tests." })
@@ -150,9 +153,9 @@ describe("daemon API", () => {
   });
 
   it("summarizes projects and returns a project's units with their attempts", async () => {
-    expect(await (await get("/api/projects")).json()).toMatchObject([{ project: { id: "orders" }, workCounts: { running: 1 }, running: 1, openGates: 1 }]);
+    expect(await (await get("/api/projects")).json()).toMatchObject([{ project: { id: "orders" }, workCounts: { building: 1 }, running: 1, openGates: 1 }]);
     const detail = (await (await get("/api/projects/orders")).json()) as { units: { seq: number; attempts: unknown[] }[] };
-    expect(detail.units).toMatchObject([{ seq: 1, state: "running", attempts: [{ n: 1, state: "running" }] }]);
+    expect(detail.units).toMatchObject([{ seq: 1, state: "building", attempts: [{ n: 1, state: "running" }] }]);
     expect((await get("/api/projects/nope")).status).toBe(404);
   });
 
@@ -259,13 +262,10 @@ describe("daemon API", () => {
     expect(await (await get(`/api/attempts/${attemptId}/diff`)).json()).toEqual({ base: null, head: null, text: null, truncated: false });
   });
 
-  it("registers an existing repo and lists repos with their pack, projects, and landing queue", async () => {
+  it("registers an existing repo and lists repos with their projects and landing queue", async () => {
     const seed = join(boot.home, "seed");
-    mkdirSync(join(seed, ".agents/verify"), { recursive: true });
-    writeFileSync(
-      join(seed, ".agents/verify/verify.json"),
-      JSON.stringify({ provider: "local-process", checks: [{ name: "unit", command: "true", tier: "unit-verified" }] }),
-    );
+    mkdirSync(seed, { recursive: true });
+    writeFileSync(join(seed, "README.md"), "billing\n");
     await git(["init", "--quiet", "-b", "main"], { cwd: seed });
     await commitAll(seed, "init", { name: "t", email: "t@localhost" });
     const origin = join(boot.home, "Billing.git");
@@ -275,11 +275,9 @@ describe("daemon API", () => {
     const created = await post("/api/repos", { source: origin });
     expect(created.status).toBe(201);
     expect(await created.json()).toMatchObject({
-      repo: { id: "billing", url: origin, defaultBranch: "main", packStatus: "unproven" },
-      pack: { ok: true, checks: [{ name: "unit", tier: "unit-verified" }] },
+      repo: { id: "billing", url: origin, defaultBranch: "main" },
       trunk: expect.stringMatching(/^[0-9a-f]{40}$/),
       route: { text: "lands by pushing to main", confirmed: true },
-      notes: [],
     });
     const unknown = await post("/api/repos", { source: "git@git.example.com:team/x.git" });
     expect(unknown.status).toBe(400);
@@ -289,7 +287,7 @@ describe("daemon API", () => {
 
     const repos = (await (await get("/api/repos")).json()) as { repo: { id: string } }[];
     expect(repos.map((r) => r.repo.id)).toEqual(["billing", "testbed"]);
-    expect(repos[1]).toMatchObject({ trunk: null, pack: null, projects: [{ id: "orders", state: "active" }], landingQueue: [], landedCount: 0 });
+    expect(repos[1]).toMatchObject({ trunk: null, projects: [{ id: "orders", state: "active" }], landingQueue: [], landedCount: 0 });
   });
 
   it("creates and edits environments and shows who holds and waits for their slots", async () => {
@@ -327,11 +325,11 @@ describe("daemon API", () => {
     });
     expect(await (await post("/api/environments/box/presets/registry", {})).json()).toEqual({ added: ["REGISTRY_PUSH", "REGISTRY_PULL"], skipped: [] });
     expect(await (await post("/api/environments/box/presets/registry", {})).json()).toEqual({ added: [], skipped: ["REGISTRY_PUSH", "REGISTRY_PULL"] });
-    await post("/api/environments/box/notes", { notes: "deps in cluster" });
+    await post("/api/environments/box/answers", { answers: { other: "deps in cluster" } });
     await post("/api/environments/box/values/REGISTRY_PULL/delete", {});
     const detail = (await (await get("/api/environments/box")).json()) as {
       values: { name: string; source: string }[];
-      environment: { notes: string };
+      environment: { answers: { other: string } };
       keep: unknown;
       presets: unknown[];
     };
@@ -339,7 +337,10 @@ describe("daemon API", () => {
       ["REDIS_URL", "you"],
       ["REGISTRY_PUSH", "registry"],
     ]);
-    expect(detail).toMatchObject({ environment: { notes: "deps in cluster" }, keep: { policy: { value: "never", source: "default" }, hours: { value: 2 } } });
+    expect(detail).toMatchObject({
+      environment: { answers: { other: "deps in cluster" } },
+      keep: { policy: { value: "never", source: "default" }, hours: { value: 2 } },
+    });
     expect(detail.presets.length).toBeGreaterThan(3);
 
     expect((await post("/api/environments/box/template", { name: "box-shape", ask: ["REDIS_URL"] })).status).toBe(201);

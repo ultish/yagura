@@ -120,7 +120,7 @@ export async function checkRetroWatch(ctx: { db: Db; boot: Bootstrap }, w: Retro
   return `U${unit.seq}: trunk CI failed again; queued U${fix.seq}: ${fix.goal}`;
 }
 
-// A broken trunk becomes ordinary work, verified, reviewed, and landed like any unit: a fix, or a revert when the project allows it.
+// A broken trunk becomes ordinary work, judged and merged like any unit: a fix, or a revert when the project allows it.
 function queueTrunkFix(db: Db, broke: Unit, sha: Sha, failing: { name: string; log: string }[]): Unit {
   const project = getProject(db, broke.projectId);
   const revert = resolveSetting(db, "project.auto_revert", { projectId: project.id }).value;
@@ -129,21 +129,19 @@ function queueTrunkFix(db: Db, broke: Unit, sha: Sha, failing: { name: string; l
     projectId: project.id,
     type: "work",
     repoId: broke.repoId,
+    base: broke.base,
     goal: revert
       ? `Revert U${broke.seq} (${sha.slice(0, 10)}) on trunk: ${jobs} fails after it landed`
       : `Fix trunk: ${jobs} fails on ${sha.slice(0, 10)} after U${broke.seq} landed (${broke.goal})`,
-    writeScope: broke.writeScope,
-    forbidScope: broke.forbidScope,
     acceptance: revert
       ? [`trunk no longer contains U${broke.seq}'s change: \`git revert --no-edit ${sha}\` and nothing else`, `${jobs} passes`]
       : [`${jobs} passes on trunk`, ...broke.acceptance],
-    verify: broke.verify,
     context: failing.map((r) => `Failing job ${r.name} on ${sha.slice(0, 10)}, last lines:\n${r.log}`),
     playbook: revert ? undefined : "bug-fix",
     timeboxSeconds: resolveSetting(db, "timebox.work_seconds", { projectId: project.id, repoId: broke.repoId! }).value,
     maxAttempts: 2,
   });
-  transitionUnit(db, unit.id, "ready", { retro: broke.seq, revert });
+  recordEvent(db, "retro.fix_queued", { projectId: project.id, unitId: unit.id }, { retro: broke.seq, revert });
   if (project.state === "closed") setProjectState(db, project.id, "active");
   addUnitNote(db, broke.id, `Trunk CI failed after it landed (${jobs}); ${revert ? "reverting" : "fixing"} in U${unit.seq}.`);
   tell(
@@ -170,7 +168,7 @@ export async function scanReverts(ctx: { db: Db; boot: Bootstrap }, repoId: stri
       const [commit, subject, body] = entry.trim().split("\x1f");
       if (!commit) continue;
       for (const [, reverted] of (body ?? "").matchAll(/This reverts commit ([0-9a-f]{7,40})/g)) {
-        const unit = db.prepare("SELECT id FROM units WHERE repo_id = ? AND landed_sha LIKE ? AND state IN ('landed', 'done')").get(repo.id, `${reverted}%`) as
+        const unit = db.prepare("SELECT id FROM units WHERE repo_id = ? AND merged_sha LIKE ? AND state = 'merged'").get(repo.id, `${reverted}%`) as
           { id: UnitId } | undefined;
         if (!unit || getRetroWatch(db, unit.id)?.state === "reverted") continue;
         const u = getUnit(db, unit.id);
@@ -178,7 +176,7 @@ export async function scanReverts(ctx: { db: Db; boot: Bootstrap }, repoId: stri
         db.prepare(
           `INSERT INTO retro_watches (unit_id, sha, until, created_at, state) VALUES (?, ?, ?, ?, 'watching')
            ON CONFLICT (unit_id) DO NOTHING`,
-        ).run(u.id, u.landedSha, now(), now());
+        ).run(u.id, u.mergedSha, now(), now());
         settle(db, u, "reverted", detail);
         addUnitNote(db, u.id, `Reverted on trunk after landing: ${detail}`);
         tell(db, u, `**${u.projectId}/U${u.seq} was reverted on ${repo.defaultBranch}** (${detail}). The project lead will see it the next time it plans.`);

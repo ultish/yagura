@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { parseArgs } from "node:util";
 import { loadBootstrap } from "./config.js";
 import type { AttemptId } from "./domain.js";
-import { readArtifact, runEvidence, type At } from "./evidence.js";
+import { readArtifact, runEvidence, UncommittedChanges, type At } from "./evidence.js";
 import { layout } from "./paths.js";
 import { openStore } from "./store.js";
 
@@ -17,9 +17,10 @@ export async function evidenceCli(argv: string[], env: NodeJS.ProcessEnv = proce
     strict: true,
   });
   const command = split === -1 ? "" : argv.slice(split + 1).join(" ");
-  if (positionals[0] !== "run" || (values.at !== "base" && values.at !== "head") || !values.label || !command)
-    return { code: 2, output: "usage: yagura evidence run --at base|head --label <name> [--timeout <seconds>] -- <command>\n" };
-  if (!env.YAGURA_ATTEMPT) return { code: 2, output: "evidence run only works inside a yagura verify session (YAGURA_ATTEMPT is not set)\n" };
+  const at = values.at ?? "head";
+  if (positionals[0] !== "run" || (at !== "base" && at !== "head") || !command)
+    return { code: 2, output: "usage: yagura evidence run [--label <name>] [--at base] [--timeout <seconds>] -- <command>\n" };
+  if (!env.YAGURA_ATTEMPT) return { code: 2, output: "evidence run only works inside a yagura agent session (YAGURA_ATTEMPT is not set)\n" };
 
   const boot = loadBootstrap(env);
   const db = openStore(layout(boot).db);
@@ -31,11 +32,15 @@ export async function evidenceCli(argv: string[], env: NodeJS.ProcessEnv = proce
       return { code: 2, output: "evidence run refused: YAGURA_EVIDENCE_TOKEN does not match this attempt's session\n" };
     const run = await runEvidence(db, boot, {
       attemptId: Number(env.YAGURA_ATTEMPT) as AttemptId,
-      at: values.at as At,
+      at: at as At,
       label: values.label,
       command,
       timeoutSeconds: values.timeout ? Number(values.timeout) : undefined,
+    }).catch((e: unknown) => {
+      if (e instanceof UncommittedChanges) return e;
+      throw e;
     });
+    if (run instanceof UncommittedChanges) return { code: 1, output: `evidence run refused: ${run.message}\n` };
     const stdout = run.stdoutArtifactId ? readArtifact(db, boot, run.stdoutArtifactId).toString() : "";
     const stderr = run.stderrArtifactId ? readArtifact(db, boot, run.stderrArtifactId).toString() : "";
     const status = run.timedOut ? "timed out" : `exit ${run.exitCode}`;

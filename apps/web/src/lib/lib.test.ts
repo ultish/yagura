@@ -14,7 +14,8 @@ import { groupHits, highlight } from "./search";
 import { mentionHref, mentionQuery } from "./mention";
 import { layoutScene, subLabel } from "./scene";
 import { buildTimeline } from "./timeline";
-import { groupOf, isBuild, roleOf, stages, statusLine } from "./units";
+import { groupOf, isBuild, roleOf, stages, statusLine, unitActions, unitTone } from "./units";
+import { edge, moveCounts, visited, wholePath } from "./statemap";
 
 const line = (n: number, at: number, events: LogLine["events"]): LogLine => ({ line: n, at, raw: "", events });
 
@@ -52,20 +53,20 @@ const unit = (over: Partial<UnitView>): UnitView =>
     projectId: "p",
     seq: 1,
     type: "work",
-    state: "ready",
+    state: "waiting",
     repoId: "r",
-    targetUnitId: null,
+    base: null,
     goal: "g",
-    writeScope: [],
-    forbidScope: [],
     acceptance: [],
-    verify: null,
     context: [],
-    measurements: [],
-    notes: [],
+    after: [],
     refs: [],
-    landedSha: null,
+    notes: [],
+    branch: null,
+    approvedSha: null,
+    mergedSha: null,
     playbook: null,
+    scaffold: false,
     timeboxSeconds: 1800,
     maxAttempts: 2,
     createdByDrainId: null,
@@ -75,7 +76,7 @@ const unit = (over: Partial<UnitView>): UnitView =>
     verdict: null,
     blockedReason: null,
     ...over,
-  }) as UnitView;
+  }) as unknown as UnitView;
 const attempt = (over: object) =>
   ({ id: 9, unitId: 1, n: 1, agentNo: 9, state: "handed_off", startedAt: "2026-09-27T00:00:00Z", endedAt: null, ...over }) as never;
 const detail = (units: UnitView[], over: Partial<ProjectDetail> = {}): ProjectDetail =>
@@ -120,14 +121,14 @@ describe("steering in the timeline", () => {
 });
 
 describe("unit stages and status", () => {
-  it("lights every stage of a landed unit", () => {
-    const u = unit({ state: "landed", landedSha: "153a90b04b" as never, verdict: { id: 1, tier: "unit-verified", headSha: "x" } });
+  it("lights every stage of a merged unit", () => {
+    const u = unit({ state: "merged", mergedSha: "153a90b04b" as never });
     expect(stages(detail([u]), u, NOW).map((s) => s.light)).toEqual(["lit", "lit", "lit", "lit"]);
-    expect(statusLine(detail([u]), u, NOW)).toEqual({ text: "Landed 153a90b on r at unit-verified.", tone: "pine" });
+    expect(statusLine(detail([u]), u, NOW)).toEqual({ text: "Merged 153a90b on r.", tone: "pine" });
   });
 
   it("puts a flame on the work stage while a worker runs", () => {
-    const u = unit({ state: "running", attempts: [attempt({ state: "running" })] });
+    const u = unit({ state: "building", attempts: [attempt({ state: "running", role: "worker" })] });
     expect(stages(detail([u]), u, NOW).map((s) => [s.light, s.label])).toEqual([
       ["lit", null],
       ["flame", "worker · 12m"],
@@ -137,9 +138,20 @@ describe("unit stages and status", () => {
     expect(statusLine(detail([u]), u, NOW)).toEqual({ text: "Worker running for 12m (try 1 of 2).", tone: "lamp" });
   });
 
-  it("shows a unit whose pull request is open as waiting on you while its land gate is open", () => {
-    const u = unit({ state: "landing", verdict: { id: 1, tier: "unit-verified", headSha: "x" } });
-    const gate = { id: 3, unitId: 1, state: "open", kind: "land", question: "U1 is verified. Merge its pull request on lib?", options: ["land", "hold"] };
+  it("puts a flame on the judge stage while the judge runs", () => {
+    const u = unit({ state: "judging", attempts: [attempt({ id: 4, role: "worker" }), attempt({ id: 5, state: "running", role: "judge" })] });
+    expect(stages(detail([u]), u, NOW).map((s) => [s.light, s.label, s.href])).toEqual([
+      ["lit", null, "/p/p/u/1"],
+      ["lit", null, "/a/4"],
+      ["flame", "judge · 12m", "/a/5"],
+      ["off", null, null],
+    ]);
+    expect(statusLine(detail([u]), u, NOW)).toEqual({ text: "The judge is looking at it (12m).", tone: "lamp" });
+  });
+
+  it("rings the merge bell when a ready unit has an open gate, and groups it with the bell", () => {
+    const u = unit({ state: "ready" });
+    const gate = { id: 3, unitId: 1, state: "open", kind: "land", question: "Merge U1's pull request on r?", options: ["land", "hold"] };
     const d = detail([u], { gates: [gate] as never });
     expect(stages(d, u, NOW).map((s) => [s.light, s.label])).toEqual([
       ["lit", null],
@@ -147,49 +159,68 @@ describe("unit stages and status", () => {
       ["lit", null],
       ["bell", "merge?"],
     ]);
-    expect(statusLine(d, u, NOW)).toEqual({
-      text: "Its pull request is open on r; it waits for you: U1 is verified. Merge its pull request on lib?",
-      tone: "bell",
-    });
-    const answered = detail([u]);
-    expect(stages(answered, u, NOW)[3]).toMatchObject({ light: "flame", label: "landing" });
-    expect(statusLine(answered, u, NOW)).toEqual({ text: "Landing on r.", tone: "lamp" });
-  });
-
-  it("rings the land bell when a verified unit waits on a gate, and groups it with the bell", () => {
-    const u = unit({ state: "verified", verdict: { id: 1, tier: "unit-verified", headSha: "x" } });
-    const v = unit({ id: 2 as never, seq: 2, type: "verify", targetUnitId: 1 as never, state: "done", attempts: [attempt({ id: 20, agentNo: 4 })] });
-    const d = detail([u, v], { gates: [{ id: 3, unitId: 1, state: "open", kind: "land", options: ["land", "hold"] }] as never });
-    expect(stages(d, u, NOW).map((s) => s.light)).toEqual(["lit", "lit", "lit", "bell"]);
-    expect(statusLine(d, u, NOW).text).toBe("Verified by A4 at unit-verified. Ready to land on r.");
+    expect(statusLine(d, u, NOW)).toEqual({ text: "Approved; its pull request on r waits for you: Merge U1's pull request on r?", tone: "bell" });
     expect(groupOf(d, u)).toBe("bell");
+    expect(statusLine(detail([u]), u, NOW)).toEqual({ text: "Approved; waiting for CI and the merge on r.", tone: "info" });
   });
 
-  it("puts the ember where a blocked unit stopped", () => {
-    const atWork = unit({ state: "blocked", blockedReason: "used 2 of 2 attempts" });
-    const atLand = unit({ state: "blocked", verdict: { id: 1, tier: "unit-verified", headSha: "x" }, attempts: [attempt({})] });
-    expect(stages(detail([atWork]), atWork, NOW).map((s) => s.light)).toEqual(["lit", "ember", "off", "off"]);
-    expect(stages(detail([atLand]), atLand, NOW).map((s) => s.light)).toEqual(["lit", "lit", "lit", "ember"]);
-    expect(statusLine(detail([atWork]), atWork, NOW)).toEqual({ text: "Blocked. used 2 of 2 attempts", tone: "bell" });
-  });
-
-  it("links the work and verify beacons to their agent runs, and the others to the unit", () => {
-    const u = unit({
-      state: "verified",
-      attempts: [attempt({ id: 4, n: 1 }), attempt({ id: 7, n: 2 })],
-      verdict: { id: 1, tier: "unit-verified", headSha: "x" },
-    });
-    const v = unit({ id: 2 as never, seq: 5, type: "verify", targetUnitId: 1 as never, state: "done", attempts: [attempt({ id: 8 })] });
-    const fresh = unit({ state: "ready" });
-    expect(stages(detail([u, v]), u, NOW).map((s) => s.href)).toEqual(["/p/p/u/1", "/a/7", "/a/8", null]);
-    expect(stages(detail([fresh]), fresh, NOW).map((s) => s.href)).toEqual(["/p/p/u/1", null, null, null]);
+  it("puts the ember on the work stage of a stuck unit", () => {
+    const u = unit({ state: "stuck", blockedReason: "used 2 of 2 attempts" });
+    expect(stages(detail([u]), u, NOW).map((s) => s.light)).toEqual(["lit", "ember", "off", "off"]);
+    expect(statusLine(detail([u]), u, NOW)).toEqual({ text: "Stuck. used 2 of 2 attempts", tone: "bell" });
+    expect(groupOf(detail([u]), u)).toBe("bell");
   });
 
   it("shows a waiting unit with a dotted beacon and its reason", () => {
-    const u = unit({ state: "ready" });
-    const d = detail([u], { waiting: [{ unitId: 1, reason: "waiting for U3 (needs-landed, now running)" }] });
+    const u = unit({ state: "waiting" });
+    const d = detail([u], { waiting: [{ unitId: 1, reason: "after U3, now building" }] });
     expect(stages(d, u, NOW)[1]!.light).toBe("wait");
-    expect(statusLine(d, u, NOW).text).toBe("Waiting: waiting for U3 (needs-landed, now running).");
+    expect(statusLine(d, u, NOW).text).toBe("Waiting: after U3, now building.");
+  });
+});
+
+describe("the unit page's status card and state graphic", () => {
+  it("offers the developer only what the daemon accepts in each state", () => {
+    const work = (state: string) => ({ state, type: "work" });
+    expect(unitActions(work("stuck"), 1, false)).toEqual(["answer", "retry", "ask-lead", "drop"]);
+    expect(unitActions(work("stuck"), 0, true)).toEqual(["stop"]);
+    expect(unitActions(work("judging"), 0, true)).toEqual(["stop"]);
+    expect(unitActions(work("ready"), 1, false)).toEqual(["answer", "ask-lead", "drop"]);
+    expect(unitActions(work("merged"), 0, false)).toEqual(["disagree"]);
+    expect(unitActions(work("building"), 0, false)).toEqual([]);
+  });
+
+  it("colours a unit vermilion when it needs you, pine once merged, amber while it moves", () => {
+    expect(["building", "judging", "ready", "stuck", "merged", "dropped", "waiting"].map((s) => unitTone(s, 0))).toEqual([
+      "lamp",
+      "lamp",
+      "lamp",
+      "bell",
+      "pine",
+      "muted",
+      "muted",
+    ]);
+    expect(unitTone("ready", 1)).toBe("bell");
+  });
+
+  it("counts repeated moves and threads one path through a two-round unit", () => {
+    const moves = [
+      { from: "waiting", to: "building" },
+      { from: "building", to: "judging" },
+      { from: "judging", to: "building" },
+      { from: "building", to: "judging" },
+      { from: "judging", to: "ready" },
+    ] as const;
+    expect([...moveCounts(moves)]).toEqual([
+      ["waiting>building", 1],
+      ["building>judging", 2],
+      ["judging>building", 1],
+      ["judging>ready", 1],
+    ]);
+    expect([...visited(moves)].sort()).toEqual(["building", "judging", "ready", "waiting"]);
+    expect(wholePath(moves)).toBe("M70,55 L260,55 Q355,25 450,55 Q355,85 260,55 Q355,25 450,55 L640,55");
+    expect(edge("judging", "judging").d).toBe("M440,37 C416,-7 484,-7 460,37");
+    expect(edge("waiting", "stuck").d).toBe("M70,55 Q238.75,192.5 450,140");
   });
 });
 
@@ -304,22 +335,14 @@ describe("mentions and formatting", () => {
     ]);
   });
 
-  it("names each agent's role, including yagura's own proof and rebase runs", () => {
-    expect([roleOf("work"), roleOf("pack"), roleOf("verify"), roleOf("verify", "yagura-proof"), roleOf("work", "yagura-rebase"), roleOf("plan")]).toEqual([
+  it("names each agent by the role yagura stored, falling back to the unit's type", () => {
+    expect([roleOf("work"), roleOf("plan"), roleOf("work", "claude", 1, "judge"), roleOf("work", "claude", 1, "lead")]).toEqual([
       "worker",
-      "pack writer",
-      "verifier",
-      "pack proof",
-      "rebase",
       "project lead",
-    ]);
-    expect([roleOf("manager"), roleOf("review-triage"), roleOf("review-triage", "claude", 1), roleOf("review-triage", "claude", 2)]).toEqual([
+      "judge",
       "unit lead",
-      "arbiter",
-      "arbiter",
-      "worker",
     ]);
-    expect(["work", "pack", "verify", "plan"].map((type) => isBuild({ type }))).toEqual([true, true, false, false]);
+    expect(["work", "plan"].map((type) => isBuild({ type }))).toEqual([true, false]);
   });
 });
 
@@ -448,26 +471,26 @@ describe("role glyphs", () => {
 });
 
 describe("depLine", () => {
-  const dep = { unitId: 2, dependsOn: 1, kind: "needs-source" };
+  const dep = { unitId: 2, dependsOn: 1 };
   const base = (a: Partial<UnitView>, b: Partial<UnitView>, over: Partial<ProjectDetail> = {}) =>
     detail([unit({ id: 1 as never, seq: 1, ...a }), unit({ id: 2 as never, seq: 2, ...b })], over);
-  it("moves only while the consumer is really waiting, and shows who the wait is on", () => {
-    expect(depLine(base({ state: "landing" }, { state: "verified" }, { waiting: [{ unitId: 2, reason: "x" }] as never }), dep)).toEqual({
+  it("moves only while the later unit is really waiting, and shows who the wait is on", () => {
+    expect(depLine(base({ state: "ready" }, { state: "waiting" }, { waiting: [{ unitId: 2, reason: "x" }] as never }), dep)).toEqual({
       tone: "amber",
       moving: true,
-      label: "U2 waits for U1 to land",
+      label: "U2 waits for U1 to merge",
     });
     const gated = base(
-      { state: "landing" },
-      { state: "verified" },
+      { state: "ready" },
+      { state: "waiting" },
       { waiting: [{ unitId: 2, reason: "x" }] as never, gates: [{ id: 1, unitId: 1, state: "open", kind: "land", options: [] }] as never },
     );
-    expect(depLine(gated, dep)).toEqual({ tone: "bell", moving: true, label: "U2 waits for U1 to land, and U1 waits for you" });
+    expect(depLine(gated, dep)).toEqual({ tone: "bell", moving: true, label: "U2 waits for U1 to merge, and U1 waits for you" });
   });
-  it("stays still when nothing waits, goes quiet when the upstream landed, and notes a cancelled one", () => {
-    expect(depLine(base({ state: "running" }, { state: "running" }), dep)).toEqual({ tone: "amber", moving: false, label: "U2 builds on U1" });
-    expect(depLine(base({ state: "landed" }, { state: "verified" }), dep)).toEqual({ tone: "pine", moving: false, label: "U2 builds on U1 (landed)" });
-    expect(depLine(base({ state: "abandoned" }, { state: "ready" }), dep)).toMatchObject({ tone: "muted", moving: false });
+  it("stays still when nothing waits, goes quiet when the earlier unit merged, and notes a dropped one", () => {
+    expect(depLine(base({ state: "building" }, { state: "building" }), dep)).toEqual({ tone: "amber", moving: false, label: "U2 comes after U1" });
+    expect(depLine(base({ state: "merged" }, { state: "waiting" }), dep)).toEqual({ tone: "pine", moving: false, label: "U2 comes after U1 (merged)" });
+    expect(depLine(base({ state: "dropped" }, { state: "waiting" }), dep)).toMatchObject({ tone: "muted", moving: false });
   });
 });
 
@@ -477,5 +500,16 @@ describe("atEnd", () => {
     expect(atEnd({ scrollY: 930, viewport: 800, height: 1800 })).toBe(true);
     expect(atEnd({ scrollY: 900, viewport: 800, height: 1800 })).toBe(false);
     expect(atEnd({ scrollY: 0, viewport: 800, height: 600 })).toBe(true);
+  });
+});
+
+describe("the browser bundle", () => {
+  it("takes only types from @yagura/core's main entry; values come from @yagura/core/domain, which imports nothing", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const root = new URL("..", import.meta.url).pathname;
+    const files = (readdirSync(root, { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f) && !f.endsWith(".test.ts"));
+    const offenders = files.filter((f) => /^import (?!type )[^;]*from "@yagura\/core";/m.test(readFileSync(join(root, f), "utf8")));
+    expect(offenders).toEqual([]);
   });
 });

@@ -3,6 +3,7 @@ import { extname, join, normalize } from "node:path";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
+  askLead,
   addUnitNote,
   deleteTemplate,
   exportTemplate,
@@ -11,7 +12,6 @@ import {
   getSpec,
   recordEvent,
   writeSpec,
-  followUps,
   PROMPT_ROLES,
   defaultGuidance,
   effectiveGuidance,
@@ -21,8 +21,6 @@ import {
   getMessage,
   readTurnCalls,
   bumpMaxAttempts,
-  retryState,
-  wakeManager,
   logTimesPath,
   threadsForProject,
   transitionUnit,
@@ -103,7 +101,18 @@ import {
   applyPreset,
   PRESETS,
   saveTemplate,
-  setEnvironmentNotes,
+  setAnswers,
+  listActions,
+  listActionRuns,
+  saveAction,
+  deleteAction,
+  answerSuggestion,
+  getAction,
+  runAction,
+  listDoctorRuns,
+  getDoctorRun,
+  stopDoctorRun,
+  requestDoctor,
   setValue,
   artifactContentType,
   artifactName,
@@ -128,7 +137,6 @@ import {
   repoHistory,
   repoChange,
   unitCode,
-  landWait,
   repoDiffFiles,
 } from "@yagura/core";
 import {
@@ -188,9 +196,12 @@ function eventsSince(db: Db, since: number, projectId: string | null, limit = 50
 function readLog(opts: ServerOptions, attemptId: AttemptId, from: number) {
   const attempt = getAttempt(opts.db, attemptId);
   const unit = getUnit(opts.db, attempt.unitId);
-  const path = layout(opts.boot).log(unit.projectId, unit.seq, attempt.n);
-  const adapter = (opts.adapters ?? { claude: claudeAdapter })[attempt.harness] ?? claudeAdapter;
-  if (!existsSync(path)) return { attempt, lines: [] as { line: number; at: number | null; raw: string; events: unknown[] }[], next: from };
+  return { attempt, ...readLogFile(opts, layout(opts.boot).log(unit.projectId, unit.seq, attempt.n), attempt.harness, from) };
+}
+
+function readLogFile(opts: ServerOptions, path: string, harness: string, from: number) {
+  const adapter = (opts.adapters ?? { claude: claudeAdapter })[harness] ?? claudeAdapter;
+  if (!existsSync(path)) return { lines: [] as { line: number; at: number | null; raw: string; events: unknown[] }[], next: from };
   const complete = readFileSync(path, "utf8").split("\n").slice(0, -1);
   const timesPath = logTimesPath(path);
   const times = existsSync(timesPath) ? readFileSync(timesPath, "utf8").split("\n").map(Number) : [];
@@ -201,7 +212,7 @@ function readLog(opts: ServerOptions, attemptId: AttemptId, from: number) {
     } catch {}
     return { line: from + i, at: times[from + i] || null, raw, events };
   });
-  return { attempt, lines, next: from + lines.length };
+  return { lines, next: from + lines.length };
 }
 
 export function createApp(opts: ServerOptions): Hono {
@@ -237,13 +248,7 @@ export function createApp(opts: ServerOptions): Hono {
       threads: threadsForProject(db, id),
       deps: listDeps(db, id),
       gates: listGates(db, id),
-      waiting: [
-        ...r.waiting.map((w) => ({ unitId: w.unit.id, reason: w.reason })),
-        ...listUnits(db, id).flatMap((u) => {
-          const w = u.state === "verified" ? landWait(db, u) : null;
-          return w ? [{ unitId: u.id, reason: w.reason }] : [];
-        }),
-      ],
+      waiting: r.waiting.map((w) => ({ unitId: w.unit.id, reason: w.reason })),
       skills: projectSkillChecks(db, boot, id),
     });
   });
@@ -282,11 +287,9 @@ export function createApp(opts: ServerOptions): Hono {
     const attempts = rows.map((r) => {
       const a = getAttempt(db, r.id as AttemptId);
       const u = getUnit(db, a.unitId);
-      const target = u.targetUnitId ? getUnit(db, u.targetUnitId) : null;
       return {
         ...a,
         unit: { id: u.id, seq: u.seq, type: u.type, goal: u.goal, projectId: u.projectId, state: u.state },
-        target: target ? { seq: target.seq, goal: target.goal } : null,
       };
     });
     return c.json({
@@ -322,30 +325,26 @@ export function createApp(opts: ServerOptions): Hono {
   app.post("/api/projects/:id/units/:seq/retry", async (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
     const note = String(((await c.req.json().catch(() => ({}))) as { note?: unknown }).note ?? "").trim();
-    if (!["blocked", "failed", "rejected"].includes(unit.state))
-      return c.json({ error: `U${unit.seq} is ${unit.state}; only blocked, failed, or rejected units can be retried` }, 409);
-    if (note) addUnitNote(db, unit.id, `Operator: ${note}`);
-    const next = retryState(db, unit);
-    if (next === "ready") bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).length + 1);
-    transitionUnit(db, unit.id, next, { by: "operator", note: note || null });
+    if (unit.state !== "stuck") return c.json({ error: `U${unit.seq} is ${unit.state}; only a stuck unit can be retried` }, 409);
+    if (note) addUnitNote(db, unit.id, `The developer: ${note}`);
+    bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).filter((a) => a.role === "worker").length + 1);
+    transitionUnit(db, unit.id, "waiting", { by: "developer", reason: note || "retried by the developer" });
     return c.json(unitView(db, getUnit(db, unit.id)));
   });
 
-  // The developer asks a stuck unit's unit lead to look at it now, with a note.
   app.post("/api/projects/:id/units/:seq/wake", async (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
     const note = String(((await c.req.json().catch(() => ({}))) as { note?: unknown }).note ?? "").trim();
-    const woken = wakeManager(db, unit, note);
-    if (!woken.ok) return c.json({ error: woken.reason }, 409);
+    const refused = askLead(db, unit, note || "Look at this unit now.");
+    if (refused) return c.json({ error: refused }, 409);
     return c.json(unitView(db, getUnit(db, unit.id)));
   });
 
   app.post("/api/projects/:id/units/:seq/cancel", async (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
     const reason = String(((await c.req.json().catch(() => ({}))) as { reason?: unknown }).reason ?? "cancelled by operator");
-    if (["running", "landed", "done", "abandoned", "landing"].includes(unit.state))
-      return c.json({ error: `U${unit.seq} is ${unit.state} and cannot be cancelled` }, 409);
-    transitionUnit(db, unit.id, "abandoned", { by: "operator", reason });
+    if (["building", "merged", "dropped"].includes(unit.state)) return c.json({ error: `U${unit.seq} is ${unit.state} and cannot be cancelled` }, 409);
+    transitionUnit(db, unit.id, "dropped", { by: "operator", reason });
     return c.json(unitView(db, getUnit(db, unit.id)));
   });
 
@@ -444,10 +443,64 @@ export function createApp(opts: ServerOptions): Hono {
     if (!PRESETS.some((p) => p.id === c.req.param("preset"))) return c.json({ error: `no preset ${c.req.param("preset")}` }, 404);
     return c.json(applyPreset(db, c.req.param("id") as EnvironmentId, c.req.param("preset")));
   });
-  app.post("/api/environments/:id/notes", async (c) => {
-    setEnvironmentNotes(db, c.req.param("id") as EnvironmentId, ((await c.req.json()) as { notes: string }).notes ?? "");
-    return c.json({ ok: true });
+  app.post("/api/environments/:id/answers", async (c) =>
+    c.json(setAnswers(db, c.req.param("id") as EnvironmentId, ((await c.req.json()) as { answers: Record<string, string> }).answers ?? {})),
+  );
+  app.get("/api/environments/:id/actions", (c) =>
+    c.json(listActions(db, c.req.param("id") as EnvironmentId).map((a) => ({ ...a, runs: listActionRuns(db, a.id, 5) }))),
+  );
+  app.post("/api/environments/:id/actions", async (c) => {
+    const b = (await c.req.json()) as { id?: number; repoId?: string | null; name: string; use: string; command: string };
+    return c.json(saveAction(db, { ...b, environmentId: c.req.param("id") as EnvironmentId, repoId: (b.repoId || null) as RepoId | null }));
   });
+  app.post("/api/actions/:id/run", async (c) => {
+    const id = Number(c.req.param("id"));
+    const repoId = (((await c.req.json().catch(() => ({}))) as { repoId?: string }).repoId || null) as RepoId | null;
+    const a = getAction(db, id);
+    if (!a.repoId && !repoId) return c.json({ error: `${a.name} applies to every repo here; say which repo to run it on` }, 400);
+    void runAction({ db, boot }, id, repoId, { by: "you" }).catch((e: unknown) =>
+      recordEvent(db, "action.run_failed", {}, { action: id, error: e instanceof Error ? e.message : String(e) }),
+    );
+    return c.json({ started: true }, 202);
+  });
+  app.get("/api/environments/:id/doctor", (c) => c.json(listDoctorRuns(db, c.req.param("id") as EnvironmentId)));
+  app.get("/api/doctor-runs/:id", (c) => c.json(getDoctorRun(db, Number(c.req.param("id")))));
+  app.get("/api/doctor-runs/:id/log", (c) => {
+    const run = getDoctorRun(db, Number(c.req.param("id")));
+    return c.json(readLogFile(opts, run.logPath, run.harness, Number(c.req.query("from") ?? 0)));
+  });
+  app.get("/api/doctor-runs/:id/stream", (c: Context) =>
+    streamSSE(c, async (stream) => {
+      const id = Number(c.req.param("id"));
+      let from = Number(c.req.query("from") ?? 0);
+      while (!stream.aborted) {
+        const run = getDoctorRun(db, id);
+        const { lines, next } = readLogFile(opts, run.logPath, run.harness, from);
+        for (const l of lines) await stream.writeSSE({ id: String(l.line), event: "line", data: JSON.stringify(l) });
+        from = next;
+        if (run.state !== "running" && !lines.length) {
+          await stream.writeSSE({ event: "end", data: JSON.stringify({ state: run.state }) });
+          return;
+        }
+        await stream.sleep(pollMs);
+      }
+    }),
+  );
+  app.post("/api/doctor-runs/:id/stop", (c) => {
+    const stopped = stopDoctorRun(db, Number(c.req.param("id")), "stopped by the developer");
+    return stopped ? c.json({ stopped }) : c.json({ error: "that doctor run is not running" }, 409);
+  });
+  app.post("/api/environments/:id/doctor", async (c) => {
+    requestDoctor(db, c.req.param("id") as EnvironmentId, String(((await c.req.json().catch(() => ({}))) as { note?: string }).note ?? ""));
+    return c.json({ asked: true });
+  });
+  app.post("/api/actions/:id/delete", (c) => {
+    deleteAction(db, Number(c.req.param("id")));
+    return c.json({ deleted: true });
+  });
+  app.post("/api/actions/:id/suggestion", async (c) =>
+    c.json(answerSuggestion(db, Number(c.req.param("id")), Boolean(((await c.req.json()) as { accept?: boolean }).accept))),
+  );
   app.post("/api/leases/:id/delete-kept", async (c) => c.json({ deleted: await deleteKept(db, boot, Number(c.req.param("id")) as never) }));
   app.get("/api/templates", (c) => c.json(listTemplates(db)));
   app.post("/api/environments/:id/template", async (c) => {
@@ -500,19 +553,23 @@ export function createApp(opts: ServerOptions): Hono {
         { db, boot },
         { source: b.source, id: b.id, forge: b.forge as "gh" | "glab" | undefined, land: b.land === "push" ? "push" : undefined },
       );
-      return c.json({ ...(await repoView(db, boot, repo.id)), notes: inspection.notes }, 201);
+      return c.json(await repoView(db, boot, repo.id), 201);
     } catch (e) {
       if (e instanceof RouteNeeded) return c.json({ error: e.message, needsRoute: true }, 400);
       if (e instanceof RepoUnusable) return c.json({ error: e.message }, e.message.includes("already") ? 409 : 400);
       throw e;
     }
   });
-  app.get("/api/repos/:id/tree", async (c) => c.json(await repoTree(db, boot, c.req.param("id") as RepoId)));
-  app.get("/api/repos/:id/file", async (c) => c.json(await repoFile(db, boot, c.req.param("id") as RepoId, c.req.query("path") ?? "")));
+  app.get("/api/repos/:id/tree", async (c) => c.json(await repoTree(db, boot, c.req.param("id") as RepoId, c.req.query("ref") || undefined)));
+  app.get("/api/repos/:id/file", async (c) =>
+    c.json(await repoFile(db, boot, c.req.param("id") as RepoId, c.req.query("path") ?? "", c.req.query("ref") || undefined)),
+  );
   app.get("/api/repos/:id/history", async (c) =>
     c.json(await repoHistory(db, boot, c.req.param("id") as RepoId, { path: c.req.query("path") || undefined, limit: Number(c.req.query("limit") ?? 100) })),
   );
-  app.get("/api/repos/:id/change/:sha", async (c) => c.json(await repoChange(db, boot, c.req.param("id") as RepoId, c.req.param("sha"))));
+  app.get("/api/repos/:id/change/:sha", async (c) =>
+    c.json(await repoChange(db, boot, c.req.param("id") as RepoId, c.req.param("sha"), c.req.query("base") || undefined)),
+  );
   app.get("/api/repos/suggest-id", (c) => c.json({ id: suggestRepoId(c.req.query("source") ?? "") }));
 
   app.get("/api/settings", (c) =>
@@ -632,13 +689,10 @@ export function createApp(opts: ServerOptions): Hono {
   const ROLE_UNIT: Record<PromptRole, string> = {
     planner: "plan",
     worker: "work",
-    verifier: "verify",
-    reviewer: "review",
-    "review-triage": "review-triage",
-    rebase: "rebase",
-    pack: "pack",
-    manager: "manager",
+    judge: "work",
+    lead: "work",
     watchman: "",
+    doctor: "",
   };
   const promptsView = (projectId: string | null) => ({
     projectId,
@@ -661,7 +715,7 @@ export function createApp(opts: ServerOptions): Hono {
         sha: e.sha,
         notes: projectId ? getPromptText(db, "project", projectId, role, "notes") : role === "watchman" ? getPromptText(db, "global", "", role, "notes") : null,
         lastAttemptId: last?.id ?? null,
-        followUps: followUps(role),
+        followUps: [],
       };
     }),
   });

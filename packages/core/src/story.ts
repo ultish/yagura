@@ -1,20 +1,13 @@
 import { listSteers } from "./steer.js";
 import type { Bootstrap } from "./config.js";
 import { listDisagreements, type Disagreement } from "./disagreements.js";
-import { ROLE_NAMES, spendsAttempt, type ManagerAction, type Attempt, type Handoff, type IsoTime, type Unit, type UnitId } from "./domain.js";
+import { ROLE_NAMES, spendsAttempt, type Attempt, type IsoTime, type LeadAction, type Unit, type UnitId, type UnitState } from "./domain.js";
 import { getMergeRequest } from "./forge.js";
-import { liveVerdict } from "./land.js";
-import { landWait } from "./publish.js";
-import { listPackEdits } from "./packedits.js";
-import { layout } from "./paths.js";
-import { getGate, getProject, getUnit, listAttempts, listGates, listUnits, type Db, jobLabel, type Gate } from "./store.js";
-import { isReviewThread, listThreadRows } from "./triage.js";
-import { findingFates } from "./review.js";
-import { describeOps, listAmendments } from "./amend.js";
+import { getEvidenceRun } from "./evidence.js";
+import { getProject, getRepo, getUnit, listAttempts, listGates, type Db, type Gate } from "./store.js";
 import { dependencyEdges, type DepEdge } from "./chain.js";
-import { listManagerDecisions, managerOn } from "./manager.js";
-import { savedHandoff } from "./finish.js";
-import { recordedAmendments, recordedRulings } from "./records.js";
+import { getRecord } from "./records.js";
+import type { WorkerRound } from "./resume.js";
 
 // A unit's page reads as one story: who did what, what each chose, and what yagura checked about it. Agents' lines are
 // judgment unless a check sits beside them; a check is something yagura proved from its own records.
@@ -30,8 +23,10 @@ export interface StoryLine {
   checks: StoryCheck[];
   disagreements: Disagreement[];
 }
-export type Actor = "planner" | "worker" | "verifier" | "reviewer" | "review-triage" | "rebase" | "pack" | "manager" | "person" | "yagura";
+export type Actor = "planner" | "worker" | "judge" | "lead" | "person" | "yagura";
 export interface StoryEntry {
+  // The event that placed the entry; entries are in this order.
+  id: number;
   at: IsoTime;
   actor: Actor;
   who: string;
@@ -40,40 +35,40 @@ export interface StoryEntry {
   body: string | null;
   lines: StoryLine[];
   folded: { summary: string; items: string[] } | null;
+  // The state the unit was in, and the worker round it belonged to (0 before the first build).
+  state: UnitState | null;
+  round: number;
 }
-export interface ManagerTurn {
-  decisionId: number;
-  attemptId: number | null;
-  agentNo: number | null;
+export interface StateMove {
+  id: number;
   at: IsoTime;
-  wake: string;
-  action: ManagerAction;
-  actionText: string;
-  reason: string;
-  note: string | null;
-  costUsd: number;
-  resumed: boolean;
+  from: UnitState;
+  to: UnitState;
+}
+export interface StoryRound {
+  n: number;
+  at: IsoTime;
+  text: string;
 }
 export interface UnitStory {
   unit: Unit;
   projectId: string;
-  tier: string | null;
-  pr: { number: number; url: string } | null;
+  base: string | null;
+  pr: { number: number; url: string; repo: string; draft: boolean } | null;
   costUsd: number;
   started: IsoTime | null;
   ended: IsoTime | null;
+  moves: StateMove[];
+  rounds: StoryRound[];
   entries: StoryEntry[];
   agents: StoryAgent[];
-  // Questions waiting for the developer about this unit: land it.
+  // What is happening now and why, for the top of the page.
+  now: { headline: string; detail: string[] };
+  running: { attemptId: number; agentNo: number; role: string; startedAt: IsoTime } | null;
   gates: Gate[];
-  // The manager's wakes, oldest first: why it was woken, what it decided, and what it cost.
-  manager: ManagerTurn[];
-  managerOn: boolean;
-  // What this unit depends on and what depends on it, with the build used and where each edge stands.
   dependencies: DepEdge[];
 }
-// Every session that worked on a unit: the planner run that planned it (shared with the units it planned alongside),
-// its own attempts, and the verifiers, triage, and rebases that targeted it.
+// Every session that worked on a unit: the planner run that planned it (shared with the units planned beside it) and its own attempts.
 export interface StoryAgent {
   attemptId: number;
   role: string;
@@ -97,26 +92,102 @@ const bullets = (text: string) =>
     .map((l) => l.replace(/^\s*[-*]\s*/, "").trim())
     .filter((l) => l && !/^\(?(none|n\/a|nothing)\.?\)?$/i.test(l));
 
-type Ev = { id: number; ts: IsoTime; type: string; unit_id: number | null; attempt_id: number | null; data: Record<string, unknown> };
+type Ev = { id: number; ts: IsoTime; type: string; attempt_id: number | null; data: Record<string, unknown> };
 
-export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
+export const LEAD_ACTION_TEXT: Record<LeadAction, string> = {
+  resume: "sent the worker back",
+  fresh: "started a fresh worker",
+  answer: "answered the judge",
+  reply: "replied on the pull request",
+  ask: "asked you",
+  replan: "asked the project lead to change the plan",
+  drop: "dropped the unit",
+};
+
+const WAKE_TEXT: Record<string, string> = {
+  stuck: "the worker getting stuck",
+  "judge-asks": "the judge's question",
+  rounds: "round after round of changes",
+  "ci-failed": "CI failing twice",
+  conflict: "a conflict the worker could not resolve",
+  developer: "your note",
+};
+const wakeText = (trigger: unknown, pr: number | null) =>
+  trigger === "comment" ? `a comment on ${pr ? `PR #${pr}` : "the pull request"}` : (WAKE_TEXT[String(trigger)] ?? String(trigger));
+
+const roleName = (a: Attempt) => {
+  const name = a.role ? ROLE_NAMES[a.role] : "agent";
+  return name[0]!.toUpperCase() + name.slice(1);
+};
+
+const findLast = <T>(xs: readonly T[], f: (x: T) => boolean): T | undefined => {
+  for (let i = xs.length - 1; i >= 0; i--) if (f(xs[i]!)) return xs[i];
+  return undefined;
+};
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+// The planning round that created a unit: its job row, whose one attempt is the planner's session.
+function plannerOf(db: Db, unit: Unit): { unit: Unit; attempt: Attempt } | null {
+  if (!unit.createdByDrainId) return null;
+  const row = db.prepare("SELECT planner_attempt_id FROM drains WHERE id = ?").get(unit.createdByDrainId) as { planner_attempt_id: number | null } | undefined;
+  if (!row?.planner_attempt_id) return null;
+  const owner = db.prepare("SELECT unit_id FROM attempts WHERE id = ?").get(row.planner_attempt_id) as { unit_id: UnitId } | undefined;
+  if (!owner) return null;
+  const planUnit = getUnit(db, owner.unit_id);
+  const attempt = listAttempts(db, planUnit.id).find((a) => a.id === row.planner_attempt_id);
+  return attempt ? { unit: planUnit, attempt } : null;
+}
+
+function roundText(n: number, r: WorkerRound | undefined, by: Ev | undefined, pr: number | null): string {
+  const after = by ? `, after ${wakeText(by.data.trigger, pr)}` : "";
+  switch (r?.kind) {
+    case undefined:
+    case "first":
+      return `Round ${n} · first build`;
+    case "changes":
+      return `Round ${n} · sent back by the judge`;
+    case "conflict":
+      return `Round ${n} · ${r.base} moved: a conflict in ${r.files.join(", ")}`;
+    case "fresh":
+      return `Round ${n} · a fresh worker${by ? ` from the unit lead${after}` : ""}`;
+    case "lead":
+      return `Round ${n} · sent back by the unit lead${after}`;
+  }
+}
+
+export function unitStory(db: Db, _boot: Bootstrap, unit: Unit): UnitStory {
   const project = getProject(db, unit.projectId);
-  const paths = layout(boot);
-  const related = listUnits(db, project.id).filter((u) => u.targetUnitId === unit.id && u.type !== "plan");
-  const unitIds = [unit.id, ...related.map((u) => u.id)];
   const events = (
-    db
-      .prepare(`SELECT id, ts, type, unit_id, attempt_id, data_json FROM events WHERE unit_id IN (${unitIds.map(() => "?").join(", ")}) ORDER BY id`)
-      .all(...unitIds) as {
-      id: number;
-      ts: IsoTime;
-      type: string;
-      unit_id: number | null;
-      attempt_id: number | null;
+    db.prepare("SELECT id, ts, type, attempt_id, data_json FROM events WHERE unit_id = ? ORDER BY id").all(unit.id) as (Omit<Ev, "data"> & {
       data_json: string;
-    }[]
-  ).map((e): Ev => ({ ...e, data: JSON.parse(e.data_json) }));
+    })[]
+  ).map(({ data_json, ...e }): Ev => ({ ...e, data: JSON.parse(data_json) as Record<string, unknown> }));
+  const mr = getMergeRequest(db, unit.id);
+  const attempts = listAttempts(db, unit.id);
   const disagreements = listDisagreements(db, { unitId: unit.id });
+
+  const moves: StateMove[] = events
+    .filter((e) => e.type === "unit.state")
+    .map((e) => ({ id: e.id, at: e.ts, from: e.data.from as UnitState, to: e.data.to as UnitState }));
+  const rounds: (StoryRound & { id: number })[] = [];
+  if (unit.type === "work")
+    for (const e of events.filter((x) => x.type === "unit.state" && x.data.to === "building")) {
+      const by = e.data.by === "lead" ? findLast(events, (x) => x.type === "lead.decided" && x.id < e.id) : undefined;
+      rounds.push({
+        id: e.id,
+        n: rounds.length + 1,
+        at: e.ts,
+        text: roundText(rounds.length + 1, e.data.round as WorkerRound | undefined, by, mr?.number ?? null),
+      });
+    }
+  const placed = (id: number) => ({
+    id,
+    state: findLast(moves, (m) => m.id <= id)?.to ?? null,
+    round: rounds.filter((r) => r.id <= id).length,
+  });
+  const firstEvent = (attemptId: number) => events.find((e) => e.attempt_id === attemptId)?.id ?? 0;
+
   const line = (ref: string, kind: LineKind, text: string, checks: StoryCheck[] = []): StoryLine => ({
     ref,
     kind,
@@ -124,423 +195,196 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
     checks,
     disagreements: disagreements.filter((d) => d.ref === ref),
   });
-  const handoffOf = (u: Unit, a: Attempt): Handoff | null => {
-    return savedHandoff(db, a.id, paths.handoff(project.id, u.seq, a.n));
+  // A run an agent cites is checked against what yagura recorded: the command, and how it ended.
+  const runLine = (ref: string, id: number): StoryLine => {
+    const run = (() => {
+      try {
+        return getEvidenceRun(db, id);
+      } catch {
+        return null;
+      }
+    })();
+    if (!run) return line(ref, "claimed", `run:${id}`, [{ ok: false, text: "yagura has no such run" }]);
+    const ok = run.exitCode === 0 && !run.timedOut && !run.tampered;
+    const how = run.timedOut ? "timed out" : run.tampered ? "tampered" : `exit ${run.exitCode}`;
+    return line(ref, "claimed", `run:${id} \`${run.command}\` · ${how}`, [{ ok, text: "checked by yagura against runs it recorded" }]);
   };
-  const judgment = (ref: string, h: Handoff) => [
-    ...bullets(h.decisions)
-      .filter((l) => !/^T\d+\s*:/.test(l))
-      .map((t, i) => line(`${ref}:chose:${i}`, "chose", t)),
-    ...bullets(h.notes).map((t, i) => line(`${ref}:noted:${i}`, "noted", t)),
-  ];
+  const citedRuns = (texts: string[]) => [...new Set(texts.flatMap((t) => [...t.matchAll(/\brun:(\d+)\b/g)].map((m) => Number(m[1]))))];
   const attemptOf = (u: Unit, a: Attempt) => ({ id: a.id, unitSeq: u.seq, n: a.n, agentNo: a.agentNo, model: a.model, costUsd: a.costUsd });
   const entries: StoryEntry[] = [];
 
-  let planUnit: Unit | null = null;
-  const created = events.find((e) => e.type === "unit.state" && e.unit_id === unit.id && e.data.to === "ready");
-  const drain = created?.data.drain as number | undefined;
-  if (created && drain) {
-    const summary = db
-      .prepare("SELECT unit_id, data_json FROM events WHERE project_id = ? AND type = 'plan.drain_finished' AND json_extract(data_json, '$.drain') = ?")
-      .get(project.id, drain) as { unit_id: UnitId | null; data_json: string } | undefined;
-    planUnit = summary?.unit_id ? getUnit(db, summary.unit_id) : null;
-    const planAttempt = planUnit ? (listAttempts(db, planUnit.id).at(-1) ?? null) : null;
+  const planner = plannerOf(db, unit);
+  if (planner) {
+    const finished = db.prepare("SELECT data_json FROM events WHERE type = 'plan.drain_finished' AND unit_id = ?").get(planner.unit.id) as
+      { data_json: string } | undefined;
     entries.push({
-      at: created.ts,
+      ...placed(0),
+      at: (planner.attempt.startedAt ?? unit.createdAt) as IsoTime,
       actor: "planner",
-      who: `Project lead · planning round ${drain}`,
-      attempt: planUnit && planAttempt ? attemptOf(planUnit, planAttempt) : null,
+      who: `Project lead · ${planner.unit.goal.toLowerCase()}`,
+      attempt: attemptOf(planner.unit, planner.attempt),
       status: null,
-      body: summary ? ((JSON.parse(summary.data_json) as { reason?: string }).reason ?? null) : null,
+      body: finished ? ((JSON.parse(finished.data_json) as { reason?: string }).reason ?? null) : null,
       lines: [],
       folded: null,
     });
   }
 
-  // The verification that judged a head, by the head it judged.
-  const verifyFor = new Map<string, { seq: number; agent: string; outcome: string; check: string; tier: string | null; reason: string }>();
-  for (const v of related.filter((u) => u.type === "verify")) {
-    const out = events.find((e) => e.type === "verify.outcome" && e.unit_id === unit.id && e.data.verifyUnit === v.seq);
-    const head = listAttempts(db, v.id).at(-1)?.headSha;
-    if (out && head)
-      verifyFor.set(head, {
-        seq: v.seq,
-        agent: jobLabel(db, v),
-        outcome: String(out.data.outcome),
-        check: String(out.data.check ?? "agreed"),
-        tier: (out.data.tier as string | null) ?? null,
-        reason: String(out.data.reason),
-      });
-  }
-
-  // The unit's own work: one entry per attempt that did the work; tries that cost no try fold into the next one.
   let folded: string[] = [];
-  for (const a of listAttempts(db, unit.id)) {
-    if (a.harness.startsWith("yagura-")) continue;
-    const h = a.state === "handed_off" ? handoffOf(unit, a) : null;
-    if (!h) {
+  for (const a of attempts) {
+    if (!a.startedAt) continue;
+    const ref = `a${a.id}`;
+    const h = a.role === "worker" || a.role === null ? getRecord(db, a.id, "handoff") : null;
+    const judge = a.role === "judge" ? getRecord(db, a.id, "judge") : null;
+    const decision = a.role === "lead" ? getRecord(db, a.id, "decision") : null;
+    const running = a.state === "running" || a.state === "queued";
+    if (!h && !judge && !decision && !running) {
       folded.push(`A${a.agentNo}: ${a.state}${a.failureMode ? ` (${a.failureMode})` : ""}${spendsAttempt(a) ? "" : ", not counted"}`);
       continue;
     }
-    const ref = `a${a.id}`;
-    const rejected = events.find(
-      (e) => e.type === "unit.state" && e.unit_id === unit.id && e.data.to === "rejected" && e.id > 0 && sameAttempt(events, e, a.n),
-    );
-    const verified = a.headSha ? verifyFor.get(a.headSha) : undefined;
-    const checks: StoryCheck[] = rejected
-      ? [{ ok: false, text: `rejected: ${describeRejection(rejected.data)}` }]
-      : verified
-        ? [{ ok: verified.outcome === "verified", text: `${verified.outcome === "verified" ? "verified" : verified.outcome} by ${verified.agent}` }]
-        : [];
-    entries.push({
-      at: a.startedAt ?? a.endedAt ?? unit.createdAt,
-      actor: unit.type === "pack" ? "pack" : "worker",
-      who: unit.type === "pack" ? "Pack writer" : "Worker",
+    const entry: StoryEntry = {
+      ...placed(firstEvent(a.id)),
+      at: a.startedAt,
+      actor: a.role === "judge" ? "judge" : a.role === "lead" ? "lead" : "worker",
+      who: roleName(a),
       attempt: attemptOf(unit, a),
-      status: { text: rejected ? "rejected" : h.status === "success" ? "handed off" : h.status, tone: rejected ? "bell" : "amber" },
-      body: bullets(h.whatIDid)[0] ?? null,
-      lines: [line(`${ref}:claimed:0`, "claimed", `Hands off ${h.status}, self-reported ${h.verification ?? "no tier"}.`, checks), ...judgment(ref, h)],
+      status: null,
+      body: null,
+      lines: [],
       folded: folded.length ? { summary: `${folded.length} earlier tr${folded.length === 1 ? "y" : "ies"} did not count`, items: folded } : null,
-    });
+    };
+    const resumed = a.resumesAttemptId ? attempts.find((x) => x.id === a.resumesAttemptId) : undefined;
+    if (h) {
+      entry.status = { text: h.status === "done" ? "handed off" : "stuck", tone: h.status === "done" ? "amber" : "bell" };
+      const said = h.did[0] ?? (h.status === "stuck" ? h.reason : null);
+      const did = said ? said[0]!.toUpperCase() + said.slice(1) : null;
+      const at = a.headSha ? ` at ${a.headSha.slice(0, 7)}` : "";
+      entry.body = [
+        resumed ? `Resumed A${resumed.agentNo}'s session.` : null,
+        did ? `${did}${/[.!?]$/.test(did) ? "" : "."}` : null,
+        at && h.status === "done" ? `Handed off${at}.` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+      entry.lines = [
+        ...(h.status === "stuck" && h.reason && h.did.length ? [line(`${ref}:claimed:0`, "claimed", `Stuck: ${h.reason}`)] : []),
+        ...citedRuns(h.evidence).map((id) => runLine(`${ref}:run:${id}`, id)),
+        ...h.decisions.map((t, i) => line(`${ref}:chose:${i}`, "chose", t)),
+        ...h.notes.map((t, i) => line(`${ref}:noted:${i}`, "noted", t)),
+      ];
+    } else if (judge) {
+      entry.status = {
+        text: judge.verdict === "approve" ? "approved" : judge.verdict === "changes" ? "changes" : "asks",
+        tone: judge.verdict === "approve" ? "pine" : judge.verdict === "changes" ? "amber" : "bell",
+      };
+      const looked = a.headSha ? ` ${a.headSha.slice(0, 7)}` : "";
+      entry.body =
+        judge.verdict === "approve"
+          ? `Approved${looked}.`
+          : judge.verdict === "changes"
+            ? `Sent it back with ${plural(judge.findings.length, "finding")}.`
+            : `Asks: ${judge.question}`;
+      entry.lines = [...judge.findings.map((f, i) => line(`${ref}:claimed:${i}`, "claimed", f)), ...judge.runs.map((id) => runLine(`${ref}:run:${id}`, id))];
+    } else if (decision) {
+      const woke = events.find((e) => e.type === "lead.woken" && e.attempt_id === a.id);
+      entry.status = { text: LEAD_ACTION_TEXT[decision.action], tone: decision.action === "ask" ? "bell" : "amber" };
+      entry.body = decision.question ?? decision.note ?? decision.reply;
+      entry.lines = [
+        ...(woke ? [line(`${ref}:noted:woke`, "noted", `Woken by ${wakeText(woke.data.trigger, mr?.number ?? null)}.`)] : []),
+        line(`${ref}:chose:0`, "chose", decision.reason),
+      ];
+    } else {
+      entry.status = { text: "working", tone: "amber" };
+      entry.body = a.role === "judge" ? `Judging${a.headSha ? ` ${a.headSha.slice(0, 7)}` : ""} now.` : a.role === "lead" ? "Deciding now." : "Building now.";
+    }
+    entries.push(entry);
     folded = [];
   }
 
-  for (const v of related.filter((u) => u.type === "verify")) {
-    for (const a of listAttempts(db, v.id)) {
-      const h = handoffOf(v, a);
-      const out = events.find((e) => e.type === "verify.outcome" && e.unit_id === unit.id && e.data.verifyUnit === v.seq);
-      if (a.harness === "yagura-proof") {
-        if (out)
-          entries.push({
-            at: a.startedAt ?? v.createdAt,
-            actor: "yagura",
-            who: `yagura · proof ${jobLabel(db, v)}`,
-            attempt: null,
-            status: { text: String(out.data.outcome), tone: out.data.outcome === "verified" ? "pine" : "bell" },
-            body: null,
-            lines: [
-              line(`a${a.id}:claimed:0`, "claimed", "Ran the pack on its own head with no agent.", [
-                { ok: out.data.outcome === "verified", text: String(out.data.reason) },
-              ]),
-            ],
-            folded: null,
-          });
-        continue;
-      }
-      if (!h && !out) continue;
-      const ref = `a${a.id}`;
-      const lines: StoryLine[] = [];
-      if (h) {
-        const met = (h.findings.match(/^\s*-\s*\[x\]/gim) ?? []).length;
-        const all = (h.findings.match(/^\s*-\s*\[[ x]\]/gim) ?? []).length;
-        const checks: StoryCheck[] = out
-          ? [
-              ...String(out.data.reason)
-                .split(/;\s*/)
-                .map((t) => ({ ok: out.data.check !== "disagreed", text: t })),
-              ...(out.data.tier && h.verification && out.data.tier !== h.verification && out.data.outcome === "verified"
-                ? [{ ok: true, text: `capped at ${String(out.data.tier)}: no pack check proves more` }]
-                : []),
-            ]
-          : [];
-        lines.push(line(`${ref}:claimed:0`, "claimed", `${h.verification ?? "No tier"}${all ? `: ${met} of ${all} criteria met` : ""}.`, checks));
-        bullets(h.packChanges).forEach((t, i) => {
-          const edit = listPackEdits(db, unit.id).find((e) => e.attemptId === a.id);
-          const state = edit
-            ? edit.state === "dropped"
-              ? { ok: false, text: `dropped: ${edit.reason}` }
-              : {
-                  ok: true,
-                  text: edit.packUnitId ? `re-run on both sides; lands as U${getUnit(db, edit.packUnitId).seq}` : "re-run on both sides; lands after this unit",
-                }
-            : { ok: false, text: "not kept" };
-          lines.push(line(`${ref}:pack:${i}`, "claimed", `Changed the pack: ${t}`, i === 0 ? [state] : []));
-        });
-        lines.push(...judgment(ref, h));
-      }
+  for (const a of attempts)
+    for (const st of listSteers(db, a.id)) {
+      const ev = events.find((e) => e.type === "attempt.steered" && e.data.steer === st.id);
       entries.push({
-        at: a.startedAt ?? v.createdAt,
-        actor: "verifier",
-        who: "Verifier",
-        attempt: attemptOf(v, a),
-        status: out
-          ? { text: out.data.check === "disagreed" ? "yagura disagreed" : String(out.data.outcome), tone: out.data.outcome === "verified" ? "pine" : "bell" }
-          : null,
-        body: null,
-        lines,
+        ...placed(ev?.id ?? firstEvent(a.id)),
+        at: st.createdAt,
+        actor: "person",
+        who: `You told ${roleName(a)} A${a.agentNo}`,
+        attempt: { id: a.id, unitSeq: unit.seq, n: a.n, agentNo: a.agentNo, model: a.model, costUsd: 0 },
+        status:
+          st.state === "delivered"
+            ? { text: "read", tone: "pine" }
+            : st.state === "undelivered"
+              ? { text: `not read: ${st.reason}`, tone: "bell" }
+              : { text: "waiting for its current step", tone: "amber" },
+        body: st.body,
+        lines: [],
         folded: null,
       });
     }
-  }
 
-  const threads = listThreadRows(db, unit.id);
-  // yagura's own reviewer's findings are told in the reviewer's entry; only people's threads stand alone.
-  for (const r of threads.filter((t) => !isReviewThread(t.threadId)))
-    entries.push({
-      at: r.createdAt,
-      actor: "person",
-      who: `${r.author} · ${r.path ? `review on ${r.path}${r.line ? `:${r.line}` : ""}` : "comment"}`,
-      attempt: null,
-      status: null,
-      body: r.comments[0] ?? null,
-      lines: [],
-      folded: null,
-    });
-
-  // Each finding with what became of it: fixed in which commit, dismissed and why, asked, or kept as a note.
-  for (const r of related.filter((u) => u.type === "review")) {
-    const last = listAttempts(db, r.id)
-      .filter((a) => a.state === "handed_off")
-      .at(-1);
-    const done = events.find((e) => e.unit_id === r.id && e.type === "review.done");
-    if (!last || !done) continue;
-    const ref = `a${last.id}`;
-    const fates = findingFates(db, r) ?? [];
-    const lines = fates.length
-      ? fates.map((f, i) => line(`${ref}:finding:${i}`, "claimed", `[${f.severity}] ${f.path}${f.line ? `:${f.line}` : ""} — ${f.text} → ${f.fate}`))
-      : [line(`${ref}:finding:0`, "claimed", "No findings.")];
-    const raised = fates.filter((f) => f.severity !== "nit");
-    const open = raised.filter((f) => {
-      const t = threads.find((x) => x.threadId === `review:U${r.seq}:F${f.n}`);
-      return !t?.decision || (t.decision === "asked" && t.gateId !== null && getGate(db, t.gateId).state === "open");
-    }).length;
-    entries.push({
-      at: last.startedAt ?? r.createdAt,
-      actor: "reviewer",
-      who: /again/.test(r.goal) ? "Reviewer (the fixes)" : "Reviewer",
-      attempt: attemptOf(r, last),
-      status: open
-        ? { text: `${open} to settle`, tone: "amber" }
-        : raised.length
-          ? { text: `${raised.length} settled`, tone: "pine" }
-          : { text: "nothing to settle", tone: "pine" },
-      body: null,
-      lines,
-      folded: null,
-    });
-  }
-
-  // The manager's decisions: what it chose and why, which the developer can disagree with like any other claim.
-  const decisions = listManagerDecisions(db, unit.id);
-  for (const d of decisions) {
-    const m = related.find((x) => x.id === d.managerUnitId);
-    const a = d.attemptId ? listAttempts(db, d.managerUnitId).find((x) => x.id === d.attemptId) : undefined;
-    entries.push({
-      at: (a?.endedAt ?? d.createdAt) as IsoTime,
-      actor: "manager",
-      who: "Unit lead",
-      attempt: m && a ? attemptOf(m, a) : null,
-      status: { text: MANAGER_ACTION_TEXT[d.action], tone: d.action === "fallback" ? "muted" : "amber" },
-      body:
-        d.action === "fallback"
-          ? `${d.reason}; the fixed rules decided.`
-          : d.note
-            ? `${d.action === "relay" ? "Note passed on" : "Note for the next worker"}: ${d.note}`
-            : null,
-      lines: d.action === "fallback" ? [] : [line(`m${d.id}`, "chose", `${MANAGER_ACTION_TEXT[d.action]}: ${d.reason}`)],
-      folded: null,
-    });
-  }
-
-  // Changes to what the unit must do, proposed from a review comment and decided by the developer.
-  for (const a of listAmendments(db, unit.id)) {
-    const rejected = a.state === "rejected";
-    entries.push({
-      at: (a.decidedAt ?? a.createdAt) as IsoTime,
-      actor: a.state === "proposed" || a.gateId === null ? "yagura" : "person",
-      who: a.state === "proposed" ? "Amendment" : a.gateId === null ? "Yagura" : "You",
-      attempt: null,
-      status:
-        a.state === "approved"
-          ? { text: a.gateId === null ? "amendment applied (trusted author)" : "approved an amendment", tone: "pine" }
-          : rejected
-            ? { text: "rejected an amendment", tone: "muted" }
-            : { text: "amendment waits for you", tone: "bell" },
-      body: `${a.author} wrote: "${a.quote.slice(0, 240)}"\n${describeOps(a.changes).join("; ")}`,
-      lines: [],
-      folded: null,
-    });
-  }
-
-  for (const t of related.filter((u) => u.type === "review-triage" || u.type === "rebase")) {
-    const attempts = listAttempts(db, t.id);
-    const done = attempts.filter((a) => a.state === "handed_off" && events.some((e) => e.unit_id === t.id && e.type === "unit.state" && e.data.to === "done"));
-    const last = done.at(-1) ?? null;
-    const failedTries = attempts.filter((a) => a !== last && a.startedAt).map((a) => `A${a.agentNo}: ${failReason(events, t, a)}`);
-    if (!last) continue;
-    const h = handoffOf(t, last);
-    const ref = `a${last.id}`;
-    // A wave's rulings are the arbiter's own records, which a later wave on the same thread cannot overwrite; the thread table
-    // holds only each thread's latest state, so it gives the reply check while the thread is still this wave's.
-    const current = threads.filter((r) => r.waveUnitId === t.id);
-    // A wave the developer already answered runs no arbiter (§28): only its worker, building from the recorded instruction.
-    const judge = attempts.find((a) => a.role === "review-triage") ?? attempts.find((a) => a.n === 1 && !a.role);
-    const rulings = judge ? [...recordedRulings(db, judge.id).entries()].sort(([a], [b]) => a - b) : [];
-    const replyCheck = (r: (typeof threads)[number] | undefined): StoryCheck[] =>
-      !r || (r.decision !== "fixed" && r.decision !== "dismissed") || isReviewThread(r.threadId)
-        ? []
-        : [{ ok: !!r.repliedAt, text: r.repliedAt ? "reply posted on the thread" : "reply pending" }];
-    const lines: StoryLine[] =
-      t.type !== "review-triage"
-        ? [line(`${ref}:claimed:0`, "claimed", "Rebased onto the moved trunk.")]
-        : rulings.length
-          ? [
-              ...rulings.map(([n, r], i) => line(`${ref}:thread:${i}`, "claimed", `T${n} ${r.decision}: ${r.reason}`, replyCheck(current[n - 1]))),
-              ...[...recordedAmendments(db, judge!.id).entries()].map(([n, ops], i) =>
-                line(`${ref}:amend:${i}`, "claimed", `T${n} would change what U${unit.seq} must do: ${describeOps(ops).join("; ")}`),
-              ),
-            ]
-          : current
-              .filter((r) => r.decision)
-              .map((r, i) => line(`${ref}:thread:${i}`, "claimed", judge ? `${r.decision}: ${r.reason}` : `Fixed as you approved: ${r.reason}`, replyCheck(r)));
-    if (h) lines.push(...judgment(ref, h));
-    entries.push({
-      at: last.startedAt ?? t.createdAt,
-      actor: t.type === "review-triage" ? "review-triage" : "rebase",
-      who: t.type !== "review-triage" ? "Rebase" : judge ? "Arbiter" : "Worker",
-      attempt: attemptOf(t, t.type === "review-triage" && judge ? judge : last),
-      status: { text: "done", tone: "pine" },
-      body: null,
-      lines,
-      folded: failedTries.length
-        ? {
-            summary: `${failedTries.length} earlier tr${failedTries.length === 1 ? "y" : "ies"} did not count ($${attempts
-              .filter((a) => a !== last)
-              .reduce((s, a) => s + a.costUsd, 0)
-              .toFixed(2)})`,
-            items: failedTries,
-          }
-        : null,
-    });
-  }
-
-  for (const u of [unit, ...related])
-    for (const a of listAttempts(db, u.id))
-      for (const st of listSteers(db, a.id))
-        entries.push({
-          at: st.createdAt,
-          actor: "person",
-          who: `You told ${roleName(u, a)} A${a.agentNo}`,
-          attempt: { id: a.id, unitSeq: u.seq, n: a.n, agentNo: a.agentNo, model: a.model, costUsd: 0 },
-          status:
-            st.state === "delivered"
-              ? { text: "read", tone: "pine" }
-              : st.state === "undelivered"
-                ? { text: `not read: ${st.reason}`, tone: "bell" }
-                : { text: "waiting for its current step", tone: "amber" },
-          body: st.body,
-          lines: [],
-          folded: null,
-        });
-
-  for (const e of events.filter((x) => x.type === "gate.answered" && x.unit_id === unit.id))
-    entries.push({
-      at: e.ts,
-      actor: "person",
-      who: `You answered ${String(e.data.answer)}`,
-      attempt: null,
-      status: null,
-      body: null,
-      lines: [],
-      folded: null,
-    });
-
-  for (const e of events.filter((x) => x.unit_id === unit.id && ["retro.passed", "retro.failed", "retro.reverted"].includes(x.type)))
-    entries.push({
-      at: e.ts,
-      actor: "yagura",
-      who: "After landing",
-      attempt: null,
-      status:
-        e.type === "retro.passed"
-          ? { text: "trunk CI passed", tone: "pine" }
-          : e.type === "retro.failed"
-            ? { text: "trunk CI failed", tone: "bell" }
-            : { text: "reverted", tone: "bell" },
-      body: `${String(e.data.detail ?? "")}${e.data.fixUnit ? `; ${e.type === "retro.failed" ? "fix" : "follow-up"} queued as U${getUnit(db, e.data.fixUnit as never).seq}` : ""}`,
-      lines: [],
-      folded: null,
-    });
-
-  const PUBLISHING: Record<string, { who: string; status: (d: Record<string, unknown>) => { text: string; tone: "pine" | "amber" | "bell" | "muted" } }> = {
-    "publish.test": { who: "Test build", status: (d) => ({ text: `published ${String(d.version)}`, tone: "pine" }) },
-    "publish.failed": { who: "Test build", status: () => ({ text: "publishing failed", tone: "bell" }) },
-    "consumer.repinned": { who: "Re-pinned", status: () => ({ text: "moved to its sources' current versions", tone: "amber" }) },
-  };
-  for (const e of events.filter((x) => x.unit_id === unit.id && x.type in PUBLISHING)) {
-    const p = PUBLISHING[e.type]!;
-    const moved = e.type === "consumer.repinned" ? (e.data.moved as { repo: string; from: string; to: string }[]) : null;
-    entries.push({
-      at: e.ts,
-      actor: "yagura",
-      who: p.who,
-      attempt: null,
-      status: p.status(e.data),
-      body: moved ? moved.map((m) => `${m.repo}: ${m.from} → ${m.to}`).join("; ") : e.data.reason ? String(e.data.reason) : null,
-      lines: [],
-      folded: null,
-    });
-  }
-
-  // The moment a consumer's worker was first handed the build of what it depends on.
-  for (const dep of dependencyEdges(db, unit).filter((e) => e.direction === "needs" && e.kind === "needs-source" && e.build)) {
-    const first = listAttempts(db, unit.id).find((a) => a.startedAt && a.sources.some((s) => s.unit === `U${dep.other.seq}` && s.version));
-    if (!first) continue;
-    entries.push({
-      at: first.startedAt as IsoTime,
-      actor: "yagura",
-      who: "Test build",
-      attempt: null,
-      status: { text: `built against U${dep.other.seq}`, tone: "amber" },
-      body: `Started on U${dep.other.seq}'s test build ${dep.build!.version}${dep.build!.repoId ? ` (${dep.build!.repoId})` : ""}.`,
-      lines: [],
-      folded: null,
-    });
-  }
-
-  const stillWaiting = unit.state === "verified" ? landWait(db, unit) : null;
-  if (stillWaiting)
-    entries.push({
-      at: new Date().toISOString() as IsoTime,
-      actor: "yagura",
-      who: "Waiting",
-      attempt: null,
-      status: { text: stillWaiting.stuck ? "will not come" : "waiting", tone: stillWaiting.stuck ? "bell" : "amber" },
-      body: stillWaiting.reason,
-      lines: [],
-      folded: null,
-    });
-
-  const landed = events.find((e) => e.type === "unit.landed" && e.unit_id === unit.id);
-  const verdict = liveVerdict(db, unit.id);
-  if (landed) {
-    const sha = String(landed.data.sha);
-    const carried = verdict?.head_sha === sha;
-    entries.push({
-      at: landed.ts,
-      actor: "yagura",
-      who: "Landed",
-      attempt: null,
-      status: { text: `landed ${sha.slice(0, 7)}`, tone: "pine" },
-      body: null,
-      lines: [
-        line(
-          "landed",
-          "landed",
-          landed.data.pr ? `Pull request #${String(landed.data.pr)} merged as ${sha.slice(0, 10)}.` : `Landed on trunk as ${sha.slice(0, 10)}.`,
-          [
-            carried
-              ? { ok: true, text: "the merged patch is the one verified, so the verdict carries" }
-              : { ok: false, text: "merged with a patch other than the one verified; the verdict did not carry" },
-          ],
+  const yagura = (e: Ev, who: string, status: StoryEntry["status"], body: string | null, lines: StoryLine[] = []): StoryEntry => ({
+    ...placed(e.id),
+    at: e.ts,
+    actor: "yagura",
+    who,
+    attempt: null,
+    status,
+    body,
+    lines,
+    folded: null,
+  });
+  const base = unit.base ?? (unit.repoId ? getRepo(db, unit.repoId).defaultBranch : null);
+  for (const e of events) {
+    const to = e.data.to as UnitState | undefined;
+    if (e.type === "pr.opened")
+      entries.push(
+        yagura(e, "yagura", { text: "draft", tone: "muted" }, `Pushed ${unit.branch ?? "the branch"} and opened PR #${String(e.data.number)} as a draft.`),
+      );
+    else if (e.type === "unit.base_merged")
+      entries.push(
+        yagura(
+          e,
+          "yagura",
+          { text: "base merged", tone: "muted" },
+          `Merged ${base ?? "the base"} into the branch cleanly, at ${String(e.data.head).slice(0, 7)}.`,
         ),
-      ],
-      folded: null,
-    });
+      );
+    else if (e.type === "ci.rerun")
+      entries.push(
+        yagura(
+          e,
+          "yagura",
+          { text: "CI failed", tone: "bell" },
+          `CI failed on ${String(e.data.head).slice(0, 7)} (${(e.data.failing as string[]).join(", ")}); yagura ran it again.`,
+        ),
+      );
+    else if (e.type === "gate.answered")
+      entries.push({ ...yagura(e, "You", { text: "answered", tone: "pine" }, String(e.data.answer === "land" ? "merge" : e.data.answer)), actor: "person" });
+    else if (e.type === "unit.state" && to === "ready")
+      entries.push(
+        yagura(
+          e,
+          "yagura",
+          { text: "ready", tone: "pine" },
+          `${mr ? `PR #${mr.number} is out of draft` : "Ready"}: the judge approved ${String(e.data.head ?? "").slice(0, 7)}. It merges when CI passes${project.mergePolicy === "human" ? " and you say merge" : ""}.`,
+        ),
+      );
+    else if (e.type === "unit.state" && to === "merged")
+      entries.push(
+        yagura(e, "yagura", { text: "merged", tone: "pine" }, `Merged into ${base ?? "the base"} with a merge commit.`, [
+          ...(unit.mergedSha ? [line("merged", "landed", `Merged as ${unit.mergedSha.slice(0, 10)}.`)] : []),
+        ]),
+      );
+    else if (e.type === "unit.state" && (to === "stuck" || to === "dropped"))
+      entries.push(yagura(e, "yagura", { text: to, tone: "bell" }, e.data.reason ? String(e.data.reason) : null));
+    else if (e.type === "unit.state" && e.data.reason && (to === "judging" || to === "waiting") && e.data.by !== "lead")
+      entries.push(yagura(e, "yagura", { text: to, tone: "muted" }, String(e.data.reason)));
   }
 
-  for (const d of disagreements)
+  for (const d of disagreements) {
+    const ev = events.find((e) => e.type === "disagreement.recorded" && e.data.disagreement === d.id);
     entries.push({
+      ...placed(ev?.id ?? Number.MAX_SAFE_INTEGER),
       at: d.createdAt,
       actor: "person",
       who: "You disagreed",
@@ -550,174 +394,152 @@ export function unitStory(db: Db, boot: Bootstrap, unit: Unit): UnitStory {
       lines: [],
       folded: null,
     });
+  }
 
-  // What yagura had to do about an agent's records (§27), on that agent's entry (or its unit's, when the agent has none of its own,
-  // as the arbiter shares the triage unit's entry): a reminder, a refused command, a read of its prose.
-  const unitOfAttempt = (id: number) => (db.prepare("SELECT unit_id FROM attempts WHERE id = ?").get(id) as { unit_id: number } | undefined)?.unit_id;
-  const entryFor = (attemptId: number) =>
-    entries.find((e) => e.attempt?.id === attemptId) ?? entries.filter((e) => e.attempt && unitOfAttempt(e.attempt.id) === unitOfAttempt(attemptId)).at(-1);
+  // What yagura had to do about an agent's records: a reminder, a refused command.
   const refusedSoFar = new Map<StoryEntry, number>();
   for (const x of events) {
-    if (!x.attempt_id || !["command.rejected", "records.reminded", "parse.fallback"].includes(x.type)) continue;
-    const e = entryFor(x.attempt_id);
+    if (!x.attempt_id || !["command.rejected", "records.reminded"].includes(x.type)) continue;
+    const e = entries.find((en) => en.attempt?.id === x.attempt_id && en.actor !== "person");
     if (!e) continue;
     const ref = `a${x.attempt_id}:records:${x.id}`;
     if (x.type === "command.rejected") {
       const n = (refusedSoFar.get(e) ?? 0) + 1;
       refusedSoFar.set(e, n);
       if (n <= 3) e.lines.push(line(ref, "noted", `Tried yagura ${String(x.data.command)}`, [{ ok: false, text: `refused: ${String(x.data.problem)}` }]));
-    } else if (x.type === "records.reminded")
+    } else
       e.lines.push(
         line(ref, "noted", `Ended without recording: ${(x.data.missing as string[]).join("; ")}`, [
           { ok: false, text: "yagura asked for it once, in the same session" },
         ]),
       );
-    else
-      e.lines.push(
-        line(ref, "noted", `Read from its report, not its records (${String(x.data.parser)})`, [
-          { ok: false, text: x.data.ok ? "yagura fell back to parsing its prose" : "yagura fell back to parsing its prose and found nothing" },
-        ]),
-      );
   }
-  entries.sort((a, b) => a.at.localeCompare(b.at));
-  const allAttempts = unitIds.flatMap((id) => listAttempts(db, id));
-  const mr = getMergeRequest(db, unit.id);
+  entries.sort((a, b) => a.id - b.id || a.at.localeCompare(b.at));
+  const live = attempts.find((a) => a.state === "running");
+  const gates = listGates(db, project.id, "open").filter((g) => g.unitId === unit.id);
+  const merged = moves.find((m) => m.to === "merged");
   return {
     unit,
     projectId: project.id,
-    tier: verdict?.tier ?? null,
-    pr: mr ? { number: mr.number, url: mr.url } : null,
-    costUsd: allAttempts.reduce((s, a) => s + a.costUsd, 0),
-    agents: agentsOf(db, unit, related, planUnit, handoffOf, events),
-    gates: listGates(db, project.id, "open").filter((g) => g.unitId === unit.id),
-    managerOn: managerOn(db, unit),
+    base,
+    pr: mr ? { number: mr.number, url: mr.url, repo: mr.forgeRepo, draft: mr.status?.draft ?? !["ready", "merged"].includes(unit.state) } : null,
+    costUsd: attempts.reduce((s, a) => s + a.costUsd, 0),
+    agents: agentsOf(db, unit, attempts, planner),
+    now: nowOf(unit, { entries, rounds, gates, events, mr: mr ? { number: mr.number } : null, base, running: live ?? null, deps: dependencyEdges(db, unit) }),
+    running: live?.startedAt ? { attemptId: live.id, agentNo: live.agentNo, role: roleName(live), startedAt: live.startedAt } : null,
+    gates,
     dependencies: dependencyEdges(db, unit),
-    manager: decisions.map((d) => {
-      const a = d.attemptId ? listAttempts(db, d.managerUnitId).find((x) => x.id === d.attemptId) : undefined;
-      return {
-        decisionId: d.id,
-        attemptId: a?.id ?? null,
-        agentNo: a?.agentNo ?? null,
-        at: (a?.startedAt ?? d.createdAt) as IsoTime,
-        wake: d.wake,
-        action: d.action,
-        actionText: MANAGER_ACTION_TEXT[d.action],
-        reason: d.reason,
-        note: d.note,
-        costUsd: a?.costUsd ?? 0,
-        resumed: !!a?.resumesAttemptId,
-      };
-    }),
-    started: entries[0]?.at ?? null,
-    ended: landed?.ts ?? null,
+    started: entries.find((e) => e.actor !== "planner")?.at ?? null,
+    ended: merged?.at ?? null,
+    moves,
+    rounds: rounds.map(({ n, at, text }) => ({ n, at, text })),
     entries,
   };
 }
 
-function sameAttempt(events: Ev[], rejected: Ev, n: number): boolean {
-  const handedOff = [...events]
-    .reverse()
-    .find((e) => e.id < rejected.id && e.unit_id === rejected.unit_id && e.type === "unit.state" && e.data.to === "handed_off");
-  return handedOff?.data.attempt === n;
+function nowOf(
+  unit: Unit,
+  s: {
+    entries: StoryEntry[];
+    rounds: StoryRound[];
+    gates: Gate[];
+    events: Ev[];
+    mr: { number: number } | null;
+    base: string | null;
+    running: Attempt | null;
+    deps: DepEdge[];
+  },
+): UnitStory["now"] {
+  const last = (actor: Actor) => findLast(s.entries, (e) => e.actor === actor && e.status?.text !== "working");
+  const reason = String(findLast(s.events, (e) => e.type === "unit.state")?.data.reason ?? "");
+  const round = s.rounds.length;
+  const pr = s.mr ? `PR #${s.mr.number}` : "the pull request";
+  const finding = (e: StoryEntry | undefined) => e?.lines.filter((l) => l.kind === "claimed" && !l.ref.includes(":run:")).map((l) => l.text) ?? [];
+  const agent = s.running ? `A${s.running.agentNo}` : null;
+  switch (unit.state) {
+    case "waiting": {
+      const before = s.deps.filter((d) => d.direction === "needs" && d.other.state !== "merged");
+      return before.length
+        ? { headline: `Waiting for ${before.map((d) => `U${d.other.seq}`).join(", ")} to merge.`, detail: [] }
+        : { headline: "Queued. A worker starts when an agent slot is free.", detail: reason ? [reason] : [] };
+    }
+    case "building": {
+      const r = s.rounds.at(-1);
+      const judge = last("judge");
+      const cause = r?.text.replace(/^Round \d+ · /, "") ?? "";
+      const why = round > 1 ? [`${cause[0]!.toUpperCase()}${cause.slice(1)}.`, ...finding(judge)] : [];
+      return {
+        headline: agent ? `Worker ${agent} is building round ${round}.` : `A worker starts round ${round} next.`,
+        detail: why,
+      };
+    }
+    case "judging": {
+      const worker = last("worker");
+      const judge = last("judge");
+      const sentBack = judge && judge.status?.text === "changes" && round > 1 ? [`Round ${round - 1} was sent back: ${finding(judge).join("; ")}`] : [];
+      return {
+        headline: agent ? `Judge ${agent} is looking at round ${round}.` : `The judge looks at round ${round} next.`,
+        detail: [...sentBack, ...(worker?.body ? [`Worker A${worker.attempt!.agentNo}: ${worker.body}`] : [])],
+      };
+    }
+    case "ready": {
+      const judge = last("judge");
+      const merge = s.gates.find((g) => g.kind === "land");
+      const asked = s.gates.find((g) => g.kind === "lead");
+      const said = judge ? `Judge A${judge.attempt!.agentNo}: ${judge.body ?? "approved."}` : "The judge approved it.";
+      if (asked) return { headline: "Approved, but held by an open question to you.", detail: [said, `Its unit lead asks you: ${asked.question}`] };
+      return merge
+        ? { headline: "Approved. Waits for your go to merge.", detail: [said, `${pr} is out of draft.`] }
+        : { headline: "Approved. Waits for CI and the merge.", detail: [said, `${pr} is out of draft.`] };
+    }
+    case "merged":
+      return {
+        headline: `Merged into ${s.base ?? "its base"}${unit.mergedSha ? ` as ${unit.mergedSha.slice(0, 7)}` : ""}.`,
+        detail: [`${plural(round, "round")} of work${s.mr ? `, ${pr}` : ""}.`],
+      };
+    case "stuck": {
+      const ask = s.gates.find((g) => g.kind === "lead") ?? s.gates[0];
+      if (ask) return { headline: "Waits for you.", detail: [reason, `Its unit lead asks you: ${ask.question}`].filter(Boolean) };
+      if (s.running) return { headline: `Its unit lead ${agent} is deciding.`, detail: reason ? [reason] : [] };
+      return { headline: "Stuck.", detail: reason ? [reason] : ["No reason was recorded."] };
+    }
+    case "dropped":
+      return { headline: "Dropped.", detail: reason ? [reason] : [] };
+  }
 }
 
-function describeRejection(d: Record<string, unknown>): string {
-  if (d.reason === "scope" && Array.isArray(d.violations))
-    return `wrote outside its scope (${(d.violations as { path: string }[])
-      .map((v) => v.path)
-      .slice(0, 3)
-      .join(", ")})`;
-  if (d.reason === "skipped required skills") return `skipped ${(d.missing as string[] | undefined)?.join(", ") ?? "required skills"}`;
-  return String(d.reason);
-}
-
-function failReason(events: Ev[], unit: Unit, a: Attempt): string {
-  const e = events.filter((x) => x.unit_id === unit.id && (x.type === "triage.failed" || x.type === "engine.error" || x.type === "rebase.failed"));
-  const after = e.find((x) => a.startedAt && x.ts >= a.startedAt);
-  return after ? String(after.data.reason ?? after.data.error ?? after.type) : a.state;
-}
-
-export const MANAGER_ACTION_TEXT: Record<ManagerAction, string> = {
-  resume: "resumed the builder",
-  fresh: "started a fresh builder",
-  split: "split the unit",
-  planner: "sent it to the project lead",
-  ask: "asked you",
-  stop: "stopped it",
-  investigate: "asked for an investigation",
-  relay: "passed a note on",
-  ignore: "left a note alone",
-  fallback: "no decision",
-};
-
-const ROLE: Partial<Record<string, string>> = {
-  manager: "Unit lead",
-  plan: "Project lead",
-  work: "Worker",
-  pack: "Pack writer",
-  verify: "Verifier",
-  "review-triage": "Arbiter",
-  review: "Reviewer",
-  rebase: "Rebase",
-  investigate: "Investigator",
-};
-
-// The stored role names every agent; only attempts from before roles were stored fall back to the unit's type.
-const roleName = (u: Unit, a: Attempt) => {
-  if (u.type === "investigate") return "Investigator";
-  const name = a.role ? ROLE_NAMES[a.role] : null;
-  return name ? name[0]!.toUpperCase() + name.slice(1) : (ROLE[u.type] ?? u.type);
-};
-
-function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, handoffOf: (u: Unit, a: Attempt) => Handoff | null, events: Ev[]): StoryAgent[] {
+function agentsOf(db: Db, unit: Unit, attempts: Attempt[], planner: { unit: Unit; attempt: Attempt } | null): StoryAgent[] {
   const rows: StoryAgent[] = [];
   const add = (u: Unit, a: Attempt, shared: boolean) => {
-    if (a.harness.startsWith("yagura-") || !a.startedAt) return;
-    // The try a review fix is recorded as on the unit it fixes ran no agent; its worker is listed under the triage unit.
-    if (events.some((e) => e.type === "triage.fix_recorded" && e.attempt_id === a.id)) return;
-    const h = a.state === "handed_off" ? handoffOf(u, a) : null;
-    const rejected = events.find((e) => e.unit_id === u.id && e.type === "unit.state" && e.data.to === "rejected" && sameAttempt(events, e, a.n));
-    // A triage or rebase session counts only if its unit finished on it; otherwise say what stopped it. While the unit is still
-    // running (the arbiter has ruled and its fix worker is at work) nothing has stopped yet.
-    const finishes = u.type === "review-triage" || u.type === "rebase";
-    // A triage unit's arbiter and its fix worker are one run of the unit, so the arbiter's run ends with the unit's, not when the worker starts.
-    const next = u.type === "review-triage" ? "9999" : (listAttempts(db, u.id).find((x) => x.startedAt && x.startedAt > a.startedAt!)?.startedAt ?? "9999");
-    const finished =
-      finishes && events.some((e) => e.unit_id === u.id && (e.type === "triage.done" || e.type === "rebase.done") && e.ts >= a.startedAt! && e.ts < next);
-    const failedAfter = finishes && !finished && u.state !== "running" ? { data: { reason: failReason(events, u, a) } } : undefined;
-    const verdict = u.type === "verify" ? events.find((e) => e.type === "verify.outcome" && e.data.verifyUnit === u.seq) : undefined;
-    const counted = a.state === "handed_off" && !rejected && !failedAfter && spendsAttempt(a);
-    const outcome = rejected
-      ? "rejected"
-      : failedAfter
-        ? "failed"
-        : verdict
-          ? String(verdict.data.outcome)
-          : a.state === "handed_off"
-            ? (h?.status ?? "handed off")
-            : a.state === "running"
-              ? "running"
-              : a.state === "stopped"
-                ? "stopped"
-                : "failed";
-    const tone = outcome === "running" ? "amber" : !counted ? "bell" : outcome === "verified" || outcome === "success" ? "pine" : "amber";
-    const note = rejected
-      ? describeRejection(rejected.data)
-      : failedAfter
-        ? String(failedAfter.data.reason)
-        : verdict
-          ? String(verdict.data.reason)
-          : u.type === "manager"
-            ? (listManagerDecisions(db, unit.id).find((d) => d.managerUnitId === u.id)?.reason ?? null)
-            : u.type === "review"
-              ? reviewSummary(events, u)
-              : u.type === "plan"
-                ? planSummary(db, u)
-                : (bullets(h?.whatIDid ?? "")[0] ?? (a.failureMode ? `failed: ${a.failureMode}` : null));
+    if (!a.startedAt) return;
+    const h = a.role === "worker" ? getRecord(db, a.id, "handoff") : null;
+    const judge = a.role === "judge" ? getRecord(db, a.id, "judge") : null;
+    const decision = a.role === "lead" ? getRecord(db, a.id, "decision") : null;
+    const counted = a.state === "handed_off" && spendsAttempt(a);
+    const outcome = judge
+      ? judge.verdict
+      : decision
+        ? decision.action
+        : a.state === "handed_off"
+          ? (h?.status ?? "handed off")
+          : a.state === "running"
+            ? "running"
+            : a.state === "stopped"
+              ? "stopped"
+              : "failed";
+    const tone = outcome === "running" ? "amber" : !counted ? "bell" : outcome === "done" || outcome === "approve" ? "pine" : "amber";
+    const note = h
+      ? (h.did[0] ?? h.reason)
+      : judge
+        ? (judge.question ?? judge.findings[0] ?? null)
+        : decision
+          ? decision.reason
+          : a.failureMode
+            ? `failed: ${a.failureMode}`
+            : null;
     rows.push({
       attemptId: a.id,
-      // A triage unit's first agent is the arbiter; a later one is the worker making the fix it ruled.
-      role: roleName(u, a),
+      role: roleName(a),
       unitSeq: u.seq,
       n: a.n,
       agentNo: a.agentNo,
@@ -732,21 +554,7 @@ function agentsOf(db: Db, unit: Unit, related: Unit[], planUnit: Unit | null, ha
       note,
     });
   };
-  if (planUnit) for (const a of listAttempts(db, planUnit.id).slice(-1)) add(planUnit, a, true);
-  for (const u of [unit, ...related]) for (const a of listAttempts(db, u.id)) add(u, a, false);
+  if (planner) add(planner.unit, planner.attempt, true);
+  for (const a of attempts) add(unit, a, false);
   return rows.sort((a, b) => (a.startedAt ?? "").localeCompare(b.startedAt ?? ""));
-}
-
-function reviewSummary(events: Ev[], review: Unit): string | null {
-  const done = events.find((e) => e.unit_id === review.id && e.type === "review.done");
-  if (!done) return null;
-  const findings = done.data.findings as { severity: string; path: string; text: string }[];
-  if (!findings.length) return "no findings";
-  const first = findings[0]!;
-  return `${findings.length} finding${findings.length === 1 ? "" : "s"}: [${first.severity}] ${first.path} — ${first.text}${findings.length > 1 ? " …" : ""}`;
-}
-
-function planSummary(db: Db, plan: Unit): string | null {
-  const r = db.prepare("SELECT data_json FROM events WHERE type = 'plan.drain_finished' AND unit_id = ?").get(plan.id) as { data_json: string } | undefined;
-  return r ? ((JSON.parse(r.data_json) as { reason?: string }).reason ?? null) : null;
 }

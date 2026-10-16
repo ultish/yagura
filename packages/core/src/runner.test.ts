@@ -5,15 +5,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import { setSetting, type Bootstrap } from "./config.js";
-import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
+import type { EnvironmentId, ProjectId, RepoId, UnitId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
 import { claudeAdapter, parseClaudeLine } from "./harness/claude.js";
 import { addSteer, listSteers } from "./steer.js";
 import { unitStory } from "./story.js";
 import { layout } from "./paths.js";
-import { runWorkUnit } from "./runner.js";
-import { setEnvironmentNotes, setValue } from "./envvalues.js";
+import { runWorkerRound, type RunContext } from "./runner.js";
+import { setValue } from "./envvalues.js";
+import { setAnswers } from "./actions.js";
 import { getRecord } from "./records.js";
 import {
   addEnvironment,
@@ -22,6 +23,7 @@ import {
   addUnit,
   getUnit,
   getUnitBySeq,
+  listUnits,
   listAttempts,
   openStore,
   setProjectEnvironment,
@@ -51,10 +53,10 @@ beforeEach(async () => {
   writeFileSync(join(origin, "app/orders.py"), "x = 1\n");
   await git(["init", "--quiet", "-b", "main"], { cwd: origin });
   await commitAll(origin, "init", { name: "t", email: "t@t" });
-  boot = { home: join(root, "home"), packsDir: "", skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
+  boot = { home: join(root, "home"), skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
   addRepo(db, { id: "testbed", url: origin, defaultBranch: "main" });
-  addProject(db, { id: project, name: "P", goal: "g", predicate: "pred", minTier: "unit-verified", repos: ["testbed" as RepoId] });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "pred", repos: ["testbed" as RepoId] });
 });
 
 async function run(mode: string, timeboxSeconds = 60) {
@@ -64,22 +66,26 @@ async function run(mode: string, timeboxSeconds = 60) {
     type: "work",
     repoId: "testbed" as RepoId,
     goal: "Implement apply_discount",
-    writeScope: ["app/**"],
     acceptance: ["SAVE10 takes 10% off"],
-    verify: "python3 -m unittest",
     timeboxSeconds,
     maxAttempts: 2,
   });
-  transitionUnit(db, unit.id, "ready");
-  const attempt = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
+  const attempt = await startRound(unit.id);
   return { unit: getUnit(db, unit.id), attempt, paths: layout(boot) };
 }
 
-describe("runWorkUnit", () => {
-  it("runs an agent in its own worktree and records a clean handoff", async () => {
+// The engine's move from waiting to a worker's first round, then the round itself; resolves with the round's attempt.
+async function startRound(unitId: UnitId, ctx: RunContext = { db, boot, adapters: { claude: fake }, cli }) {
+  transitionUnit(db, unitId, "building", { round: { kind: "first" } });
+  await runWorkerRound(ctx, unitId);
+  return listAttempts(db, unitId).at(-1)!;
+}
+
+describe("runWorkerRound", () => {
+  it("runs an agent in the unit's own checkout and records a clean handoff", async () => {
     const { unit, attempt, paths } = await run("success");
-    expect(unit.state).toBe("verifying");
-    expect(getUnitBySeq(db, project, 2)).toMatchObject({ type: "verify", state: "ready", targetUnitId: unit.id });
+    expect(unit.state).toBe("judging");
+    expect(listUnits(db, project).filter((u) => u.type !== "work")).toEqual([]);
     expect(attempt.skills).toEqual([
       "yagura:yagura-worker",
       "pstack:poteto-mode",
@@ -89,8 +95,7 @@ describe("runWorkUnit", () => {
     expect(attempt.missingSkills).toEqual([]);
     expect(attempt).toMatchObject({
       state: "handed_off",
-      handoffStatus: "success",
-      selfTier: "unit-verified",
+      handoffStatus: "done",
       model: "fake-model",
       contextPeak: 1200,
       costUsd: 0.01,
@@ -99,7 +104,7 @@ describe("runWorkUnit", () => {
     expect(attempt.headSha).not.toBe(attempt.baseSha);
     expect(readFileSync(join(attempt.worktreePath!, "app/orders.py"), "utf8")).toContain("brief had GOAL: true");
     expect(readFileSync(paths.brief(project, 1, 1), "utf8")).toContain("## ACCEPTANCE\n- SAVE10 takes 10% off");
-    expect(getRecord(db, attempt.id, "handoff")).toMatchObject({ status: "success", tier: "unit-verified", did: ["edited app/orders.py"] });
+    expect(getRecord(db, attempt.id, "handoff")).toMatchObject({ status: "done", did: ["edited app/orders.py"] });
     expect(readFileSync(paths.handoff(project, 1, 1), "utf8")).toMatch(/^Handing off success\./);
     expect(
       readFileSync(paths.log(project, 1, 1), "utf8")
@@ -112,60 +117,26 @@ describe("runWorkUnit", () => {
     expect(readFileSync(paths.leftovers(project, 1, 1), "utf8")).toContain("app/notes.txt");
   });
 
-  it("rejects work that wrote outside its scope", async () => {
-    const { unit, attempt } = await run("scope");
-    expect(unit.state).toBe("rejected");
-    expect(attempt).toMatchObject({ state: "handed_off", failureMode: "scope" });
-    const ev = db.prepare("SELECT data_json FROM events WHERE type = 'unit.state' ORDER BY id DESC LIMIT 1").get() as { data_json: string };
-    expect(JSON.parse(ev.data_json).violations).toEqual([{ path: "README.md", reason: "outside-write-scope" }]);
-  });
-
-  it("accepts work that wrote outside its scope when the handoff says why, and records it", async () => {
-    const { unit } = await run("scope-justified");
-    expect(unit.state).toBe("verifying");
-    const ev = db.prepare("SELECT data_json FROM events WHERE type = 'attempt.beyond_scope'").get() as { data_json: string };
-    expect(JSON.parse(ev.data_json)).toMatchObject({ paths: ["README.md"], reason: expect.stringContaining("needs a line in the docs") });
-  });
-
-  it("resumes the worker's own session when it wrote outside scope without a reason, and accepts the reason it gives", async () => {
-    const { unit, attempt: first } = await run("scope");
-    expect(unit.state).toBe("rejected");
-    process.env.FAKE_RESUME_JUSTIFY = "1";
-    try {
-      transitionUnit(db, unit.id, "ready");
-      const second = await runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
-      expect(second.resumesAttemptId).toBe(first.id);
-      expect(getUnit(db, unit.id).state).toBe("verifying");
-    } finally {
-      delete process.env.FAKE_RESUME_JUSTIFY;
-    }
-  });
-
-  it("tells the next attempt why a path outside scope was rejected", async () => {
-    const { unit } = await run("scope");
-    expect(unit.notes.join("\n")).toContain("outside SCOPE without saying why");
-  });
-
-  it("gives the agent the environment's values with their notes, and leaves judging a hard-coded value to the verifier", async () => {
+  it("gives the agent the environment's values with their notes", async () => {
     addEnvironment(db, { id: "dev", name: "dev", provider: "local-process", capacity: 1 });
     setProjectEnvironment(db, project, "dev" as EnvironmentId);
-    setEnvironmentNotes(db, "dev" as EnvironmentId, "deps run in the cluster");
+    setAnswers(db, "dev" as EnvironmentId, { other: "deps run in the cluster" });
     setValue(db, "dev" as EnvironmentId, { name: "MARKER", value: "edited by fake agent", note: "the text every fake edit starts with" });
     const { unit, attempt, paths } = await run("success");
     const brief = readFileSync(paths.brief(project, unit.seq, attempt.n), "utf8");
     expect(brief).toContain("## ENV\n- MARKER=edited by fake agent (the text every fake edit starts with)\n");
-    expect(brief).toContain("- About this environment: deps run in the cluster");
-    expect(unit.state).toBe("verifying");
-    expect(attempt).toMatchObject({ state: "handed_off", rejection: null });
+    expect(brief).toContain("## ENVIRONMENT\nEnvironment dev, in the developer's words:\n- deps run in the cluster\n");
+    expect(unit.state).toBe("judging");
+    expect(attempt).toMatchObject({ state: "handed_off" });
   });
 
   it("blocks the unit when the agent hands off blocked", async () => {
-    expect((await run("blocked")).unit.state).toBe("blocked");
+    expect((await run("blocked")).unit.state).toBe("stuck");
   });
 
   it("writes a synthetic failure handoff when the agent ends without one", async () => {
     const { unit, attempt, paths } = await run("nohandoff");
-    expect(unit.state).toBe("failed");
+    expect(unit.state).toBe("waiting");
     expect(attempt).toMatchObject({ state: "failed", failureMode: "unknown" });
     expect(readFileSync(paths.handoff(project, 1, 1), "utf8")).toContain("yagura synthetic failure handoff");
   });
@@ -174,24 +145,23 @@ describe("runWorkUnit", () => {
     const started = Date.now();
     const { unit, attempt } = await run("hang", 1);
     expect(Date.now() - started).toBeLessThan(8000);
-    expect(unit.state).toBe("failed");
+    expect(unit.state).toBe("stuck");
     expect(attempt.failureMode).toBe("timebox");
     expect(listAttempts(db, unit.id)).toHaveLength(1);
   });
 
-  it("refuses to run a unit that is not ready", async () => {
+  it("refuses to run a unit that is not building", async () => {
     const unit = addUnit(db, {
       projectId: project,
       type: "work",
       repoId: "testbed" as RepoId,
       goal: "g",
-      writeScope: ["app/**"],
       acceptance: ["a"],
-      verify: "v",
       timeboxSeconds: 60,
       maxAttempts: 1,
     });
-    await expect(runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id)).rejects.toThrow(/draft, not ready/);
+    transitionUnit(db, unit.id, "stuck");
+    await expect(runWorkerRound({ db, boot, adapters: { claude: fake }, cli }, unit.id)).rejects.toThrow(/is stuck, not building/);
     expect(existsSync(layout(boot).mirror("testbed" as RepoId))).toBe(false);
   });
 
@@ -203,17 +173,17 @@ describe("runWorkUnit", () => {
       "pstack:principle-prove-it-works",
       "pstack:principle-test-behavior-not-implementation",
     ]);
-    expect(unit.state).toBe("rejected");
+    expect(unit.state).toBe("stuck");
     expect(unit.notes[0]).toMatch(/skipped required skills \(yagura:yagura-worker, pstack:poteto-mode, /);
   });
 
   it("lets a skipped skill through when enforcement is switched off", async () => {
     const { setSetting } = await import("./config.js");
     setSetting(db, "global", "", "method.enforce_required_skills", false);
-    expect((await run("noskills")).unit.state).toBe("verifying");
+    expect((await run("noskills")).unit.state).toBe("judging");
   });
 
-  it("stops a running agent on request and puts the unit back with the operator's note", async () => {
+  it("stops a running agent on request and puts the unit back with the developer's note", async () => {
     const { stopAttempt } = await import("./agent.js");
     process.env.FAKE_MODE = "hang";
     const unit = addUnit(db, {
@@ -221,14 +191,11 @@ describe("runWorkUnit", () => {
       type: "work",
       repoId: "testbed" as RepoId,
       goal: "g",
-      writeScope: ["app/**"],
       acceptance: ["a"],
-      verify: "v",
       timeboxSeconds: 60,
       maxAttempts: 1,
     });
-    transitionUnit(db, unit.id, "ready");
-    const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
+    const running = startRound(unit.id);
     let attempt = listAttempts(db, unit.id)[0];
     for (let i = 0; i < 50 && !attempt?.pid; i++) {
       await new Promise((r) => setTimeout(r, 50));
@@ -237,7 +204,7 @@ describe("runWorkUnit", () => {
     expect(stopAttempt(db, attempt!.id, "wrong approach; use the store")).toBe(true);
     const done = await running;
     expect(done.state).toBe("stopped");
-    expect(getUnit(db, unit.id)).toMatchObject({ state: "ready", notes: ["Operator stopped attempt 1: wrong approach; use the store"] });
+    expect(getUnit(db, unit.id)).toMatchObject({ state: "waiting", notes: ["The developer stopped attempt 1: wrong approach; use the store"] });
   });
 
   describe("the account's usage limit", () => {
@@ -253,9 +220,9 @@ describe("runWorkUnit", () => {
         expect(held).toMatchObject({ harness: "claude", reason: "You've hit your session limit · resets soon" });
         expect(Date.now()).toBeGreaterThanOrEqual(Math.min(Date.parse(held.until), started + 1000));
         expect(events("attempt.limited")).toEqual([{ until: held.until }]);
-        expect(unit.state).toBe("verifying");
+        expect(unit.state).toBe("judging");
         expect(listAttempts(db, unit.id)).toHaveLength(1);
-        expect(attempt).toMatchObject({ state: "handed_off", handoffStatus: "success", limitedUntil: null, sessionId: "s1" });
+        expect(attempt).toMatchObject({ state: "handed_off", handoffStatus: "done", limitedUntil: null, sessionId: "s1" });
         expect(attempt.skills).toContain("pstack:poteto-mode");
         expect(readFileSync(join(attempt.worktreePath!, "app/orders.py"), "utf8")).toContain("brief had GOAL: true");
         const log = readFileSync(paths.log(project, 1, 1), "utf8");
@@ -275,14 +242,11 @@ describe("runWorkUnit", () => {
           type: "work",
           repoId: "testbed" as RepoId,
           goal: "g",
-          writeScope: ["app/**"],
           acceptance: ["a"],
-          verify: "v",
           timeboxSeconds: 60,
           maxAttempts: 1,
         });
-        transitionUnit(db, unit.id, "ready");
-        const running = runWorkUnit({ db, boot, adapters: { claude: fake }, cli }, unit.id);
+        const running = startRound(unit.id);
         let attempt = listAttempts(db, unit.id)[0];
         for (let i = 0; i < 100 && !attempt?.limitedUntil; i++) {
           await new Promise((r) => setTimeout(r, 50));
@@ -291,7 +255,7 @@ describe("runWorkUnit", () => {
         expect(Date.parse(attempt!.limitedUntil!)).toBeGreaterThan(Date.now() + 500_000);
         expect(stopAttempt(db, attempt!.id, "not today")).toBe(true);
         expect(await running).toMatchObject({ state: "stopped", limitedUntil: null });
-        expect(getUnit(db, unit.id).state).toBe("ready");
+        expect(getUnit(db, unit.id).state).toBe("waiting");
       } finally {
         delete process.env.FAKE_LIMIT;
       }
@@ -308,14 +272,11 @@ describe("runWorkUnit", () => {
         type: "work",
         repoId: "testbed" as RepoId,
         goal: "g",
-        writeScope: ["app/**"],
         acceptance: ["a"],
-        verify: "v",
         timeboxSeconds,
         maxAttempts: 1,
       });
-      transitionUnit(db, unit.id, "ready");
-      return { unit, running: runWorkUnit({ db, boot, adapters: { claude: claudeAdapter }, cli }, unit.id) };
+      return { unit, running: startRound(unit.id, { db, boot, adapters: { claude: claudeAdapter }, cli }) };
     };
     const runningAttempt = async (unitId: number) => {
       let attempt = listAttempts(db, unitId as never)[0];
@@ -332,7 +293,7 @@ describe("runWorkUnit", () => {
       const attempt = await runningAttempt(unit.id);
       addSteer(db, attempt.id, "use the existing store instead");
       const done = await running;
-      expect(done).toMatchObject({ n: 1, state: "handed_off", handoffStatus: "success" });
+      expect(done).toMatchObject({ n: 1, state: "handed_off", handoffStatus: "done" });
       expect(readFileSync(join(done.worktreePath!, "app/orders.py"), "utf8")).toContain("# steered: use the existing store instead");
       const [steer] = listSteers(db, attempt.id);
       expect(steer).toMatchObject({ state: "delivered", body: "use the existing store instead" });
@@ -360,7 +321,7 @@ describe("runWorkUnit", () => {
         const { unit, running } = start();
         const attempt = await runningAttempt(unit.id);
         addSteer(db, attempt.id, "too late");
-        expect(await running).toMatchObject({ state: "handed_off", handoffStatus: "success" });
+        expect(await running).toMatchObject({ state: "handed_off", handoffStatus: "done" });
         expect(listSteers(db, attempt.id)).toMatchObject([{ state: "undelivered", reason: "the agent finished before reading it" }]);
         expect(() => addSteer(db, attempt.id, "after the end")).toThrow(/not running/);
       } finally {
@@ -377,14 +338,11 @@ describe("runWorkUnit", () => {
         type: "work",
         repoId: "testbed" as RepoId,
         goal: "Build it",
-        writeScope: ["app/**"],
         acceptance: ["it builds"],
-        verify: "true",
         scaffold,
         timeboxSeconds: 60,
         maxAttempts: 2,
       });
-      transitionUnit(db, u.id, "ready");
       return u;
     };
     const runUnit = async (scaffold: boolean, skills: string) => {
@@ -392,7 +350,7 @@ describe("runWorkUnit", () => {
       process.env.FAKE_SKILLS = skills;
       try {
         const u = unitWith(scaffold);
-        const attempt = await runWorkUnit(ctx(), u.id);
+        const attempt = await startRound(u.id, ctx());
         return { unit: getUnit(db, u.id), attempt, brief: readFileSync(layout(boot).brief(project, u.seq, attempt.n), "utf8") };
       } finally {
         delete process.env.FAKE_SKILLS;
@@ -403,11 +361,11 @@ describe("runWorkUnit", () => {
       setSetting(db, "project", project, "skills.work", ["setup-thing"]);
       const skipped = await runUnit(false, "");
       expect(skipped.brief).toContain("Then load these project skills with the Skill tool before you change anything, and follow them: setup-thing.");
-      expect(skipped.attempt).toMatchObject({ missingSkills: ["setup-thing"], rejection: "skills" });
-      expect(skipped.unit.state).toBe("rejected");
+      expect(skipped.attempt).toMatchObject({ missingSkills: ["setup-thing"] });
+      expect(skipped.unit.state).toBe("stuck");
       const loaded = await runUnit(false, "setup-thing");
       expect(loaded.attempt.missingSkills).toEqual([]);
-      expect(loaded.unit.state).toBe("verifying");
+      expect(loaded.unit.state).toBe("judging");
     });
 
     it("runs a scaffold unit with the scaffold skills instead of the work skills", async () => {
@@ -417,7 +375,7 @@ describe("runWorkUnit", () => {
       expect(brief).toContain("This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more.");
       expect(brief).toContain("follow them: setup-gradle.");
       expect(attempt.missingSkills).toEqual([]);
-      expect(unit.state).toBe("verifying");
+      expect(unit.state).toBe("judging");
     });
 
     it("gives the worker a read-only trunk checkout of each reference repo", async () => {

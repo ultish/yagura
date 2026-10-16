@@ -1,13 +1,11 @@
 import { existsSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
-import { BUILD_TYPES_SQL, isBuild, type Attempt, type Project, type Unit, type VerdictId } from "./domain.js";
-import { listEvidenceRuns } from "./evidence.js";
+import { isBuild, type Attempt, type Project, type Unit } from "./domain.js";
 import { layout } from "./paths.js";
-import { getAttempt, getProject, getUnit, listAttempts, listUnits, type Db } from "./store.js";
-import { savedHandoff } from "./finish.js";
+import { getRecord } from "./records.js";
+import { getProject, getUnit, listAttempts, listUnits, type Db } from "./store.js";
 
 const SUBJECT_MAX = 72;
-const BODY_MAX = 1500;
 
 export function commitSubject(goal: string): string {
   const firstSentence = goal
@@ -18,94 +16,65 @@ export function commitSubject(goal: string): string {
   return subject.length <= SUBJECT_MAX ? subject : `${subject.slice(0, SUBJECT_MAX - 1).trimEnd()}…`;
 }
 
-export function citedRunsOfVerdict(db: Db, verdictId: VerdictId): number[] {
-  return (
-    db
-      .prepare(
-        `SELECT DISTINCT e.id FROM evidence_runs e JOIN verdict_artifacts va
-         ON va.artifact_id = e.stdout_artifact_id OR va.artifact_id = e.stderr_artifact_id
-         WHERE va.verdict_id = ? ORDER BY e.id`,
-      )
-      .all(verdictId) as { id: number }[]
-  ).map((r) => r.id);
-}
-
 export function unitLink(url: string | null, project: Project, unit: Unit): string | null {
   return url ? `${url.replace(/\/$/, "")}/p/${project.id}/u/${unit.seq}` : null;
 }
 
-// A ref to an issue yagura is answering (§30) closes it when a change to that issue's own repo merges; a change to another repo
-// of the project only refers to it.
-function watchedIssues(db: Db, unit: Unit, refs: string[]): number[] {
-  if (!unit.repoId) return [];
-  const numbers = refs.flatMap((r) => {
+// A unit's ref to an issue in its own repo (`app#12`) closes that issue when it merges; refs to other repos only point at them.
+export function closesIssues(unit: Unit): number[] {
+  return unit.refs.flatMap((r) => {
     const m = /^(.+)#(\d+)$/.exec(r);
     return m && m[1] === unit.repoId ? [Number(m[2])] : [];
   });
-  return numbers.filter((n) => db.prepare("SELECT 1 FROM forge_issues WHERE repo_id = ? AND number = ?").get(unit.repoId, n));
 }
 
-export function landMessage(
-  db: Db,
-  boot: Bootstrap,
-  p: { unit: Unit; work: Attempt; verdict: { id: VerdictId; tier: string; attemptId: number }; url: string | null },
-): string {
-  const project = getProject(db, p.unit.projectId);
-  const handoffPath = layout(boot).handoff(project.id, p.unit.seq, p.work.n);
-  const handoff = savedHandoff(db, p.work.id, handoffPath);
-  const body = handoff?.whatIDid.trim() ?? "";
-  const verifyAttempt = getAttempt(db, p.verdict.attemptId as never);
-  const verifyUnit = getUnit(db, verifyAttempt.unitId);
-  const runs = citedRunsOfVerdict(db, p.verdict.id);
-  const pstack = p.work.pluginVersions.pstack;
-  const refs = [...new Set([...project.refs, ...p.unit.refs])];
-  const link = unitLink(p.url, project, p.unit);
-  const trailers = [
-    `Yagura-Project: ${project.id}`,
-    `Yagura-Unit: U${p.unit.seq}`,
-    `Yagura-Attempt: A${p.work.agentNo} (U${p.unit.seq}, ${[p.work.model ?? p.work.harness, pstack ? `pstack ${pstack}` : null].filter(Boolean).join(", ")})`,
-    ...(p.work.branch ? [`Yagura-Branch: ${p.work.branch}`] : []),
-    `Yagura-Verdict: ${p.verdict.tier} by A${verifyAttempt.agentNo}${runs.length ? ` (${runs.map((r) => `run:${r}`).join(", ")})` : ""}`,
-    ...(link ? [`Yagura-Link: ${link}`] : []),
-    ...refs.map((r) => `Refs: ${r}`),
-    ...watchedIssues(db, p.unit, refs).map((n) => `Closes #${n}`),
-  ];
-  return `${commitSubject(p.unit.goal)}\n\n${body ? `${body.length > BODY_MAX ? `${body.slice(0, BODY_MAX)}\n…` : body}\n\n` : ""}${trailers.join("\n")}\n`;
+// The pull request's description: what the unit must make true, the issues it closes, and where to follow it in yagura.
+export function pullRequestBody(project: Project, unit: Unit, url: string | null): string {
+  const link = unitLink(url, project, unit);
+  return [
+    unit.goal,
+    "",
+    "## Acceptance",
+    ...unit.acceptance.map((a) => `- ${a}`),
+    ...(closesIssues(unit).length ? ["", ...closesIssues(unit).map((n) => `Closes #${n}`)] : []),
+    "",
+    link ? `Built by yagura: ${project.id}/U${unit.seq}, ${link}` : `Built by yagura: ${project.id}/U${unit.seq}.`,
+  ].join("\n");
+}
+
+// The merge commit names the unit, the agents that built it, and the judge's approval, so main's history says how it was made.
+export function mergeMessage(db: Db, unit: Unit, pr: number | null, url: string | null): { subject: string; body: string } {
+  const project = getProject(db, unit.projectId);
+  const attempts = listAttempts(db, unit.id);
+  const workers = attempts.filter((a) => a.role === "worker" && a.state === "handed_off");
+  const judge = attempts.filter((a) => a.role === "judge").at(-1);
+  const approval = judge ? getRecord(db, judge.id, "judge") : null;
+  const link = unitLink(url, project, unit);
+  return {
+    subject: `${project.id}/U${unit.seq}: ${commitSubject(unit.goal)}${pr ? ` (#${pr})` : ""}`,
+    body: [
+      `Workers: ${workers.map((a) => `A${a.agentNo}${a.model ? ` (${a.model})` : ""}`).join(", ") || "none"}`,
+      ...(judge && approval?.verdict === "approve"
+        ? [`Judge: A${judge.agentNo} approved ${unit.approvedSha?.slice(0, 10) ?? ""}, on ${approval.runs.map((r) => `run:${r}`).join(", ")}`]
+        : []),
+      ...closesIssues(unit).map((n) => `Closes #${n}`),
+      ...(link ? [`yagura: ${link}`] : []),
+    ].join("\n"),
+  };
 }
 
 export interface Trace {
   project: Project;
   unit: Unit;
-  work: Attempt[];
-  verifications: { unit: Unit; attempts: Attempt[]; runs: ReturnType<typeof listEvidenceRuns> }[];
-  verdicts: { id: number; tier: string; headSha: string; voided: boolean; voidReason: string | null }[];
+  attempts: Attempt[];
   handoffPaths: string[];
 }
 
 export function traceUnit(db: Db, boot: Bootstrap, unit: Unit): Trace {
   const project = getProject(db, unit.projectId);
-  const work = listAttempts(db, unit.id);
-  const paths = layout(boot);
-  const verifications = listUnits(db, project.id)
-    .filter((u) => u.type === "verify" && u.targetUnitId === unit.id)
-    .map((v) => {
-      const attempts = listAttempts(db, v.id);
-      return { unit: v, attempts, runs: attempts.flatMap((a) => listEvidenceRuns(db, a.id)) };
-    });
-  const verdicts = (
-    db.prepare("SELECT id, tier, head_sha, voided_at, void_reason FROM verdicts WHERE unit_id = ? ORDER BY id").all(unit.id) as {
-      id: number;
-      tier: string;
-      head_sha: string;
-      voided_at: string | null;
-      void_reason: string | null;
-    }[]
-  ).map((v) => ({ id: v.id, tier: v.tier, headSha: v.head_sha, voided: v.voided_at !== null, voidReason: v.void_reason }));
-  const handoffPaths = [
-    ...work.map((a) => paths.handoff(project.id, unit.seq, a.n)),
-    ...verifications.flatMap((v) => v.attempts.map((a) => paths.handoff(project.id, v.unit.seq, a.n))),
-  ].filter((p) => existsSync(p));
-  return { project, unit, work, verifications, verdicts, handoffPaths };
+  const attempts = listAttempts(db, unit.id);
+  const handoffPaths = attempts.map((a) => layout(boot).handoff(project.id, unit.seq, a.n)).filter((p) => existsSync(p));
+  return { project, unit, attempts, handoffPaths };
 }
 
 export function findUnitsByCommit(db: Db, sha: string): Unit[] {
@@ -113,11 +82,10 @@ export function findUnitsByCommit(db: Db, sha: string): Unit[] {
   const like = `${sha}%`;
   const ids = db
     .prepare(
-      `SELECT id FROM units WHERE landed_sha LIKE ?
-       UNION SELECT unit_id FROM verdicts WHERE head_sha LIKE ?
-       UNION SELECT a.unit_id FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.type IN ${BUILD_TYPES_SQL} AND a.head_sha LIKE ?`,
+      `SELECT id FROM units WHERE merged_sha LIKE ?
+       UNION SELECT a.unit_id FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.type = 'work' AND a.head_sha LIKE ?`,
     )
-    .all(like, like, like) as { id: number }[];
+    .all(like, like) as { id: number }[];
   return ids.map((r) => getUnit(db, r.id as never));
 }
 

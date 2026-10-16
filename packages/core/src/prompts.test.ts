@@ -14,16 +14,16 @@ let boot: Bootstrap;
 const project = "p" as ProjectId;
 
 beforeEach(() => {
-  boot = { home: mkdtempSync(join(tmpdir(), "yagura-prompts-")), packsDir: "", skillsDir: BUNDLED_SKILLS_DIR, bind: "", port: 0, tokenFile: "" };
+  boot = { home: mkdtempSync(join(tmpdir(), "yagura-prompts-")), skillsDir: BUNDLED_SKILLS_DIR, bind: "", port: 0, tokenFile: "" };
   db = openStore(":memory:");
   addRepo(db, { id: "r", url: "file:///nowhere", defaultBranch: "main" });
-  addProject(db, { id: project, name: "P", goal: "g", predicate: "p", minTier: "unit-verified", repos: ["r" as RepoId] });
+  addProject(db, { id: project, name: "P", goal: "g", predicate: "p", repos: ["r" as RepoId] });
 });
 
 describe("role prompts", () => {
   it("uses the project's guidance over the global one over yagura's default, and resets back", () => {
     expect(effectiveGuidance(db, boot, "planner", project)).toMatchObject({ source: "default", text: defaultGuidance(boot, "planner") });
-    expect(defaultGuidance(boot, "planner")).toContain("# yagura planner");
+    expect(defaultGuidance(boot, "planner")).toContain("# yagura project lead");
     setPromptText(db, "global", "", "planner", "guidance", "Plan big units.");
     expect(effectiveGuidance(db, boot, "planner", project)).toMatchObject({ source: "global", text: "Plan big units.\n" });
     setPromptText(db, "project", project, "planner", "guidance", "Plan one unit per feature, with its tests.");
@@ -43,7 +43,7 @@ describe("role prompts", () => {
     setPromptText(db, "project", project, "all", "notes", "Never touch vendor/.");
     setPromptText(db, "project", project, "worker", "notes", "Run the linter before you hand off.");
     expect(standingFor(db, project, "worker")).toBe("Never touch vendor/.\n\nRun the linter before you hand off.\n");
-    expect(standingFor(db, project, "verifier")).toBe("Never touch vendor/.\n");
+    expect(standingFor(db, project, "judge")).toBe("Never touch vendor/.\n");
   });
 
   it("moves hand-edited standing-orders files into the store and removes them", () => {
@@ -65,9 +65,7 @@ describe("role prompts", () => {
       type: "work",
       repoId: "r" as RepoId,
       goal: "g",
-      writeScope: ["a"],
       acceptance: ["x"],
-      verify: "true",
       timeboxSeconds: 60,
       maxAttempts: 2,
     });
@@ -79,32 +77,11 @@ describe("role prompts", () => {
     const skill = readFileSync(join(dir, "skills", "yagura-worker", "SKILL.md"), "utf8");
     expect(skill).toMatch(/^---\nname: yagura-worker\n/);
     expect(skill).toContain("Write the test first.");
-    expect(readFileSync(join(dir, "skills", "yagura-planner", "SKILL.md"), "utf8")).toContain("# yagura planner");
+    expect(readFileSync(join(dir, "skills", "yagura-planner", "SKILL.md"), "utf8")).toContain("# yagura project lead");
     expect(promptPlugin(db, boot, project)).toBe(dir);
     const recorded = db.prepare("SELECT v.text FROM attempts a JOIN prompt_versions v ON v.sha = a.guidance_sha WHERE a.id = ?").get(attempt.id) as {
       text: string;
     };
     expect(recorded.text).toContain("Write the test first.");
-  });
-});
-
-describe("follow-up messages", () => {
-  it("renders each message yagura may send after the brief, from the functions that send it", async () => {
-    const { followUps } = await import("./followups.js");
-    const worker = followUps("worker");
-    expect(worker.map((f) => f.when)).toEqual([
-      "The verifier rejected its work: the same session resumes, once",
-      "It changed a path outside SCOPE without a reason: the same session resumes, once",
-      "You send it a message while it runs (any agent that can take one)",
-    ]);
-    expect(worker[0]!.text).toMatch(/^# yagura: your handoff was rejected/);
-    expect(worker[1]!.text).toContain('yagura handoff --outside-scope "<path>=<why>"');
-    expect(followUps("review-triage")[0]!.text).toMatch(/^# yagura: your triage handoff was not accepted/);
-    expect(followUps("watchman").map((f) => f.text.split("\n")[0])).toEqual([
-      "# yagura: the next message in this thread",
-      "## YOUR PREVIOUS REPLY WAS REJECTED",
-      "<the full brief>",
-    ]);
-    expect(followUps("verifier").length).toBe(1);
   });
 });

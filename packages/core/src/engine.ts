@@ -1,31 +1,24 @@
 import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
-import { TERMINAL_STATES, isBuild, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
-import { markMergeChecked, openMergeRequests, prNoun, prRef } from "./forge.js";
-import { landUnit, liveVerdict, watchMergeRequest, type LandResult } from "./land.js";
+import { TERMINAL_STATES, isBuild, type EnvironmentId, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
 import { layout } from "./paths.js";
 import { projectSkillChecks } from "./skills.js";
 import { reapKept, reapLeases } from "./leases.js";
 import { lastDrainEventId, latestDelta, runPlanner } from "./planner.js";
-import { runRebaseUnit } from "./rebase.js";
-import { runInvestigateUnit } from "./investigate.js";
-import { applyAskAnswer, managerNeed, queueManager, runManagerUnit, settleManagerUnit, wakeOnNote } from "./manager.js";
-import { sourceDeps, staleSource } from "./sources.js";
-import { landWait, moveConsumer, publishJobs, repinIfStale, testBuildWait } from "./publish.js";
-import { queueTriage, runTriageUnit, advanceThreads } from "./triage.js";
-import { queueReview, reviewStatus, runReviewUnit } from "./review.js";
 import { checkRetroWatch, scanReverts, watchingFor } from "./retro.js";
-import { runWorkUnit } from "./runner.js";
-import { failurePolicy, readiness, runningAttempts } from "./schedule.js";
+import { currentRound, runWorkerRound } from "./runner.js";
+import { runJudgeRound } from "./judge.js";
+import { pendingWake, runLeadRound } from "./lead.js";
+import { checkReady, syncWithBase, unitsOnBase } from "./merge.js";
+import { ensureMirror, resolveRef } from "./git.js";
+import { readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
-import { resumeVerifications } from "./envpause.js";
-import { queuePackEdits } from "./packedits.js";
-import { ensurePackUnits } from "./packs.js";
 import {
   addGate,
   getProject,
   getRepo,
   getUnit,
+  lastTransition,
   listAttempts,
   listGates,
   listProjects,
@@ -34,6 +27,7 @@ import {
   recordEvent,
   setAndon,
   projectCost,
+  projectRepos,
   setProjectState,
   transitionUnit,
   updateAttempt,
@@ -43,7 +37,9 @@ import { activeHold } from "./limits.js";
 import { answerIssue, listIssues, pollIssues, watchedRepos } from "./issues.js";
 import { postReport, reportKey, type ReportKind } from "./report.js";
 import { listThreads } from "./threads.js";
-import { runVerifyUnit } from "./verify.js";
+import { listTurns, stopTurn } from "./turns.js";
+import { doctorWakes, runDoctor, runningDoctorRuns, stopDoctorRun } from "./doctor.js";
+import { publishDue, publishTestBuild } from "./publish.js";
 import { sweepWorktrees } from "./worktrees.js";
 import { savedHandoff } from "./finish.js";
 
@@ -57,16 +53,14 @@ export interface EngineOptions {
 
 export const LANDING_CUTOFF = 0.7;
 const COST_WARNING = 0.8;
-const PLAN_TRIGGERS = ["landed", "blocked", "abandoned", "done"];
-const YAGURA_GATES = ["report", "land", "environment", "review", "manager"];
+const PLAN_TRIGGERS = ["merged", "stuck", "dropped"];
+const YAGURA_GATES = ["report", "land", "environment", "lead"];
 
-function suggestsFollowUps(db: Db, boot: RunContext["boot"], unitId: UnitId): boolean {
-  const unit = getUnit(db, unitId);
+function suggestsFollowUps(db: Db, unitId: UnitId): boolean {
   const last = listAttempts(db, unitId)
     .filter((a) => a.state === "handed_off")
     .at(-1);
-  const path = last ? layout(boot).handoff(unit.projectId, unit.seq, last.n) : null;
-  const handoff = last ? savedHandoff(db, last.id, path) : null;
+  const handoff = last ? savedHandoff(db, last.id) : null;
   return (handoff?.followUps ?? "")
     .split("\n")
     .map((l) =>
@@ -84,9 +78,10 @@ export class Engine {
   private lastSweep = 0;
   private lastRevertScan = 0;
   private readonly issuesPolledAt = new Map<string, number>();
-  private readonly landingSaid = new Map<UnitId, string>();
+  private readonly readyCheckedAt = new Map<UnitId, number>();
+  private readonly basePolledAt = new Map<string, number>();
+  private readonly baseSeen = new Map<string, string>();
   private readonly cutoffSaid = new Set<ProjectId>();
-  private readonly pinsChecked = new Map<UnitId, string>();
   private readonly costSaid = new Set<ProjectId>();
   private holdSaid: string | null = null;
   private readonly log: (line: string) => void;
@@ -126,189 +121,11 @@ export class Engine {
     recordEvent(this.db, "engine.error", { projectId: unit.projectId, unitId }, { error: e instanceof Error ? e.message : String(e) });
     for (const a of listAttempts(this.db, unitId))
       if (a.state === "running" || a.state === "queued") updateAttempt(this.db, a.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
-    if (unit.state === "running") transitionUnit(this.db, unitId, "failed", { reason: "engine error" });
+    if (unit.state === "building" || unit.state === "judging")
+      transitionUnit(this.db, unitId, "stuck", { reason: `engine error: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`, trigger: "engine" });
     // A unit that crashes before it starts would crash again on the next tick, so it waits for someone to look.
-    else if (unit.state === "ready")
-      transitionUnit(this.db, unitId, "blocked", { reason: `engine error before it started: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}` });
-  }
-
-  private settleFailures(project: Project): void {
-    for (const u of listUnits(this.db, project.id)) {
-      if (this.inflight.has(`unit:${u.id}`)) continue;
-      if (u.type === "verify" && u.state === "failed")
-        transitionUnit(this.db, u.id, "abandoned", { reason: "verifier attempt failed; outcome applied to its target" });
-      if (u.type === "investigate" && (u.state === "failed" || u.state === "blocked")) {
-        transitionUnit(this.db, u.id, "abandoned", { reason: "the investigation failed; its unit lead is told" });
-        this.log(`  U${u.seq}: the investigation failed; its unit lead decides what next`);
-      }
-      if (u.type === "manager" && (u.state === "failed" || u.state === "blocked")) {
-        settleManagerUnit(this.db, u);
-        this.log(`  U${u.seq}: the unit lead session failed; the fixed rules decide`);
-      }
-      if (u.type === "work" && !this.inflight.has(`unit:${u.id}`)) {
-        const m = wakeOnNote(this.db, this.ctx.boot, u);
-        if (m) this.log(`  U${u.seq} left a note; its unit lead decides who needs it`);
-      }
-      if (!isBuild(u) || (u.state !== "failed" && u.state !== "rejected")) continue;
-      // A manager decides what happens next when one is on for the project; its absence, failure, or spent decisions leave it to the fixed rules.
-      const need = managerNeed(this.db, u);
-      if (need?.kind === "waiting") continue;
-      if (need?.kind === "wake") {
-        const m = queueManager(this.db, u, need.wake);
-        this.log(`  U${u.seq} goes to its unit lead (${need.wake})`);
-        void m;
-        continue;
-      }
-      if (need?.kind === "cap") {
-        transitionUnit(this.db, u.id, "blocked", { reason: `its unit lead has used ${need.cap} decisions on it; it needs you` });
-        this.log(`  U${u.seq} blocked: its unit lead has used ${need.cap} decisions`);
-        continue;
-      }
-      if (need?.kind === "answered") {
-        applyAskAnswer(this.db, u, need.answer);
-        this.log(`  U${u.seq}: ${need.answer === "retry" ? "retries as you said" : "blocked as you said"}`);
-        continue;
-      }
-      const policy = failurePolicy(u, listAttempts(this.db, u.id));
-      transitionUnit(this.db, u.id, policy.action === "retry" ? "ready" : "blocked", { reason: policy.reason });
-      this.log(`  U${u.seq} ${policy.action === "retry" ? "retries" : "blocked"}: ${policy.reason}`);
-    }
-  }
-
-  private land(project: Project): void {
-    const openPr = new Set(openMergeRequests(this.db).map((mr) => mr.unitId));
-    // A unit whose pull request is open is still reviewed there: on a forge the pull request opens before review settles.
-    for (const u of listUnits(this.db, project.id).filter((x) => (x.state === "verified" || (x.state === "landing" && openPr.has(x.id))) && x.repoId)) {
-      const key = `land:${u.repoId}`;
-      if (u.state === "verified" && this.inflight.has(key)) continue;
-      // A consumer lands after what it builds against, and only on a verdict proven against that source as it is now.
-      const wait = landWait(this.db, u);
-      if (wait?.stuck) {
-        transitionUnit(this.db, u.id, "blocked", { reason: wait.reason });
-        this.log(`  U${u.seq} blocked: ${wait.reason}`);
-        continue;
-      }
-      if (wait) {
-        this.sayOnce(u, wait.reason);
-        continue;
-      }
-      const build = u.state === "verified" ? testBuildWait(this.db, u) : null;
-      if (build) {
-        this.sayOnce(u, build);
-        continue;
-      }
-      const stale = staleSource(this.db, u);
-      if (stale) {
-        if (!this.inflight.has(key))
-          this.start(
-            key,
-            `move U${u.seq} onto its sources as they are now`,
-            () => moveConsumer(this.ctx, u.id, stale).then((r) => this.log(`  U${u.seq} ${r === "repinned" ? "re-pinned and " : ""}re-verifies: ${stale}`)),
-            () => undefined,
-          );
-        continue;
-      }
-      const head = liveVerdict(this.db, u.id)?.head_sha;
-      if (head && this.pinsChecked.get(u.id) !== head && sourceDeps(this.db, u).some((up) => up.repoId !== u.repoId && getRepo(this.db, up.repoId!).publish)) {
-        if (!this.inflight.has(key))
-          this.start(
-            key,
-            `check U${u.seq}'s pinned versions`,
-            () =>
-              repinIfStale(this.ctx, u.id).then((r) => {
-                if (r === "clean") this.pinsChecked.set(u.id, head);
-                else this.log(`  U${u.seq} re-pinned and re-verifies: its change still named a superseded test version`);
-              }),
-            () => undefined,
-          );
-        continue;
-      }
-      const onForge = getRepo(this.db, u.repoId!).forge !== "none";
-      if (!onForge) advanceThreads(this.db, u, false);
-      // One lander per repo: a unit whose pull request is open stays landing until it merges.
-      const repoBusy = listUnits(this.db, project.id).some((x) => x.repoId === u.repoId && x.state === "landing" && x.id !== u.id);
-      // On a forge the pull request opens first, so yagura's review happens on it; a repo busy with another landing reviews meanwhile.
-      const prFirst = onForge && u.state === "verified" && !openPr.has(u.id) && !repoBusy;
-      // Nothing merges before its code review settles (§24): queue the review, or the next triage wave once the developer answered.
-      const review = reviewStatus(this.db, u);
-      if (!prFirst && review.state === "needed") {
-        queueReview(this.db, u, review.since);
-        this.log(`  review of U${u.seq} queued`);
-        continue;
-      }
-      if (!prFirst && review.state === "answered") {
-        const t = queueTriage(this.db, u, `the review of U${u.seq}`, review.fresh);
-        if (t) this.log(`  triage of the review of U${u.seq} queued`);
-        continue;
-      }
-      // From here it is about opening or merging; a landing unit's pull request is the watcher's, and it merges only once review settles.
-      if (u.state === "landing") continue;
-      if (review.state !== "settled" && !onForge) continue;
-      if (repoBusy) continue;
-      if (project.mergePolicy === "human") {
-        const gate = listGates(this.db, project.id)
-          .filter((g) => g.kind === "land" && g.unitId === u.id)
-          .at(-1);
-        if (!gate || gate.state === "cancelled") {
-          addGate(this.db, {
-            projectId: project.id,
-            unitId: u.id,
-            kind: "land",
-            question: `U${u.seq} is verified. ${onForge ? `Merge its ${prNoun(getRepo(this.db, u.repoId!).forge)}` : "Land it"} on ${u.repoId}?`,
-            options: ["land", "hold"],
-            defaultOption: "hold",
-          });
-          this.log(`  gate: land U${u.seq}?`);
-        }
-        // On a forge the pull request opens now so it can be reviewed there; the gate decides the merge.
-        if (!onForge && !landApproved(this.db, project.id, u)) continue;
-      }
-      this.start(
-        key,
-        `land U${u.seq}`,
-        () => landUnit(this.ctx, u.id).then((r) => this.logLanding(u, r)),
-        () => undefined,
-      );
-    }
-    const poll = resolveSetting(this.db, "forge.poll_seconds").value * 1000;
-    for (const mr of openMergeRequests(this.db)) {
-      const u = getUnit(this.db, mr.unitId);
-      if (u.projectId !== project.id) continue;
-      const key = `land:${u.repoId}`;
-      if (this.inflight.has(key) || (mr.checkedAt && Date.now() - Date.parse(mr.checkedAt) < poll)) continue;
-      this.start(
-        key,
-        `watch ${prRef(mr.forge, mr.number)} for U${u.seq}`,
-        () => watchMergeRequest(this.ctx, u.id).then((r) => this.logLanding(u, r)),
-        (e) => {
-          markMergeChecked(this.db, u.id);
-          this.log(`  ✗ ${prRef(mr.forge, mr.number)}: ${e instanceof Error ? e.message : String(e)}`);
-        },
-      );
-    }
-  }
-
-  // A pull request is polled every few seconds; say what it is waiting for only when that changes.
-  private logLanding(u: Unit, r: LandResult | null): void {
-    if (r) this.sayOnce(u, `${r.outcome}: ${r.reason}`);
-  }
-
-  private sayOnce(u: Unit, line: string): void {
-    if (this.landingSaid.get(u.id) === line) return;
-    this.landingSaid.set(u.id, line);
-    this.log(`  U${u.seq} ${line}`);
-  }
-
-  // Test builds run for every project, a closed one included, until nothing is left to do.
-  private publishing(project: Project): void {
-    for (const job of publishJobs(this.db, project.id))
-      if (!this.inflight.has(job.key))
-        this.start(
-          job.key,
-          job.label,
-          () => job.run(this.ctx),
-          () => undefined,
-        );
+    else if (unit.state === "waiting")
+      transitionUnit(this.db, unitId, "stuck", { reason: `engine error before it started: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}` });
   }
 
   // The share of the project's wall-clock budget used since it became active, or null without a budget.
@@ -321,7 +138,7 @@ export class Engine {
     return (at - Date.parse(activated?.ts ?? project.createdAt)) / (hours * 3_600_000);
   }
 
-  // Past the landing cutoff only what helps verified work land may start: verification, rebases, review triage.
+  // Past the landing cutoff only what is not a build may start.
   private mayStart(project: Project, u: Unit): boolean {
     const used = this.budgetUsed(project);
     return used === null || used < LANDING_CUTOFF || !isBuild(u);
@@ -329,7 +146,7 @@ export class Engine {
 
   // A drain costs a planner session, so only what can change the plan starts one: a unit that stopped short, a
   // question answered, a rejected delta, andon cleared, a spec edit, or work landing with nothing left queued or
-  // with follow-ups suggested. Land, environment, and review gates, and pack units, are yagura's own to finish.
+  // with follow-ups suggested. Land, environment, and review gates are yagura's own to finish.
   private planNeeded(project: Project): boolean {
     if (this.inflight.has(`plan:${project.id}`)) return false;
     const since = lastDrainEventId(this.db, project.id);
@@ -337,66 +154,172 @@ export class Engine {
     const events = this.db
       .prepare(
         `SELECT e.type, e.unit_id, e.data_json, u.type AS unit_type FROM events e LEFT JOIN units u ON u.id = e.unit_id WHERE e.project_id = ? AND e.id > ? AND (
-           (e.type = 'unit.state' AND json_extract(e.data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(e.data_json, '$.drain') IS NULL AND json_extract(e.data_json, '$.rebaseUnit') IS NULL AND json_extract(e.data_json, '$.reviewUnit') IS NULL)
+           (e.type = 'unit.state' AND json_extract(e.data_json, '$.to') IN (${PLAN_TRIGGERS.map(() => "?").join(", ")}) AND json_extract(e.data_json, '$.drain') IS NULL)
            OR (e.type IN ('gate.answered', 'gate.defaulted') AND COALESCE(json_extract(e.data_json, '$.kind'), '') NOT IN (${YAGURA_GATES.map(() => "?").join(", ")}))
            OR (e.type = 'disagreement.recorded' AND json_extract(e.data_json, '$.action') = 'follow-up')
-           OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed', 'retro.reverted'))`,
+           OR e.type IN ('plan.rejected', 'project.andon_cleared', 'project.spec_changed', 'retro.reverted', 'lead.replan'))`,
       )
       .all(project.id, since, ...PLAN_TRIGGERS, ...YAGURA_GATES) as { type: string; unit_id: UnitId | null; data_json: string; unit_type: string | null }[];
-    const open = () => listUnits(this.db, project.id).some((u) => isBuild(u) && !TERMINAL_STATES.has(u.state) && u.state !== "blocked");
+    const open = () => listUnits(this.db, project.id).some((u) => isBuild(u) && !TERMINAL_STATES.has(u.state) && u.state !== "stuck");
     return events.some((e) => {
       const to = e.type === "unit.state" ? (JSON.parse(e.data_json) as { to: string }).to : null;
-      // Plan, verify, and review rows end in done every time; only a work unit closing without landing changes the plan.
-      if (to === "done") return e.unit_type === "work";
-      if (to !== "landed") return true;
-      if (e.unit_type === "pack") return false;
-      return !open() || suggestsFollowUps(this.db, this.ctx.boot, e.unit_id!);
+      if (to !== "merged") return true;
+      if (e.unit_type === "plan") return false;
+      return !open() || suggestsFollowUps(this.db, e.unit_id!);
     });
   }
 
+  // An agent slot is free under every cap: across yagura, on the harness, and in the project.
+  private slotFree(project: Project, harness: string): boolean {
+    if (!this.agentFree(harness)) return false;
+    return (
+      runningAttempts(this.db, { projectId: project.id }) + this.pendingStarts(project.id) <
+      resolveSetting(this.db, "project.max_in_flight", { projectId: project.id }).value
+    );
+  }
+
+  // Under the caps across yagura and on the harness; doctor runs count, though they belong to no project.
+  private agentFree(harness: string): boolean {
+    const doctors = runningDoctorRuns(this.db);
+    if (runningAttempts(this.db) + doctors + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return false;
+    return runningAttempts(this.db, { harness }) + doctors < resolveSetting(this.db, "max_parallel_per_harness").value;
+  }
+
+  private unitTask(unitId: UnitId, label: string, work: () => Promise<unknown>, quiet = false): void {
+    this.start(`unit:${unitId}`, label, work, (e) => this.recoverCrashed(unitId, e), quiet);
+  }
+
+  // Each state has one step: a worker round for building, a judge round for judging, and a check of what a ready unit waits for.
   private spawn(project: Project): void {
     const r = readiness(this.db, project.id);
     for (const s of r.stuck) {
-      transitionUnit(this.db, s.unit.id, "blocked", { reason: s.reason });
-      this.log(`  U${s.unit.seq} blocked: ${s.reason}`);
+      transitionUnit(this.db, s.unit.id, "stuck", { reason: s.reason });
+      this.log(`  U${s.unit.seq} stuck: ${s.reason}`);
     }
-    for (const u of r.ready) {
-      if (this.inflight.has(`unit:${u.id}`) || !this.mayStart(project, u)) continue;
-      const sctx = { projectId: project.id, repoId: u.repoId, environmentId: u.type === "verify" ? project.environmentId : null };
-      const harness = resolveSetting(
-        this.db,
-        u.type === "verify"
-          ? "role.verifier.harness"
-          : u.type === "review"
-            ? "role.reviewer.harness"
-            : u.type === "manager"
-              ? "role.manager.harness"
-              : "role.worker.harness",
-        sctx,
-      ).value;
-      if (runningAttempts(this.db) + this.pendingStarts() >= resolveSetting(this.db, "max_parallel_agents").value) return;
-      if (runningAttempts(this.db, { harness }) >= resolveSetting(this.db, "max_parallel_per_harness").value) return;
-      if (
-        runningAttempts(this.db, { projectId: project.id }) + this.pendingStarts(project.id) >=
-        resolveSetting(this.db, "project.max_in_flight", { projectId: project.id }).value
-      )
-        return;
-      const run =
-        u.type === "verify"
-          ? () => runVerifyUnit(this.ctx, u.id)
-          : u.type === "rebase"
-            ? () => runRebaseUnit(this.ctx, u.id)
-            : u.type === "manager"
-              ? () => runManagerUnit(this.ctx, u.id)
-              : u.type === "review-triage"
-                ? () => runTriageUnit(this.ctx, u.id)
-                : u.type === "review"
-                  ? () => runReviewUnit(this.ctx, u.id)
-                  : u.type === "investigate"
-                    ? () => runInvestigateUnit(this.ctx, u.id)
-                    : () => runWorkUnit(this.ctx, u.id);
-      this.start(`unit:${u.id}`, isBuild(u) ? `${u.type} U${u.seq}: ${u.goal.slice(0, 80)}` : `${u.type}: ${u.goal.slice(0, 80)}`, run, (e) =>
-        this.recoverCrashed(u.id, e),
+    const at = (u: Unit) => ({ projectId: project.id, repoId: u.repoId ?? undefined });
+    const startable = new Set(r.ready.filter((u) => this.mayStart(project, u)).map((u) => u.id));
+    for (const u of listUnits(this.db, project.id)) {
+      if (!isBuild(u) || this.inflight.has(`unit:${u.id}`)) continue;
+      const label = `U${u.seq}: ${u.goal.slice(0, 80)}`;
+      const wake = u.state === "stuck" || u.state === "ready" ? pendingWake(this.db, u) : null;
+      if (wake) {
+        if (this.slotFree(project, resolveSetting(this.db, "role.lead.harness", at(u)).value))
+          this.unitTask(u.id, `unit lead ${label} (${wake.trigger})`, () => runLeadRound(this.ctx, u.id, wake));
+        continue;
+      }
+      if ((u.state === "waiting" && startable.has(u.id)) || u.state === "building") {
+        if (!this.slotFree(project, resolveSetting(this.db, "role.worker.harness", at(u)).value)) continue;
+        if (u.state === "waiting") transitionUnit(this.db, u.id, "building", { round: this.roundFromWaiting(u) });
+        this.unitTask(u.id, `worker ${label}`, () => runWorkerRound(this.ctx, u.id));
+      } else if (u.state === "judging") {
+        if (!this.slotFree(project, resolveSetting(this.db, "role.judge.harness", at(u)).value)) continue;
+        this.unitTask(u.id, `judge ${label}`, () => runJudgeRound(this.ctx, u.id));
+      } else if (u.state === "ready" && this.readyDue(u)) {
+        this.readyCheckedAt.set(u.id, Date.now());
+        this.unitTask(
+          u.id,
+          `ready ${label}`,
+          async () => {
+            const merged = await checkReady(this.ctx, u.id);
+            if (merged) {
+              this.log(`✔ U${u.seq} merged`);
+              this.syncBase(merged.repoId, merged.base);
+            }
+            // Without a forge there is no CI to wait for, so the next look need not wait for the poll.
+            if (getRepo(this.db, u.repoId!).forge === "none") this.readyCheckedAt.delete(u.id);
+          },
+          true,
+        );
+      }
+    }
+  }
+
+  // The environments the engine looks after: those of the projects in its scope, whatever state they are in.
+  private environments(): EnvironmentId[] {
+    return [...new Set(this.scope().flatMap((p) => (p.environmentId ? [p.environmentId] : [])))];
+  }
+
+  // A doctor run looks after one repo in one environment; it is not a unit, and one runs per repo and environment at a time.
+  private doctors(): void {
+    for (const env of this.environments())
+      for (const wake of doctorWakes(this.db, env)) {
+        const key = `doctor:${env}:${wake.repoId}`;
+        if (this.inflight.has(key) || !this.agentFree(resolveSetting(this.db, "role.doctor.harness", { environmentId: env }).value)) continue;
+        this.start(
+          key,
+          `doctor ${env}/${wake.repoId} (${wake.trigger})`,
+          () => runDoctor(this.ctx, env, wake),
+          (e) => this.log(`✗ doctor ${env}/${wake.repoId}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`),
+        );
+      }
+  }
+
+  // A merged library that units after it build on is published from its merge commit; a failed try is tried again once its actions change.
+  private publishes(project: Project): void {
+    for (const u of publishDue(this.db, project.id)) {
+      const key = `publish:${u.id}`;
+      if (this.inflight.has(key)) continue;
+      this.start(
+        key,
+        `publish U${u.seq} (${u.repoId})`,
+        () => publishTestBuild(this.ctx, u.id),
+        (e) => this.log(`✗ publish U${u.seq}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`),
+      );
+    }
+  }
+
+  // A unit leaving waiting starts its first round, or a fresh worker when an earlier one stopped or failed.
+  private roundFromWaiting(u: Unit) {
+    const round = currentRound(this.db, u.id);
+    const why = lastTransition(this.db, u.id)?.data.reason;
+    return round.kind === "fresh" && typeof why === "string" ? { kind: "fresh" as const, reason: why } : round;
+  }
+
+  private readyDue(u: Unit): boolean {
+    const poll = resolveSetting(this.db, "forge.poll_seconds").value * 1000;
+    return Date.now() - (this.readyCheckedAt.get(u.id) ?? 0) >= poll;
+  }
+
+  // Every open unit on a base that just moved is checked against it, unless an agent is on it.
+  private syncBase(repoId: string, base: string): void {
+    for (const u of unitsOnBase(this.db, repoId, base)) {
+      if (this.inflight.has(`unit:${u.id}`)) continue;
+      this.unitTask(
+        u.id,
+        `base check U${u.seq} on ${base}`,
+        () => syncWithBase(this.ctx, u.id).then((r) => r !== "current" && this.log(`  U${u.seq}: ${r === "conflict" ? "conflicts with" : "merged"} ${base}`)),
+        true,
+      );
+    }
+  }
+
+  // A base that moved outside yagura (someone merged by hand) is noticed at the forge poll rate.
+  private baseMoves(): void {
+    const poll = resolveSetting(this.db, "forge.poll_seconds").value * 1000;
+    const bases = new Map<string, { repoId: string; base: string }>();
+    for (const p of this.scope())
+      for (const u of listUnits(this.db, p.id))
+        if (u.repoId && u.branch && (u.state === "judging" || u.state === "ready")) {
+          const base = u.base ?? getRepo(this.db, u.repoId).defaultBranch;
+          bases.set(`${u.repoId}:${base}`, { repoId: u.repoId, base });
+        }
+    for (const [key, { repoId, base }] of bases) {
+      if (this.inflight.has(`base:${key}`) || Date.now() - (this.basePolledAt.get(key) ?? 0) < poll) continue;
+      this.basePolledAt.set(key, Date.now());
+      this.start(
+        `base:${key}`,
+        `base ${key}`,
+        async () => {
+          const repo = getRepo(this.db, repoId as never);
+          const mirror = layout(this.ctx.boot).mirror(repo.id);
+          await ensureMirror(repo.url, mirror);
+          const sha = await resolveRef(mirror, `refs/remotes/origin/${base}`);
+          const seen = this.baseSeen.get(key);
+          this.baseSeen.set(key, sha);
+          if (seen && seen !== sha) this.syncBase(repoId, base);
+        },
+        () => undefined,
+        true,
       );
     }
   }
@@ -407,15 +330,15 @@ export class Engine {
       if (!key.startsWith("unit:")) continue;
       const u = getUnit(this.db, Number(key.slice(5)) as UnitId);
       if (projectId && u.projectId !== projectId) continue;
-      if (!listAttempts(this.db, u.id).some((a) => a.state === "running")) n++;
+      if ((u.state === "building" || u.state === "judging") && !listAttempts(this.db, u.id).some((a) => a.state === "running")) n++;
     }
     return n;
   }
 
   private maybeClose(project: Project): boolean {
     const delta = latestDelta(this.db, project.id);
-    const units = listUnits(this.db, project.id).filter((u) => u.type !== "plan");
-    if (!delta?.done || this.planNeeded(project) || units.some((u) => !TERMINAL_STATES.has(u.state) && u.state !== "blocked")) return false;
+    const units = listUnits(this.db, project.id).filter(isBuild);
+    if (!delta?.done || this.planNeeded(project) || units.some((u) => !TERMINAL_STATES.has(u.state) && u.state !== "stuck")) return false;
     if ([...this.inflight.keys()].some((k) => k === `plan:${project.id}`)) return false;
     setProjectState(this.db, project.id, "closed");
     this.log(`✔ project ${project.id} closed: ${delta.summary}`);
@@ -453,9 +376,8 @@ export class Engine {
     if (project.state !== "active" || project.andonReason) return null;
     if ([...this.inflight.keys()].some((k) => k === `plan:${project.id}`)) return null;
     const units = listUnits(this.db, project.id);
-    if (units.some((u) => this.inflight.has(`unit:${u.id}`) || ["ready", "running", "handed_off", "verifying", "verified", "landing"].includes(u.state)))
-      return null;
-    const blocked = units.filter((u) => isBuild(u) && u.state === "blocked").map((u) => u.seq);
+    if (units.some((u) => this.inflight.has(`unit:${u.id}`) || ["waiting", "building", "judging", "ready"].includes(u.state))) return null;
+    const blocked = units.filter((u) => isBuild(u) && u.state === "stuck").map((u) => u.seq);
     return blocked.length && !this.planNeeded(project) ? blocked : null;
   }
 
@@ -502,11 +424,10 @@ export class Engine {
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
     for (const project of this.scope()) this.retro(project);
-    for (const project of this.scope()) this.publishing(project);
     if (!this.opts.projectId) this.issues();
     if (Date.now() - this.lastRevertScan > (this.opts.revertScanMs ?? REVERT_SCAN_MS)) {
       this.lastRevertScan = Date.now();
-      const repos = this.db.prepare("SELECT DISTINCT repo_id AS id FROM units WHERE landed_sha IS NOT NULL").all() as { id: string }[];
+      const repos = this.db.prepare("SELECT DISTINCT repo_id AS id FROM units WHERE merged_sha IS NOT NULL").all() as { id: string }[];
       for (const { id } of repos)
         if (!this.inflight.has(`reverts:${id}`))
           this.start(
@@ -517,7 +438,7 @@ export class Engine {
             true,
           );
     }
-    // While the account's usage limit holds, sessions already running wait it out and nothing new starts; landing carries on.
+    // While the account's usage limit holds, sessions already running wait it out and nothing new starts.
     const hold = activeHold(this.db);
     if (hold && hold.until !== this.holdSaid) {
       this.holdSaid = hold.until;
@@ -560,13 +481,8 @@ export class Engine {
         this.cutoffSaid.add(project.id);
         this.log(`  ${project.id}: ${Math.round(used * 100)}% of the wall-clock budget used; no new work starts, verified work keeps landing`);
       }
-      for (const u of await ensurePackUnits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
-      for (const u of await queuePackEdits(this.ctx, project)) this.log(`  U${u.seq}: ${u.goal}`);
-      for (const u of resumeVerifications(this.db, project.id)) this.log(`  U${u.seq}: ${u.goal} (verification resumed)`);
-      this.settleFailures(project);
       if (this.maybeClose(project)) continue;
       if (project.andonReason) continue;
-      this.land(project);
       if (hold) continue;
       if (this.planNeeded(project))
         this.start(
@@ -576,7 +492,10 @@ export class Engine {
           () => undefined,
         );
       this.spawn(project);
+      this.publishes(project);
     }
+    if (!hold) this.doctors();
+    this.baseMoves();
     this.report(this.scope());
   }
 
@@ -584,15 +503,19 @@ export class Engine {
     if (this.inflight.size) return false;
     const projects = this.scope();
     if (projects.some((p) => this.activationDue(p)) || this.dueReports(projects).length) return false;
-    if (projects.some((p) => publishJobs(this.db, p.id).length)) return false;
     const held = activeHold(this.db) !== null;
+    if (!held && this.environments().some((env) => doctorWakes(this.db, env).length)) return false;
     return projects.every((p) => {
       if (p.state !== "active") return true;
       if (p.andonReason || held) return true;
       if (this.planNeeded(p)) return false;
+      if (publishDue(this.db, p.id).length) return false;
       if (readiness(this.db, p.id).ready.some((u) => this.mayStart(p, u))) return false;
-      if (listUnits(this.db, p.id).some((u) => u.state === "verified" && this.wouldMove(p, u))) return false;
-      return !listUnits(this.db, p.id).some((u) => isBuild(u) && (u.state === "failed" || u.state === "rejected"));
+      // A ready unit is settled only while it waits for the developer's go.
+      const waitsForYou = (u: Unit) => listGates(this.db, p.id, "open").some((g) => g.unitId === u.id);
+      return !listUnits(this.db, p.id).some(
+        (u) => u.state === "building" || u.state === "judging" || (u.state === "ready" && !waitsForYou(u)) || (u.state === "stuck" && pendingWake(this.db, u)),
+      );
     });
   }
 
@@ -633,15 +556,6 @@ export class Engine {
     }
   }
 
-  // A verified unit the engine would act on now: queue its review or triage, or land it.
-  private wouldMove(p: Project, u: Unit): boolean {
-    const wait = landWait(this.db, u);
-    if (wait) return wait.stuck;
-    const review = reviewStatus(this.db, u).state;
-    if (review === "needed" || review === "answered") return true;
-    return review === "settled" && (p.mergePolicy === "auto" || landApproved(this.db, p.id, u));
-  }
-
   recoverOrphans(): number {
     const orphans = this.db.prepare("SELECT a.id, a.pid, a.unit_id FROM attempts a WHERE a.state IN ('running', 'queued')").all() as {
       id: number;
@@ -674,6 +588,9 @@ export class Engine {
     }
     for (const a of this.db.prepare("SELECT id FROM attempts WHERE state = 'running'").all() as { id: number }[])
       stopAttempt(this.db, a.id as never, "yagura daemon shut down");
+    for (const t of listTurns(this.db).filter((x) => x.state === "running")) stopTurn(this.db, t.id, "the yagura daemon shut down; send your message again");
+    for (const { id } of this.db.prepare("SELECT id FROM doctor_runs WHERE state = 'running'").all() as { id: number }[])
+      stopDoctorRun(this.db, id, "yagura daemon shut down");
     await Promise.allSettled(this.inflight.values());
   }
 
@@ -689,10 +606,3 @@ export class Engine {
 
 const SWEEP_MS = 60_000;
 const REVERT_SCAN_MS = 5 * 60_000;
-
-function landApproved(db: Db, projectId: ProjectId, u: Unit): boolean {
-  const gate = listGates(db, projectId)
-    .filter((g) => g.kind === "land" && g.unitId === u.id)
-    .at(-1);
-  return !!gate && gateResolved(gate, "land");
-}

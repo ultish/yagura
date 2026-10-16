@@ -15,19 +15,19 @@ const yg = (...args) => {
 };
 const pendingFile = () => join(tmpdir(), `fake-records-${process.env.YAGURA_HOME?.replace(/\W/g, "_")}-${process.env.YAGURA_ATTEMPT}.json`);
 const canRecord = () => !!process.env.YAGURA_CLI && process.env.FAKE_RECORDS !== "prose";
-// yagura handoff with the flags a builder records; h: { tier, did[], evidence[], outsideScope: [[path, why]], forOthers[], followUps[], notes[], findings[] }.
-const handoffCall = (status, h = {}) => [
-  "handoff",
-  status,
-  ...(h.tier ? ["--tier", h.tier] : []),
-  ...(h.did ?? []).flatMap((d) => ["--did", d]),
-  ...(h.evidence ?? []).flatMap((d) => ["--evidence", d]),
-  ...(h.outsideScope ?? []).flatMap(([path, why]) => ["--outside-scope", `${path}=${why}`]),
-  ...(h.forOthers ?? []).flatMap((d) => ["--for-others", d]),
-  ...(h.followUps ?? []).flatMap((d) => ["--follow-up", d]),
-  ...(h.notes ?? []).flatMap((d) => ["--note", d]),
-  ...(h.findings ?? []).flatMap((d) => ["--finding", d]),
-];
+// yagura handoff with the flags a worker records; h: { did[], evidence[], followUps[], notes[], reason }. A blocked agent is stuck.
+const handoffCall = (status, h = {}) => {
+  const stuck = status === "blocked" || status === "stuck";
+  return [
+    "handoff",
+    stuck ? "stuck" : "done",
+    ...(stuck ? ["--reason", h.reason ?? "the fake agent was told to be blocked"] : []),
+    ...(h.did ?? []).flatMap((d) => ["--did", d]),
+    ...(h.evidence ?? []).flatMap((d) => ["--evidence", d]),
+    ...(h.followUps ?? []).flatMap((d) => ["--follow-up", d]),
+    ...(h.notes ?? []).flatMap((d) => ["--note", d]),
+  ];
+};
 // A builder's ending: the handoff recorded through yagura when it can, else the old prose report (tests without the CLI).
 function handOff(status, h, prose) {
   if (!canRecord()) return finish(prose);
@@ -113,35 +113,17 @@ async function main() {
   const skills =
     {
       worker: ["yagura:yagura-worker", "pstack:poteto-mode", "pstack:principle-prove-it-works", "pstack:principle-test-behavior-not-implementation"],
-      pack: ["yagura:yagura-pack"],
-      rebase: ["yagura:yagura-rebase"],
-      "review-triage": ["yagura:yagura-review-triage"],
-      reviewer: ["yagura:yagura-reviewer"],
       planner: ["yagura:yagura-planner"],
-      verifier: ["yagura:yagura-verifier"],
       watchman: ["yagura:yagura-watchman"],
-      manager: ["yagura:yagura-manager"],
+      lead: ["yagura:yagura-unit-lead"],
+      judge: ["yagura:yagura-judge"],
     }[process.env.YAGURA_ROLE] ?? [];
   skills.push(...(process.env.FAKE_SKILLS ?? "").split(",").filter(Boolean));
   if (mode !== "noskills")
     for (const skill of skills) emit({ type: "assistant", message: { content: [{ type: "tool_use", id: `sk-${skill}`, name: "Skill", input: { skill } }] } });
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
-  if (process.env.YAGURA_ROLE === "manager") return manager();
-  if (brief.startsWith("# yagura investigation brief"))
-    return process.env.FAKE_INVESTIGATE === "garbage"
-      ? handOff("success", {}, "## Status\nsuccess\n\nNothing to report.\n")
-      : handOff(
-          "success",
-          { findings: ["the failing test depends on the clock: it passes before noon"] },
-          "## Status\nsuccess\n\n## Findings\n- the failing test depends on the clock: it passes before noon\n\n## Notes, concerns, deviations\n- none\n",
-        );
-  if (process.env.YAGURA_ROLE === "rebase") return rebase();
-  if (/Apply the arbiter's rulings/.test(brief)) return fixer();
-  if (process.env.YAGURA_ROLE === "review-triage") return triage();
-  if (process.env.YAGURA_ROLE === "reviewer") return reviewer();
   if (mode === "engine") return engine(process.env.YAGURA_ROLE);
   if (mode === "hang") return setTimeout(() => {}, 60_000);
-  if ((mode ?? "").startsWith("verify")) return verify(mode);
   const file = mode === "scope" || mode === "scope-justified" ? "README.md" : "app/orders.py";
   let steered = null;
   if (mode === "steer") {
@@ -194,31 +176,30 @@ function resumed(sessionId) {
     return finish("Recorded what I had only written down.");
   }
   if (process.env.YAGURA_ROLE === "watchman") return watchman(sessionId);
-  if (process.env.YAGURA_ROLE === "manager") return manager();
-  // A resumed fixer (asked to explain a path outside scope) answers again with what it handed off, plus the reason.
-  const savedFix = join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`);
-  if (existsSync(savedFix)) {
-    const before = readFileSync(savedFix, "utf8");
-    const did = /^- (fixed .+)$/m.exec(before)?.[1] ?? "fixed it";
-    return handOff(
-      "success",
-      { tier: "unit-verified", did: [did], outsideScope: [["outside/extra.txt", "the fix needs a test that proves it"]] },
-      `${before}\n## Outside scope\n- outside/extra.txt: the fix needs a test that proves it\n`,
-    );
+  const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args], { encoding: "utf8" });
+  const merging = /git merge ([0-9a-f]{40})/.exec(brief);
+  let file;
+  if (merging) {
+    spawnSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "merge", "-q", merging[1]]);
+    const conflicted = g("diff", "--name-only", "--diff-filter=U").trim().split("\n").filter(Boolean);
+    for (const f of conflicted) writeFileSync(f, "work, merged with the base\n");
+    g("add", "-A");
+    g("commit", "-q", "--no-edit");
+    file = conflicted[0] ?? "nothing";
+  } else {
+    file =
+      g("ls-files", `app/*/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`).trim().split("\n")[0] ||
+      g("diff", "--name-only", "HEAD~1", "HEAD").trim().split("\n")[0];
+    appendFileSync(file, `# fixed after findings: ${/run:\d+|asked for changes/.test(brief)}\n`);
+    g("add", file);
+    g("commit", "-q", "-m", "fix after findings");
   }
-  const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
-  appendFileSync(file, `# fixed after findings: ${/run:\d+/.test(brief)}\n`);
-  const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
-  g("add", file);
-  g("commit", "-q", "-m", "fix after findings");
   emit({ type: "assistant", message: { content: [{ type: "text", text: "Fixed." }], usage: { input_tokens: 900, output_tokens: 20 } } });
-  const prose = `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file}\n\n## Verification\nunit-verified\n${process.env.FAKE_RESUME_JUSTIFY ? `\n## Outside scope\n- ${file}: the docs needed the new flag\n` : ""}`;
+  const prose = `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file}\n\n## Verification\nunit-verified\n`;
   if (canRecord())
     record([
       handoffCall("success", {
-        tier: "unit-verified",
-        did: [`fixed ${file}`],
-        outsideScope: process.env.FAKE_RESUME_JUSTIFY ? [[file, "the docs needed the new flag"]] : [],
+        did: [merging ? `merged the base and resolved ${file}` : `fixed ${file}`],
       }),
     ]);
   emit({
@@ -229,198 +210,6 @@ function resumed(sessionId) {
     terminal_reason: "completed",
     total_cost_usd: 0.01,
   });
-}
-
-// FAKE_MANAGER: the action to decide (default fresh); FAKE_MANAGER=garbage answers without a usable decision.
-function manager() {
-  const action = process.env.FAKE_MANAGER ?? "fresh";
-  if (action === "garbage") return finish("## Status\nsuccess\n\nI am not sure what to do.\n");
-  const repo = /^- U\d+ \(([\w-]+)\):/m.exec(brief)?.[1] ?? "repo";
-  const lines = [`action: ${action}`, `reason: the fake manager chose ${action}`];
-  if (action === "relay") {
-    const to = [...brief.slice(brief.indexOf("## OTHER UNITS")).matchAll(/^- (U\d+) \(\w+\):/gm)]
-      .map((m) => m[1])
-      .slice(0, Number(process.env.FAKE_RELAY_TO ?? 1));
-    lines.push(`to: ${to.join(", ")}`, "note: the shared helper moved");
-  }
-  if (action === "fresh" || action === "resume") lines.push("note: write it with care");
-  if (action === "ask") lines.push("question: Should it try again?");
-  if (action === "investigate") lines.push("question: Why does the scenario fail on head?");
-  const delta =
-    action === "split"
-      ? "\n```json\n" +
-        JSON.stringify({
-          add: ["a", "b"].map((k) => ({
-            key: `split-${k}`,
-            repo,
-            goal: `half ${k}`,
-            write: [`app/split-${k}/**`],
-            accept: [`half ${k} exists`],
-            verify: "true",
-            playbook: "feature",
-          })),
-          summary: "split in two",
-        }) +
-        "\n```\n"
-      : "";
-  if (canRecord()) {
-    const field = (k) => lines.find((l) => l.startsWith(`${k}: `))?.slice(k.length + 2);
-    const decide = ["decide", action, "--reason", field("reason")];
-    for (const k of ["note", "question", "to"]) if (field(k)) decide.push(`--${k}`, field(k));
-    const plan = action === "split" ? [["plan", "--json", delta.replace(/```json|```/g, "").trim()]] : [];
-    record([...plan, decide]);
-    return finish(`I chose ${action}.\n\n## Decision\naction: stop\n`);
-  }
-  finish(`## Status\nsuccess\n\n## Decision\n${lines.join("\n")}\n${delta}`);
-}
-
-// Fixes threads that say "please fix" (or that the developer said to fix), and dismisses the rest.
-// The arbiter only rules: each thread is fix, dismissed, or (with FAKE_TRIAGE_AMEND) asked. It changes nothing.
-function triage() {
-  const threads = [...brief.matchAll(/^- T(\d+) · [\s\S]*?(?=^- T\d+ · |^- Decisions from|^## )/gm)].map((m) => ({ n: m[1], text: m[0] }));
-  const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
-  // FAKE_TRIAGE_AMEND: a thread the developer has not decided yet is asked, with an amendment that would change the unit's first acceptance criterion.
-  const amend = process.env.FAKE_TRIAGE_AMEND;
-  const accept = /## ACCEPTANCE\n- (.+)/.exec(brief)?.[1];
-  const lines = threads.map((t) => {
-    if (amend && /The developer trusts/.test(brief)) return `- T${t.n}: fix — make the greeting celebrate`;
-    if (amend && !/The developer decided: (fix|dismiss)/.test(t.text)) return `- T${t.n}: asked — should this change what the unit must do?`;
-    const fix = /please fix|The developer decided: fix/.test(t.text) && !/The developer decided: dismiss/.test(t.text);
-    return fix ? `- T${t.n}: fix — added the review fix to ${file}` : `- T${t.n}: dismissed — the existing test covers this case`;
-  });
-  const amendments = amend
-    ? lines
-        .filter((l) => l.includes("asked") || l.includes("make the greeting celebrate"))
-        .map((l) => `- ${/^- (T\d+)/.exec(l)[1]}: replace: ${accept} => celebration emojis are part of the output`)
-    : [];
-  const sections = `## Decisions\n${lines.join("\n")}\n${amendments.length ? `\n## Amendments\n${amendments.join("\n")}\n` : ""}`;
-  if (canRecord() && !process.env.FAKE_TRIAGE_SECTIONS_FIRST) {
-    const word = { fix: "fix", asked: "ask", dismissed: "dismiss" };
-    record([
-      ...lines.map((l) => {
-        const [, n, decision, reason] = /^- T(\d+): (fix|asked|dismissed) — (.+)$/.exec(l);
-        const amended = amendments.some((a) => a.startsWith(`- T${n}:`));
-        const changes = word[decision] === "dismiss" ? "none" : amended ? "code,acceptance" : "code";
-        const instruction = word[decision] === "ask" && changes.includes("code") ? ["--instruction", `make the greeting celebrate in ${file}`] : [];
-        return ["rule", `T${n}`, word[decision], "--changes", changes, "--reason", reason, ...instruction];
-      }),
-      ...amendments.map((a) => ["amend", /^- (T\d+)/.exec(a)[1], "replace", "--from", accept, "--to", "celebration emojis are part of the output"]),
-    ]);
-    // The report is for the developer and may say anything, headings included; yagura reads only the records.
-    return finish(`I ruled on ${lines.length} thread(s).\n\n## Status\nblocked\n\n${sections}`);
-  }
-  const status = "## Status\nsuccess\n\n## Verification\nunit-verified\n\n";
-  // FAKE_TRIAGE_SECTIONS_FIRST: a real model sometimes writes the rulings ahead of the handoff, in prose only.
-  finish(process.env.FAKE_TRIAGE_SECTIONS_FIRST ? `${sections}\n${status}` : `${status}${sections}`);
-}
-
-// The worker the arbiter's rulings go to: it changes the code for each thread the arbiter ruled a fix, and commits.
-function fixer() {
-  const threads = [...brief.matchAll(/^- T(\d+) · /gm)].map((m) => m[1]);
-  const file = execFileSync("git", ["diff", "--name-only", "HEAD~1", "HEAD"], { encoding: "utf8" }).trim().split("\n")[0];
-  for (const n of threads) appendFileSync(file, `# review fix T${n}\n`);
-  if (process.env.FAKE_TRIAGE_OUTSIDE) {
-    mkdirSync("outside", { recursive: true });
-    writeFileSync("outside/extra.txt", "a test the fix needs\n");
-    execFileSync("git", ["add", "outside/extra.txt"]);
-  }
-  execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-qam", "review fixes"]);
-  const handoff = `## Status\nsuccess\n\n## Branch\n\`b\`\n\n## What I did\n- fixed ${file} for ${threads.map((n) => `T${n}`).join(", ")}\n\n## Verification\nunit-verified\n`;
-  writeFileSync(join(tmpdir(), `fake-triage-${process.cwd().replace(/\W/g, "_")}`), handoff);
-  handOff("success", { tier: "unit-verified", did: [`fixed ${file} for ${threads.map((n) => `T${n}`).join(", ")}`] }, handoff);
-}
-
-// FAKE_REVIEW: unset or "none" → no findings; "<severity>[:text]" → one finding on the first changed file; "write" → edits the worktree.
-// A re-review (the brief says "fixes only") finds nothing, so a fixed change settles.
-function reviewer() {
-  const [, base, head] = /git diff ([0-9a-f]{40})\.\.([0-9a-f]{40})/.exec(brief);
-  const file = execFileSync("git", ["diff", "--name-only", `${base}..${head}`], { encoding: "utf8" })
-    .trim()
-    .split("\n")[0];
-  const want = brief.includes("only the fixes made after the last review") ? "none" : (process.env.FAKE_REVIEW ?? "none");
-  if (want === "write") writeFileSync(file, "reviewer was here\n");
-  const [severity, ...rest] = want.split(":");
-  const text = rest.join(":") || "please fix: this branch has no test for the empty case";
-  const findings = want === "none" || want === "write" ? "- none" : `- F1 [${severity}] ${file}:1 — ${text}`;
-  if (canRecord()) {
-    record([...(findings === "- none" ? [] : [["review-finding", severity, `${file}:1`, "--text", text]]), handoffCall("success")]);
-    return finish(`Reviewed it.\n\n## Findings\n- F9 [blocking] nowhere.txt:1 — a decoy no parser should read`);
-  }
-  finish(`## Status\nsuccess\n\n## Findings\n${findings}\n\n## Notes, concerns, deviations\n- none\n`);
-}
-
-// Replays the branch onto the named trunk commit, keeping the branch's side of each conflict.
-function rebase() {
-  const onto = /git rebase ([0-9a-f]{40})/.exec(brief)[1];
-  if (process.env.FAKE_REBASE === "fail")
-    return handOff(
-      "blocked",
-      { tier: "not-verified", notes: ["could not resolve"] },
-      "## Status\nblocked\n\n## Verification\nnot-verified\n\n## Notes, concerns, deviations\n- could not resolve\n",
-    );
-  execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "rebase", "-X", "theirs", onto]);
-  handOff(
-    "success",
-    { tier: "unit-verified", did: ["rebased and kept both changes"] },
-    "## Status\nsuccess\n\n## Verification\nunit-verified\n\n## What I did\n- rebased and kept both changes\n",
-  );
-}
-
-function verify(mode) {
-  emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "s1", name: "Skill", input: { skill: "yagura:yagura-verifier" } }] } });
-  const script = `${process.cwd()}/scenario.sh`;
-  const body =
-    mode === "verify-weak" ? "true" : mode === "verify-fail" ? "grep -q 'never there' app/orders.py" : "grep -q 'edited by fake agent' app/orders.py";
-  writeFileSync(script, `${body}\n`);
-  const run = (at) => {
-    const out = execSync(`yagura evidence run --at ${at} --label scenario -- sh ${script}`, { encoding: "utf8" });
-    return Number(/run:(\d+)/.exec(out)[1]);
-  };
-  if (mode === "verify-tamper") appendFileSync(`${process.env.YAGURA_HEAD}/app/orders.py`, "# edited by fake agent\n");
-  // Fixes a broken doctor and adds a check, the way a verifier repairs the pack it was handed.
-  let packChanges = "none";
-  if (mode === "verify-fix-pack" || mode === "verify-bad-pack") {
-    const file = `${process.env.YAGURA_PACK}/verify.json`;
-    const pack = JSON.parse(readFileSync(file, "utf8"));
-    if (pack.doctor) pack.doctor = "true";
-    pack.checks.push({ name: "orders-edited", command: "grep -q 'edited by fake agent' app/orders.py", tier: "unit-verified" });
-    writeFileSync(file, mode === "verify-bad-pack" ? "{ not json" : JSON.stringify(pack));
-    writeFileSync(`${process.env.YAGURA_PACK}/../../stray.txt`, "outside the pack\n");
-    packChanges = "- doctor: the old one probed a service this repo does not use\n- added orders-edited, which runs what this change built";
-  }
-  const base = run("base");
-  const head = run("head");
-  const tier = mode === "verify-fail" ? "verifier-failed" : "unit-verified";
-  const cite = mode === "verify-lie" ? "run:999" : `run:${head}`;
-  // A lie cannot be recorded (yagura verdict refuses a run it did not record), so verify-lie reports in prose to exercise the fallback.
-  if (canRecord() && mode !== "verify-lie") {
-    record([
-      ["finding", "1", mode === "verify-fail" ? "unmet" : "met", "--runs", `${head},${base}`],
-      [
-        "verdict",
-        tier,
-        "--runs",
-        `${head},${base}`,
-        ...packChanges
-          .split("\n")
-          .filter((l) => l.startsWith("- "))
-          .flatMap((l) => ["--pack-change", l.slice(2)]),
-        "--decision",
-        "tested the edited file directly",
-      ],
-    ]);
-    emit({
-      type: "result",
-      subtype: "success",
-      is_error: false,
-      result: `Verified ${tier} with run:${head} and run:${base}.\n\n## Verification\nverifier-failed`,
-      terminal_reason: "completed",
-      total_cost_usd: 0.01,
-    });
-    return;
-  }
-  const handoff = `## Status\nsuccess\n\n## Verification\n${tier}\n\n## Evidence\n- ${cite} scenario on head\n- run:${base} scenario on base\n\n## Findings\n- [x] criterion: ${cite}\n\n## Pack changes\n${packChanges}\n\n## Decisions\n- tested the edited file directly\n`;
-  emit({ type: "result", subtype: "success", is_error: false, result: handoff, terminal_reason: "completed", total_cost_usd: 0.01 });
 }
 
 function finish(text) {
@@ -439,39 +228,64 @@ async function engine(role) {
   if (role === "planner") {
     const workRows = [...brief.matchAll(/^\| U\d+ \| work \| (\w+)/gm)].map((m) => m[1]);
     const repo = /^## CODE[^\n]*\n- ([\w-]+):/m.exec(brief)[1];
-    const unit = (key, write) => ({ key, repo, goal: `write ${key}`, write: [write], accept: [`${key} file exists`], verify: "true", playbook: "feature" });
+    const unit = (key, extra = {}) => ({ key, repo, goal: `write ${key}`, acceptance: [`${key} file exists`], playbook: "feature", ...extra });
     const disagreed = [...brief.matchAll(/^- D(\d+) on U\d+/gm)].map((m) => Number(m[1]));
     const delta = disagreed.length
-      ? { add: disagreed.map((n) => ({ ...unit(`fix-d${n}`, `app/fix${n}/**`), disagreement: n })), summary: "fix forward" }
+      ? { add: disagreed.map((n) => ({ ...unit(`fix-d${n}`), disagreement: n })), summary: "fix forward" }
       : !workRows.length
-        ? { add: [unit("a", "app/a/**"), unit("b", "app/b/**"), unit("c", "app/a/extra/**")], summary: "three units" }
-        : { done: workRows.every((s) => s === "landed"), summary: workRows.every((s) => s === "landed") ? "all landed" : "waiting" };
+        ? process.env.FAKE_UNITS === "0"
+          ? { summary: "nothing to plan yet" }
+          : process.env.FAKE_UNITS === "2"
+            ? { add: [unit("lib"), unit("app", { after: ["lib"] })], summary: "two units" }
+            : { add: [unit("a"), unit("b"), unit("c", { after: ["a"] })], summary: "three units" }
+        : { done: workRows.every((s) => s === "merged"), summary: workRows.every((s) => s === "merged") ? "all merged" : "waiting" };
     if (canRecord()) {
       record([["plan", "--json", JSON.stringify(delta)]]);
       return finish(`Plan: ${delta.summary}.\n\n\`\`\`json\n{"add": [{"key": "decoy"}]}\n\`\`\``);
     }
     return finish("Plan:\n```json\n" + JSON.stringify(delta) + "\n```");
   }
-  if (role === "pack") {
-    mkdirSync(".agents/verify", { recursive: true });
-    const pack = {
-      provider: "local-process",
-      doctor: "test -d .",
-      deploy: 'echo up > "$YAGURA_LEASE_DIR/up"',
-      teardown: 'rm "$YAGURA_LEASE_DIR/up"',
-      checks: [{ name: "unit", command: process.env.FAKE_PACK_CHECK ?? 'test -f "$YAGURA_LEASE_DIR/up" && test -f README.md', tier: "unit-verified" }],
-    };
-    writeFileSync(".agents/verify/verify.json", `${JSON.stringify(pack, null, 2)}\n`);
-    execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "add", "-A"]);
-    execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", "commit", "-q", "-m", "verify pack"]);
-    return handOff(
-      "success",
-      { tier: "unit-verified", did: ["wrote .agents/verify/verify.json"] },
-      "## Status\nsuccess\n\n## Verification\nunit-verified\n\n## What I did\n- wrote .agents/verify/verify.json\n",
-    );
+  // FAKE_LEAD=<action> decides that; otherwise the lead answers by what woke it: a comment is sent to the worker with a reply on the
+  // pull request, a judge's question is answered, anything else gets a fresh worker.
+  // The fake doctor offers a test action that always passes and reports it; FAKE_DOCTOR=fail offers one that cannot pass.
+  if (role === "doctor") {
+    const proposed = yg("action", "propose", "--name", "test", "--use", "Runs the whole suite.", "--", process.env.FAKE_DOCTOR === "fail" ? "false" : "true");
+    record([["doctor", "report", ...(proposed?.code === 0 ? ["--works", "tests: test"] : ["--fails", "tests: the fake command failed"])]]);
+    return finish("Doctor done.");
+  }
+  if (role === "lead") {
+    const woken = /## WHY YOU WERE WOKEN\n(.*)/.exec(brief)?.[1] ?? "";
+    const action = process.env.FAKE_LEAD ?? (/commented/.test(woken) ? "resume" : /judge asks/.test(woken) ? "answer" : "fresh");
+    const call = ["decide", action, "--reason", `the fake lead chose ${action}`];
+    if (["resume", "fresh", "answer"].includes(action)) call.push("--note", "do what was asked, and say so in a test");
+    if (/commented/.test(woken) || action === "reply") call.push("--reply", "Thanks, the worker is on it.");
+    if (action === "ask") call.push("--question", "Should it try again?");
+    record([call]);
+    return finish(`I chose ${action}.`);
+  }
+  // FAKE_JUDGE_CHANGES=U2,U3: the judge asks those units for changes in their first round and approves after.
+  if (role === "judge") {
+    const ran = /run:(\d+)/.exec(yg("evidence", "run", "--", "true")?.out ?? "")?.[1];
+    const firstRound = /What the last round asked for:\n\(none\)/.test(brief);
+    const asks = (process.env.FAKE_JUDGE_CHANGES ?? "").split(",").includes(process.env.YAGURA_UNIT);
+    if (process.env.FAKE_JUDGE === "ask") {
+      record([["judge", "ask", "--question", "Should the greeting end with a full stop?"]]);
+      return finish("I need the developer.");
+    }
+    if (asks && firstRound) {
+      record([["judge", "changes", "--finding", `app:1 ${process.env.YAGURA_UNIT} must say it was fixed`]]);
+      return finish("Changes asked.");
+    }
+    record([["judge", "approve", "--runs", ran]]);
+    return finish(`Approved on run:${ran}.`);
+  }
+  // FAKE_WORKER_STUCK=U2: that unit's first worker hands off stuck; a later one builds as usual.
+  if (role === "worker" && (process.env.FAKE_WORKER_STUCK ?? "").split(",").includes(process.env.YAGURA_UNIT) && !brief.includes("A fresh worker takes over")) {
+    record([["handoff", "stuck", "--reason", "the spec does not say which rounding to use"]]);
+    return finish("Stuck.");
   }
   if (role === "worker") {
-    const base = /Expected to write:\n- ([^*\n]+?)\/?\*\*/.exec(brief)[1];
+    const base = `app/${/## GOAL\nwrite ([\w-]+)/.exec(brief)?.[1] ?? "unit"}`;
     let steered = null;
     if (streaming && process.env.FAKE_STEER_WAIT_MS) {
       emit({ type: "assistant", message: { content: [{ type: "tool_use", id: "w1", name: "Bash", input: { command: "sleep 1 # waiting to be steered" } }] } });
@@ -489,6 +303,19 @@ async function engine(role) {
     const g = (...args) => execFileSync("git", ["-c", "user.name=fake", "-c", "user.email=fake@x", ...args]);
     g("add", "-A");
     g("commit", "-q", "-m", `work ${process.env.YAGURA_UNIT}`);
+    const ran = canRecord()
+      ? /run:(\d+)/.exec(yg("evidence", "run", "--", "test", "-f", `${base}/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`)?.out ?? "")?.[0]
+      : null;
+    // FAKE_BASE_MOVE=U2: while U2 works, someone else changes the same file on main at the forge (FAKE_ORIGIN).
+    if (process.env.FAKE_BASE_MOVE === process.env.YAGURA_UNIT) {
+      const other = join(tmpdir(), `fake-other-${process.pid}`);
+      execFileSync("git", ["clone", "-q", process.env.FAKE_ORIGIN, other]);
+      mkdirSync(join(other, base), { recursive: true });
+      writeFileSync(join(other, base, `${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`), "theirs\n");
+      execFileSync("git", ["-c", "user.name=other", "-c", "user.email=o@x", "-C", other, "add", "-A"]);
+      execFileSync("git", ["-c", "user.name=other", "-c", "user.email=o@x", "-C", other, "commit", "-q", "-m", "someone else's change"]);
+      execFileSync("git", ["-C", other, "push", "-q", "origin", "HEAD:main"]);
+    }
     const followUps = process.env.FAKE_FOLLOWUPS ? `\n## Suggested follow-ups\n- ${process.env.FAKE_FOLLOWUPS}\n` : "\n## Suggested follow-ups\n- None.\n";
     return setTimeout(
       () =>
@@ -497,6 +324,7 @@ async function engine(role) {
           {
             tier: "unit-verified",
             did: [`wrote ${base}/${process.env.YAGURA_PROJECT}-${process.env.YAGURA_UNIT}.txt`],
+            evidence: ran ? [ran] : [],
             followUps: process.env.FAKE_FOLLOWUPS ? [process.env.FAKE_FOLLOWUPS] : [],
             forOthers: process.env.FAKE_WORKER_NOTE ? [process.env.FAKE_WORKER_NOTE] : [],
           },
@@ -504,66 +332,6 @@ async function engine(role) {
         ),
       400,
     );
-  }
-  if (role === "verifier") {
-    const file = /^\+\+\+ b\/(.+)$/m.exec(brief)[1];
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="120"><rect width="360" height="120" fill="#1c2134"/><text x="20" y="66" fill="#ece6da" font-family="monospace" font-size="18">${file}</text></svg>`;
-    writeFileSync(
-      "scenario.sh",
-      [
-        'mkdir -p "$YAGURA_EVIDENCE/notes"',
-        `echo "looked for ${file} at $YAGURA_AT" > "$YAGURA_EVIDENCE/notes/check.txt"`,
-        `printf '%s' '${svg}' > "$YAGURA_EVIDENCE/screen.svg"`,
-        `node -e 'require("fs").writeFileSync(process.env.YAGURA_EVIDENCE + "/pixel.png", Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64"))'`,
-        `echo "checking ${file}"`,
-        process.env.FAKE_VERIFY_NEEDS_FIX ? `grep -q 'fixed after findings' ${file}` : `test -f ${file}`,
-        "",
-      ].join("\n"),
-    );
-    let packChanges = "none";
-    if (/^- doctor on trunk: run:\d+ exit [1-9]/m.test(brief)) {
-      const file = `${process.env.YAGURA_PACK}/verify.json`;
-      writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), doctor: "true" }));
-      packChanges = "- doctor: it probed a service this repo does not use";
-    }
-    const exits = {};
-    const run = (at) => {
-      const out = execSync(`yagura evidence run --at ${at} --label s -- sh ${process.cwd()}/scenario.sh`, { encoding: "utf8" });
-      const [, id, exit] = /run:(\d+) .*: (?:exit (\d+)|timed out)/.exec(out);
-      exits[at] = exit === "0";
-      return Number(id);
-    };
-    const changes = packChanges
-      .split("\n")
-      .filter((l) => l.startsWith("- "))
-      .flatMap((l) => ["--pack-change", l.slice(2)]);
-    if (process.env.FAKE_VERIFY_BLOCKED) {
-      if (canRecord()) {
-        record([["verdict", "verifier-blocked", "--note", process.env.FAKE_VERIFY_BLOCKED]]);
-        return finish(`I could not verify it: ${process.env.FAKE_VERIFY_BLOCKED}`);
-      }
-      return finish(`## Status\nblocked\n\n## Verification\nverifier-blocked\n\n## Notes, concerns, deviations\n- ${process.env.FAKE_VERIFY_BLOCKED}\n`);
-    }
-    const base = run("base");
-    const head = run("head");
-    if (!exits.head) {
-      if (canRecord()) {
-        record([["verdict", "verifier-failed", "--runs", `${head},${base}`, ...changes]]);
-        return finish(`It fails on head: run:${head}.`);
-      }
-      return finish(`## Status\nsuccess\n\n## Verification\nverifier-failed\n\n## Evidence\n- run:${head} fails on head\n- run:${base}\n`);
-    }
-    const order = ["deployed-verified", "live-local-verified", "e2e-verified", "unit-verified", "build-only"];
-    const listed = [...brief.matchAll(/^- [\w-]+ \(([\w-]+)\): base/gm)].map((m) => m[1]);
-    const tier = order.find((t) => listed.includes(t)) ?? "unit-verified";
-    if (canRecord()) {
-      record([
-        ["finding", "1", "met", "--runs", `${head},${base}`],
-        ["verdict", tier, "--runs", `${head},${base}`, ...changes],
-      ]);
-      return finish(`Verified at ${tier}: run:${head} passes on head, run:${base} fails on trunk.`);
-    }
-    return finish(`## Status\nsuccess\n\n## Verification\n${tier}\n\n## Evidence\n- run:${head}\n- run:${base}\n\n## Pack changes\n${packChanges}\n`);
   }
 }
 
@@ -593,9 +361,7 @@ function watchman(sessionId) {
         key: `issue-${n}`,
         repo,
         goal: `write issue-${n}.txt`,
-        write: [`issue-${n}.txt`],
-        accept: [`issue-${n}.txt exists`],
-        verify: `test -f issue-${n}.txt`,
+        acceptance: [`issue-${n}.txt exists`],
       };
       const proposal = { summary: `build what issue #${n} asks`, amend: [{ project: process.env.FAKE_ISSUE_PROJECT, units: [unit] }] };
       return finish(`I can build that: one unit writing issue-${n}.txt.\n\n\`\`\`yagura\n${JSON.stringify({ proposal })}\n\`\`\``);
@@ -627,7 +393,6 @@ function watchman(sessionId) {
         };
     return finish(`Setting up ${id}.\n\n\`\`\`yagura\n${JSON.stringify({ proposal: { summary: `environment ${id}`, environments: [environment] } })}\n\`\`\``);
   }
-  const pack = { provider: "local-process", checks: [{ name: "unit", command: "test -f README.md", tier: "unit-verified" }] };
   const project = (id, after) => ({
     id,
     goal: `build ${id}`,
@@ -649,7 +414,7 @@ function watchman(sessionId) {
           questions: ["Which environment later?"],
           proposal: {
             summary: "two chained projects",
-            repos: [{ id: "proto", description: "a prototype", verifyPack: pack }],
+            repos: [{ id: "proto", description: "a prototype" }],
             projects: [project("proto-a", []), project("proto-b", ["proto-a"])],
           },
         };

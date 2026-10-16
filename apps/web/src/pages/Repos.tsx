@@ -7,13 +7,8 @@ import { ScopedSettings } from "../ui/settings";
 
 const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "7px 10px" } as const;
 
-function packStatus(v: RepoView): { text: string; tone: string } {
-  if (!v.pack) return { text: "Not mirrored yet; yagura reads the verify pack on the first run.", tone: "muted" };
-  if (!v.pack.ok) return { text: `No usable verify pack: ${v.pack.reason}. Verification stays blocked until one lands.`, tone: "bell" };
-  const checks = v.pack.checks.map((c) => `${c.name} (${c.tier})`).join(", ");
-  return v.repo.packStatus === "proven"
-    ? { text: `Verify pack proven: ${checks}.`, tone: "pine" }
-    : { text: `Verify pack on trunk: ${checks}.`, tone: "muted" };
+function repoStatus(v: RepoView): { text: string; tone: string } {
+  return v.trunk ? { text: "Mirrored.", tone: "muted" } : { text: "Not mirrored yet; yagura fetches it on the first run.", tone: "muted" };
 }
 
 function AddRepo({ onAdded }: { onAdded: () => void }) {
@@ -141,7 +136,7 @@ export function Repos() {
           </div>
           {data.length === 0 && <div className="empty">No repos yet. Add one above, or ask the watch for a prototype in a new repo.</div>}
           {data.map((v) => {
-            const s = packStatus(v);
+            const s = repoStatus(v);
             return (
               <div key={v.repo.id} id={`repo-${v.repo.id}`} style={hash === v.repo.id ? { background: "var(--line2)" } : undefined}>
                 <Row

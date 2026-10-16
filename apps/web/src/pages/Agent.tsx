@@ -23,17 +23,19 @@ import { RunningDot } from "../ui/Running";
 import { DiffView, RunView } from "../ui/evidence";
 import { NoteForm, useAction } from "../ui/rows";
 
-function useLog(attemptId: number, live: boolean): LogLine[] {
+// A session's log, and its new lines while it runs; `base` is the session's API path (an attempt's, or a doctor run's).
+export function useLog(base: string | null, live: boolean): LogLine[] {
   const [lines, setLines] = useState<LogLine[]>([]);
   useEffect(() => {
     setLines([]);
+    if (!base) return;
     let source: EventSource | null = null;
     let cancelled = false;
-    api<{ lines: LogLine[]; next: number }>(`/api/attempts/${attemptId}/log`).then((r) => {
+    api<{ lines: LogLine[]; next: number }>(`${base}/log`).then((r) => {
       if (cancelled) return;
       setLines(r.lines);
       if (!live) return;
-      source = new EventSource(streamUrl(`/api/attempts/${attemptId}/stream?from=${r.next}`));
+      source = new EventSource(streamUrl(`${base}/stream?from=${r.next}`));
       source.addEventListener("line", (e) => setLines((ls) => [...ls, JSON.parse((e as MessageEvent<string>).data) as LogLine]));
       source.addEventListener("end", () => source?.close());
     });
@@ -41,7 +43,7 @@ function useLog(attemptId: number, live: boolean): LogLine[] {
       cancelled = true;
       source?.close();
     };
-  }, [attemptId, live]);
+  }, [base, live]);
   return lines;
 }
 
@@ -103,7 +105,7 @@ function SteerBox({ attemptId }: { attemptId: number }) {
   );
 }
 
-function StepRow({ step, start, live }: { step: Step; start: number | null; live: boolean }) {
+export function StepRow({ step, start, live }: { step: Step; start: number | null; live: boolean }) {
   const time = (
     <span className="mono muted" style={{ fontSize: 11.5, width: 52, flexShrink: 0, paddingTop: 3 }}>
       {rel(step.at, start)}
@@ -329,7 +331,7 @@ function EvidenceGrid({ runs, selected, onPick }: { runs: EvidenceRun[]; selecte
 
 // The order the agents worked on a unit, each linked, so the way from a worker to the verifier that sent it back is one click.
 function AgentFlow({ d }: { d: AttemptDetail }) {
-  const workSeq = d.target?.seq ?? (d.unit.type === "plan" ? null : d.unit.seq);
+  const workSeq = d.unit.type === "plan" ? null : d.unit.seq;
   const story = useApi<UnitStory>(workSeq === null ? null : `/api/projects/${d.project.id}/units/${workSeq}/story`, {
     poll: d.attempt.state === "running" ? 4000 : undefined,
   });
@@ -392,8 +394,8 @@ function statusOf(d: AttemptDetail, now: number, lastActivity: string | null): {
       return { text: `Queued${d.waiting ? `: ${d.waiting}` : ""}.`, tone: "muted" };
     case "handed_off":
       return {
-        text: `Handed off${a.handoffStatus ? `: ${a.handoffStatus}` : ""} after ${took}.${a.missingSkills.length ? ` Skipped ${a.missingSkills.join(", ")}, so yagura rejected it.` : a.rejection ? ` Sent back: ${REJECTION_LABEL[a.rejection]}.` : ""}`,
-        tone: a.missingSkills.length || a.rejection ? "bell" : a.handoffStatus === "success" ? "pine" : "info",
+        text: `Handed off${a.handoffStatus ? `: ${a.handoffStatus}` : ""} after ${took}.${a.missingSkills.length ? ` Skipped ${a.missingSkills.join(", ")}, so the unit is stuck.` : ""}`,
+        tone: a.missingSkills.length || a.handoffStatus === "stuck" ? "bell" : a.handoffStatus === "done" ? "pine" : "info",
       };
     case "failed":
       if (a.resumesAttemptId && !a.sessionId)
@@ -404,21 +406,13 @@ function statusOf(d: AttemptDetail, now: number, lastActivity: string | null): {
   }
 }
 
-const PROMPT_ROLE: Record<string, string> = { plan: "planner", work: "worker", verify: "verifier", review: "reviewer" };
-
-const REJECTION_LABEL: Record<NonNullable<Attempt["rejection"]>, string> = {
-  "code-fault": "verification failed",
-  literals: "hard-coded values",
-  scope: "out of scope",
-  skills: "skipped skills",
-  conflict: "trunk conflict",
-};
+const PROMPT_ROLE: Record<string, string> = { plan: "planner", work: "worker" };
 
 export function Agent({ attemptId }: { attemptId: number }) {
   const now = useNow(1000);
   const { data: d, error } = useApi<AttemptDetail>(`/api/attempts/${attemptId}`);
   const live = d?.attempt.state === "running" || d?.attempt.state === "queued";
-  const lines = useLog(attemptId, !!live);
+  const lines = useLog(`/api/attempts/${attemptId}`, !!live);
   const timeline = useMemo(() => buildTimeline(lines), [lines]);
   const [stopping, setStopping] = useState(false);
   const [view, setView] = useState<"log" | "diff" | "run">("log");
@@ -456,11 +450,9 @@ export function Agent({ attemptId }: { attemptId: number }) {
   const elapsed = a.startedAt ? (a.endedAt ? Date.parse(a.endedAt) : now) - Date.parse(a.startedAt) : 0;
   const ctxPeak = Math.max(a.contextPeak, timeline.contextPeak);
   const window = /1m|\[1m\]/.test(a.model ?? "") ? 1_000_000 : 200_000;
-  const verifierRuns = u.type === "verify" ? d.runs : (d.verifications.at(-1)?.attempts.at(-1)?.runs ?? []);
-  const lastVerification = d.verifications.at(-1);
   const tabs: { key: "log" | "diff" | "run"; label: string }[] = [
     { key: "log", label: "Log" },
-    ...(u.type !== "plan" && u.type !== "manager" && u.type !== "investigate" ? [{ key: "diff" as const, label: "Diff" }] : []),
+    ...(u.type !== "plan" ? [{ key: "diff" as const, label: "Diff" }] : []),
     ...(picked !== null ? [{ key: "run" as const, label: `Evidence r${picked}` }] : []),
   ];
   const briefGoal = d.brief ? /## GOAL\n([\s\S]*?)\n##/.exec(d.brief)?.[1]?.trim() : null;
@@ -477,23 +469,17 @@ export function Agent({ attemptId }: { attemptId: number }) {
           <Link to={`/p/${u.projectId}`} style={{ textDecoration: "none" }}>
             {u.projectId}
           </Link>{" "}
-          / <Link to={`/p/${u.projectId}/u/${d.target?.seq ?? u.seq}`}>U{d.target?.seq ?? u.seq}</Link> / <RoleLabel role={role} /> A{a.agentNo}
+          / <Link to={`/p/${u.projectId}/u/${u.seq}`}>U{u.seq}</Link> / <RoleLabel role={role} /> A{a.agentNo}
           {a.resumesAttemptId && (
             <>
               {" "}
               · resumes <Link to={`/a/${a.resumesAttemptId}`}>A{u.attempts.find((x) => x.id === a.resumesAttemptId)?.agentNo ?? "?"}</Link>
             </>
           )}
-          {d.target && (
-            <>
-              {" "}
-              · for <Link to={`/p/${u.projectId}/u/${d.target.seq}`}>U{d.target.seq}</Link>
-            </>
-          )}
           {u.type !== "plan" && (
             <>
               {" "}
-              · <Link to={`/p/${u.projectId}/u/${d.target?.seq ?? u.seq}?tab=code`}>the code it changed →</Link>
+              · <Link to={`/p/${u.projectId}/u/${u.seq}?tab=code`}>the code it changed →</Link>
             </>
           )}
         </div>
@@ -540,7 +526,6 @@ export function Agent({ attemptId }: { attemptId: number }) {
             try {a.n} of {u.maxAttempts}
           </span>
           {a.branch && <span>{a.branch}</span>}
-          {u.writeScope.length > 0 && <span>write: {u.writeScope.join(", ")}</span>}
           {a.skills.length > 0 && <span>skills: {a.skills.join(", ")}</span>}
           {a.guidanceSha && (
             <span title="The version of this role's guidance this run got; the Prompts page shows the current one">
@@ -636,7 +621,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
               <>
                 {briefGoal && <div style={{ fontSize: 13.5, marginTop: 6 }}>{briefGoal.split("\n")[0]}</div>}
                 <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>
-                  {acceptCount ? `${acceptCount} acceptance lines · ` : ""}verify <span className="mono">{u.verify ?? "—"}</span>
+                  {acceptCount ? `${acceptCount} acceptance lines` : ""}
                 </div>
                 {u.notes.length > 0 && (
                   <div style={{ fontSize: 13, marginTop: 4 }} className="s-lamp">
@@ -661,17 +646,12 @@ export function Agent({ attemptId }: { attemptId: number }) {
           </div>
           {u.type !== "plan" && (
             <div>
-              <h2 className="h2">Trunk vs head</h2>
+              <h2 className="h2">Recorded runs</h2>
               <div className="muted" style={{ fontSize: 12.5, margin: "4px 0 6px" }}>
-                {u.type === "verify"
-                  ? "runs this verifier captured"
-                  : lastVerification
-                    ? `captured by the verifier (${lastVerification.unit.state})`
-                    : "filled in by the verifier after hand-off"}
-                {u.verdict ? ` · verdict ${u.verdict.tier}` : ""}
+                runs this agent recorded with yagura evidence run
               </div>
               <EvidenceGrid
-                runs={verifierRuns}
+                runs={d.runs}
                 selected={view === "run" ? picked : null}
                 onPick={(id) => {
                   setPicked(id);
@@ -681,7 +661,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
             </div>
           )}
           <div>
-            <h2 className="h2">Agents on U{d.target?.seq ?? u.seq}</h2>
+            <h2 className="h2">Agents on U{u.seq}</h2>
             <div className="mono" style={{ fontSize: 12.5, lineHeight: 1.9, marginTop: 6 }}>
               {u.attempts.map((x) => (
                 <div key={x.id}>
@@ -693,13 +673,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
                     <Link to={`/a/${x.id}`}>
                       A{x.agentNo} · {x.state}
                       {x.resumesAttemptId ? " · resumed" : ""}
-                      {x.rejection
-                        ? ` · rejected: ${REJECTION_LABEL[x.rejection]}`
-                        : x.missingSkills.length
-                          ? ` · skipped ${x.missingSkills.join(", ")}`
-                          : x.failureMode
-                            ? ` · ${x.failureMode}`
-                            : ""}
+                      {x.missingSkills.length ? ` · skipped ${x.missingSkills.join(", ")}` : x.failureMode ? ` · ${x.failureMode}` : ""}
                     </Link>
                   )}
                 </div>

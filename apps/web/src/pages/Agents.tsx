@@ -94,7 +94,7 @@ export function Agents() {
             {a.unit.projectId} · <RoleLabel role={roleOf(a.unit.type, a.harness, a.n, a.role)} /> A{a.agentNo}
           </Link>
         }
-        goal={<Inline text={a.target?.goal ?? a.unit.goal} />}
+        goal={<Inline text={a.unit.goal} />}
         to={`/a/${a.id}`}
         status={
           <>
@@ -102,12 +102,12 @@ export function Agents() {
             {outcome + (a.missingSkills.length ? ` Skipped ${a.missingSkills.join(", ")}.` : "")}
           </>
         }
-        tone={a.state === "running" ? "lamp" : a.state === "failed" || a.missingSkills.length ? "bell" : a.handoffStatus === "success" ? "pine" : "muted"}
+        tone={a.state === "running" ? "lamp" : a.state === "failed" || a.missingSkills.length ? "bell" : a.handoffStatus === "done" ? "pine" : "muted"}
         facts={
           <>
             {a.unit.type !== "plan" && (
               <span>
-                for <Link to={`/p/${a.unit.projectId}/u/${a.target?.seq ?? a.unit.seq}`}>U{a.target?.seq ?? a.unit.seq}</Link>
+                for <Link to={`/p/${a.unit.projectId}/u/${a.unit.seq}`}>U{a.unit.seq}</Link>
               </span>
             )}
             <span>{modelName(a.model)}</span>

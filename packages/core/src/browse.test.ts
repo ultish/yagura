@@ -7,7 +7,7 @@ import type { Bootstrap } from "./config.js";
 import type { ProjectId, RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
 import { layout } from "./paths.js";
-import { addProject, addRepo, addUnit, createAttempt, getUnitBySeq, openStore, setLandedSha, updateAttempt, type Db } from "./store.js";
+import { addProject, addRepo, addUnit, createAttempt, getUnitBySeq, openStore, setMergedSha, updateAttempt, type Db } from "./store.js";
 
 let db: Db;
 let boot: Bootstrap;
@@ -34,22 +34,20 @@ beforeEach(async () => {
   shas = { init, trailered, landed };
   const origin = join(root, "origin.git");
   await git(["clone", "--quiet", "--bare", seed, origin]);
-  boot = { home: join(root, "home"), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+  boot = { home: join(root, "home"), skillsDir: "", bind: "", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
   addRepo(db, { id: repo, url: origin, defaultBranch: "main" });
-  addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", minTier: "unit-verified", repos: [repo] });
+  addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: [repo] });
   const unit = addUnit(db, {
     projectId: "p" as ProjectId,
     type: "work",
     repoId: repo,
     goal: "add c",
-    writeScope: [],
     acceptance: [],
-    verify: "v",
     timeboxSeconds: 60,
     maxAttempts: 1,
   });
-  setLandedSha(db, unit.id, landed);
+  setMergedSha(db, unit.id, landed);
 });
 
 describe("browsing a repo's trunk", () => {
@@ -98,18 +96,26 @@ describe("browsing a repo's trunk", () => {
     expect(fromEmpty.files!.find((f) => f.path === "logo.png")).toMatchObject({ status: "added", binary: true, new: "" });
   });
 
+  it("reads a commit off trunk, such as an unmerged branch's head, against the base it left", async () => {
+    await repoTree(db, boot, repo);
+    expect(await repoTree(db, boot, repo, shas.trailered)).toEqual({ head: shas.trailered, branch: "main", files: ["app/main.py", "logo.png"] });
+    const file = await repoFile(db, boot, repo, "app/main.py", shas.trailered);
+    expect([file.text, file.blame]).toEqual(["a = 1\nb = 3", [shas.init, shas.trailered]]);
+    const branch = await repoChange(db, boot, repo, shas.landed, shas.init);
+    expect([branch.base, branch.files]).toEqual([shas.init, ["README.md", "app/main.py"]]);
+    await expect(repoTree(db, boot, repo, "main; rm -rf /")).rejects.toThrow("is not a commit");
+  });
+
   it("shows a unit's code: what landed, or its branch before it lands", async () => {
     await repoTree(db, boot, repo);
     const landed = await unitCode(db, boot, getUnitBySeq(db, "p" as ProjectId, 1));
-    expect(landed).toMatchObject({ source: "landed", files: ["README.md", "app/main.py"], base: shas.trailered });
+    expect(landed).toMatchObject({ source: "merged", files: ["README.md", "app/main.py"], base: shas.trailered });
     const pending = addUnit(db, {
       projectId: "p" as ProjectId,
       type: "work",
       repoId: repo,
       goal: "change b",
-      writeScope: [],
       acceptance: [],
-      verify: "v",
       timeboxSeconds: 60,
       maxAttempts: 1,
     });

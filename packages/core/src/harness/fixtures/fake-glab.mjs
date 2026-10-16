@@ -3,10 +3,23 @@
 // FAKE_GLAB_STATE. It answers in GitLab's own shapes: `mr` commands print merge request JSON, and `glab api` serves
 // the REST v4 paths yagura uses. Tests steer it by editing the state file.
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 
 const statePath = process.env.FAKE_GLAB_STATE;
 const origin = process.env.FAKE_GLAB_ORIGIN;
+// Calls run in parallel like a real forge's API, so each one holds the state file's lock from its read to its last write.
+const lock = `${statePath}.lock`;
+for (let i = 0; ; i++) {
+  try {
+    mkdirSync(lock);
+    break;
+  } catch {
+    if (i > 2000) throw new Error(`fake forge state ${lock} stayed locked`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+  }
+}
+process.on("exit", () => rmSync(lock, { recursive: true, force: true }));
+for (const signal of ["SIGTERM", "SIGINT"]) process.on(signal, () => process.exit(1));
 const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, "utf8")) : { mrs: [], pipelines: [], calls: [] };
 const save = () => writeFileSync(statePath, JSON.stringify(state, null, 2));
 const git = (...args) => execFileSync("git", ["--git-dir", origin, ...args], { encoding: "utf8" }).trim();
@@ -41,6 +54,7 @@ process.stdin.on("end", () => {
       target_branch: flag("--target-branch"),
       title: flag("--title"),
       description: stdin,
+      draft: rest.includes("--draft"),
       state: "opened",
       discussions: [],
     });
@@ -67,6 +81,7 @@ process.stdin.on("end", () => {
     return out({
       iid: m.iid,
       state: m.state,
+      draft: m.draft ?? false,
       detailed_merge_status: status,
       has_conflicts: status === "conflict",
       sha,
@@ -76,8 +91,14 @@ process.stdin.on("end", () => {
       web_url: m.web_url,
     });
   }
+  if (verb === "update") {
+    if (rest.includes("--ready")) m.draft = false;
+    if (rest.includes("--description-file")) m.description = stdin;
+    return save();
+  }
   if (verb === "merge") {
     if (!rest.includes("--auto-merge=false")) fail("yagura must not leave GitLab to merge on its own");
+    if (m.draft) fail("Merge request is still a draft");
     const sha = head();
     if (flag("--sha") !== sha) fail("SHA does not match HEAD of source branch");
     // A merge commit whose first parent is the target, as a GitLab project with the default merge method makes.
@@ -94,13 +115,13 @@ process.stdin.on("end", () => {
         "--git-dir",
         origin,
         "commit-tree",
-        `${sha}^{tree}`,
+        execFileSync("git", ["--git-dir", origin, "merge-tree", "--write-tree", `refs/heads/${m.target_branch}`, sha], { encoding: "utf8" }).split("\n")[0],
         "-p",
         `refs/heads/${m.target_branch}`,
         "-p",
         sha,
         "-m",
-        `Merge branch '${m.source_branch}' into '${m.target_branch}'`,
+        flag("--message") ?? `Merge branch '${m.source_branch}' into '${m.target_branch}'`,
       ],
       { encoding: "utf8", env },
     ).trim();
@@ -131,29 +152,6 @@ function api() {
     if (!m) fail(`404 merge request ${parts[mrAt + 1]}`);
     const tail = parts.slice(mrAt + 2);
     if (tail[0] === "discussions" && tail.length === 1 && method === "GET") return out(m.discussions);
-    if (tail.length === 0 && method === "GET")
-      return out({
-        ...m,
-        diff_refs: {
-          base_sha: git("rev-parse", `refs/heads/${m.target_branch}`),
-          start_sha: git("rev-parse", `refs/heads/${m.target_branch}`),
-          head_sha: git("rev-parse", `refs/heads/${m.source_branch}`),
-        },
-      });
-    if (tail[0] === "discussions" && tail.length === 1 && method === "POST") {
-      const id = `d${m.discussions.length + 1}`;
-      const note = {
-        id: Date.now(),
-        body: body.body,
-        system: false,
-        author: { username: "yagura-bot" },
-        resolvable: true,
-        resolved: false,
-        position: body.position,
-      };
-      m.discussions.push({ id, individual_note: false, notes: [note] });
-      return out({ id });
-    }
     if (tail[0] === "notes" && method === "POST") {
       const note = { id: Date.now(), body: body.body, system: false, author: { username: "yagura-bot" } };
       m.discussions.push({ id: `d${m.discussions.length + 1}`, individual_note: true, notes: [note] });

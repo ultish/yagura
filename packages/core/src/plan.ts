@@ -1,21 +1,18 @@
-import picomatch from "picomatch";
 import { z } from "zod";
 import { resolveSetting } from "./config.js";
 import { listDisagreements, markPlanned } from "./disagreements.js";
-import { TERMINAL_STATES, isBuild, type ProjectId, type RepoId, type Unit, type UnitId } from "./domain.js";
+import { TERMINAL_STATES, type ProjectId, type RepoId, type Unit, type UnitId } from "./domain.js";
 import {
   addDep,
   addGate,
   addUnit,
   addUnitNote,
   amendUnit,
-  getRepo,
   bumpMaxAttempts,
   getUnit,
   getUnitBySeq,
   listAttempts,
   listDeps,
-  listUnits,
   projectRepos,
   recordEvent,
   transitionUnit,
@@ -38,25 +35,20 @@ export const WORK_PLAYBOOKS = [
 
 const UnitRef = z.string().regex(/^U\d+$/, "unit references look like U3");
 
-const Deps = z.array(z.object({ on: z.string(), kind: z.enum(["needs-landed", "needs-source"]).default("needs-landed") }).strict());
-
 export const PlanUnit = z
   .object({
     key: z.string().regex(/^[a-z][a-z0-9-]*$/, "keys are lowercase words, e.g. discount-create"),
     repo: z.string(),
+    base: z.string().min(1).optional(),
     goal: z.string().min(1),
-    why: z.string().min(1).optional(),
-    write: z.array(z.string().min(1)).min(1),
-    forbid: z.array(z.string()).default([]),
-    accept: z.array(z.string().min(1)).min(1),
-    verify: z.string().min(1),
+    acceptance: z.array(z.string().min(1)).min(1),
     context: z.array(z.string()).default([]),
+    after: z.array(z.string()).default([]),
+    refs: z.array(z.string().min(1)).default([]),
     playbook: z.enum(WORK_PLAYBOOKS).default("feature"),
     scaffold: z.boolean().default(false),
     timeboxMinutes: z.number().int().positive().max(240).optional(),
-    refs: z.array(z.string().min(1)).default([]),
     disagreement: z.number().int().positive().optional(),
-    deps: Deps.default([]),
   })
   .strict();
 
@@ -69,11 +61,9 @@ export const PlanDelta = z
           .object({
             unit: UnitRef,
             goal: z.string().min(1).optional(),
-            write: z.array(z.string().min(1)).min(1).optional(),
-            accept: z.array(z.string().min(1)).min(1).optional(),
-            verify: z.string().min(1).optional(),
+            acceptance: z.array(z.string().min(1)).min(1).optional(),
             context: z.array(z.string()).optional(),
-            deps: Deps.optional(),
+            after: z.array(z.string()).optional(),
           })
           .strict(),
       )
@@ -84,50 +74,15 @@ export const PlanDelta = z
     done: z.boolean().default(false),
     summary: z.string().default(""),
   })
-  .strict();
+  .strict()
+  .superRefine((d, ctx) => {
+    for (const g of d.gates)
+      if (!g.options.includes(g.default))
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `gate "${g.question}": default must be one of its options`, path: ["gates"] });
+  });
 export type PlanDelta = z.output<typeof PlanDelta>;
 
-export type Extracted = { ok: true; delta: PlanDelta } | { ok: false; reason: string };
-
-export function extractDelta(message: string): Extracted {
-  const blocks = [...message.matchAll(/```json\s*\n([\s\S]*?)\n```/g)];
-  const last = blocks.at(-1);
-  if (!last) return { ok: false, reason: "no ```json plan delta block in the final message" };
-  let json: unknown;
-  try {
-    json = JSON.parse(last[1]!);
-  } catch (e) {
-    return { ok: false, reason: `plan delta is not valid JSON: ${e instanceof Error ? e.message : String(e)}` };
-  }
-  const parsed = PlanDelta.safeParse(json);
-  if (!parsed.success)
-    return {
-      ok: false,
-      reason: `plan delta does not match the schema: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`,
-    };
-  for (const g of parsed.data.gates)
-    if (!g.options.includes(g.default)) return { ok: false, reason: `gate "${g.question}": default must be one of its options` };
-  return { ok: true, delta: parsed.data };
-}
-
 export class PlanRejected extends Error {}
-
-function scopeBase(glob: string): string[] {
-  return picomatch
-    .scan(glob)
-    .base.split("/")
-    .filter((s) => s && s !== ".");
-}
-
-export function scopesOverlap(a: string[], b: string[]): boolean {
-  return a.some((x) =>
-    b.some((y) => {
-      const [p, q] = [scopeBase(x), scopeBase(y)];
-      const n = Math.min(p.length, q.length);
-      return p.slice(0, n).every((seg, i) => seg === q[i]);
-    }),
-  );
-}
 
 function assertAcyclic(db: Db, projectId: ProjectId): void {
   const edges = new Map<UnitId, UnitId[]>();
@@ -167,15 +122,6 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
       if (!repos.has(a.repo)) throw new PlanRejected(`${a.key}: repo "${a.repo}" is not part of this project (${[...repos].join(", ")})`);
     }
 
-    // Verifiers maintain the verify pack; a work unit that lists it would get a brief that both allows and forbids it.
-    const withoutPack = (name: string, repoId: string, write: string[]) => {
-      const pack = getRepo(db, repoId as RepoId).verifyPackPath;
-      const kept = write.filter((g) => g !== pack && !g.startsWith(`${pack}/`));
-      if (!kept.length) throw new PlanRejected(`${name} only writes the verify pack (${pack}); verifiers maintain the pack, so leave it out of the plan`);
-      if (kept.length < write.length) warnings.push(`${name}: dropped ${pack} from its write scope; verifiers maintain the verify pack`);
-      return kept;
-    };
-
     const created = new Map<string, Unit>();
     for (const a of delta.add) {
       const sctx = { projectId, repoId: a.repo as RepoId };
@@ -189,13 +135,10 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
         projectId,
         type: "work",
         repoId: a.repo as RepoId,
+        base: a.base ?? null,
         goal: a.goal,
-        description: [a.why, because].filter(Boolean).join("\n\n") || null,
-        writeScope: withoutPack(a.key, a.repo, a.write),
-        forbidScope: a.forbid,
-        acceptance: a.accept,
-        verify: a.verify,
-        context: a.context,
+        acceptance: a.acceptance,
+        context: [...a.context, ...(because ? [because] : [])],
         playbook: a.playbook,
         scaffold: a.scaffold,
         refs: a.refs,
@@ -203,7 +146,6 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
         maxAttempts,
       });
       if (drainId !== null) db.prepare("UPDATE units SET created_by_drain_id = ? WHERE id = ?").run(drainId, unit.id);
-      transitionUnit(db, unit.id, "ready", { drain: drainId });
       created.set(a.key, getUnit(db, unit.id));
       if (a.disagreement !== undefined) {
         const d = listDisagreements(db, { projectId }).find((x) => x.id === a.disagreement);
@@ -213,56 +155,41 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
       }
     }
 
-    const addDeps = (unit: Unit, name: string, deps: z.output<typeof Deps>) => {
-      for (const d of deps) {
-        const on = created.get(d.on) ?? (/^U\d+$/.test(d.on) ? unitRef(d.on, `${name} depends on`) : undefined);
-        if (!on) throw new PlanRejected(`${name} depends on "${d.on}", which is neither a key in this delta nor an existing unit`);
-        if (on.state === "abandoned") throw new PlanRejected(`${name} depends on ${d.on}, which is abandoned`);
-        addDep(db, { unitId: unit.id, dependsOn: on.id, kind: d.kind });
+    const after = (unit: Unit, name: string, refs: string[]) => {
+      for (const ref of refs) {
+        const on = created.get(ref) ?? (/^U\d+$/.test(ref) ? unitRef(ref, `${name} comes after`) : undefined);
+        if (!on) throw new PlanRejected(`${name} comes after "${ref}", which is neither a key in this delta nor an existing unit`);
+        if (on.state === "dropped") throw new PlanRejected(`${name} comes after ${ref}, which was dropped`);
+        addDep(db, { unitId: unit.id, dependsOn: on.id });
       }
     };
-    for (const a of delta.add) addDeps(created.get(a.key)!, a.key, a.deps);
-
-    const serialize = (unit: Unit) => {
-      for (const other of listUnits(db, projectId).filter((u) => isBuild(u) && !TERMINAL_STATES.has(u.state)))
-        if (other.id < unit.id && other.repoId === unit.repoId && scopesOverlap(unit.writeScope, other.writeScope))
-          addDep(db, { unitId: unit.id, dependsOn: other.id, kind: "scope-overlap" });
-    };
-    for (const unit of created.values()) serialize(unit);
+    for (const a of delta.add) after(created.get(a.key)!, a.key, a.after);
     assertAcyclic(db, projectId);
 
     for (const m of delta.amend) {
       const u = unitRef(m.unit, "amend");
-      if (!["draft", "ready"].includes(u.state) || listAttempts(db, u.id).length) throw new PlanRejected(`amend: ${m.unit} has already started (${u.state})`);
-      amendUnit(db, u.id, {
-        goal: m.goal,
-        writeScope: m.write && withoutPack(m.unit, u.repoId!, m.write),
-        acceptance: m.accept,
-        verify: m.verify,
-        context: m.context,
-      });
-      if (m.deps) {
-        db.prepare("DELETE FROM unit_deps WHERE unit_id = ? AND kind <> 'scope-overlap'").run(u.id);
-        addDeps(u, m.unit, m.deps);
-        serialize(getUnit(db, u.id));
+      if (u.state !== "waiting" || listAttempts(db, u.id).length) throw new PlanRejected(`amend: ${m.unit} has already started (${u.state})`);
+      amendUnit(db, u.id, { goal: m.goal, acceptance: m.acceptance, context: m.context });
+      if (m.after) {
+        db.prepare("DELETE FROM unit_deps WHERE unit_id = ?").run(u.id);
+        after(u, m.unit, m.after);
       }
     }
     assertAcyclic(db, projectId);
 
     for (const r of delta.retry) {
       const u = unitRef(r.unit, "retry");
-      if (!["blocked", "failed", "rejected"].includes(u.state))
-        throw new PlanRejected(`retry: ${r.unit} is ${u.state}; only blocked, failed, or rejected units can be retried`);
+      if (u.state !== "stuck") throw new PlanRejected(`retry: ${r.unit} is ${u.state}; only stuck units can be retried`);
       addUnitNote(db, u.id, `Planner: ${r.note}`);
       bumpMaxAttempts(db, u.id, listAttempts(db, u.id).length + 1);
-      transitionUnit(db, u.id, "ready", { by: "planner", drain: drainId });
+      transitionUnit(db, u.id, "waiting", { by: "planner", drain: drainId });
     }
 
     for (const c of delta.cancel) {
       const u = unitRef(c.unit, "cancel");
       if (TERMINAL_STATES.has(u.state)) warnings.push(`${c.unit} is already ${u.state}`);
-      else if (u.state === "running") warnings.push(`${c.unit} is running and was not cancelled; cancel it again after it hands off`);
-      else transitionUnit(db, u.id, "abandoned", { by: "planner", reason: c.reason, drain: drainId });
+      else if (u.state === "building") warnings.push(`${c.unit} is being built and was not cancelled; cancel it again once it is not`);
+      else transitionUnit(db, u.id, "dropped", { by: "planner", reason: c.reason, drain: drainId });
     }
 
     for (const g of delta.gates) addGate(db, { projectId, question: g.question, options: g.options, defaultOption: g.default, kind: "planner" });

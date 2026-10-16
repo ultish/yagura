@@ -8,6 +8,7 @@ export type MergeState = "clean" | "behind" | "conflict" | "blocked" | "unknown"
 
 export interface PrStatus {
   state: "open" | "merged" | "closed";
+  draft: boolean;
   merge: MergeState;
   failing: string[];
   pending: string[];
@@ -19,9 +20,12 @@ export interface ForgeAdapter {
   kind: "github" | "gitlab";
   repo: string;
   find(branch: string): Promise<{ number: number; url: string } | null>;
-  open(pr: { branch: string; base: string; title: string; body: string }): Promise<{ number: number; url: string }>;
+  openDraft(pr: { branch: string; base: string; title: string; body: string }): Promise<{ number: number; url: string }>;
+  updateBody(number: number, body: string): Promise<void>;
+  markReady(number: number): Promise<void>;
   status(number: number): Promise<PrStatus>;
-  merge(number: number, headSha: Sha, method: "rebase" | "squash" | "merge"): Promise<void>;
+  // Always a merge commit, and only while the head is still `headSha`.
+  mergeCommit(number: number, headSha: Sha, message: { subject: string; body: string }): Promise<void>;
   close(number: number, comment: string): Promise<void>;
   failedRuns(headSha: Sha): Promise<{ id: number; name: string; log: string }[]>;
   // CI on a commit as a whole: none ran, still running, all passed, or something failed.
@@ -30,11 +34,6 @@ export interface ForgeAdapter {
   threads(number: number): Promise<PrThread[]>;
   replyKeys(number: number): Promise<Set<string>>;
   reply(number: number, thread: Pick<PrThread, "id" | "kind">, body: string, key: string): Promise<void>;
-  // A comment on one line of the change, for yagura's own reviewer; returns where to reply, or null when the forge took
-  // it only as a plain comment (the line is not in the diff it shows).
-  // `plain` is the text to post instead when the forge refuses the line (it names the location itself).
-  comment(number: number, at: { path: string; line: number; headSha: Sha } | null, body: string, key: string, plain?: string): Promise<string | null>;
-  replyTo(number: number, ref: string, body: string, key: string): Promise<void>;
   // Open issues (never pull or merge requests) updated at or after `since`, each with its comments oldest first.
   issues(since: string): Promise<ForgeIssue[]>;
   issueReplyKeys(number: number): Promise<Set<string>>;
@@ -260,17 +259,24 @@ export function githubForge(bin: string, repo: string, timeoutMs = 120_000): For
       }[];
       return found[0] ?? null;
     },
-    async open(pr) {
-      const url = (await gh(bin, ["pr", "create", ...R, "--head", pr.branch, "--base", pr.base, "--title", pr.title, "--body-file", "-"], pr.body))
+    async openDraft(pr) {
+      const url = (await gh(bin, ["pr", "create", ...R, "--draft", "--head", pr.branch, "--base", pr.base, "--title", pr.title, "--body-file", "-"], pr.body))
         .split("\n")
         .at(-1)!;
       return { number: numberOf(url), url };
     },
+    async updateBody(number, body) {
+      await gh(bin, ["pr", "edit", String(number), ...R, "--body-file", "-"], body);
+    },
+    async markReady(number) {
+      await gh(bin, ["pr", "ready", String(number), ...R]);
+    },
     async status(number) {
       const v = JSON.parse(
-        await gh(bin, ["pr", "view", String(number), ...R, "--json", "state,mergeable,mergeStateStatus,statusCheckRollup,headRefOid,mergeCommit"]),
+        await gh(bin, ["pr", "view", String(number), ...R, "--json", "state,isDraft,mergeable,mergeStateStatus,statusCheckRollup,headRefOid,mergeCommit"]),
       ) as {
         state: string;
+        isDraft: boolean;
         mergeable: string;
         mergeStateStatus: string;
         statusCheckRollup: Check[] | null;
@@ -280,14 +286,19 @@ export function githubForge(bin: string, repo: string, timeoutMs = 120_000): For
       const checks = readChecks(v.statusCheckRollup ?? []);
       return {
         state: v.state === "MERGED" ? "merged" : v.state === "CLOSED" ? "closed" : "open",
+        draft: v.isDraft,
         merge: v.mergeable === "CONFLICTING" ? "conflict" : (MERGE_STATES[v.mergeStateStatus] ?? "unknown"),
         ...checks,
         headSha: v.headRefOid as Sha,
         mergedSha: (v.mergeCommit?.oid as Sha | undefined) ?? null,
       };
     },
-    async merge(number, headSha, method) {
-      await gh(bin, ["pr", "merge", String(number), ...R, `--${method}`, "--match-head-commit", headSha]);
+    async mergeCommit(number, headSha, message) {
+      await gh(
+        bin,
+        ["pr", "merge", String(number), ...R, "--merge", "--match-head-commit", headSha, "--subject", message.subject, "--body-file", "-"],
+        message.body,
+      );
     },
     async close(number, comment) {
       await gh(bin, ["pr", "close", String(number), ...R, "--comment", marked(comment)]);
@@ -339,31 +350,6 @@ export function githubForge(bin: string, repo: string, timeoutMs = 120_000): For
       if (thread.kind === "review-thread")
         await gh(bin, ["api", "graphql", ...host, "-f", `query=${REPLY_MUTATION}`, "-F", `thread=${thread.id}`, "-F", "body=@-"], keyed(body, key));
       else await gh(bin, ["pr", "comment", String(number), ...R, "--body-file", "-"], keyed(body, key));
-    },
-    async comment(number, at, body, key, plain) {
-      const path = `repos/${repoParts.slice(-2).join("/")}/pulls/${number}/comments`;
-      if (at)
-        try {
-          const posted = JSON.parse(
-            await gh(
-              bin,
-              ["api", ...host, "--method", "POST", path, "--input", "-"],
-              JSON.stringify({ body: keyed(body, key), commit_id: at.headSha, path: at.path, line: at.line, side: "RIGHT" }),
-            ),
-          ) as { id: number };
-          return `c:${posted.id}`;
-        } catch {
-          // GitHub refuses a line outside the diff it shows; the finding still goes on the pull request.
-        }
-      await gh(bin, ["pr", "comment", String(number), ...R, "--body-file", "-"], keyed(plain ?? body, key));
-      return null;
-    },
-    async replyTo(number, ref, body, key) {
-      await gh(
-        bin,
-        ["api", ...host, "--method", "POST", `repos/${repoParts.slice(-2).join("/")}/pulls/${number}/comments/${ref.slice(2)}/replies`, "--input", "-"],
-        JSON.stringify({ body: keyed(body, key) }),
-      );
     },
     async issues(since) {
       const listed = JSON.parse(
@@ -462,11 +448,13 @@ export function readGitlabStatus(mr: {
   merge_commit_sha?: string | null;
   squash_commit_sha?: string | null;
   head_pipeline?: { status: string } | null;
+  draft?: boolean;
 }): PrStatus {
   const pipeline = mr.head_pipeline?.status;
   const state = mr.state === "merged" ? "merged" : mr.state === "opened" ? "open" : "closed";
   return {
     state,
+    draft: mr.draft ?? false,
     merge: mr.has_conflicts ? "conflict" : (GITLAB_MERGE[mr.detailed_merge_status ?? ""] ?? "blocked"),
     failing: pipeline && PIPELINE_FAILED.has(pipeline) ? ["pipeline"] : [],
     pending: pipeline && !PIPELINE_DONE.has(pipeline) ? ["pipeline"] : [],
@@ -525,10 +513,10 @@ export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): For
       }[];
       return found[0] ? { number: found[0].iid, url: found[0].web_url } : null;
     },
-    async open(mr) {
+    async openDraft(mr) {
       const printed = await gh(
         bin,
-        ["mr", "create", ...R, "--source-branch", mr.branch, "--target-branch", mr.base, "--title", mr.title, "--description-file", "-", "--yes"],
+        ["mr", "create", ...R, "--draft", "--source-branch", mr.branch, "--target-branch", mr.base, "--title", mr.title, "--description-file", "-", "--yes"],
         mr.body,
         env,
       );
@@ -539,14 +527,20 @@ export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): For
           ?.trim() ?? printed;
       return { number: iidOf(url), url: /(https?:\/\/\S+)/.exec(url)?.[1] ?? url };
     },
+    async updateBody(iid, body) {
+      await gh(bin, ["mr", "update", String(iid), ...R, "--description-file", "-"], body, env);
+    },
+    async markReady(iid) {
+      await gh(bin, ["mr", "update", String(iid), ...R, "--ready"], undefined, env);
+    },
     async status(iid) {
       return readGitlabStatus(JSON.parse(await gh(bin, ["mr", "view", String(iid), ...R, "--output", "json"], undefined, env)));
     },
-    // GitLab merges by the project's own method; squash is the one choice a merge request can make.
-    async merge(iid, headSha, method) {
+    // GitLab merges by the project's own method, which must be "Merge commit" for the unit's history to survive.
+    async mergeCommit(iid, headSha, message) {
       await gh(
         bin,
-        ["mr", "merge", String(iid), ...R, "--sha", headSha, "--auto-merge=false", "--yes", ...(method === "squash" ? ["--squash"] : [])],
+        ["mr", "merge", String(iid), ...R, "--sha", headSha, "--auto-merge=false", "--yes", "--message", `${message.subject}\n\n${message.body}`],
         undefined,
         env,
       );
@@ -589,27 +583,6 @@ export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): For
       if (thread.kind === "review-thread")
         await api(["--method", "POST", `${project}/merge_requests/${iid}/discussions/${thread.id}/notes`], { body: keyed(body, key) });
       else await api(["--method", "POST", `${project}/merge_requests/${iid}/notes`], { body: keyed(body, key) });
-    },
-    async comment(iid, at, body, key, plain) {
-      if (at)
-        try {
-          const refs = (JSON.parse(await api([`${project}/merge_requests/${iid}`])) as { diff_refs: { base_sha: string; start_sha: string; head_sha: string } })
-            .diff_refs;
-          const d = JSON.parse(
-            await api(["--method", "POST", `${project}/merge_requests/${iid}/discussions`], {
-              body: keyed(body, key),
-              position: { position_type: "text", ...refs, new_path: at.path, old_path: at.path, new_line: at.line },
-            }),
-          ) as { id: string };
-          return `d:${d.id}`;
-        } catch {
-          // GitLab refuses a position outside the diff; the finding still goes on the merge request.
-        }
-      await api(["--method", "POST", `${project}/merge_requests/${iid}/notes`], { body: keyed(plain ?? body, key) });
-      return null;
-    },
-    async replyTo(iid, ref, body, key) {
-      await api(["--method", "POST", `${project}/merge_requests/${iid}/discussions/${ref.slice(2)}/notes`], { body: keyed(body, key) });
     },
     async issues(since) {
       const listed = JSON.parse(

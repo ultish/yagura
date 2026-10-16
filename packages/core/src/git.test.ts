@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { addWorktree, changedPaths, commitAll, ensureMirror, git, headSha, resolveRef } from "./git.js";
-import { assessScope, checkScope } from "./scope.js";
 
 const author = { name: "yagura", email: "yagura@localhost" };
 let origin: string;
@@ -65,31 +64,5 @@ describe("git", () => {
       await Promise.all(Array.from({ length: 8 }, () => ensureMirror(origin, mirror)));
       expect(await resolveRef(mirror, "origin/main")).toBe(await headSha(origin));
     }
-  });
-});
-
-describe("scope", () => {
-  it("flags paths outside the write scope and forbidden paths", () => {
-    expect(checkScope(["app/orders.py", ".agents/verify/drive", "README.md"], ["app/**", ".agents/**"], [".agents/verify/**"])).toEqual([
-      { path: ".agents/verify/drive", reason: "forbidden" },
-      { path: "README.md", reason: "outside-write-scope" },
-    ]);
-  });
-
-  it("lets a path outside the estimate through when the handoff says why, but never the verify pack", () => {
-    const a = assessScope(
-      ["app/orders.py", "tests/test_out.py", "docs/usage.md", ".agents/verify/verify.json"],
-      ["app/**"],
-      [],
-      [".agents/verify/**"],
-      "- tests/test_out.py: a test for the fix\n- .agents/verify/verify.json: tidy",
-    );
-    expect(a.hard).toEqual([{ path: ".agents/verify/verify.json", reason: "forbidden" }]);
-    expect(a.justified).toEqual([{ path: "tests/test_out.py", reason: "outside-write-scope" }]);
-    expect(a.unjustified).toEqual([{ path: "docs/usage.md", reason: "outside-write-scope" }]);
-  });
-
-  it("passes a diff fully inside scope", () => {
-    expect(checkScope(["app/orders.py", "tests/test_orders.py"], ["app/**", "tests/**"], [])).toEqual([]);
   });
 });

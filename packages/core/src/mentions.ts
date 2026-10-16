@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import type { Bootstrap } from "./config.js";
-import { BUILD_TYPES_SQL, type MentionKind, type ProjectId } from "./domain.js";
+import { type MentionKind, type ProjectId } from "./domain.js";
 import { layout } from "./paths.js";
 import { generateStatus } from "./status.js";
 import { lastDrainEventId } from "./planner.js";
@@ -124,7 +124,7 @@ export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[]
   }[])
     out.push({ token: p.id, kind: "project", label: `project · ${p.state} · ${p.goal}` });
   for (const u of db
-    .prepare(`SELECT project_id, seq, state, goal FROM units WHERE type IN ${BUILD_TYPES_SQL} AND goal LIKE ? ORDER BY updated_at DESC LIMIT ?`)
+    .prepare(`SELECT project_id, seq, state, goal FROM units WHERE type = 'work' AND goal LIKE ? ORDER BY updated_at DESC LIMIT ?`)
     .all(like, q.length >= 3 ? limit : 0) as { project_id: string; seq: number; state: string; goal: string }[])
     out.push({ token: `${u.project_id}/U${u.seq}`, kind: "unit", label: `${u.state} · ${u.goal}` });
   for (const t of db
@@ -147,13 +147,13 @@ const HANDOFF_LIMIT = 2500;
 function describeUnit(db: Db, boot: Bootstrap, unit: Unit, onlyAttempt: number | null): string {
   const attempts = listAttempts(db, unit.id).filter((a) => onlyAttempt === null || a.n === onlyAttempt);
   const blocked = db
-    .prepare("SELECT data_json FROM events WHERE unit_id = ? AND type = 'unit.state' AND json_extract(data_json, '$.to') = 'blocked' ORDER BY id DESC LIMIT 1")
+    .prepare("SELECT data_json FROM events WHERE unit_id = ? AND type = 'unit.state' AND json_extract(data_json, '$.to') = 'stuck' ORDER BY id DESC LIMIT 1")
     .get(unit.id) as { data_json: string } | undefined;
   const lines = [
-    `- ${unit.type} · ${unit.state}${unit.landedSha ? ` · landed ${unit.landedSha.slice(0, 10)}` : ""} · repo ${unit.repoId ?? "-"} · goal: ${unit.goal}`,
-    `- write: ${unit.writeScope.join(", ") || "-"} · accept: ${unit.acceptance.join(" / ")}`,
+    `- ${unit.type} · ${unit.state}${unit.mergedSha ? ` · merged ${unit.mergedSha.slice(0, 10)}` : ""} · repo ${unit.repoId ?? "-"} · goal: ${unit.goal}`,
+    `- accept: ${unit.acceptance.join(" / ")}`,
   ];
-  if (unit.state === "blocked" && blocked) lines.push(`- blocked: ${JSON.stringify(JSON.parse(blocked.data_json).reason ?? "no reason recorded")}`);
+  if (unit.state === "stuck" && blocked) lines.push(`- stuck: ${JSON.stringify(JSON.parse(blocked.data_json).reason ?? "no reason recorded")}`);
   if (unit.notes.length) lines.push(`- notes: ${unit.notes.join(" / ")}`);
   for (const a of attempts) {
     lines.push(
@@ -174,7 +174,7 @@ export function describeMention(db: Db, boot: Bootstrap, m: Mention): string {
   if (m.kind === "project") return generateStatus(db, boot, m.projectId!, lastDrainEventId(db, m.projectId!)).replace(/^# /, "");
   if (m.kind === "repo") {
     const repo = getRepo(db, m.ref.slice(5) as never);
-    return `- url ${repo.url} · default branch ${repo.defaultBranch} · verify pack ${repo.verifyPackPath} (${repo.packStatus})`;
+    return `- url ${repo.url} · default branch ${repo.defaultBranch}`;
   }
   if (m.kind === "thread") {
     const id = Number(m.ref.slice(7));

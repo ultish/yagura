@@ -5,12 +5,11 @@ import { z } from "zod";
 import { write } from "./agent.js";
 import { resolveSetting, setSetting, type Bootstrap } from "./config.js";
 import { SKILL_PURPOSES } from "./skills.js";
-import { LAND_ROUTES, MERGE_POLICIES, PASS_TIERS, type EnvironmentId, type LandRoute, type ProjectId, type RepoId } from "./domain.js";
+import { LAND_ROUTES, MERGE_POLICIES, type EnvironmentId, type LandRoute, type ProjectId, type RepoId } from "./domain.js";
 import { commitAll, git } from "./git.js";
-import { VerifyPack } from "./pack.js";
 import { layout } from "./paths.js";
 import { applyDelta, PlanDelta, PlanRejected, PlanUnit } from "./plan.js";
-import { checkRepoFree, inspectRepo, packStatusOf, REPO_ID, RepoUnusable, resolveSource, type RepoInspection } from "./repos.js";
+import { checkRepoFree, inspectRepo, REPO_ID, RepoUnusable, resolveSource, type RepoInspection } from "./repos.js";
 import { chooseRoute, describeRoute, isRemote, routeOf, RouteNeeded } from "./route.js";
 import { parseSpec, writeSpec } from "./spec.js";
 import { ValueInvalid } from "./envvalues.js";
@@ -19,7 +18,7 @@ import { checkDraft, createEnvironment, draftFromTemplate, EnvironmentDraft, Tem
 import { getProposal, getThread, issueOfThread, linkThreadProject, resolveProposal } from "./threads.js";
 
 const Slug = z.string().regex(REPO_ID, "ids are lowercase words joined by dashes, e.g. kafka-diff");
-const NewRepo = z.object({ id: Slug, description: z.string().default(""), verifyPack: VerifyPack }).strict();
+const NewRepo = z.object({ id: Slug, description: z.string().default("") }).strict();
 const ExistingRepo = z.object({ id: Slug, existing: z.string().min(1), forge: z.enum(["gh", "glab"]).optional(), land: z.literal("push").optional() }).strict();
 type ExistingRepo = z.output<typeof ExistingRepo>;
 const FromTemplate = z
@@ -50,7 +49,6 @@ export const ProposalBody = z
             environment: z.string().nullable().default(null),
             merge: z.enum(MERGE_POLICIES).default("human"),
             land: z.enum(LAND_ROUTES).optional(),
-            minTier: z.enum(PASS_TIERS).default("unit-verified"),
             after: z.array(z.string()).default([]),
             phaseGate: z.boolean().default(false),
             refs: z.array(z.string().min(1)).default([]),
@@ -60,9 +58,6 @@ export const ProposalBody = z
               .object({
                 scaffold: z.array(z.string().min(1)).optional(),
                 work: z.array(z.string().min(1)).optional(),
-                pack: z.array(z.string().min(1)).optional(),
-                verify: z.array(z.string().min(1)).optional(),
-                review: z.array(z.string().min(1)).optional(),
               })
               .strict()
               .default({}),
@@ -240,7 +235,6 @@ async function createLocalRepo(boot: Bootstrap, db: Db, r: z.output<typeof NewRe
   const seed = mkdtempSync(join(tmpdir(), `yagura-seed-${r.id}-`));
   try {
     write(join(seed, "README.md"), `# ${r.id}\n\n${r.description}\n`.replace(/\n\n\n$/, "\n"));
-    write(join(seed, ".agents/verify/verify.json"), `${JSON.stringify(r.verifyPack, null, 2)}\n`);
     await git(["init", "--quiet", "-b", "main"], { cwd: seed });
     await commitAll(seed, `chore: start ${r.id}`, { name: resolveSetting(db, "git.author_name").value, email: resolveSetting(db, "git.author_email").value });
     await git(["clone", "--quiet", "--bare", seed, bare]);
@@ -279,9 +273,8 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
       const out: ApplyProposalResult = { repos: [], environments: created, projects: [], units: {} };
       for (const r of body.repos) {
         const seen = existing.get(r.id);
-        if (seen && isExisting(r))
-          addRepo(db, { id: r.id, url: seen.url, defaultBranch: seen.defaultBranch, ...chooseRoute(db, seen.url, r), packStatus: packStatusOf(seen.pack) });
-        else addRepo(db, { id: r.id, url: bares.get(r.id)!, defaultBranch: "main", packStatus: "unproven" });
+        if (seen && isExisting(r)) addRepo(db, { id: r.id, url: seen.url, defaultBranch: seen.defaultBranch, ...chooseRoute(db, seen.url, r) });
+        else addRepo(db, { id: r.id, url: bares.get(r.id)!, defaultBranch: "main" });
         out.repos.push(r.id);
       }
       for (const p of body.projects) {
@@ -295,7 +288,6 @@ export async function applyProposal(ctx: { db: Db; boot: Bootstrap }, proposalId
           name: p.name ?? p.id,
           goal: p.goal,
           predicate: p.predicate,
-          minTier: p.minTier,
           repos: p.repos as RepoId[],
           refs: withIssue(p).refs,
           after: p.after as ProjectId[],
@@ -345,7 +337,7 @@ export function describeProposal(body: ProposalBody): string {
     lines.push(
       isExisting(r)
         ? `- existing repo ${r.id}: ${r.existing}${r.forge ? ` (forge ${r.forge})` : r.land ? " (pushes to its default branch)" : ""}`
-        : `- new repo ${r.id}${r.description ? `: ${r.description}` : ""} (checks: ${r.verifyPack.checks.map((c) => c.name).join(", ")})`,
+        : `- new repo ${r.id}${r.description ? `: ${r.description}` : ""}`,
     );
   for (const e of body.environments) {
     if ("template" in e) {
@@ -361,7 +353,6 @@ export function describeProposal(body: ProposalBody): string {
       `repos ${p.repos.join(", ")}`,
       `merge ${p.merge}`,
       p.land === "pr" ? "lands through pull/merge requests" : p.land === "push" ? "pushes to the default branch" : "",
-      `min ${p.minTier}`,
       p.after.length ? `after ${p.after.join(", ")}` : "",
       p.phaseGate ? "phase gate" : "",
       p.environment ? `env ${p.environment}` : "",

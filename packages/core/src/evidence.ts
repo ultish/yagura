@@ -1,16 +1,14 @@
 import { spawn } from "node:child_process";
-import { sourceEnv } from "./sources.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 import type { Bootstrap } from "./config.js";
 import type { ArtifactId, AttemptId, ProjectId, Sha } from "./domain.js";
-import { isPristine, readFileAt, restorePristine } from "./git.js";
+import { git, headSha, restorePristine } from "./git.js";
 import { activeLease } from "./leases.js";
-import { loadPack, parsePack, type PackLoad } from "./pack.js";
-import { overlayPack, packWorkspaceOf } from "./packedits.js";
 import { layout } from "./paths.js";
-import { getAttempt, getRepo, getUnit, now, recordEvent, type Db } from "./store.js";
+import { builtBefore, unitEnv } from "./publish.js";
+import { getAttempt, getProject, getRepo, getUnit, now, recordEvent, type Db } from "./store.js";
 
 const MAX_CAPTURE = 5 * 1024 * 1024;
 const KILL_GRACE_MS = 5_000;
@@ -94,68 +92,31 @@ export function runShell(
   });
 }
 
-type RunRequest = { attemptId: AttemptId; at: At; label: string; command: string; timeoutSeconds?: number };
+type RunRequest = { attemptId: AttemptId; at: At; label?: string; command: string; timeoutSeconds?: number };
 
-export const PACK_LABEL = (step: "doctor" | "deploy" | "teardown") => `pack:${step}`;
-const LIFECYCLE_SECONDS = 900;
+export class UncommittedChanges extends Error {}
 
-// A pack unit's proof uses the pack it wrote; a verification uses its verifier's copy of trunk's pack, which the
-// verifier may fix or extend and which runs on both sides alike. The worker's change never supplies the pack.
-export async function packForAttempt(db: Db, boot: Bootstrap, attemptId: AttemptId): Promise<PackLoad> {
-  const attempt = getAttempt(db, attemptId);
-  const unit = getUnit(db, attempt.unitId);
-  const target = unit.targetUnitId ? getUnit(db, unit.targetUnitId) : null;
-  const repo = getRepo(db, unit.repoId!);
-  const workspace = packWorkspaceOf(db, attemptId);
-  if (workspace) return loadPack(workspace, repo.verifyPackPath);
-  const mirror = layout(boot).mirror(repo.id);
-  const ref = target?.type === "pack" ? attempt.headSha! : `origin/${repo.defaultBranch}`;
-  return parsePack(await readFileAt(mirror, ref, `${repo.verifyPackPath}/verify.json`), repo.verifyPackPath);
-}
-
-export function deployedSide(db: Db, attemptId: AttemptId): At | null {
-  const last = db
-    .prepare("SELECT label, at FROM evidence_runs WHERE attempt_id = ? AND label IN (?, ?) ORDER BY id DESC LIMIT 1")
-    .get(attemptId, PACK_LABEL("deploy"), PACK_LABEL("teardown")) as { label: string; at: At } | undefined;
-  return last?.label === PACK_LABEL("deploy") ? last.at : null;
-}
-
-export async function runEvidence(db: Db, boot: Bootstrap, req: RunRequest): Promise<EvidenceRun> {
-  if (!req.label.startsWith("pack:")) {
-    const pack = await packForAttempt(db, boot, req.attemptId);
-    if (pack.ok && pack.pack.deploy) {
-      const side = deployedSide(db, req.attemptId);
-      if (side !== req.at) {
-        if (side && pack.pack.teardown)
-          await captureRun(db, boot, { ...req, at: side, label: PACK_LABEL("teardown"), command: pack.pack.teardown, timeoutSeconds: LIFECYCLE_SECONDS });
-        await captureRun(db, boot, { ...req, label: PACK_LABEL("deploy"), command: pack.pack.deploy, timeoutSeconds: LIFECYCLE_SECONDS });
-      }
-    }
-  }
-  return captureRun(db, boot, req);
-}
-
-export async function teardownDeployed(db: Db, boot: Bootstrap, attemptId: AttemptId): Promise<EvidenceRun | null> {
-  const side = deployedSide(db, attemptId);
-  const pack = side ? await packForAttempt(db, boot, attemptId) : null;
-  if (!side || !pack?.ok || !pack.pack.teardown) return null;
-  return captureRun(db, boot, { attemptId, at: side, label: PACK_LABEL("teardown"), command: pack.pack.teardown, timeoutSeconds: LIFECYCLE_SECONDS });
-}
+export const runEvidence = (db: Db, boot: Bootstrap, req: RunRequest): Promise<EvidenceRun> => captureRun(db, boot, req);
 
 async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<EvidenceRun> {
   const attempt = getAttempt(db, req.attemptId);
   const unit = getUnit(db, attempt.unitId);
-  if (unit.type !== "verify") throw new Error(`attempt ${attempt.id} is not a verify attempt`);
+  if (attempt.role !== "worker" && attempt.role !== "judge") throw new Error(`attempt ${attempt.id} is not a worker or judge attempt`);
   if (attempt.state !== "queued" && attempt.state !== "running")
     throw new Error(`attempt ${attempt.id} is ${attempt.state}; evidence can only be captured while it runs`);
-  if (!attempt.worktreePath || !attempt.baseSha || !attempt.headSha) throw new Error(`attempt ${attempt.id} has no checkouts`);
-  const sha = req.at === "head" ? attempt.headSha : attempt.baseSha;
+  if (!attempt.worktreePath) throw new Error(`attempt ${attempt.id} has no checkout`);
+  if (req.at === "base" && attempt.role !== "judge") throw new Error("only the judge runs commands on the base");
   const cwd = req.at === "head" ? attempt.worktreePath : baseWorktree(attempt.worktreePath);
+  const label = req.label ?? req.command.slice(0, 60);
 
-  const tampered = !(await isPristine(cwd, sha));
+  // A run proves what a command did on one commit. A worker's uncommitted work is never thrown away to make that true, so it
+  // commits first; a judge's checkout is yagura's, so it is put back and the run flagged.
+  const sha = (await headSha(cwd)) as Sha;
+  const dirty = (await git(["status", "--porcelain"], { cwd })) !== "";
+  if (dirty && attempt.role === "worker")
+    throw new UncommittedChanges("commit your changes first: a recorded run proves what a command does on a commit, and your checkout has uncommitted changes");
+  const tampered = dirty;
   if (tampered) await restorePristine(cwd, sha);
-  const workspace = packWorkspaceOf(db, attempt.id);
-  if (workspace) overlayPack(workspace, cwd, getRepo(db, unit.repoId!).verifyPackPath);
 
   const evidenceDir = mkdtempSync(join(boot.home, "evidence-tmp-"));
   const lease = activeLease(db, attempt.id);
@@ -163,11 +124,18 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
   const result = await runShell(
     req.command,
     cwd,
-    { ...process.env, ...(lease?.vars ?? {}), ...sourceEnv(attempt.sources), YAGURA_EVIDENCE: evidenceDir, YAGURA_AT: req.at, YAGURA_SHA: sha },
+    {
+      ...process.env,
+      ...unitEnv(db, getProject(db, unit.projectId).environmentId, builtBefore(db, unit)),
+      ...(lease?.vars ?? {}),
+      YAGURA_EVIDENCE: evidenceDir,
+      YAGURA_AT: req.at,
+      YAGURA_SHA: sha,
+    },
     req.timeoutSeconds ?? 300,
   );
   const durationMs = Date.now() - started;
-  await restorePristine(cwd, sha);
+  if (attempt.role === "judge") await restorePristine(cwd, sha);
 
   const run = db.transaction(() => {
     const runId = Number(
@@ -176,13 +144,13 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
           `INSERT INTO evidence_runs (attempt_id, at, sha, label, command, exit_code, timed_out, tampered, duration_ms, created_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(attempt.id, req.at, sha, req.label, req.command, result.exitCode, result.timedOut ? 1 : 0, tampered ? 1 : 0, durationMs, now()).lastInsertRowid,
+        .run(attempt.id, req.at, sha, label, req.command, result.exitCode, result.timedOut ? 1 : 0, tampered ? 1 : 0, durationMs, now()).lastInsertRowid,
     );
     const base = { projectId: unit.projectId, attemptId: attempt.id, evidenceRunId: runId };
-    const stdoutId = putArtifact(db, boot, { ...base, kind: "stdout", label: `${req.label}@${req.at} stdout`, data: result.stdout });
-    const stderrId = putArtifact(db, boot, { ...base, kind: "stderr", label: `${req.label}@${req.at} stderr`, data: result.stderr });
+    const stdoutId = putArtifact(db, boot, { ...base, kind: "stdout", label: `${label}@${req.at} stdout`, data: result.stdout });
+    const stderrId = putArtifact(db, boot, { ...base, kind: "stderr", label: `${label}@${req.at} stderr`, data: result.stderr });
     for (const file of walk(evidenceDir))
-      putArtifact(db, boot, { ...base, kind: "file", label: `${req.label}@${req.at} ${relative(evidenceDir, file)}`, data: readFileSync(file) });
+      putArtifact(db, boot, { ...base, kind: "file", label: `${label}@${req.at} ${relative(evidenceDir, file)}`, data: readFileSync(file) });
     db.prepare("UPDATE evidence_runs SET stdout_artifact_id = ?, stderr_artifact_id = ? WHERE id = ?").run(stdoutId, stderrId, runId);
     recordEvent(
       db,
@@ -191,7 +159,7 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
       {
         run: runId,
         at: req.at,
-        label: req.label,
+        label,
         exit: result.exitCode,
         tampered,
       },

@@ -1,17 +1,12 @@
 // The commands an agent records its work with (§27), and how each is called. The briefs and the commands share these lines.
-export const RECORD_COMMANDS = ["handoff", "verdict", "finding", "rule", "amend", "review-finding", "decide", "plan", "check-done"] as const;
+export const RECORD_COMMANDS = ["handoff", "judge", "decide", "plan", "check-done"] as const;
 export type RecordCommand = (typeof RECORD_COMMANDS)[number];
 
 export const RECORD_USAGE: Record<RecordCommand, string> = {
-  handoff:
-    'yagura handoff <success|partial|blocked> [--tier <tier>] --did "…" [--did "…"] [--evidence "…"] [--outside-scope "<path>=<why>"] [--for-others "…"] [--decision "…"] [--note "…"] [--follow-up "…"] [--finding "…"]',
-  verdict: 'yagura verdict <tier> --runs <id,…> [--pack-change "…"] [--decision "…"] [--note "…"]',
-  finding: 'yagura finding <criterion number> <met|unmet> --runs <id,…> [--note "…"]',
-  rule: 'yagura rule T<n> <fix|dismiss|ask> --changes <none | code,acceptance,verify,scope,plan> --reason "…" [--instruction "…"] [--plan-note "…"]',
-  amend:
-    'yagura amend T<n> replace --from "<criterion exactly as ACCEPTANCE words it>" --to "…" | add --text "…" | remove --text "…" | verify --command "…" | scope --path "…" --text "<why>" | clear',
-  "review-finding": 'yagura review-finding <blocking|should|nit> <path>[:<line>] --text "…"',
-  decide: 'yagura decide <action> --reason "…" [--note "…"] [--question "…"] [--to "…"]',
+  handoff: 'yagura handoff done [--did "…"] [--evidence "run:12"] [--decision "…"] [--note "…"] [--follow-up "…"]  |  yagura handoff stuck --reason "…"',
+  judge:
+    'yagura judge approve --runs <id,…>  |  yagura judge changes --finding "<file:line> what is wrong" [--finding "…"]  |  yagura judge ask --question "…"',
+  decide: 'yagura decide <resume|fresh|answer|reply|ask|replan|drop> --reason "…" [--note "…"] [--question "…"] [--reply "…"]',
   plan: "yagura plan --file <delta.json>   (or --file - for stdin, or --json '<delta>' inline)",
   "check-done": "yagura check-done   (says what you still have to record)",
 };

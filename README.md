@@ -7,19 +7,19 @@
 
 # yagura 櫓
 
-Agent orchestration for long-running engineering projects. A deterministic daemon plans work into units, runs coding agents (`claude -p` and others) on them in isolated git worktrees, checks their output with evidence it captures itself, and lands only what is proven.
+Agent orchestration for long-running engineering projects. A deterministic daemon plans work into units, runs coding agents (`claude -p` and others) on them in isolated git worktrees, has a fresh judge check each unit against evidence it captures itself, and merges only what is approved.
 
 It runs on one machine, one daemon per developer, with no cloud services. The target is a developer's own RHEL 9 VM in an air-gapped network. A web dashboard shows everything.
 
 ## How it works
 
-- **The daemon owns the truth; agents propose.** Scheduling, state changes, environment leases, verdicts, and landing are plain code. Agents plan, write, review, and judge evidence, and each call starts fresh with a bounded brief. No agent holds a long conversation.
-- **A project is a goal.** The project lead (the planner) splits it into units, each with a scope, acceptance criteria, and a verify command. Units that do not touch the same files run in parallel.
-- **Proof, not narration.** A worker's claim is not evidence. A different agent, the verifier, runs the unit's checks against the worker's head and trunk. Yagura records the output itself, and a unit counts as verified only at the commit it checked.
-- **Landing goes through the forge.** On GitHub or GitLab, each unit becomes one pull or merge request. Under `merge: human`, you answer a Merge gate. Yagura merges the exact commit it verified, or sees you merge it yourself.
-- **Review comments are handled.** Comments on a PR go to an arbiter, which rules fix, dismiss, or ask you. A worker makes any fix it rules necessary. A comment that would change what the unit must do becomes an amendment, which applies only when you approve it.
-- **Stuck units have a unit lead.** After repeated failures it decides whether to retry, split, investigate, or ask you.
-- **Multi-repo work is supported.** A library and its consumer can be separate repos. The consumer is verified against the library's test build (npm and Maven snapshots) and lands pinned to it. Yagura never releases or deletes anything.
+- **The daemon owns the truth; agents propose.** Scheduling, state changes, recorded runs, merging, and publishing are plain code. Agents plan, build, and judge, and each call starts fresh with a bounded brief. No agent holds a long conversation.
+- **A project is a goal.** The project lead (the planner) splits it into units. A unit is a goal with acceptance criteria, in one repo, with the units it comes after. It never lists files to touch. Units that do not depend on each other run in parallel.
+- **The builder proves its work; a fresh judge decides.** A worker runs its tests through `yagura evidence run`, which the daemon executes and records itself, so a claim of "tests pass" cannot be forged. A judge with no shared context runs the tests again, reads the change, and approves, asks for changes, or asks a question.
+- **One pull request per unit.** It opens as a draft, takes every commit, and comes out of draft the moment the judge approves. Yagura merges that exact commit with a merge commit once CI passes (and, under `merge: human`, once you say so), keeps the branch current with its base, and closes the issues the unit answers.
+- **Stuck units have a unit lead.** Woken only when the unit needs a decision (a stuck worker, a judge's question, a comment on the pull request, failing CI, a conflict), it decides whether to retry, answer, split, drop, or ask you.
+- **Environments hold how things run.** You describe tests, publishing, and deployment in plain words and add values like `NEXUS_URL`. A doctor agent turns that into commands (actions), proves them, and keeps them current; agents and yagura run them.
+- **Multi-repo work is supported.** A library and its consumer can be separate repos. After the library merges, yagura publishes a test build under a version no release can be confused with, and the consumer's worker pins exactly that version. Yagura never releases or deletes anything.
 
 The full spec is [`docs/DESIGN.md`](docs/DESIGN.md). Where the build stands, with the handoff for the next session, is [`docs/STATUS.md`](docs/STATUS.md).
 
@@ -29,7 +29,7 @@ The full spec is [`docs/DESIGN.md`](docs/DESIGN.md). Where the build stands, wit
 - **pnpm 11.**
 - **git 2.38 or newer** (RHEL 9 ships 2.39).
 - **A harness CLI**, `claude` by default, logged in. Agents load your whole harness: plugins, skills, hooks. Yagura assumes the [pstack](https://github.com/ultish/pstack-claude) plugin is installed and set up in the harness.
-- `gh` or `glab` for landing through pull or merge requests.
+- `gh` or `glab` for pull or merge requests.
 
 ## Quick start
 
@@ -55,29 +55,20 @@ For development, `pnpm dev` rebuilds on change, restarts the daemon, and runs Vi
 
 Point `harness.claude.bin` at a wrapper around `packages/core/src/harness/fixtures/fake-agent.mjs` with `FAKE_MODE=engine`. The fake agent emits real Claude stream-json, so the whole pipeline runs for free. Add `FAKE_DELAY_MS` to watch it work.
 
-### End-to-end demo
+### A real run
 
-`scripts/demo-publish-npm.sh` sets up a library and an app in two repos, publishes test builds to your own Nexus, and lands through pull requests on two scratch GitHub repos:
-
-```sh
-NEXUS_USER=admin NEXUS_PASSWORD=... scripts/demo-publish-npm.sh up      # fake agents
-GITHUB=1 REAL=1 NEXUS_USER=... NEXUS_PASSWORD=... scripts/demo-publish-npm.sh up   # real Haiku agents, a few dollars
-scripts/demo-publish-npm.sh status
-scripts/demo-publish-npm.sh down
-```
-
-`scripts/demo-publish.sh` is the Gradle and Reposilite version.
+The core loop was proven on 2026-10-15 with Claude Haiku 5.5 on every role, real GitHub, and real Gradle: a library repo and an app repo, one issue, two units. The library unit added a function and merged; yagura published its test build; the app unit pinned that exact build, printed the result, and merged; the issue closed and the project closed itself, in about nine minutes for $0.11. Set `role.<role>.model` for each role, `project.budget_usd`, register both repos with `yagura repo add`, describe the environment with `yagura env answer`, and start the daemon under `caffeinate -is` on a Mac that must not sleep.
 
 ## Layout
 
-| Path             | What it holds                                                                                                                                            |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/core`  | Domain types, SQLite schema and store, config, git, scope checks, briefs and handoffs, harness adapters, runner, engine. Everything testable lives here. |
-| `apps/daemon`    | The engine, a Hono API with server-sent events, and the static dashboard.                                                                                |
-| `apps/cli`       | The `yagura` command line, which talks to the daemon.                                                                                                    |
-| `apps/web`       | The dashboard (Vite and React). Pure logic is in `src/lib`, pages in `src/pages`, the tower and beacon drawings in `src/scene`.                          |
-| `plugins/yagura` | Role skills loaded into every agent session: worker, verifier, reviewer, arbiter, planner, unit lead, and others.                                        |
-| `docs`           | `DESIGN.md` (the spec), `STATUS.md` (current state), `STATUS-ARCHIVE.md` (history).                                                                      |
+| Path             | What it holds                                                                                                                                                        |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core`  | Domain types, SQLite schema and store, config, git, briefs and hand-offs, harness adapters, runner, judge, unit lead, merge, engine. Everything testable lives here. |
+| `apps/daemon`    | The engine, a Hono API with server-sent events, and the static dashboard.                                                                                            |
+| `apps/cli`       | The `yagura` command line, which talks to the daemon.                                                                                                                |
+| `apps/web`       | The dashboard (Vite and React). Pure logic is in `src/lib`, pages in `src/pages`, the tower and beacon drawings in `src/scene`.                                      |
+| `plugins/yagura` | Role skills loaded into every agent session: worker, judge, unit lead, planner, doctor, watchman.                                                                    |
+| `docs`           | `DESIGN.md` (the spec), `STATUS.md` (current state), `STATUS-ARCHIVE.md` (history).                                                                                  |
 
 ## Development
 
@@ -92,4 +83,4 @@ Tests run against real SQLite and real git. The runner is tested with the fake a
 
 ## Status
 
-Built through the planning, verification, forge landing (GitHub and GitLab), review, and publishing phases, and proven with real agents on a local GitLab, GitHub, and Nexus. Still unproven: a container-image round, a Maven snapshots round, and the air-gapped VM itself. See [`docs/STATUS.md`](docs/STATUS.md) for the list.
+The core loop (goals, one pull request per unit, a fresh judge, recorded runs, a unit lead, merge commits, published test builds, environment actions and the doctor) is built and proven with real agents on real GitHub, and the publish path on the developer's own Nexus. Still unproven: a container-image round, GitLab on the new loop, and the air-gapped VM itself. See [`docs/STATUS.md`](docs/STATUS.md).

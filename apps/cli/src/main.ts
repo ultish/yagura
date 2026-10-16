@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs, type ParseArgsConfig } from "node:util";
 import {
@@ -42,14 +44,10 @@ import {
   addUnitNote,
   evidenceCli,
   agentRefusal,
-  retryState,
-  wakeManager,
   gitRead,
-  landUnit,
   listEvidenceRuns,
   PROVIDERS,
   reapLeases,
-  runVerifyUnit,
   setProjectEnvironment,
   setRepoUrl,
   setRepoForge,
@@ -71,9 +69,10 @@ import {
   missingBriefFields,
   openStore,
   parseClaudeLine,
-  PASS_TIERS,
   resolveSetting,
-  runWorkUnit,
+  runWorkerRound,
+  askLead,
+  getRecord,
   setSetting,
   projectSkillChecks,
   clearSetting,
@@ -84,13 +83,11 @@ import {
   applyPreset,
   applyTemplate,
   deleteValue,
-  environmentNotes,
   getEnvironment,
   listTemplates,
   listValues,
   PRESETS,
   saveTemplate,
-  setEnvironmentNotes,
   setValue,
   exportTemplate,
   importTemplate,
@@ -99,7 +96,6 @@ import {
   PROVIDERS_IMPL,
   transitionUnit,
   type HarnessEvent,
-  type PassTier,
   type ProjectId,
   type RepoId,
   type SettingScope,
@@ -116,16 +112,30 @@ import {
   type PromptRole,
   activeHold,
   clearHold,
+  describeImport,
+  importHome,
+  ANSWER_KEYS,
+  ANSWER_QUESTIONS,
+  type AnswerKey,
+  listActions,
+  setAnswers,
+  saveAction,
+  deleteAction,
+  getAction,
+  runAction,
+  actionAgentCli,
+  requestDoctor,
+  doctorCli,
 } from "@yagura/core";
 
 const USAGE = `yagura — agent orchestration
 
   yagura repo add <git URL> [--id <id>] [--forge gh|glab | --land push]   mirror an existing repo; github.com lands through pull requests, hosts in forge.glab_hosts through merge requests; any other remote needs --forge or --land push
-  yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--min-tier unit-verified] [--issue <ref>...]
+  yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--issue <ref>...]
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
-  yagura unit add <project> --repo <id> --goal <text> --write <glob>... --accept <text>... --verify <cmd>
-                  [--forbid <glob>...] [--context <path>...] [--playbook <name>] [--timebox <seconds>] [--description <text>] [--needs <seq>[:source]...]
-  yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab land through pull/merge requests (forge.repo, forge.merge_method)
+  yagura unit add <project> --repo <id> --goal <text> --accept <text>...
+                  [--context <text>...] [--base <branch>] [--after <unit#>...] [--playbook <name>] [--timebox <seconds>] [--issue <ref>...]
+  yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab merge through pull/merge requests (forge.repo names the repo on the forge)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]
   yagura env set <id> [--capacity <n>] [--name <text>] [--context <kube context>] [--pool <ns,ns> | --pool ""] [--base-url <url>]
@@ -135,7 +145,15 @@ const USAGE = `yagura — agent orchestration
   yagura env value rm <id> <NAME>
   yagura env preset <id> <preset>          add that preset's values; names already set are left alone
   yagura env presets
-  yagura env notes <id> | notes set <id> --text <text>
+  yagura env answers <id>                        the environment's answers: how tests run, publishing, images, running, never, other
+  yagura env answer <id> <tests|publish|images|run|never|other> --text <text>   answer one question in your own words
+  yagura action add <env> <name> --use <when to use it> [--repo <id>] -- <command>   save an action of yours (unproven until it runs)
+  yagura action run <env> <name> [--repo <id>]   run it now on a clean checkout of the repo's main; proves or breaks it
+  yagura action rm <env> <name> [--repo <id>]
+  yagura action propose --name <name> --use <text> [--all] -- <command> | broken --name <name> --reason <text>   (inside an agent session or doctor run)
+  yagura doctor report [--works <text>] [--fails <text>] [--unknown <text>]   (inside a doctor run)
+  yagura env doctor <id> [--note <text>]         ask for a doctor on each repo of the projects in the environment
+  yagura env actions <id>                        the commands agents and yagura may run there, with what each is for and whether it is proven
   yagura template list
   yagura template save <env> <name> [--description <text>] [--ask <NAME>...]
   yagura template apply <name> --id <new env> [--name <text>] [--answer <NAME=value>...]
@@ -151,17 +169,16 @@ const USAGE = `yagura — agent orchestration
   yagura proposal apply|discard <id>
   yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
   yagura daemon                          run yagura for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)
-  yagura drive <project>                 plan, run, verify, and land until nothing is left to do (without a daemon)
+  yagura drive <project>                 plan and run workers until nothing is left to do (without a daemon)
+  yagura import <old home>               copy settings, repos, environments, templates, and conversations from an old home (projects and units stay behind)
   yagura andon <project> --reason <text> | --clear
   yagura limit [--clear]                 whether the account's usage limit holds new agents back, and until when; --clear starts them now
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
-  yagura unit wake <project> <unit#> [--note <text>]   ask a blocked, failed, or rejected unit's unit lead to look at it now
-  yagura unit reject|requeue <project> <unit#> [--note <text>]   requeue lands a blocked unit that is still verified again
-  yagura run <project> <unit#>           run a ready work unit
-  yagura verify <project> <unit#>        run the queued verify unit for a unit in verifying
-  yagura land <project> <unit#>          land a verified unit onto its repo's default branch
-  yagura evidence run --at base|head --label <name> -- <command>   (inside a verify session)
+  yagura unit requeue|drop <project> <unit#> [--note <text>]   requeue puts a stuck unit back to waiting; drop gives it up
+  yagura unit wake <project> <unit#> --note <text>          wake a stuck or ready unit's lead now, with your note
+  yagura run <project> <unit#>           run one worker round of a unit (debugging; the daemon does this)
+  yagura evidence run [--label <name>] [--at base] -- <command>   (inside an agent session: a recorded run on its commit)
   yagura show <project> [unit#]
   yagura git <repo> log|show|ls-tree|diff|grep|blame [args]   read a registered repo's mirror (trunk is origin/<default branch>)
   yagura logs <project> <unit#> [--attempt <n>]
@@ -186,12 +203,51 @@ if ((RECORD_COMMANDS as readonly string[]).includes(command ?? "")) {
   process.stdout.write(result.output);
   process.exit(result.code);
 }
+if (command === "doctor" && rest[0] === "report") {
+  const result = await doctorCli(rest);
+  process.stdout.write(result.output);
+  process.exit(result.code);
+}
+if (command === "action" && (rest[0] === "propose" || rest[0] === "broken")) {
+  const result = await actionAgentCli(rest);
+  process.stdout.write(result.output);
+  process.exit(result.code);
+}
 if (command === "evidence") {
   const result = await evidenceCli(rest);
   process.stdout.write(result.output);
   process.exit(result.code);
 }
+// Help and unknown commands answer before anything opens a home: `yagura daemon --help` once started a real daemon.
+const HELP_FLAGS = new Set(["--help", "-h"]);
+const usageOf = (cmd: string) => {
+  const out: string[] = [];
+  let mine = false;
+  for (const l of USAGE.split("\n").slice(1)) {
+    const named = /^ {2}yagura ([\w-]+)/.exec(l);
+    if (named) mine = named[1] === cmd;
+    else if (!/^ {3,}/.test(l)) mine = false;
+    if (mine) out.push(l);
+  }
+  return out.length ? out.join("\n") : null;
+};
+if (!command || command === "help" || HELP_FLAGS.has(command)) {
+  console.log((rest[0] && usageOf(rest[0])) ?? USAGE);
+  process.exit(0);
+}
+if (rest.some((a) => HELP_FLAGS.has(a))) {
+  console.log(usageOf(command) ?? USAGE);
+  process.exit(0);
+}
+if (!usageOf(command)) {
+  process.stderr.write(`yagura: no command "${command}"\n${USAGE}\n`);
+  process.exit(2);
+}
 if (command === "daemon") {
+  if (rest.length) {
+    process.stderr.write(`yagura daemon takes no arguments (got ${rest.join(" ")}); set YAGURA_HOME, YAGURA_BIND, YAGURA_PORT instead\n`);
+    process.exit(2);
+  }
   const { startDaemon } = await import("@yagura/daemon");
   await startDaemon([process.execPath, fileURLToPath(import.meta.url)]);
   process.exit(0);
@@ -293,10 +349,7 @@ async function main() {
         throw e;
       }
       const { repo, inspection } = registered!;
-      console.log(
-        `repo ${repo.id} → ${repo.url} (${repo.defaultBranch} at ${inspection.trunk.slice(0, 10)}, verify pack ${repo.packStatus}); lands ${describeRoute(repo)}`,
-      );
-      for (const n of inspection.notes) console.log(`  note: ${n}`);
+      console.log(`repo ${repo.id} → ${repo.url} (${repo.defaultBranch} at ${inspection.trunk.slice(0, 10)}); lands ${describeRoute(repo)}`);
       return;
     }
     case "project": {
@@ -305,7 +358,6 @@ async function main() {
         predicate: { type: "string" },
         repo: { type: "string", multiple: true },
         name: { type: "string" },
-        "min-tier": { type: "string", default: "unit-verified" },
         env: { type: "string" },
         merge: { type: "string" },
         issue: { type: "string", multiple: true },
@@ -316,7 +368,7 @@ async function main() {
       const id = positionals[1];
       if (positionals[0] === "skills" && id) {
         const checks = projectSkillChecks(db, boot, id as ProjectId);
-        if (!checks.length) console.log(`project ${id} names no project skills (set skills.scaffold, skills.work, skills.pack, skills.verify)`);
+        if (!checks.length) console.log(`project ${id} names no project skills (set skills.scaffold, skills.work)`);
         for (const c of checks)
           console.log(
             `${c.installed ? "✓" : "✗"} ${c.skill}  ${c.purposes.join(", ")} · ${c.repos.join(", ")}${c.installed ? "" : "  not installed where agents run"}`,
@@ -342,14 +394,11 @@ async function main() {
         return;
       }
       if (positionals[0] !== "new" || !id || !values.goal || !values.predicate || !many(values.repo).length) fail(USAGE);
-      const minTier = values["min-tier"] as string;
-      if (!(PASS_TIERS as readonly string[]).includes(minTier)) fail(`--min-tier must be one of ${PASS_TIERS.join(", ")}`);
       const p = addProject(db, {
         id: id!,
         name: (values.name as string) ?? id!,
         goal: values.goal as string,
         predicate: values.predicate as string,
-        minTier: minTier as PassTier,
         repos: many(values.repo) as RepoId[],
         refs: many(values.issue),
         after: many(values.after) as ProjectId[],
@@ -364,68 +413,52 @@ async function main() {
       const { positionals, values } = args({
         repo: { type: "string" },
         goal: { type: "string" },
-        write: { type: "string", multiple: true },
-        forbid: { type: "string", multiple: true },
         accept: { type: "string", multiple: true },
-        verify: { type: "string" },
         context: { type: "string", multiple: true },
+        base: { type: "string" },
+        after: { type: "string", multiple: true },
         playbook: { type: "string" },
         timebox: { type: "string" },
         note: { type: "string" },
         issue: { type: "string", multiple: true },
-        needs: { type: "string", multiple: true },
-        description: { type: "string" },
       });
       const projectId = positionals[1] as ProjectId | undefined;
       if (positionals[0] === "wake" && projectId && positionals[2]) {
-        const woken = wakeManager(db, getUnitBySeq(db, projectId, Number(positionals[2])), values.note ?? "");
-        if (!woken.ok) fail(woken.reason);
-        console.log(`U${positionals[2]}: its unit lead is looking at it (the daemon runs it)`);
+        const u = getUnitBySeq(db, projectId, Number(positionals[2]));
+        const refused = askLead(db, u, values.note ?? "Look at this unit now.");
+        if (refused) fail(refused);
+        console.log(`U${u.seq}'s unit lead is woken; it reads your note first`);
         return;
       }
-      if ((positionals[0] === "reject" || positionals[0] === "requeue") && projectId && positionals[2]) {
+      if ((positionals[0] === "requeue" || positionals[0] === "drop") && projectId && positionals[2]) {
         const u = getUnitBySeq(db, projectId, Number(positionals[2]));
         if (values.note) addUnitNote(db, u.id, values.note);
-        const direct = positionals[0] === "requeue" && (u.state === "blocked" || u.state === "failed");
-        if (!direct && u.state !== "rejected") transitionUnit(db, u.id, "rejected", { by: "operator", note: values.note ?? null });
-        if (positionals[0] === "requeue") transitionUnit(db, u.id, direct ? retryState(db, u) : "ready", { by: "operator" });
+        if (positionals[0] === "requeue") {
+          if (u.state !== "stuck") fail(`U${u.seq} is ${u.state}; only a stuck unit can be requeued`);
+          transitionUnit(db, u.id, "waiting", { by: "operator" });
+        } else transitionUnit(db, u.id, "dropped", { by: "operator", note: values.note ?? null });
         console.log(`U${u.seq} → ${getUnitBySeq(db, projectId, u.seq).state}`);
         return;
       }
       if (positionals[0] !== "add" || !projectId || !values.repo) fail(USAGE);
-      const fields = {
-        goal: (values.goal as string) ?? "",
-        scope: { write: many(values.write), forbid: many(values.forbid) },
-        acceptance: many(values.accept),
-        verify: (values.verify as string) ?? "",
-      };
+      const fields = { goal: (values.goal as string) ?? "", acceptance: many(values.accept) };
+      const missing = missingBriefFields(fields);
+      if (missing.length) fail(`a unit needs ${missing.join(" and ")}`);
       const u = addUnit(db, {
         projectId: projectId!,
         type: "work",
         repoId: values.repo as RepoId,
+        base: (values.base as string | undefined) ?? null,
         goal: fields.goal,
-        description: (values.description as string | undefined) ?? null,
-        writeScope: fields.scope.write,
-        forbidScope: fields.scope.forbid,
         acceptance: fields.acceptance,
-        verify: fields.verify || null,
         context: many(values.context),
+        after: many(values.after).map((n) => getUnitBySeq(db, projectId!, Number(n.replace(/^U/i, ""))).id),
         playbook: (values.playbook as string) ?? null,
         refs: many(values.issue),
         timeboxSeconds: values.timebox ? Number(values.timebox) : resolveSetting(db, "timebox.work_seconds", { projectId }).value,
         maxAttempts: resolveSetting(db, "max_attempts", { projectId }).value,
       });
-      for (const n of many(values.needs)) {
-        const [seq, kind] = n.replace(/^U/i, "").split(":");
-        addDep(db, { unitId: u.id, dependsOn: getUnitBySeq(db, projectId!, Number(seq)).id, kind: kind === "source" ? "needs-source" : "needs-landed" });
-      }
-      const missing = missingBriefFields(fields);
-      if (missing.length) {
-        console.log(`U${u.seq} created as draft; brief is missing ${missing.join(", ")}`);
-        return;
-      }
-      transitionUnit(db, u.id, "ready");
-      console.log(`U${u.seq} ready: ${u.goal}`);
+      console.log(`U${u.seq} waiting: ${u.goal}`);
       return;
     }
     case "run": {
@@ -434,35 +467,18 @@ async function main() {
       const unit = getUnitBySeq(db, projectId as ProjectId, Number(seq));
       console.log(`running ${projectId}/U${unit.seq}: ${unit.goal}`);
       await reapLeases(db, boot);
-      const attempt = await runWorkUnit(agentCtx(), unit.id);
+      if (unit.state === "waiting") transitionUnit(db, unit.id, "building", { round: { kind: "first" } });
+      await runWorkerRound(agentCtx(), unit.id);
+      const attempt = listAttempts(db, unit.id)
+        .filter((a) => a.role === "worker")
+        .at(-1)!;
       const after = getUnitBySeq(db, projectId as ProjectId, Number(seq));
       console.log(
         `\nU${after.seq} → ${after.state} · attempt ${attempt.n} ${attempt.state}` +
-          `${attempt.handoffStatus ? ` (${attempt.handoffStatus}, self-reported ${attempt.selfTier ?? "no tier"})` : ""}` +
+          `${attempt.handoffStatus ? ` (${attempt.handoffStatus})` : ""}` +
           `${attempt.failureMode ? ` · failure: ${attempt.failureMode}` : ""}` +
-          `\n  branch ${attempt.branch} @ ${attempt.headSha?.slice(0, 10)} · worktree ${attempt.worktreePath}` +
-          `\n  handoff ${layout(boot).handoff(projectId as ProjectId, after.seq, attempt.n)}` +
-          (after.state === "verifying" ? `\n  next: yagura verify ${projectId} ${after.seq}` : ""),
-      );
-      return;
-    }
-    case "verify": {
-      const [projectId, seq] = rest;
-      if (!projectId || !seq) fail(USAGE);
-      const target = getUnitBySeq(db, projectId as ProjectId, Number(seq));
-      const verifyUnit = listUnits(db, target.projectId)
-        .filter((u) => u.type === "verify" && u.targetUnitId === target.id && u.state === "ready")
-        .at(-1);
-      if (!verifyUnit) fail(`U${target.seq} has no ready verify unit (it is ${target.state})`);
-      await reapLeases(db, boot);
-      console.log(`verifying ${projectId}/U${target.seq} with U${verifyUnit!.seq}`);
-      const result = await runVerifyUnit(agentCtx(), verifyUnit!.id);
-      const after = getUnitBySeq(db, projectId as ProjectId, target.seq);
-      console.log(
-        `\nverdict: ${result.decision.outcome}${result.decision.tier ? ` (${result.decision.tier})` : ""} — ${result.decision.reason}` +
-          `\n  trunk: ${result.decision.trunkOutcome ?? "-"}\n  head:  ${result.decision.headOutcome ?? "-"}` +
-          `\n  cited: ${result.decision.citedRunIds.map((id) => `run:${id}`).join(", ") || "none"}` +
-          `\nU${after.seq} → ${after.state}${after.state === "verified" ? `\n  next: yagura land ${projectId} ${after.seq}` : ""}`,
+          `\n  branch ${attempt.branch} @ ${attempt.headSha?.slice(0, 10)} · checkout ${attempt.worktreePath}` +
+          `\n  handoff ${layout(boot).handoff(projectId as ProjectId, after.seq, attempt.n)}`,
       );
       return;
     }
@@ -497,19 +513,13 @@ async function main() {
       for (const unit of units) {
         const t = traceUnit(db, boot, unit);
         console.log(`\n${t.project.id}/U${unit.seq} [${unit.state}] ${unit.goal}`);
-        if (unit.landedSha) console.log(`  landed as ${unit.landedSha}`);
+        if (unit.mergedSha) console.log(`  merged as ${unit.mergedSha}`);
         if (unit.refs.length || t.project.refs.length) console.log(`  refs: ${[...new Set([...t.project.refs, ...unit.refs])].join(", ")}`);
-        for (const a of t.work)
+        for (const a of t.attempts)
           console.log(
-            `  work attempt ${a.n} (attempt id ${a.id}): ${a.state} ${a.handoffStatus ?? a.failureMode ?? ""} · ${a.model ?? a.harness}` +
+            `  attempt ${a.n} (attempt id ${a.id}): ${a.role ?? "agent"} ${a.state} ${a.handoffStatus ?? a.failureMode ?? ""} · ${a.model ?? a.harness}` +
               `${a.pluginVersions.pstack ? ` · pstack ${a.pluginVersions.pstack}` : ""} · skills ${a.skills.join(", ") || "none"} · ${a.branch ?? ""}`,
           );
-        for (const v of t.verifications) {
-          console.log(`  verified by ${jobLabel(db, v.unit as never)} [${v.unit.state}]`);
-          for (const r of v.runs)
-            console.log(`    run:${r.id} ${r.label}@${r.at} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}${r.tampered ? " TAMPERED" : ""}`);
-        }
-        for (const v of t.verdicts) console.log(`  verdict ${v.id}: ${v.tier} @ ${v.headSha.slice(0, 10)}${v.voided ? ` (void: ${v.voidReason})` : " (live)"}`);
         for (const h of t.handoffPaths) console.log(`  handoff ${h}`);
       }
       return;
@@ -520,6 +530,15 @@ async function main() {
       if (!projectId || (!values.reason && !values.clear)) fail(USAGE);
       setAndon(db, projectId as ProjectId, values.clear ? null : values.reason!);
       console.log(values.clear ? `andon cleared on ${projectId}` : `andon raised on ${projectId}: ${values.reason}`);
+      return;
+    }
+    case "import": {
+      const [source] = rest;
+      if (!source) fail(USAGE);
+      const dir = source!.replace(/^~(?=\/|$)/, homedir());
+      const path = dir.endsWith(".db") ? dir : join(dir, "yagura.db");
+      if (!existsSync(path)) fail(`no yagura database at ${path}`);
+      console.log(describeImport(importHome(db, path)));
       return;
     }
     case "limit": {
@@ -604,14 +623,6 @@ async function main() {
       }
       fail(USAGE);
     }
-    case "land": {
-      const [projectId, seq] = rest;
-      if (!projectId || !seq) fail(USAGE);
-      const unit = getUnitBySeq(db, projectId as ProjectId, Number(seq));
-      const result = await landUnit({ db, boot }, unit.id);
-      console.log(`U${unit.seq} ${result.outcome}: ${result.reason}${result.landedSha ? ` @ ${result.landedSha.slice(0, 10)}` : ""}`);
-      return;
-    }
     case "env": {
       const { positionals, values } = args({
         provider: { type: "string" },
@@ -659,9 +670,7 @@ async function main() {
       }
       if (sub === "values" && id) {
         getEnvironment(db, id as EnvironmentId);
-        const notes = environmentNotes(db, id as EnvironmentId);
         const listed = listValues(db, id as EnvironmentId);
-        if (notes) console.log(notes);
         if (!listed.length) console.log(`environment ${id} has no values`);
         for (const v of listed) printValue(v);
         return;
@@ -695,17 +704,27 @@ async function main() {
         for (const preset of PRESETS) console.log(`${preset.id.padEnd(14)} ${preset.values.map((v) => v.name).join(", ")}`);
         return;
       }
-      if (sub === "notes" && a === "set" && b) {
-        const text = values.text;
-        if (typeof text !== "string") fail("env notes set needs --text");
-        else setEnvironmentNotes(db, b as EnvironmentId, text);
-        console.log(`environment ${b} notes saved`);
+      if (sub === "answer" && a && b) {
+        if (typeof values.text !== "string") fail("env answer needs --text");
+        setAnswers(db, a as EnvironmentId, { [b]: values.text });
+        console.log(`${a}: ${ANSWER_QUESTIONS[b as AnswerKey]} saved`);
         return;
       }
-      if (sub === "notes" && id && a !== "set") {
-        getEnvironment(db, id as EnvironmentId);
-        const notes = environmentNotes(db, id as EnvironmentId);
-        console.log(notes || `environment ${id} has no notes`);
+      if (sub === "doctor" && id) {
+        requestDoctor(db, id as EnvironmentId, values.note ?? "");
+        console.log(`asked for a doctor on every repo of the projects in ${id}; the daemon starts it`);
+        return;
+      }
+      if (sub === "answers" && id) {
+        const answers = getEnvironment(db, id as EnvironmentId).answers;
+        for (const k of ANSWER_KEYS) console.log(`${k.padEnd(8)} ${ANSWER_QUESTIONS[k]} ${answers[k] || "(not answered)"}`);
+        return;
+      }
+      if (sub === "actions" && id) {
+        const listed = listActions(db, id as EnvironmentId);
+        if (!listed.length) console.log(`environment ${id} has no actions yet; the doctor makes them from its answers`);
+        for (const x of listed)
+          console.log(`${x.name} [${x.repoId ?? "every repo"}] ${x.state}${x.reason ? ` (${x.reason})` : ""}\n  ${x.use}\n  $ ${x.command}`);
         return;
       }
       if (sub !== "add" || !id || !values.provider) fail(USAGE);
@@ -739,17 +758,15 @@ async function main() {
           ).map((r) => [r.id, r.usd]),
         );
         const total = [...costs.values()].reduce((a, b) => a + b, 0);
-        console.log(
-          `${project.id} [${project.state}] ${project.goal}\n  predicate: ${project.predicate} · min tier: ${project.minTier} · agent cost $${total.toFixed(2)}`,
-        );
+        console.log(`${project.id} [${project.state}] ${project.goal}\n  predicate: ${project.predicate} · agent cost $${total.toFixed(2)}`);
         const units = listUnits(db, project.id);
         for (const u of units.filter(isBuild)) {
-          const own = units.filter((j) => j.targetUnitId === u.id).reduce((sum, j) => sum + (costs.get(j.id) ?? 0), costs.get(u.id) ?? 0);
+          const own = costs.get(u.id) ?? 0;
           console.log(`  U${u.seq}  ${u.state.padEnd(10)} ${u.type.padEnd(6)} ${`$${own.toFixed(2)}`.padStart(6)}  ${u.goal}`);
         }
         const agents = db
           .prepare(
-            `SELECT a.agent_no, a.state, a.cost_usd, a.started_at, u.type, u.seq, t.seq AS target FROM attempts a JOIN units u ON u.id = a.unit_id LEFT JOIN units t ON t.id = u.target_unit_id
+            `SELECT a.agent_no, a.state, a.role, a.cost_usd, a.started_at, u.type, u.seq FROM attempts a JOIN units u ON u.id = a.unit_id
              WHERE u.project_id = ? ORDER BY a.agent_no`,
           )
           .all(project.id) as {
@@ -758,35 +775,33 @@ async function main() {
           cost_usd: number;
           started_at: string | null;
           type: string;
+          role: string | null;
           seq: number;
-          target: number | null;
         }[];
         console.log("  agents (cost above includes the agents that worked on each unit):");
         for (const a of agents)
           console.log(
-            `  A${a.agent_no}  ${a.state.padEnd(10)} ${(a.type === "plan" ? "planner" : a.type).padEnd(13)} ${`$${a.cost_usd.toFixed(2)}`.padStart(6)}  ${a.type === "plan" ? "plan" : `for U${a.target ?? a.seq}`}  ${a.started_at ?? ""}`,
+            `  A${a.agent_no}  ${a.state.padEnd(10)} ${(a.role ?? a.type).padEnd(13)} ${`$${a.cost_usd.toFixed(2)}`.padStart(6)}  ${a.type === "plan" ? "plan" : `for U${a.seq}`}  ${a.started_at ?? ""}`,
           );
         return;
       }
       const u = getUnitBySeq(db, project.id, Number(seq));
-      console.log(`U${u.seq} [${u.state}] ${u.goal}\n  write: ${u.writeScope.join(", ")}\n  verify: ${u.verify}`);
+      console.log(`U${u.seq} [${u.state}] ${u.goal}\n  accept: ${u.acceptance.join(" / ")}${u.after.length ? `\n  after: ${u.after.length} unit(s)` : ""}`);
       if (u.notes.length) console.log(`  notes:\n${u.notes.map((n) => `    - ${n}`).join("\n")}`);
+      const moves = db.prepare("SELECT json_extract(data_json, '$.to') AS to_ FROM events WHERE type = 'unit.state' AND unit_id = ? ORDER BY id").all(u.id) as {
+        to_: string;
+      }[];
+      console.log(`  states: waiting → ${moves.map((m) => m.to_).join(" → ")}`);
       for (const a of listAttempts(db, u.id)) {
+        const verdict = a.role === "judge" ? getRecord(db, a.id, "judge") : null;
         console.log(
-          `  attempt ${a.n}: ${a.state} ${a.handoffStatus ?? ""} ${a.failureMode ?? ""} · ${a.model ?? "?"} · $${a.costUsd.toFixed(2)} · ctx peak ${a.contextPeak} · ${a.branch ?? a.headSha?.slice(0, 10) ?? ""}` +
+          `  attempt ${a.n} (${a.role ?? "?"}): ${a.state} ${verdict?.verdict ?? a.handoffStatus ?? ""} ${a.failureMode ?? ""} · ${a.model ?? "?"} · $${a.costUsd.toFixed(2)} · ctx peak ${a.contextPeak} · ${a.headSha?.slice(0, 10) ?? ""}` +
+            (verdict?.findings.length ? `\n    findings: ${verdict.findings.join(" / ")}` : "") +
             (a.missingSkills.length ? `\n    skipped required skills: ${a.missingSkills.join(", ")}` : ""),
         );
         for (const r of listEvidenceRuns(db, a.id))
           console.log(`    run:${r.id} ${r.label}@${r.at} ${r.timedOut ? "timed out" : `exit ${r.exitCode}`}${r.tampered ? " TAMPERED" : ""}`);
       }
-      for (const v of db.prepare("SELECT id, tier, head_sha, voided_at, void_reason FROM verdicts WHERE unit_id = ? ORDER BY id").all(u.id) as {
-        id: number;
-        tier: string;
-        head_sha: string;
-        voided_at: string | null;
-        void_reason: string | null;
-      }[])
-        console.log(`  verdict ${v.id}: ${v.tier} @ ${v.head_sha.slice(0, 10)}${v.voided_at ? ` (void: ${v.void_reason})` : " (live)"}`);
       return;
     }
     case "git": {
@@ -953,6 +968,39 @@ async function main() {
       if (sub === "set" && more[0] && (values.autonomy === "go" || values.autonomy === "propose")) {
         setThreadAutonomy(db, Number(more[0]), values.autonomy);
         console.log(`thread ${more[0]} autonomy → ${values.autonomy}`);
+        return;
+      }
+      fail(USAGE);
+      return;
+    }
+    case "action": {
+      const { positionals, values } = args({ use: { type: "string" }, repo: { type: "string" } });
+      const [sub, envId, name, ...command] = positionals;
+      if (!sub || !envId || !name) fail(USAGE);
+      const environmentId = envId as EnvironmentId;
+      const repoId = (values.repo ?? null) as RepoId | null;
+      const named = () =>
+        listActions(db, environmentId).find((x) => x.name === name && (x.repoId === repoId || (!values.repo && x.repoId !== null))) ??
+        fail(`no action ${name}${repoId ? ` for ${repoId}` : ""} in ${environmentId}`);
+      if (sub === "add") {
+        if (!values.use || !command.length) fail('action add needs --use "<when to use it>" and the command after --');
+        const saved = saveAction(db, { environmentId, repoId, name: name!, use: values.use!, command: command.join(" ") });
+        console.log(`${saved.name} saved in ${environmentId} (${saved.state}); prove it with \`yagura action run ${environmentId} ${saved.name}\``);
+        return;
+      }
+      if (sub === "rm") {
+        deleteAction(db, named().id);
+        console.log(`removed ${name} from ${environmentId}`);
+        return;
+      }
+      if (sub === "run") {
+        for (const r of await runAction({ db, boot }, named().id, repoId, { by: "you" }))
+          console.log(
+            `${r.exitCode === 0 && !r.timedOut ? "✓" : "✗"} ${r.command} on ${r.repoId}@${r.sha.slice(0, 7)} (${r.timedOut ? "timed out" : `exit ${r.exitCode}`})\n${r.output.trim().split("\n").slice(-5).join("\n")}`,
+          );
+        const after = getAction(db, named().id);
+        console.log(`${after.name}: ${after.state}${after.reason ? ` (${after.reason})` : ""}`);
+        if (after.state === "broken") process.exitCode = 1;
         return;
       }
       fail(USAGE);
