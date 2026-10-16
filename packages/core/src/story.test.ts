@@ -51,7 +51,7 @@ beforeEach(async () => {
   await commitAll(seed, "init", { name: "t", email: "t@t" });
   const origin = join(root, "origin.git");
   await git(["clone", "--quiet", "--bare", seed, origin]);
-  boot = { home: join(root, "home"), packsDir: "", skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
+  boot = { home: join(root, "home"), skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
   ctx = { db, boot, adapters: { claude: fake }, cli: [process.execPath, "--import", tsx, fixtures("evidence-shim.ts")] };
   addRepo(db, { id: "testbed", url: origin, defaultBranch: "main" });

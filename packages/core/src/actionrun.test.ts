@@ -27,7 +27,7 @@ beforeEach(async () => {
   head = await git(["rev-parse", "HEAD"], { cwd: seed });
   const origin = join(root, "lib.git");
   await git(["clone", "--quiet", "--bare", seed, origin]);
-  const boot: Bootstrap = { home: join(root, "home"), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+  const boot: Bootstrap = { home: join(root, "home"), skillsDir: "", bind: "", port: 0, tokenFile: "" };
   ctx = { db: openStore(layout(boot).db), boot };
   nexus = join(root, "nexus");
   mkdirSync(nexus);

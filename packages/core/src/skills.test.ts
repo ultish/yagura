@@ -30,7 +30,7 @@ beforeEach(() => {
     join(claude, "plugins", "installed_plugins.json"),
     JSON.stringify({ version: 2, plugins: { "pstack@pstack-claude": [{ installPath: pstack }] } }),
   );
-  boot = { home: join(root, "home"), packsDir: "", skillsDir: join(root, "yagura"), bind: "", port: 0, tokenFile: "" };
+  boot = { home: join(root, "home"), skillsDir: join(root, "yagura"), bind: "", port: 0, tokenFile: "" };
   skill(join(boot.skillsDir, "skills"), "yagura-worker");
   db = openStore(":memory:");
   addRepo(db, { id: "a", url: "/a", defaultBranch: "main" });

@@ -132,7 +132,7 @@ describe("watchman turns", () => {
 
   beforeEach(() => {
     const root = mkdtempSync(join(tmpdir(), "yagura-watchman-"));
-    boot = { home: join(root, "home"), packsDir: "", skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
+    boot = { home: join(root, "home"), skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
     db = openStore(layout(boot).db);
     ctx = { db, boot, adapters: { claude: fake }, cli: [process.execPath, "--import", tsx, fixtures("evidence-shim.ts")] };
     process.env.FAKE_MODE = "engine";
@@ -585,7 +585,7 @@ describe("specs in the store", () => {
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
     const home = mkdtempSync(join(tmpdir(), "yagura-spec-"));
-    const b = { home, packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+    const b = { home, skillsDir: "", bind: "", port: 0, tokenFile: "" };
     const d = openStore(":memory:");
     addRepo(d, { id: "r", url: "file:///x", defaultBranch: "main" });
     addProject(d, { id: "sp" as ProjectId, name: "S", goal: "g", predicate: "p", repos: ["r" as never] });

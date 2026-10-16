@@ -53,7 +53,7 @@ beforeEach(async () => {
   writeFileSync(join(origin, "app/orders.py"), "x = 1\n");
   await git(["init", "--quiet", "-b", "main"], { cwd: origin });
   await commitAll(origin, "init", { name: "t", email: "t@t" });
-  boot = { home: join(root, "home"), packsDir: "", skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
+  boot = { home: join(root, "home"), skillsDir: join(root, "skills"), bind: "", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
   addRepo(db, { id: "testbed", url: origin, defaultBranch: "main" });
   addProject(db, { id: project, name: "P", goal: "g", predicate: "pred", repos: ["testbed" as RepoId] });

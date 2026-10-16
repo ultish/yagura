@@ -14,7 +14,7 @@ let boot: Bootstrap;
 const project = "p" as ProjectId;
 
 beforeEach(() => {
-  boot = { home: mkdtempSync(join(tmpdir(), "yagura-prompts-")), packsDir: "", skillsDir: BUNDLED_SKILLS_DIR, bind: "", port: 0, tokenFile: "" };
+  boot = { home: mkdtempSync(join(tmpdir(), "yagura-prompts-")), skillsDir: BUNDLED_SKILLS_DIR, bind: "", port: 0, tokenFile: "" };
   db = openStore(":memory:");
   addRepo(db, { id: "r", url: "file:///nowhere", defaultBranch: "main" });
   addProject(db, { id: project, name: "P", goal: "g", predicate: "p", repos: ["r" as RepoId] });

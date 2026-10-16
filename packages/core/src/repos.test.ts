@@ -32,7 +32,7 @@ async function bare(name: string, opts: { branch?: string } = {}): Promise<strin
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "yagura-repos-"));
-  boot = { home: join(root, "home"), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+  boot = { home: join(root, "home"), skillsDir: "", bind: "", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
 });
 

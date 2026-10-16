@@ -13,7 +13,7 @@ let boot: Bootstrap;
 const env = "local" as EnvironmentId;
 
 beforeEach(() => {
-  boot = { home: mkdtempSync(join(tmpdir(), "yagura-lease-")), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+  boot = { home: mkdtempSync(join(tmpdir(), "yagura-lease-")), skillsDir: "", bind: "", port: 0, tokenFile: "" };
   db = openStore(":memory:");
   addRepo(db, { id: "r", url: "file:///r", defaultBranch: "main" });
   addProject(db, { id: "p", name: "P", goal: "g", predicate: "x", repos: ["r" as RepoId] });

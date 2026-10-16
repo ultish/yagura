@@ -14,7 +14,7 @@ import { addEnvironment, addProject, addRepo, addUnit, createAttempt, openStore,
 describe("evidence run", () => {
   it("refuses a caller that does not hold the attempt's token", async () => {
     const home = mkdtempSync(join(tmpdir(), "yagura-evtoken-"));
-    const db = openStore(layout({ home, packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" }).db);
+    const db = openStore(layout({ home, skillsDir: "", bind: "", port: 0, tokenFile: "" }).db);
     addRepo(db, { id: "r", url: "/r", defaultBranch: "main" });
     addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: ["r" as RepoId] });
     const unit = addUnit(db, {
@@ -46,7 +46,7 @@ describe("evidence run", () => {
 
   it("runs a recorded command with the environment's values", async () => {
     const home = mkdtempSync(join(tmpdir(), "yagura-evenv-"));
-    const boot = { home, packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+    const boot = { home, skillsDir: "", bind: "", port: 0, tokenFile: "" };
     const db = openStore(layout(boot).db);
     const checkout = mkdtempSync(join(tmpdir(), "yagura-evenv-checkout-"));
     writeFileSync(join(checkout, "f.txt"), "x");

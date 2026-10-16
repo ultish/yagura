@@ -34,7 +34,7 @@ beforeEach(async () => {
   shas = { init, trailered, landed };
   const origin = join(root, "origin.git");
   await git(["clone", "--quiet", "--bare", seed, origin]);
-  boot = { home: join(root, "home"), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+  boot = { home: join(root, "home"), skillsDir: "", bind: "", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
   addRepo(db, { id: repo, url: origin, defaultBranch: "main" });
   addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: [repo] });

@@ -300,7 +300,7 @@ describe("bootstrap", () => {
     const home = mkdtempSync(join(tmpdir(), "yagura-home-"));
     writeFileSync(join(home, "yagura.yaml"), "port: 8100\nbind: devvm.local\n");
     const b = loadBootstrap({ YAGURA_HOME: home, YAGURA_PORT: "9000" });
-    expect(b).toMatchObject({ home, port: 9000, bind: "devvm.local", packsDir: join(home, "packs") });
+    expect(b).toMatchObject({ home, port: 9000, bind: "devvm.local" });
     expect(b.skillsDir).toMatch(/plugins\/yagura$/);
   });
 });

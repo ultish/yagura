@@ -15,7 +15,7 @@ let boot: Bootstrap;
 const dev = "dev" as EnvironmentId;
 
 beforeEach(() => {
-  boot = { home: mkdtempSync(join(tmpdir(), "yagura-values-")), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+  boot = { home: mkdtempSync(join(tmpdir(), "yagura-values-")), skillsDir: "", bind: "", port: 0, tokenFile: "" };
   db = openStore(":memory:");
   addEnvironment(db, { id: "dev", name: "dev", provider: "local-process", capacity: 1 });
 });

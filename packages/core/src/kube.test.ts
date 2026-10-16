@@ -21,7 +21,7 @@ beforeEach(() => {
   mkdirSync(join(kube, "ns"), { recursive: true });
   process.env.FAKE_KUBE_DIR = kube;
   delete process.env.FAKE_KUBE_DOWN;
-  boot = { home: join(root, "home"), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+  boot = { home: join(root, "home"), skillsDir: "", bind: "", port: 0, tokenFile: "" };
   db = openStore(":memory:");
   addRepo(db, { id: "r", url: "file:///r", defaultBranch: "main" });
   addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: ["r" as RepoId] });

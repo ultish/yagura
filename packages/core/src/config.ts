@@ -9,7 +9,6 @@ import { now, type Db } from "./store.js";
 
 export interface Bootstrap {
   home: string;
-  packsDir: string;
   skillsDir: string;
   bind: string;
   port: number;
@@ -19,7 +18,6 @@ export interface Bootstrap {
 const BootstrapFile = z
   .object({
     home: z.string(),
-    packs_dir: z.string(),
     skills_dir: z.string(),
     bind: z.string(),
     port: z.number().int().positive(),
@@ -35,7 +33,6 @@ export function loadBootstrap(env: NodeJS.ProcessEnv = process.env): Bootstrap {
   const file = existsSync(filePath) ? BootstrapFile.parse(parseYaml(readFileSync(filePath, "utf8")) ?? {}) : {};
   return {
     home,
-    packsDir: env.YAGURA_PACKS_DIR ?? file.packs_dir ?? join(home, "packs"),
     skillsDir: env.YAGURA_SKILLS_DIR ?? file.skills_dir ?? BUNDLED_SKILLS_DIR,
     bind: env.YAGURA_BIND ?? file.bind ?? "127.0.0.1",
     port: env.YAGURA_PORT ? Number(env.YAGURA_PORT) : (file.port ?? 7300),

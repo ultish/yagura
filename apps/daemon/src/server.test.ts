@@ -33,7 +33,7 @@ let app: ReturnType<typeof createApp>;
 const project = "orders" as ProjectId;
 
 beforeEach(() => {
-  boot = { home: mkdtempSync(join(tmpdir(), "yagura-api-")), packsDir: "", skillsDir: "", bind: "0.0.0.0", port: 0, tokenFile: "" };
+  boot = { home: mkdtempSync(join(tmpdir(), "yagura-api-")), skillsDir: "", bind: "0.0.0.0", port: 0, tokenFile: "" };
   db = openStore(layout(boot).db);
   addRepo(db, { id: "testbed", url: "file:///tb", defaultBranch: "main" });
   addProject(db, {

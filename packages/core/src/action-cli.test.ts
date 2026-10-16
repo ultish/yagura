@@ -21,7 +21,7 @@ describe("yagura action propose and broken, from an agent's session", () => {
     const origin = join(root, "lib.git");
     await git(["clone", "--quiet", "--bare", seed, origin]);
     const home = join(root, "home");
-    const db = openStore(layout({ home, packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" }).db);
+    const db = openStore(layout({ home, skillsDir: "", bind: "", port: 0, tokenFile: "" }).db);
     addRepo(db, { id: "lib", url: origin, defaultBranch: "main" });
     addEnvironment(db, { id: "dev", name: "dev", provider: "local-process", capacity: 1 });
     addProject(db, { id: "p", name: "p", goal: "g", predicate: "x", repos: ["lib" as RepoId] });
@@ -56,7 +56,7 @@ describe("yagura action propose and broken, from an agent's session", () => {
       output: "build-image marked broken; the doctor looks at it next\n",
     });
 
-    const after = openStore(layout({ home, packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" }).db);
+    const after = openStore(layout({ home, skillsDir: "", bind: "", port: 0, tokenFile: "" }).db);
     expect(listActions(after, "dev" as EnvironmentId).map((a) => [a.name, a.repoId, a.state, a.author, a.reason])).toEqual([
       ["build-image", null, "broken", "you", "jib: unauthorized at localhost:8802"],
       ["has-gradle", "lib", "proven", "agent", null],

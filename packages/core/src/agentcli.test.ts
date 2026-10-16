@@ -85,7 +85,7 @@ describe("gitRead", () => {
 
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), "yagura-agentcli-"));
-    boot = { home: join(root, "home"), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+    boot = { home: join(root, "home"), skillsDir: "", bind: "", port: 0, tokenFile: "" };
     db = openStore(layout(boot).db);
     const seed = join(root, "seed");
     mkdirSync(seed);

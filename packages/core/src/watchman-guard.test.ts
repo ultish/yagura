@@ -8,7 +8,7 @@ import { watchmanGuardSettings } from "./watchman-guard.js";
 
 describe("the watchman's Bash guard", () => {
   it("lets through only the watchman's yagura reads, however broad the developer's own allow rules are", () => {
-    const boot = { home: mkdtempSync(join(tmpdir(), "yagura-guard-")), packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" };
+    const boot = { home: mkdtempSync(join(tmpdir(), "yagura-guard-")), skillsDir: "", bind: "", port: 0, tokenFile: "" };
     const settings = JSON.parse(watchmanGuardSettings(boot, SETTINGS["watchman.allowed_tools"].parse(undefined)));
     const hook = settings.hooks.PreToolUse[0];
     expect(hook.matcher).toBe("Bash");

@@ -35,7 +35,7 @@ function session(unit: Unit, role: Role) {
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "yagura-records-"));
-  db = openStore(layout({ home, packsDir: "", skillsDir: "", bind: "", port: 0, tokenFile: "" }).db);
+  db = openStore(layout({ home, skillsDir: "", bind: "", port: 0, tokenFile: "" }).db);
   addRepo(db, { id: "r", url: "/r", defaultBranch: "main" });
   addProject(db, { id: project, name: "p", goal: "g", predicate: "x", repos: ["r" as RepoId] });
 });
