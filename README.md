@@ -77,9 +77,26 @@ Run the daemon under `tmux` or a systemd user service so it keeps running. On a 
 
 ## Set up a project in the dashboard
 
-1. Repos. Paste a git URL and press Add repo. "Merge via" says how finished work gets in. Detect handles github.com and any GitLab host you listed. For any other address, pick GitHub pull requests or GitLab merge requests. Push straight to main skips review, so use it only where that's fine.
-2. Environments. Add one with provider `local-process` to start. On its Answers tab, say how tests run and how libraries are published, then press Save and run the doctor. Put machine facts such as `NEXUS_URL` on the Values tab. The Actions tab shows the commands the doctor proved.
-3. Projects, then New project. Write the goal and how anyone can tell it is done. Tick the repos the project may change, or add one from the same page. Pick the environment. Choose whether you approve each merge, which is the default, or let yagura merge once the judge approves and CI passes. You can also describe the goal on the Talk page and press Go on the proposal it makes.
-4. Watch it run. The Projects page lists units as they move. Gates shows the questions agents have for you. On Agents you can read a running agent's work, steer it, or stop it. A stuck unit can be retried or cancelled, and the andon button on a project stops everything.
+### 1. Add the repos
+
+On the Repos page, paste a git URL and press Add repo. "Merge via" says how finished work gets in. Detect handles github.com and any GitLab host you listed. For any other address, pick GitHub pull requests or GitLab merge requests. Push straight to main skips review, so use it only where that's fine.
+
+<img src="docs/img/repos.png" alt="The Repos page with the add form filled in for an internal GitLab repo" width="720" />
+
+### 2. Describe the environment
+
+On the Environments page, add one with provider `local-process` to start. On its Answers tab, say how tests run and how libraries are published, then press Save and run the doctor. Put machine facts such as `NEXUS_URL` on the Values tab. The Actions tab shows the commands the doctor proved.
+
+<img src="docs/img/environment.png" alt="An environment's Answers tab with the questions filled in" width="720" />
+
+### 3. Create the project
+
+Go to Projects, then New project. Write the goal and how anyone can tell it is done. Tick the repos the project may change, or add one from the same page. Pick the environment. Choose whether you approve each merge, which is the default, or let yagura merge once the judge approves and CI passes. You can also describe the goal on the Talk page and press Go on the proposal it makes.
+
+<img src="docs/img/new-project.png" alt="The New project page filled in for a project across two repos" width="720" />
+
+### 4. Watch it run
+
+The Projects page lists units as they move. Gates shows the questions agents have for you. On Agents you can read a running agent's work, steer it, or stop it. A stuck unit can be retried or cancelled, and the andon button on a project stops everything.
 
 Starting the daemon, logging in to `claude`, `gh` and `glab`, `yagura project set` and `yagura unit requeue` are CLI only for now.

@@ -1,5 +1,6 @@
 // Headless Chrome over the DevTools protocol, for review screenshots and a page-load probe; no browser driver needed.
 //   READY=<css selector> node scripts/page-check.mjs shot <url> <night|day> <out.png> [width]   full-page shot once the selector exists
+//   FILL='[["#sel","text"],...]' sets those inputs before the shot (React-safe); CLICK='["#sel","sel|2",...]' clicks them after (sel|n is the nth match)
 //   node scripts/page-check.mjs paint <url> <runs>   ms until the unit page's first timeline entry exists, per load, and the median
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -60,6 +61,20 @@ if (mode === "shot") {
   await evaluate(
     `new Promise(r => { const t = setInterval(() => { if (document.querySelector(${JSON.stringify(process.env.READY ?? ".story-entry")})) { clearInterval(t); setTimeout(r, 600); } }, 50); })`,
   );
+  if (process.env.FILL) {
+    await evaluate(`(${JSON.stringify(JSON.parse(process.env.FILL))}).forEach(([sel, val]) => {
+      const el = document.querySelector(sel);
+      const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value").set.call(el, val);
+      el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+    })`);
+  }
+  if (process.env.CLICK) {
+    await evaluate(
+      `(${JSON.stringify(JSON.parse(process.env.CLICK))}).forEach((spec) => { const [sel, n = "0"] = spec.split("|"); document.querySelectorAll(sel)[Number(n)]?.click(); })`,
+    );
+  }
+  if (process.env.FILL || process.env.CLICK) await sleep(500);
   const scroll = await evaluate(`[document.documentElement.scrollWidth, innerWidth, document.documentElement.scrollHeight]`);
   const shot = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { x: 0, y: 0, width, height: scroll[2], scale: 1 } });
   writeFileSync(b, Buffer.from(shot.data, "base64"));

@@ -142,7 +142,7 @@ export function NewProject() {
           </div>
         </section>
 
-        <Field label="Environment" hint="How tests run and how publishing works for this project's repos. Every project needs one.">
+        <Field label="Environment">
           {envs.data && envs.data.length === 0 ? (
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <span className="muted">None yet.</span>
@@ -173,7 +173,8 @@ export function NewProject() {
             </select>
           )}
           <span className="muted" style={{ fontSize: 13 }}>
-            Describe how it runs on the <Link to="/environments">Environments</Link> page; the doctor turns your answers into proven commands.
+            Every project needs one. It says how tests run and how publishing works for the project's repos. You describe it on the{" "}
+            <Link to="/environments">Environments</Link> page.
           </span>
         </Field>
 
