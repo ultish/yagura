@@ -7,133 +7,79 @@
 
 # yagura 櫓
 
-Agent orchestration for long-running engineering projects. A deterministic daemon plans work into units, runs coding agents (`claude -p` and others) on them in isolated git worktrees, has a fresh judge check each unit against evidence it captures itself, and merges only what is approved.
+Yagura runs coding agents on long engineering projects while you stay in charge. You give a project a goal. A daemon splits it into small units, runs an agent on each one in its own git worktree, and has a fresh agent judge the result against test runs the daemon recorded itself. Each unit ends as one pull request, and nothing merges until the judge approves it and, by default, you do too.
 
-It runs on one machine, one daemon per developer, with no cloud services. The target is a developer's own RHEL 9 VM in an air-gapped network. A web dashboard shows everything.
+It runs as one daemon per developer, with no cloud service. The target is a developer's own RHEL 9 VM on an air-gapped network. You drive it from a web dashboard. The full design is in [`docs/DESIGN.md`](docs/DESIGN.md).
 
-## How it works
+## Install
 
-- **The daemon owns the truth; agents propose.** Scheduling, state changes, recorded runs, merging, and publishing are plain code. Agents plan, build, and judge, and each call starts fresh with a bounded brief. No agent holds a long conversation.
-- **A project is a goal.** The project lead (the planner) splits it into units. A unit is a goal with acceptance criteria, in one repo, with the units it comes after. It never lists files to touch. Units that do not depend on each other run in parallel.
-- **The builder proves its work; a fresh judge decides.** A worker runs its tests through `yagura evidence run`, which the daemon executes and records itself, so a claim of "tests pass" cannot be forged. A judge with no shared context runs the tests again, reads the change, and approves, asks for changes, or asks a question.
-- **One pull request per unit.** It opens as a draft, takes every commit, and comes out of draft the moment the judge approves. Yagura merges that exact commit with a merge commit once CI passes (and, under `merge: human`, once you say so), keeps the branch current with its base, and closes the issues the unit answers.
-- **Stuck units have a unit lead.** Woken only when the unit needs a decision (a stuck worker, a judge's question, a comment on the pull request, failing CI, a conflict), it decides whether to retry, answer, split, drop, or ask you.
-- **Environments hold how things run.** You describe tests, publishing, and deployment in plain words and add values like `NEXUS_URL`. A doctor agent turns that into commands (actions), proves them, and keeps them current; agents and yagura run them.
-- **Multi-repo work is supported.** A library and its consumer can be separate repos. After the library merges, yagura publishes a test build under a version no release can be confused with, and the consumer's worker pins exactly that version. Yagura never releases or deletes anything.
+You need Node 26 (`.nvmrc` pins it), pnpm 11, git 2.38 or newer, a logged-in `claude` CLI, and `gh` or `glab` for pull or merge requests.
 
-The full spec is [`docs/DESIGN.md`](docs/DESIGN.md). Where the build stands, with the handoff for the next session, is [`docs/STATUS.md`](docs/STATUS.md).
+```sh
+git clone https://github.com/ultish/yagura && cd yagura
+scripts/setup.sh
+yagura daemon
+```
 
-## Requirements
+`scripts/setup.sh` checks Node, pnpm and git, runs `pnpm install` and the build, and links `yagura` into `~/.local/bin`. It adds one marked block to your `~/.zshrc` or `~/.bashrc` that puts that directory on your PATH. It then reports whether `claude`, `gh` and `glab` are installed and logged in. You can run it again at any time. `--no-rc` leaves your rc files alone and prints the PATH line instead, `--bin <dir>` changes where the link goes, and `--uninstall` removes the link and the block.
 
-- **Node 26.** `.nvmrc` pins it. The database module, `better-sqlite3` 13, needs Node 22 or newer and segfaults on Node 23.5. After switching Node, run `pnpm install` or `pnpm rebuild better-sqlite3`.
-- **pnpm 11.**
-- **git 2.38 or newer** (RHEL 9 ships 2.39).
-- **A harness CLI**, `claude` by default, logged in. Agents load your whole harness: plugins, skills, hooks. Yagura assumes the [pstack](https://github.com/ultish/pstack-claude) plugin is installed and set up in the harness.
-- `gh` or `glab` for pull or merge requests.
+`yagura daemon` starts the engine and the dashboard on `http://127.0.0.1:7300`. State lives in `~/.yagura`, or in `YAGURA_HOME` if you set it. While you experiment, point `YAGURA_HOME` at a scratch directory so you don't mix test runs into your real home.
+
+Every command is listed by `yagura --help`.
+
+### On an air-gapped machine
+
+`pnpm install` needs a package registry, so point pnpm at your internal mirror or copy a populated pnpm store to the machine. Build elsewhere and run `scripts/setup.sh --no-build` if you can't install there at all. `better-sqlite3` compiles natively, so the machine needs `gcc`, `make` and Python. After any Node switch, run `pnpm rebuild better-sqlite3`. I haven't run this path end to end on the target VM yet.
+
+## Configure
 
 ### Plugins
 
-- **Yagura's own skills need no install.** The role skills in `plugins/yagura` (worker, judge, and so on) are passed to every agent session with `--plugin-dir`, so they load from the repo you cloned.
-- **pstack is installed in your `claude`, once.** Agents use your whole harness, and the default method (the playbooks the worker follows) comes from the pstack plugins. In `claude`:
+Yagura's own skills need no install. The daemon passes `plugins/yagura` to every agent session, so keep the cloned folder where it is.
 
-  ```
-  /plugin marketplace add ultish/pstack-claude
-  /plugin install pstack@pstack-claude
-  /plugin install cursor-team-kit@pstack-claude
-  ```
+Agents use your whole `claude` setup, and the default method comes from the [pstack](https://github.com/ultish/pstack-claude) plugins. Install them once, inside `claude`:
 
-  With no internet, clone `pstack-claude` onto the machine and give `/plugin marketplace add` the path on disk instead. Any other plugins or skills your work needs go in the same `claude`, and every agent gets them. To make yagura refuse a unit whose worker did not load a skill, name it in the `skills.work` setting (`yagura project skills <id>` checks that the named skills are installed).
-
-- **Have another LLM session create an environment for you.** Tell it: "Read `<this repo>/plugins/yagura/skills/yagura-environment/SKILL.md` and create a yagura environment for this project." It reads your project, then runs `yagura env add`, `env answer` and `env value set` itself, so `yagura` must be on its PATH. Or start that session with `claude --plugin-dir <this repo>/plugins/yagura`.
-
-## Quick start
-
-```sh
-scripts/setup.sh
+```
+/plugin marketplace add ultish/pstack-claude
+/plugin install pstack@pstack-claude
+/plugin install cursor-team-kit@pstack-claude
 ```
 
-This checks Node, pnpm and git, runs `pnpm install` and the build, links `yagura` into `~/.local/bin`, adds one marked block to your `~/.zshrc` or `~/.bashrc` that puts that directory on your PATH, and reports whether `claude`, `gh` and `glab` are installed and logged in. Run it again any time; `--no-rc` leaves your rc files alone and prints the line instead, `--bin <dir>` changes where the link goes, and `--uninstall` removes the link and the block (it never touches `~/.yagura`). To build by hand instead: `pnpm install && pnpm -r build && pnpm -r test`, then link `apps/cli/dist/main.js` yourself.
+With no internet, clone `pstack-claude` onto the machine and give `/plugin marketplace add` the path on disk. Any other plugin or skill your work needs goes into the same `claude`, and every agent gets it. To make yagura stop a unit whose worker skipped a skill, list that skill in the `skills.work` setting.
 
-Runtime state lives in `~/.yagura`, or wherever `YAGURA_HOME` points, and never in the repo. Every `yagura` command opens that home's database and migrates it, so set a scratch home before you try anything. Never run a command without one while experimenting.
+### Your `claude` command
 
-### Your first project
+Yagura starts `claude` as a program, without a shell. If `claude` is a function or alias in your `.bashrc`, as it is when a proxy is wrapped around it, yagura can't see it. `scripts/setup.sh` detects this and writes `~/.local/bin/yagura-claude`, which runs your function in an interactive shell. Set `harness.claude.bin` to that path in Settings. If your rc file prints anything at startup, that text mixes into the agent's output. In that case, copy what the function does into the wrapper instead.
 
-Start the daemon first. It is the one step that needs a terminal; everything after it can be done in the dashboard at `http://127.0.0.1:7300`.
+### Environments
 
-```sh
-export YAGURA_HOME=$(mktemp -d)      # drop this line for your real home
-yagura daemon                        # engine, API, and dashboard on one port
-```
+An environment tells agents how things run: how tests run, where libraries are published, what must never happen. You describe it in plain words, and a doctor agent turns the description into commands and proves them.
 
-**In the dashboard**
+You can fill one in on the Environments page, or let an LLM session do it. In the session that's working on your project, say:
 
-1. **Repos**: paste the git URL, optionally pick how it lands (pull requests with `gh`, merge requests with `glab`, or a push to the default branch), and press Add repo.
-2. **Environments**: add one (provider `local-process` to start). Open it, and on the Answers tab describe in your own words how tests run and how publishing works, then press Save and run the doctor. On the Values tab add values such as `NEXUS_URL`. The Actions tab shows what the doctor proved. Or have an LLM session fill this in for you; see Plugins above.
-3. **Projects → New project**: fill in the goal and how anyone can tell it is done, tick one or more registered repos (or add one on the spot), pick the environment, and choose whether you approve each merge (the default) or merge when CI passes. Or use **Talk**: describe the goal to the watchman and press Go on its proposal.
-4. **Projects**, **Gates**, and **Agents**: watch it run, answer the questions it asks you, steer or stop a running agent, retry or cancel a unit, and pull the andon cord. **Settings** holds models, budget, and the GitLab hosts.
+> Read `<this repo>/plugins/yagura/skills/yagura-environment/SKILL.md` and create a yagura environment for this project.
 
-**The same from the CLI**, in another terminal with the same `YAGURA_HOME`:
+It reads your project, then creates the environment with the `yagura` command, so `yagura` has to be on its PATH.
 
-```sh
-yagura repo add <git URL> --id app   # github.com goes through pull requests; see below for GitLab
-yagura env add local --provider local-process
-yagura env answer local tests --text "run the tests with gradle test"
-yagura env answer local publish --text "snapshots go to our Nexus; never release"
-yagura env value set local NEXUS_URL http://nexus.internal:8081
-yagura env doctor local              # a doctor agent turns your answers into proven actions
-yagura env actions local             # check that `test` (and the publish actions) are proven
-yagura project new demo --goal "<what you want done>" --predicate "<how anyone can tell it is done>" --repo app --env local
-yagura show demo
-```
+### GitLab
 
-Questions for you show up as gates (`yagura gates`) or on the Gates page.
+Log in with `glab auth login --hostname <host>`, then add the host to the `forge.glab_hosts` setting. Repos from that host merge through merge requests. Any other host needs you to pick GitHub or GitLab when you add the repo.
 
-What only the CLI does: install the binary, start the daemon, and log in (`claude`, `gh`, `glab`). Changing a project's merge mode or environment later (`yagura project set`), checking its skills (`yagura project skills`), and putting a stuck unit back or dropping it (`yagura unit requeue|drop`) have no dashboard control yet.
+### Models and budget
 
-Models default to the harness default. To pick them per role and cap spend: `yagura set role.worker.model '"claude-haiku-4-5-20251001"'` (same for `judge`, `lead`, `planner`, `doctor`) and `yagura set project.budget_usd 5 --scope project --id demo`.
+All settings are on the Settings page. Models default to the `claude` default. To pick one per role, set `role.worker.model`, `role.judge.model`, `role.lead.model`, `role.planner.model` and `role.doctor.model`. `project.budget_usd` caps what one project can spend.
 
-### Setting it up on a work VM
+### Reaching the dashboard from another machine
 
-- **Install without internet.** `scripts/setup.sh` runs `pnpm install`, which needs a registry; run it with `--no-build` after building elsewhere. Point pnpm at your internal mirror, or copy a populated pnpm store to the VM. `better-sqlite3` builds natively, so the VM needs `gcc`, `make` and Python; after any Node switch run `pnpm rebuild better-sqlite3`.
-- **Harness.** Install and log in `claude` on the VM, with your plugins and skills, including pstack. Yagura starts `claude` as a program, not through your shell, so a `claude` that is a function or alias in your rc file is invisible to it. `scripts/setup.sh` detects that and writes `~/.local/bin/yagura-claude`, a wrapper that runs your function in an interactive shell; set `harness.claude.bin` to it (Settings, or `yagura set`). If your rc file prints anything at startup, it mixes into the agent's output, so copy what the function does (env vars, proxy, the real binary) into the wrapper instead. `yagura project skills <id>` checks a project's required skills are installed where agents run.
-- **Internal GitLab.** Log in with `glab auth login --hostname <host>`, then add the host to `forge.glab_hosts` (Settings, or `yagura set forge.glab_hosts '["<host>"]'`). A repo from that host registers through merge requests with `yagura repo add <url> --id <id>`; any other remote needs `--forge gh|glab` or `--land push`. If the repo path on the forge differs from the URL, `yagura repo set <id>` and `yagura set forge.repo '"group/name"' --scope repo --id <id>`.
-- **Reaching the dashboard from another machine.** The daemon binds to localhost on port 7300. For access from a Windows host, start it with `YAGURA_BIND=<vm-hostname>` (or `0.0.0.0`) and `YAGURA_PORT`, and open that port in the VM firewall. Beyond localhost the dashboard asks for the token in `$YAGURA_HOME/token` (`YAGURA_TOKEN_FILE` moves it). Browser notifications need HTTPS, or Chrome's `unsafely-treat-insecure-origin-as-secure` flag for that origin.
-- **Keep it alive.** Run the daemon under `tmux` or a systemd user service. On a Mac use `caffeinate -is`.
+The daemon listens on localhost. To open it from another machine, start it with `YAGURA_BIND=<hostname>` (or `0.0.0.0`) and `YAGURA_PORT`, and open that port in the firewall. Beyond localhost the dashboard asks for the token in `$YAGURA_HOME/token`. Browser notifications need HTTPS, or Chrome's `unsafely-treat-insecure-origin-as-secure` flag for that address.
 
-The air-gapped VM setup has not been run end to end yet; treat this list as a checklist, not a proven recipe.
+Run the daemon under `tmux` or a systemd user service so it keeps running. On a Mac, use `caffeinate -is`.
 
-For development, `pnpm dev` rebuilds on change, restarts the daemon, and runs Vite with hot reload on `:5173`. Its home is `~/.yagura-dev`.
+## Set up a project in the dashboard
 
-### Trying it without spending money
+1. Repos. Paste a git URL and press Add repo. "Merge via" says how finished work gets in. Detect handles github.com and any GitLab host you listed. For any other address, pick GitHub pull requests or GitLab merge requests. Push straight to main skips review, so use it only where that's fine.
+2. Environments. Add one with provider `local-process` to start. On its Answers tab, say how tests run and how libraries are published, then press Save and run the doctor. Put machine facts such as `NEXUS_URL` on the Values tab. The Actions tab shows the commands the doctor proved.
+3. Projects, then New project. Write the goal and how anyone can tell it is done. Tick the repos the project may change, or add one from the same page. Pick the environment. Choose whether you approve each merge, which is the default, or let yagura merge once the judge approves and CI passes. You can also describe the goal on the Talk page and press Go on the proposal it makes.
+4. Watch it run. The Projects page lists units as they move. Gates shows the questions agents have for you. On Agents you can read a running agent's work, steer it, or stop it. A stuck unit can be retried or cancelled, and the andon button on a project stops everything.
 
-Point `harness.claude.bin` at a wrapper around `packages/core/src/harness/fixtures/fake-agent.mjs` with `FAKE_MODE=engine`. The fake agent emits real Claude stream-json, so the whole pipeline runs for free. Add `FAKE_DELAY_MS` to watch it work.
-
-### A real run
-
-The core loop was proven on 2026-10-15 with Claude Haiku 5.5 on every role, real GitHub, and real Gradle: a library repo and an app repo, one issue, two units. The library unit added a function and merged; yagura published its test build; the app unit pinned that exact build, printed the result, and merged; the issue closed and the project closed itself, in about nine minutes for $0.11. Set `role.<role>.model` for each role, `project.budget_usd`, register both repos with `yagura repo add`, describe the environment with `yagura env answer`, and start the daemon under `caffeinate -is` on a Mac that must not sleep.
-
-## Layout
-
-| Path             | What it holds                                                                                                                                                                                              |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/core`  | Domain types, SQLite schema and store, config, git, briefs and hand-offs, harness adapters, runner, judge, unit lead, merge, engine. Everything testable lives here.                                       |
-| `apps/daemon`    | The engine, a Hono API with server-sent events, and the static dashboard.                                                                                                                                  |
-| `apps/cli`       | The `yagura` command line, which talks to the daemon.                                                                                                                                                      |
-| `apps/web`       | The dashboard (Vite and React). Pure logic is in `src/lib`, pages in `src/pages`, the tower and beacon drawings in `src/scene`.                                                                            |
-| `plugins/yagura` | Role skills loaded into every agent session: worker, judge, unit lead, planner, doctor, watchman; plus `yagura-environment`, which you can give your own LLM session so it creates an environment for you. |
-| `docs`           | `DESIGN.md` (the spec), `STATUS.md` (current state), `STATUS-ARCHIVE.md` (history).                                                                                                                        |
-
-## Development
-
-```sh
-pnpm -r build        # core copies schema.sql into dist
-pnpm -r test         # real SQLite, real git repos in temp dirs, a fake agent
-pnpm -r typecheck
-pnpm format          # Prettier; format:check verifies
-```
-
-Tests run against real SQLite and real git. The runner is tested with the fake agent. A change to a harness parser needs a captured real transcript as a fixture, scrubbed of personal paths and emails. Unit state changes go through `transitionUnit` only, and the TypeScript enum lists in `domain.ts` must match the SQL `CHECK` lists in `schema.sql`. [`CLAUDE.md`](CLAUDE.md) has the rest of the conventions.
-
-## Status
-
-The core loop (goals, one pull request per unit, a fresh judge, recorded runs, a unit lead, merge commits, published test builds, environment actions and the doctor) is built and proven with real agents on real GitHub, and the publish path on the developer's own Nexus. Still unproven: a container-image round, GitLab on the new loop, and the air-gapped VM itself. See [`docs/STATUS.md`](docs/STATUS.md).
+Starting the daemon, logging in to `claude`, `gh` and `glab`, `yagura project set` and `yagura unit requeue` are CLI only for now.
