@@ -150,7 +150,23 @@ fi
 
 say ""
 say "Other tools yagura uses"
-if command -v claude > /dev/null; then ok "claude found at $(command -v claude); log in by running it once if you have not"; else bad "claude not found: yagura runs agents through it by default"; fi
+SHELL_NAME="$(basename "${SHELL:-bash}")"
+if command -v claude > /dev/null; then
+  ok "claude found at $(command -v claude); log in by running it once if you have not"
+else
+  KIND="$("$SHELL_NAME" -ic 'type -t claude' 2> /dev/null | tail -n 1 || true)"
+  case "$KIND" in
+    function | alias)
+      WRAPPER="$BIN_DIR/yagura-claude"
+      printf '#!/usr/bin/env %s\nexec %s -ic '"'"'claude "$@"'"'"' claude "$@"\n' "$SHELL_NAME" "$SHELL_NAME" > "$WRAPPER"
+      chmod +x "$WRAPPER"
+      note "claude is a shell $KIND in your rc file; yagura starts agents without a shell, so it cannot see that."
+      note "wrote $WRAPPER, which runs your $KIND through an interactive shell. Point yagura at it: yagura set harness.claude.bin '\"$WRAPPER\"'"
+      note "if your rc file prints anything at startup, agent output gets mixed with it; then copy what the $KIND does (env vars, proxy, the real binary) into the wrapper instead."
+      ;;
+    *) bad "claude not found: yagura runs agents through it by default" ;;
+  esac
+fi
 if command -v gh > /dev/null; then
   if gh auth status > /dev/null 2>&1; then ok "gh is logged in"; else note "gh found but not logged in: run 'gh auth login'"; fi
 else
