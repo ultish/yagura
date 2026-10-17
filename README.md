@@ -44,7 +44,7 @@ The full spec is [`docs/DESIGN.md`](docs/DESIGN.md). Where the build stands, wit
 
   With no internet, clone `pstack-claude` onto the machine and give `/plugin marketplace add` the path on disk instead. Any other plugins or skills your work needs go in the same `claude`, and every agent gets them. To make yagura refuse a unit whose worker did not load a skill, name it in the `skills.work` setting (`yagura project skills <id>` checks that the named skills are installed).
 
-- **Use the environment skill in your own `claude`.** To have an LLM write an environment for you, start `claude --plugin-dir <this repo>/plugins/yagura` and ask it to write a yagura environment, or simply point any LLM at `plugins/yagura/skills/yagura-environment/SKILL.md`.
+- **Have another LLM session create an environment for you.** Tell it: "Read `<this repo>/plugins/yagura/skills/yagura-environment/SKILL.md` and create a yagura environment for this project." It reads your project, then runs `yagura env add`, `env answer` and `env value set` itself, so `yagura` must be on its PATH. Or start that session with `claude --plugin-dir <this repo>/plugins/yagura`.
 
 ## Quick start
 
