@@ -45,26 +45,37 @@ Runtime state lives in `~/.yagura`, or wherever `YAGURA_HOME` points, and never 
 
 ### Your first project
 
+Start the daemon first. It is the one step that needs a terminal; everything after it can be done in the dashboard at `http://127.0.0.1:7300`.
+
 ```sh
 export YAGURA_HOME=$(mktemp -d)      # drop this line for your real home
+yagura daemon                        # engine, API, and dashboard on one port
+```
+
+**In the dashboard**
+
+1. **Repos**: paste the git URL, optionally pick how it lands (pull requests with `gh`, merge requests with `glab`, or a push to the default branch), and press Add repo.
+2. **Environments**: add one (provider `local-process` to start). Open it, and on the Answers tab describe in your own words how tests run and how publishing works, then press Save and run the doctor. On the Values tab add values such as `NEXUS_URL`. The Actions tab shows what the doctor proved.
+3. **Talk**: describe the goal to the watchman, and name the repo and environment. It replies with a proposal; press Go to create the project. Set the thread to `go` autonomy to skip that step.
+4. **Projects**, **Gates**, and **Agents**: watch it run, answer the questions it asks you, steer or stop a running agent, retry or cancel a unit, and pull the andon cord. **Settings** holds models, budget, and the GitLab hosts.
+
+**The same from the CLI**, in another terminal with the same `YAGURA_HOME`:
+
+```sh
 yagura repo add <git URL> --id app   # github.com goes through pull requests; see below for GitLab
 yagura env add local --provider local-process
 yagura env answer local tests --text "run the tests with gradle test"
 yagura env answer local publish --text "snapshots go to our Nexus; never release"
 yagura env value set local NEXUS_URL http://nexus.internal:8081
-yagura daemon                        # in its own terminal: engine, API, and dashboard on one port
-```
-
-Then, in another terminal with the same `YAGURA_HOME`:
-
-```sh
 yagura env doctor local              # a doctor agent turns your answers into proven actions
 yagura env actions local             # check that `test` (and the publish actions) are proven
 yagura project new demo --goal "<what you want done>" --predicate "<how anyone can tell it is done>" --repo app --env local
 yagura show demo
 ```
 
-Open the dashboard at `http://127.0.0.1:7300`. Questions for you show up as gates (`yagura gates`).
+Questions for you show up as gates (`yagura gates`) or on the Gates page.
+
+What only the CLI does: install the binary, start the daemon, and log in (`claude`, `gh`, `glab`). Changing a project's merge mode or environment later (`yagura project set`), checking its skills (`yagura project skills`), and putting a stuck unit back or dropping it (`yagura unit requeue|drop`) have no dashboard control yet.
 
 Models default to the harness default. To pick them per role and cap spend: `yagura set role.worker.model '"claude-haiku-4-5-20251001"'` (same for `judge`, `lead`, `planner`, `doctor`) and `yagura set project.budget_usd 5 --scope project --id demo`.
 
@@ -72,7 +83,7 @@ Models default to the harness default. To pick them per role and cap spend: `yag
 
 - **Install without internet.** `pnpm install` needs a registry. Point pnpm at your internal mirror, or copy a populated pnpm store to the VM. `better-sqlite3` builds natively, so the VM needs `gcc`, `make` and Python; after any Node switch run `pnpm rebuild better-sqlite3`.
 - **Harness.** Install and log in `claude` on the VM (or set `harness.claude.bin`), with your plugins and skills, including pstack. `yagura project skills <id>` checks a project's required skills are installed where agents run.
-- **Internal GitLab.** Log in with `glab auth login --hostname <host>`, then `yagura set forge.glab_hosts '["<host>"]'`. A repo from that host registers through merge requests with `yagura repo add <url> --id <id>`; any other remote needs `--forge gh|glab` or `--land push`. If the repo path on the forge differs from the URL, `yagura repo set <id>` and `yagura set forge.repo '"group/name"' --scope repo --id <id>`.
+- **Internal GitLab.** Log in with `glab auth login --hostname <host>`, then add the host to `forge.glab_hosts` (Settings, or `yagura set forge.glab_hosts '["<host>"]'`). A repo from that host registers through merge requests with `yagura repo add <url> --id <id>`; any other remote needs `--forge gh|glab` or `--land push`. If the repo path on the forge differs from the URL, `yagura repo set <id>` and `yagura set forge.repo '"group/name"' --scope repo --id <id>`.
 - **Reaching the dashboard from another machine.** The daemon binds to localhost on port 7300. For access from a Windows host, start it with `YAGURA_BIND=<vm-hostname>` (or `0.0.0.0`) and `YAGURA_PORT`, and open that port in the VM firewall. Beyond localhost the dashboard asks for the token in `$YAGURA_HOME/token` (`YAGURA_TOKEN_FILE` moves it). Browser notifications need HTTPS, or Chrome's `unsafely-treat-insecure-origin-as-secure` flag for that origin.
 - **Keep it alive.** Run the daemon under `tmux` or a systemd user service. On a Mac use `caffeinate -is`.
 
