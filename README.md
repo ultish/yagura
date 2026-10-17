@@ -99,14 +99,14 @@ The core loop was proven on 2026-10-15 with Claude Haiku 5.5 on every role, real
 
 ## Layout
 
-| Path             | What it holds                                                                                                                                                        |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/core`  | Domain types, SQLite schema and store, config, git, briefs and hand-offs, harness adapters, runner, judge, unit lead, merge, engine. Everything testable lives here. |
-| `apps/daemon`    | The engine, a Hono API with server-sent events, and the static dashboard.                                                                                            |
-| `apps/cli`       | The `yagura` command line, which talks to the daemon.                                                                                                                |
-| `apps/web`       | The dashboard (Vite and React). Pure logic is in `src/lib`, pages in `src/pages`, the tower and beacon drawings in `src/scene`.                                      |
-| `plugins/yagura` | Role skills loaded into every agent session: worker, judge, unit lead, planner, doctor, watchman.                                                                    |
-| `docs`           | `DESIGN.md` (the spec), `STATUS.md` (current state), `STATUS-ARCHIVE.md` (history).                                                                                  |
+| Path             | What it holds                                                                                                                                                                                  |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core`  | Domain types, SQLite schema and store, config, git, briefs and hand-offs, harness adapters, runner, judge, unit lead, merge, engine. Everything testable lives here.                           |
+| `apps/daemon`    | The engine, a Hono API with server-sent events, and the static dashboard.                                                                                                                      |
+| `apps/cli`       | The `yagura` command line, which talks to the daemon.                                                                                                                                          |
+| `apps/web`       | The dashboard (Vite and React). Pure logic is in `src/lib`, pages in `src/pages`, the tower and beacon drawings in `src/scene`.                                                                |
+| `plugins/yagura` | Role skills loaded into every agent session: worker, judge, unit lead, planner, doctor, watchman; plus `yagura-environment`, which you can give your own LLM to write an environment template. |
+| `docs`           | `DESIGN.md` (the spec), `STATUS.md` (current state), `STATUS-ARCHIVE.md` (history).                                                                                                            |
 
 ## Development
 
