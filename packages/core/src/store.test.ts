@@ -66,6 +66,14 @@ describe("store", () => {
     expect(second.prepare("SELECT COUNT(*) AS n FROM repos").get()).toEqual({ n: 1 });
   });
 
+  it("refuses a database made by a build whose schema this one does not know, and says what to do", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "yagura-db-")), "yagura.db");
+    const first = openStore(path);
+    first.prepare("UPDATE schema_version SET version = 34").run();
+    first.close();
+    expect(() => openStore(path)).toThrow(/version 34.*only knows up to 1.*yagura import <old home>/);
+  });
+
   it("takes the write lock before a transaction reads, so another process cannot commit between its read and its write", () => {
     const path = join(mkdtempSync(join(tmpdir(), "yagura-db-")), "yagura.db");
     const mine = openStore(path);

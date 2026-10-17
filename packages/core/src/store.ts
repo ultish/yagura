@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
 import { canTransition, emptyAnswers, IllegalTransition, type Answers, type Role } from "./domain.js";
-import { MIGRATIONS } from "./migrations.js";
+import { LATEST_VERSION, MIGRATIONS } from "./migrations.js";
 import type {
   Attempt,
   AttemptId,
@@ -68,6 +68,11 @@ export function schemaVersion(db: Db): number {
 }
 
 function migrate(db: Db): void {
+  const found = schemaVersion(db);
+  if (found > LATEST_VERSION)
+    throw new Error(
+      `this home's database is at version ${found}, but this yagura only knows up to ${LATEST_VERSION}: it was made by a different build (a home from before the core-loop redesign is not compatible). Start with a new YAGURA_HOME and bring settings, repos, environments, templates, and threads across with: yagura import <old home>`,
+    );
   for (const m of MIGRATIONS) {
     if (m.version <= schemaVersion(db)) continue;
     if (m.rebuild) db.pragma("foreign_keys = OFF");

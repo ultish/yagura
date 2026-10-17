@@ -249,11 +249,21 @@ if (command === "daemon") {
     process.exit(2);
   }
   const { startDaemon } = await import("@yagura/daemon");
-  await startDaemon([process.execPath, fileURLToPath(import.meta.url)]);
+  await startDaemon([process.execPath, fileURLToPath(import.meta.url)]).catch((e: unknown) => {
+    console.error(e instanceof Error ? e.message : String(e));
+    process.exit(1);
+  });
   process.exit(0);
 }
 const boot = loadBootstrap();
-const db = openStore(layout(boot).db);
+const db = (() => {
+  try {
+    return openStore(layout(boot).db);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    return process.exit(1);
+  }
+})();
 const agentCtx = (): RunContext => ({
   db,
   boot,
