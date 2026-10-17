@@ -31,6 +31,21 @@ The full spec is [`docs/DESIGN.md`](docs/DESIGN.md). Where the build stands, wit
 - **A harness CLI**, `claude` by default, logged in. Agents load your whole harness: plugins, skills, hooks. Yagura assumes the [pstack](https://github.com/ultish/pstack-claude) plugin is installed and set up in the harness.
 - `gh` or `glab` for pull or merge requests.
 
+### Plugins
+
+- **Yagura's own skills need no install.** The role skills in `plugins/yagura` (worker, judge, and so on) are passed to every agent session with `--plugin-dir`, so they load from the repo you cloned.
+- **pstack is installed in your `claude`, once.** Agents use your whole harness, and the default method (the playbooks the worker follows) comes from the pstack plugins. In `claude`:
+
+  ```
+  /plugin marketplace add ultish/pstack-claude
+  /plugin install pstack@pstack-claude
+  /plugin install cursor-team-kit@pstack-claude
+  ```
+
+  With no internet, clone `pstack-claude` onto the machine and give `/plugin marketplace add` the path on disk instead. Any other plugins or skills your work needs go in the same `claude`, and every agent gets them. To make yagura refuse a unit whose worker did not load a skill, name it in the `skills.work` setting (`yagura project skills <id>` checks that the named skills are installed).
+
+- **Use the environment skill in your own `claude`.** To have an LLM write an environment for you, start `claude --plugin-dir <this repo>/plugins/yagura` and ask it to write a yagura environment, or simply point any LLM at `plugins/yagura/skills/yagura-environment/SKILL.md`.
+
 ## Quick start
 
 ```sh
