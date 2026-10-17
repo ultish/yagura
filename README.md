@@ -34,12 +34,10 @@ The full spec is [`docs/DESIGN.md`](docs/DESIGN.md). Where the build stands, wit
 ## Quick start
 
 ```sh
-pnpm install
-pnpm -r build
-pnpm -r test
+scripts/setup.sh
 ```
 
-The CLI is `apps/cli/dist/main.js`. Put it on your PATH once, for example `chmod +x apps/cli/dist/main.js && ln -s "$PWD/apps/cli/dist/main.js" ~/.local/bin/yagura`, or `alias yagura='node /path/to/yagura/apps/cli/dist/main.js'`. The commands below assume `yagura` works.
+This checks Node, pnpm and git, runs `pnpm install` and the build, links `yagura` into `~/.local/bin`, adds one marked block to your `~/.zshrc` or `~/.bashrc` that puts that directory on your PATH, and reports whether `claude`, `gh` and `glab` are installed and logged in. Run it again any time; `--no-rc` leaves your rc files alone and prints the line instead, `--bin <dir>` changes where the link goes, and `--uninstall` removes the link and the block (it never touches `~/.yagura`). To build by hand instead: `pnpm install && pnpm -r build && pnpm -r test`, then link `apps/cli/dist/main.js` yourself.
 
 Runtime state lives in `~/.yagura`, or wherever `YAGURA_HOME` points, and never in the repo. Every `yagura` command opens that home's database and migrates it, so set a scratch home before you try anything. Never run a command without one while experimenting.
 
@@ -81,7 +79,7 @@ Models default to the harness default. To pick them per role and cap spend: `yag
 
 ### Setting it up on a work VM
 
-- **Install without internet.** `pnpm install` needs a registry. Point pnpm at your internal mirror, or copy a populated pnpm store to the VM. `better-sqlite3` builds natively, so the VM needs `gcc`, `make` and Python; after any Node switch run `pnpm rebuild better-sqlite3`.
+- **Install without internet.** `scripts/setup.sh` runs `pnpm install`, which needs a registry; run it with `--no-build` after building elsewhere. Point pnpm at your internal mirror, or copy a populated pnpm store to the VM. `better-sqlite3` builds natively, so the VM needs `gcc`, `make` and Python; after any Node switch run `pnpm rebuild better-sqlite3`.
 - **Harness.** Install and log in `claude` on the VM (or set `harness.claude.bin`), with your plugins and skills, including pstack. `yagura project skills <id>` checks a project's required skills are installed where agents run.
 - **Internal GitLab.** Log in with `glab auth login --hostname <host>`, then add the host to `forge.glab_hosts` (Settings, or `yagura set forge.glab_hosts '["<host>"]'`). A repo from that host registers through merge requests with `yagura repo add <url> --id <id>`; any other remote needs `--forge gh|glab` or `--land push`. If the repo path on the forge differs from the URL, `yagura repo set <id>` and `yagura set forge.repo '"group/name"' --scope repo --id <id>`.
 - **Reaching the dashboard from another machine.** The daemon binds to localhost on port 7300. For access from a Windows host, start it with `YAGURA_BIND=<vm-hostname>` (or `0.0.0.0`) and `YAGURA_PORT`, and open that port in the VM firewall. Beyond localhost the dashboard asks for the token in `$YAGURA_HOME/token` (`YAGURA_TOKEN_FILE` moves it). Browser notifications need HTTPS, or Chrome's `unsafely-treat-insecure-origin-as-secure` flag for that origin.
