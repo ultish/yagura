@@ -69,22 +69,23 @@ export function AddRepo({ onAdded }: { onAdded: (added: RepoView) => void }) {
           style={{ ...field, width: 180, fontSize: 13 }}
         />
         <label htmlFor="repo-route" className="sr-only">
-          How it lands
+          How finished work gets merged
         </label>
         <select id="repo-route" value={route} onChange={(e) => setRoute(e.target.value)} style={{ ...field, fontSize: 13 }}>
-          <option value="">lands: from the URL</option>
-          <option value="gh">lands through pull requests (gh)</option>
-          <option value="glab">lands through merge requests (glab)</option>
-          <option value="push">lands by pushing to the default branch</option>
+          <option value="">Merge via: detect (GitHub.com or a known GitLab)</option>
+          <option value="gh">Merge via: GitHub pull requests</option>
+          <option value="glab">Merge via: GitLab merge requests</option>
+          <option value="push">Merge via: push straight to main, no review</option>
         </select>
         <button className="btn lamp" type="submit" disabled={action.busy || !source.trim()}>
           {action.busy ? "Reading…" : "Add repo"}
         </button>
       </div>
       <div className="muted" style={{ fontSize: 13 }}>
-        yagura clones it into its own mirror and reads its default branch and verify pack. Agents work in worktrees of that mirror. Verified work lands through
-        pull requests on github.com, through merge requests on the GitLab hosts in forge.glab_hosts, and by a push to the default branch only when you choose
-        that.
+        yagura keeps its own copy of the repo; agents work on separate branches of it. Each finished unit becomes one pull or merge request, and "Merge via"
+        says which kind. "Detect" works for github.com and for any GitLab host listed in the forge.glab_hosts setting; for any other address, such as an
+        internal GitLab or GitHub Enterprise, pick GitHub or GitLab yourself. "Push straight to main" skips the pull request and any review, so choose it only
+        for a repo where that is fine.
       </div>
       {action.error && (
         <div className="s-bell" style={{ fontSize: 13 }}>
