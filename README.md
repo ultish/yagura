@@ -68,7 +68,7 @@ yagura daemon                        # engine, API, and dashboard on one port
 **In the dashboard**
 
 1. **Repos**: paste the git URL, optionally pick how it lands (pull requests with `gh`, merge requests with `glab`, or a push to the default branch), and press Add repo.
-2. **Environments**: add one (provider `local-process` to start). Open it, and on the Answers tab describe in your own words how tests run and how publishing works, then press Save and run the doctor. On the Values tab add values such as `NEXUS_URL`. The Actions tab shows what the doctor proved.
+2. **Environments**: add one (provider `local-process` to start). Open it, and on the Answers tab describe in your own words how tests run and how publishing works, then press Save and run the doctor. On the Values tab add values such as `NEXUS_URL`. The Actions tab shows what the doctor proved. Or have an LLM session fill this in for you; see Plugins above.
 3. **Projects → New project**: fill in the goal and how anyone can tell it is done, tick one or more registered repos (or add one on the spot), pick the environment, and choose whether you approve each merge (the default) or merge when CI passes. Or use **Talk**: describe the goal to the watchman and press Go on its proposal.
 4. **Projects**, **Gates**, and **Agents**: watch it run, answer the questions it asks you, steer or stop a running agent, retry or cancel a unit, and pull the andon cord. **Settings** holds models, budget, and the GitLab hosts.
 
@@ -114,14 +114,14 @@ The core loop was proven on 2026-10-15 with Claude Haiku 5.5 on every role, real
 
 ## Layout
 
-| Path             | What it holds                                                                                                                                                                                  |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/core`  | Domain types, SQLite schema and store, config, git, briefs and hand-offs, harness adapters, runner, judge, unit lead, merge, engine. Everything testable lives here.                           |
-| `apps/daemon`    | The engine, a Hono API with server-sent events, and the static dashboard.                                                                                                                      |
-| `apps/cli`       | The `yagura` command line, which talks to the daemon.                                                                                                                                          |
-| `apps/web`       | The dashboard (Vite and React). Pure logic is in `src/lib`, pages in `src/pages`, the tower and beacon drawings in `src/scene`.                                                                |
-| `plugins/yagura` | Role skills loaded into every agent session: worker, judge, unit lead, planner, doctor, watchman; plus `yagura-environment`, which you can give your own LLM to write an environment template. |
-| `docs`           | `DESIGN.md` (the spec), `STATUS.md` (current state), `STATUS-ARCHIVE.md` (history).                                                                                                            |
+| Path             | What it holds                                                                                                                                                                                              |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/core`  | Domain types, SQLite schema and store, config, git, briefs and hand-offs, harness adapters, runner, judge, unit lead, merge, engine. Everything testable lives here.                                       |
+| `apps/daemon`    | The engine, a Hono API with server-sent events, and the static dashboard.                                                                                                                                  |
+| `apps/cli`       | The `yagura` command line, which talks to the daemon.                                                                                                                                                      |
+| `apps/web`       | The dashboard (Vite and React). Pure logic is in `src/lib`, pages in `src/pages`, the tower and beacon drawings in `src/scene`.                                                                            |
+| `plugins/yagura` | Role skills loaded into every agent session: worker, judge, unit lead, planner, doctor, watchman; plus `yagura-environment`, which you can give your own LLM session so it creates an environment for you. |
+| `docs`           | `DESIGN.md` (the spec), `STATUS.md` (current state), `STATUS-ARCHIVE.md` (history).                                                                                                                        |
 
 ## Development
 
