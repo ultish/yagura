@@ -25,6 +25,23 @@ const proofOf = (a: ActionView) => {
   return a.state === "broken" ? `${a.reason ?? "failed"} · ${clock(run.createdAt)}` : `exit 0 · ${when}`;
 };
 
+const ANSWER_HINTS: Record<(typeof ANSWER_KEYS)[number], string> = {
+  tests: "The command, and any quirk: which tool, which flags, anything that is blocked here.",
+  publish: "Which tool, where snapshots go, and that a release is never published.",
+  images: "The build tool, the registry, and how images are tagged.",
+  run: "How to start the app locally, or how it is deployed.",
+  never: "Rules agents must not break in this environment.",
+  other: "Anything else a new teammate would need to know.",
+};
+const ANSWER_PLACEHOLDERS: Record<(typeof ANSWER_KEYS)[number], string> = {
+  tests: "e.g. run gradle test, not gradlew",
+  publish: "e.g. maven publish to my nexus at localhost:8801; use gradle, not gradlew",
+  images: "e.g. docker build, pushed to registry.internal/team",
+  run: "e.g. docker compose up; the app is on port 8080",
+  never: "e.g. never publish a release version; never delete from Nexus",
+  other: "Not answered",
+};
+
 function AnswersTab({ id, answers, reload }: { id: string; answers: Answers; reload: () => void }) {
   const [draft, setDraft] = useState<Answers>(answers);
   const save = useAction();
@@ -40,16 +57,18 @@ function AnswersTab({ id, answers, reload }: { id: string; answers: Answers; rel
       <p className="muted hub-small">In your own words. The doctor turns these into actions, and every agent reads them.</p>
       <div className="env-answer-grid">
         {ANSWER_KEYS.map((k) => (
-          <label key={k} className="env-answer">
-            {ANSWER_QUESTIONS[k]}
+          <div key={k} className="env-answer">
+            <label htmlFor={`answer-${k}`}>{ANSWER_QUESTIONS[k]}</label>
+            <span className="env-answer-hint">{ANSWER_HINTS[k]}</span>
             <textarea
-              rows={k === "never" || k === "other" ? 2 : 3}
+              id={`answer-${k}`}
+              rows={k === "never" || k === "other" ? 3 : 4}
               value={draft[k]}
-              placeholder={k === "publish" ? "e.g. maven publish to my nexus at localhost:8801; use gradle, not gradlew" : "Not answered"}
+              placeholder={ANSWER_PLACEHOLDERS[k]}
               onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
               style={{ ...field, resize: "vertical" }}
             />
-          </label>
+          </div>
         ))}
       </div>
       <div className="hub-ask-buttons">

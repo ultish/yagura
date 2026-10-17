@@ -937,17 +937,26 @@ button.story-time:hover {
   margin-bottom: 8px;
 }
 .env-answer-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 14px 20px;
-  margin: 8px 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  max-width: 760px;
+  margin: 18px 0 22px;
 }
 .env-answer {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+}
+.env-answer label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.env-answer-hint {
   font-size: 13px;
-  color: var(--soft);
+  color: var(--muted);
+  margin-bottom: 4px;
 }
 .env-actions td {
   vertical-align: top;
