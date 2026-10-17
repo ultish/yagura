@@ -1,8 +1,10 @@
 # yagura build status
 
-Updated 2026-10-16 (handoff below). Older material is in `docs/STATUS-ARCHIVE.md`; read it only when you need the history of something.
+Updated 2026-10-17 (handoff below). Older material is in `docs/STATUS-ARCHIVE.md`; read it only when you need the history of something.
 
 **Resume here (handoff, 2026-10-16).**
+
+- **Direction (2026-10-17): the dashboard is the main interface; the CLI stays for people and agents.** Built: Projects → New project (`POST /api/projects`; environment required, merge defaults to human approval, repos picked or added in place, read-only references). Still CLI-only, to build in this order: a project's repo list and settings panel (`project set`, add/remove repo, skills check; a project's repos are fixed at creation today), a "Is this machine ready?" page (git, claude/gh/glab found and logged in, glab hosts, bind and token), repo edit (forge, land route, URL), unit requeue/drop, the usage-limit hold with a Start now button, `yagura install-service`.
 
 - **State.** The core loop is built and merged into `main` (merge commit of `core-loop`). `pnpm -r test` passes (core 250, web 37, daemon 23), `pnpm -r typecheck` and `format:check` are clean. `docs/DESIGN.md` describes the new loop (§3, §6–§9, §12–§15, §26, §27); the README is rewritten. The decision log `docs/design/core-loop-trail.tsv` is local and never committed.
 - **Proven with a real model on real GitHub.** Haiku 5.5 on every role, `ultish/yagura-demo-lib` and `-app`, real Gradle build and publish into a Maven folder standing in for Nexus: a library unit and an app unit merged with merge commits (two parents each), the issue closed, the app pinned exactly the library's test build, the project closed itself. 2026-10-14: $0.184, $0.052 per work unit; 2026-10-15 (after the fixes): $0.11, about nine minutes, no gate, no method miss, no stuck unit. The perf rule (at most $0.51 per unit; the old demo cost $1.02) holds. The publish to the developer's real Nexus (8081, login from `~/.gradle/gradle.properties`) was proven on 2026-10-16 with a throwaway `0.0.0-yg-probe-SNAPSHOT`, left in Nexus; that file's `nexusUrl` still points at a dead port 8083.

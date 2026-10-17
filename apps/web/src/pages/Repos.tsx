@@ -11,7 +11,7 @@ function repoStatus(v: RepoView): { text: string; tone: string } {
   return v.trunk ? { text: "Mirrored.", tone: "muted" } : { text: "Not mirrored yet; yagura fetches it on the first run.", tone: "muted" };
 }
 
-function AddRepo({ onAdded }: { onAdded: () => void }) {
+export function AddRepo({ onAdded }: { onAdded: (added: RepoView) => void }) {
   const [source, setSource] = useState("");
   const [added, setAdded] = useState<RepoView | null>(null);
   const [id, setId] = useState("");
@@ -36,8 +36,9 @@ function AddRepo({ onAdded }: { onAdded: () => void }) {
         setAdded(null);
         void action.run(async () => {
           const chosen = route === "push" ? { land: "push" } : route ? { forge: route } : {};
-          setAdded(await api<RepoView>("/api/repos", { body: { source, id: id.trim() || undefined, ...chosen } }));
-          onAdded();
+          const created = await api<RepoView>("/api/repos", { body: { source, id: id.trim() || undefined, ...chosen } });
+          setAdded(created);
+          onAdded(created);
           setSource("");
           setId("");
         });

@@ -290,6 +290,24 @@ describe("daemon API", () => {
     expect(repos[1]).toMatchObject({ trunk: null, projects: [{ id: "orders", state: "active" }], landingQueue: [], landedCount: 0 });
   });
 
+  it("creates a project from a goal, repos, and an environment, defaulting to human merge approval", async () => {
+    await post("/api/environments", { id: "dev", provider: "local-process", capacity: 1 });
+    const body = { goal: "Move billing to the new rate API", predicate: "billing reads rates from the new API", repos: ["testbed"], environment: "dev" };
+    expect(await (await post("/api/projects", { ...body, environment: undefined })).json()).toEqual({ error: "pick the environment this project runs in" });
+    expect(await (await post("/api/projects", { ...body, repos: [] })).json()).toEqual({ error: "pick at least one repo this project may change" });
+    expect(await (await post("/api/projects", { ...body, repos: ["nope"] })).json()).toMatchObject({ error: expect.stringContaining("nope") });
+    const created = await post("/api/projects", { ...body, issues: ["gitlab#9"], references: ["testbed"] });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({
+      project: { id: "move-billing-to-the-new-rate-api", mergePolicy: "human", environmentId: "dev", refs: ["gitlab#9"] },
+    });
+    const detail = (await (await get("/api/projects/move-billing-to-the-new-rate-api")).json()) as { repos: { id: string }[] };
+    expect(detail.repos.map((r) => r.id)).toEqual(["testbed"]);
+    expect((await post("/api/projects", { ...body, id: "move-billing-to-the-new-rate-api" })).status).toBe(409);
+    const auto = await post("/api/projects", { ...body, id: "billing-auto", merge: "auto" });
+    expect(await auto.json()).toMatchObject({ project: { mergePolicy: "auto" } });
+  });
+
   it("creates and edits environments and shows who holds and waits for their slots", async () => {
     expect((await post("/api/environments", { id: "dev", provider: "docker-compose", capacity: 2 })).status).toBe(400);
     expect(await (await post("/api/environments", { id: "dev", provider: "local-process", capacity: -1 })).json()).toEqual({

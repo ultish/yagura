@@ -10,6 +10,7 @@ const Spec = lazy(() => import("./pages/Spec"));
 import { Agents } from "./pages/Agents";
 import { Home } from "./pages/Home";
 import { Project } from "./pages/Project";
+import { NewProject } from "./pages/NewProject";
 import { Projects } from "./pages/Projects";
 import { Environments } from "./pages/Environments";
 import { Environment } from "./pages/Environment";
@@ -98,6 +99,7 @@ function Routes() {
   let m: RegExpExecArray | null;
   if (path === "/") return <Home />;
   if (path === "/projects") return <Projects />;
+  if (path === "/projects/new") return <NewProject />;
   if (path === "/agents") return <Agents />;
   if (path === "/gates") return <Gates />;
   if (path === "/repos") return <Repos />;

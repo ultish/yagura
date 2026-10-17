@@ -56,7 +56,7 @@ yagura daemon                        # engine, API, and dashboard on one port
 
 1. **Repos**: paste the git URL, optionally pick how it lands (pull requests with `gh`, merge requests with `glab`, or a push to the default branch), and press Add repo.
 2. **Environments**: add one (provider `local-process` to start). Open it, and on the Answers tab describe in your own words how tests run and how publishing works, then press Save and run the doctor. On the Values tab add values such as `NEXUS_URL`. The Actions tab shows what the doctor proved.
-3. **Talk**: describe the goal to the watchman, and name the repo and environment. It replies with a proposal; press Go to create the project. Set the thread to `go` autonomy to skip that step.
+3. **Projects → New project**: fill in the goal and how anyone can tell it is done, tick one or more registered repos (or add one on the spot), pick the environment, and choose whether you approve each merge (the default) or merge when CI passes. Or use **Talk**: describe the goal to the watchman and press Go on its proposal.
 4. **Projects**, **Gates**, and **Agents**: watch it run, answer the questions it asks you, steer or stop a running agent, retry or cancel a unit, and pull the andon cord. **Settings** holds models, budget, and the GitLab hosts.
 
 **The same from the CLI**, in another terminal with the same `YAGURA_HOME`:

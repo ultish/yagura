@@ -53,6 +53,9 @@ import {
   findUnitsByCommit,
   getAttempt,
   getProject,
+  addProject,
+  getRepo,
+  REPO_ID,
   getUnit,
   getUnitBySeq,
   layout,
@@ -236,6 +239,53 @@ export function createApp(opts: ServerOptions): Hono {
 
   app.get("/api/health", (c) => c.json({ ok: true, home: boot.home }));
 
+  app.post("/api/projects", async (c) => {
+    const b = (await c.req.json()) as {
+      id?: string;
+      name?: string;
+      goal?: string;
+      predicate?: string;
+      repos?: string[];
+      references?: string[];
+      environment?: string;
+      merge?: string;
+      issues?: string[];
+    };
+    const goal = b.goal?.trim();
+    const predicate = b.predicate?.trim();
+    if (!goal) return c.json({ error: "say what the project should get done" }, 400);
+    if (!predicate) return c.json({ error: "say how anyone can tell it is done" }, 400);
+    const repos = [...new Set(b.repos ?? [])];
+    if (!repos.length) return c.json({ error: "pick at least one repo this project may change" }, 400);
+    if (!b.environment) return c.json({ error: "pick the environment this project runs in" }, 400);
+    if (b.merge && b.merge !== "auto" && b.merge !== "human") return c.json({ error: "merge must be auto or human" }, 400);
+    const slug = (b.id?.trim() || b.name?.trim() || goal)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^[^a-z]+|-+$/g, "")
+      .slice(0, 40)
+      .replace(/-+$/, "");
+    if (!REPO_ID.test(slug)) return c.json({ error: "id must be lowercase words joined by dashes, e.g. billing-v2" }, 400);
+    if (db.prepare("SELECT 1 FROM projects WHERE id = ?").get(slug)) return c.json({ error: `project ${slug} already exists` }, 409);
+    try {
+      for (const r of [...repos, ...(b.references ?? [])]) getRepo(db, r as RepoId);
+      getEnvironment(db, b.environment as EnvironmentId);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+    const project = addProject(db, {
+      id: slug,
+      name: b.name?.trim() || slug,
+      goal,
+      predicate,
+      repos: repos as RepoId[],
+      refs: (b.issues ?? []).map((i) => i.trim()).filter(Boolean),
+      mergePolicy: b.merge === "auto" ? "auto" : "human",
+      environmentId: b.environment as EnvironmentId,
+    });
+    if (b.references?.length) setSetting(db, "project", project.id, "project.reference_repos", b.references);
+    return c.json(projectSummary(db, project.id), 201);
+  });
   app.get("/api/projects", (c) => c.json(listProjects(db).map((p) => projectSummary(db, p.id))));
 
   app.get("/api/projects/:id", (c) => {

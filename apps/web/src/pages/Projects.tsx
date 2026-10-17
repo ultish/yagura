@@ -15,13 +15,18 @@ export function Projects() {
   const { data, error } = useApi<ProjectSummary[]>("/api/projects");
   return (
     <main style={{ padding: "26px 36px 48px", display: "flex", flexDirection: "column", gap: 24 }}>
-      <h1 className="serif" style={{ margin: 0, fontSize: 34, fontWeight: 600 }}>
-        Projects
-      </h1>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 16, flexWrap: "wrap" }}>
+        <h1 className="serif" style={{ margin: 0, fontSize: 34, fontWeight: 600 }}>
+          Projects
+        </h1>
+        <Link className="btn lamp" to="/projects/new">
+          New project
+        </Link>
+      </div>
       {error && <div className="s-bell">{error}</div>}
       {data && data.length === 0 && (
         <div className="empty">
-          No projects yet. <Link to="/talk">Talk to the watch</Link> to start one.
+          No projects yet. <Link to="/projects/new">Start one</Link>, or <Link to="/talk">talk to the watch</Link> and let it propose one.
         </div>
       )}
       {GROUPS.map((g) => {
