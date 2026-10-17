@@ -18,14 +18,14 @@ You need Node 26 (`.nvmrc` pins it), pnpm 11, git 2.38 or newer, a logged-in `cl
 ```sh
 git clone https://github.com/ultish/yagura && cd yagura
 scripts/setup.sh
-yagura daemon
+yagura start
 ```
 
 `scripts/setup.sh` checks Node, pnpm and git, runs `pnpm install` and the build, and links `yagura` into `~/.local/bin`. It adds one marked block to your `~/.zshrc` or `~/.bashrc` that puts that directory on your PATH. It then reports whether `claude`, `gh` and `glab` are installed and logged in. You can run it again at any time. `--no-rc` leaves your rc files alone and prints the PATH line instead, `--bin <dir>` changes where the link goes, and `--uninstall` removes the link and the block.
 
-`yagura daemon` starts the engine and the dashboard on `http://127.0.0.1:7300`. State lives in `~/.yagura`, or in `YAGURA_HOME` if you set it. While you experiment, point `YAGURA_HOME` at a scratch directory so you don't mix test runs into your real home.
+`yagura start` runs the engine and the dashboard in the background on `http://127.0.0.1:7300`. `yagura status` shows whether it runs, `yagura stop` stops it, and `yagura restart` does both. The log is `daemon.log` in the state directory. `yagura daemon` runs it in your terminal instead, which is what a systemd unit wants. State lives in `~/.yagura`, or in `YAGURA_HOME` if you set it. While you experiment, point `YAGURA_HOME` at a scratch directory so you don't mix test runs into your real home.
 
-Every command is listed by `yagura --help`.
+`yagura --help` lists the everyday commands, and `yagura help all` lists every one.
 
 ### On an air-gapped machine
 
@@ -73,7 +73,7 @@ All settings are on the Settings page. Models default to the `claude` default. T
 
 The daemon listens on localhost. To open it from another machine, start it with `YAGURA_BIND=<hostname>` (or `0.0.0.0`) and `YAGURA_PORT`, and open that port in the firewall. Beyond localhost the dashboard asks for the token in `$YAGURA_HOME/token`. Browser notifications need HTTPS, or Chrome's `unsafely-treat-insecure-origin-as-secure` flag for that address.
 
-Run the daemon under `tmux` or a systemd user service so it keeps running. On a Mac, use `caffeinate -is`.
+`yagura start` keeps running after you close the terminal. On a Mac, wrap it as `caffeinate -is yagura daemon` to keep the machine awake. For systemd, run `yagura daemon` in a user service.
 
 ## Set up a project in the dashboard
 
@@ -99,4 +99,4 @@ Go to Projects, then New project. Write the goal and how anyone can tell it is d
 
 The Projects page lists units as they move. Gates shows the questions agents have for you. On Agents you can read a running agent's work, steer it, or stop it. A stuck unit can be retried or cancelled, and the andon button on a project stops everything.
 
-Starting the daemon, logging in to `claude`, `gh` and `glab`, `yagura project set` and `yagura unit requeue` are CLI only for now.
+Logging in to `claude`, `gh` and `glab`, `yagura project set` and `yagura unit requeue` are CLI only for now.

@@ -168,7 +168,11 @@ const USAGE = `yagura — agent orchestration
   yagura thread mentions <@project | @project/U3 | @project/A7 | @thread:4 | @repo:id>   conversations that mention it
   yagura proposal apply|discard <id>
   yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
-  yagura daemon                          run yagura for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)
+  yagura start                           run the daemon in the background (log in $YAGURA_HOME/daemon.log) and print the dashboard URL
+  yagura stop                            stop the background daemon
+  yagura restart                         stop it, then start it
+  yagura status                          whether it runs, its pid, URL, and log
+  yagura daemon                          run yagura in this terminal for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)
   yagura drive <project>                 plan and run workers until nothing is left to do (without a daemon)
   yagura import <old home>               copy settings, repos, environments, templates, and conversations from an old home (projects and units stay behind)
   yagura andon <project> --reason <text> | --clear
@@ -191,6 +195,43 @@ const USAGE = `yagura — agent orchestration
   yagura prompt reset <role|all> (--project <id> | --global) [--notes]           back to the next layer
   yagura set <key> <json> [--scope global|environment|repo|project] [--id <scope id>]
   yagura unset <key> [--scope global|environment|repo|project] [--id <scope id>]   back to the next layer's value`;
+
+const SHORT = `yagura 櫓: agent orchestration. The dashboard is at http://127.0.0.1:${process.env.YAGURA_PORT ?? 7300} once the daemon runs.
+
+Server
+  yagura start | stop | restart | status   run the daemon in the background
+  yagura daemon                            run it in this terminal instead (logs show here)
+
+Set up
+  yagura repo add <git URL>                register a repo
+  yagura env add <id> --provider local-process   create an environment (then: env answer, env doctor)
+  yagura project new <id> --goal ... --predicate ... --repo <id>
+
+Watch
+  yagura show <project> [unit#]            where a project or unit stands
+  yagura gates                             questions waiting for you
+  yagura gate answer <id> <option>
+  yagura logs <project> <unit#>            an agent's work
+  yagura andon <project> --reason <text>   stop everything in a project
+
+Steer
+  yagura steer <project>/U<n> <message>    tell a running agent something
+  yagura unit requeue|drop|wake <project> <unit#>
+  yagura set <key> <json>  |  yagura settings
+
+More
+  yagura help <command>                    one command's flags, for example: yagura help project
+  yagura help all                          every command
+  yagura help agent                        the commands agents run inside a session`;
+
+const AGENT_HELP = `Commands for agents, run inside a yagura session. People rarely need them.
+
+  yagura evidence run [--label <name>] [--at base] -- <command>
+  yagura action propose --name <name> --use <text> [--all] -- <command> | broken --name <name> --reason <text>
+  yagura doctor report [--works <text>] [--fails <text>] [--unknown <text>]
+  yagura git <repo> log|show|ls-tree|diff|grep|blame [args]
+  yagura trace <commit sha | issue ref>
+  yagura show | logs | gates | settings   read-only lookups`;
 
 const [command, ...rest] = process.argv.slice(2);
 const refusal = agentRefusal(process.argv.slice(2), process.env);
@@ -232,7 +273,8 @@ const usageOf = (cmd: string) => {
   return out.length ? out.join("\n") : null;
 };
 if (!command || command === "help" || HELP_FLAGS.has(command)) {
-  console.log((rest[0] && usageOf(rest[0])) ?? USAGE);
+  const topic = command === "help" ? rest[0] : undefined;
+  console.log(topic === "all" ? USAGE : topic === "agent" ? AGENT_HELP : ((topic && usageOf(topic)) ?? SHORT));
   process.exit(0);
 }
 if (rest.some((a) => HELP_FLAGS.has(a))) {
@@ -240,8 +282,28 @@ if (rest.some((a) => HELP_FLAGS.has(a))) {
   process.exit(0);
 }
 if (!usageOf(command)) {
-  process.stderr.write(`yagura: no command "${command}"\n${USAGE}\n`);
+  process.stderr.write(`yagura: no command "${command}"\n\n${SHORT}\n`);
   process.exit(2);
+}
+if (command === "start" || command === "stop" || command === "restart" || command === "status") {
+  if (rest.length) {
+    process.stderr.write(`yagura ${command} takes no arguments (got ${rest.join(" ")}); set YAGURA_HOME, YAGURA_BIND, YAGURA_PORT instead\n`);
+    process.exit(2);
+  }
+  const service = await import("./service.js");
+  const cli = [process.execPath, fileURLToPath(import.meta.url)];
+  const control = loadBootstrap();
+  if (command === "restart") {
+    const stopped = await service.stopDaemon(control);
+    process.exit(stopped === 0 ? await service.startInBackground(control, cli) : stopped);
+  }
+  process.exit(
+    command === "start"
+      ? await service.startInBackground(control, cli)
+      : command === "stop"
+        ? await service.stopDaemon(control)
+        : await service.daemonStatus(control),
+  );
 }
 if (command === "daemon") {
   if (rest.length) {

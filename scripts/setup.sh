@@ -179,5 +179,5 @@ else
 fi
 
 say ""
-say "Done. Start it with:  yagura daemon"
+say "Done. Start it with:  yagura start"
 say "Then open http://127.0.0.1:7300 and add a repo. State lives in ${YAGURA_HOME:-$HOME/.yagura}."
