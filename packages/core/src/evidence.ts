@@ -21,6 +21,8 @@ export interface EvidenceRun {
   at: At;
   sha: Sha;
   label: string;
+  // The verification-guide page this run drove, when the agent said so.
+  page: string | null;
   command: string;
   exitCode: number | null;
   timedOut: boolean;
@@ -92,7 +94,7 @@ export function runShell(
   });
 }
 
-type RunRequest = { attemptId: AttemptId; at: At; label?: string; command: string; timeoutSeconds?: number };
+type RunRequest = { attemptId: AttemptId; at: At; label?: string; page?: string; command: string; timeoutSeconds?: number };
 
 export class UncommittedChanges extends Error {}
 
@@ -141,10 +143,11 @@ async function captureRun(db: Db, boot: Bootstrap, req: RunRequest): Promise<Evi
     const runId = Number(
       db
         .prepare(
-          `INSERT INTO evidence_runs (attempt_id, at, sha, label, command, exit_code, timed_out, tampered, duration_ms, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO evidence_runs (attempt_id, at, sha, label, page, command, exit_code, timed_out, tampered, duration_ms, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(attempt.id, req.at, sha, label, req.command, result.exitCode, result.timedOut ? 1 : 0, tampered ? 1 : 0, durationMs, now()).lastInsertRowid,
+        .run(attempt.id, req.at, sha, label, req.page ?? null, req.command, result.exitCode, result.timedOut ? 1 : 0, tampered ? 1 : 0, durationMs, now())
+        .lastInsertRowid,
     );
     const base = { projectId: unit.projectId, attemptId: attempt.id, evidenceRunId: runId };
     const stdoutId = putArtifact(db, boot, { ...base, kind: "stdout", label: `${label}@${req.at} stdout`, data: result.stdout });
@@ -177,6 +180,7 @@ function toRun(r: Record<string, unknown>): EvidenceRun {
     at: r.at as At,
     sha: r.sha as Sha,
     label: r.label as string,
+    page: (r.page as string | null) ?? null,
     command: r.command as string,
     exitCode: (r.exit_code as number | null) ?? null,
     timedOut: r.timed_out === 1,

@@ -362,6 +362,11 @@ describe("runWorkerRound", () => {
       expect(brief).toContain("- page orders-api: Fetch an order by id.");
       expect(brief).toContain("order 42 is shipped → page orders-api");
       expect(brief).toContain("emails go out → NEW page shipping-email");
+      const unit = listUnits(db, project).at(-1)!;
+      expect(unit.proof.map((p) => p && [p.pages[0], p.isNew])).toEqual([
+        ["orders-api", false],
+        ["shipping-email", true],
+      ]);
     });
 
     it("says there is no guide when the repo has none", async () => {

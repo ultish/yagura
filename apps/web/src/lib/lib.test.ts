@@ -1,6 +1,7 @@
 import { byTime } from "./sort";
 import { atEnd } from "./follow";
 import { depLine } from "./units";
+import { proofLine } from "./proof";
 import { AGENT_EMOJI } from "@yagura/core";
 import { ICONS } from "../ui/RoleIcon";
 import { describe, expect, it } from "vitest";
@@ -511,5 +512,40 @@ describe("the browser bundle", () => {
     const files = (readdirSync(root, { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f) && !f.endsWith(".test.ts"));
     const offenders = files.filter((f) => /^import (?!type )[^;]*from "@yagura\/core";/m.test(readFileSync(join(root, f), "utf8")));
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("the unit page's proof row", () => {
+  const row = (over: Partial<Parameters<typeof proofLine>[0]> = {}) => ({
+    page: "orders-api",
+    isNew: false,
+    lines: 3,
+    status: "held" as const,
+    failsOnBase: false,
+    runs: [
+      { id: 12, attemptNo: 1, agentNo: 2, role: "worker" as const, at: "head" as const, exit: 0, timedOut: false },
+      { id: 15, attemptNo: 2, agentNo: 3, role: "judge" as const, at: "head" as const, exit: 0, timedOut: false },
+    ],
+    ...over,
+  });
+
+  it("says a page held, with the judge's runs and the lines it covers", () => {
+    expect(proofLine(row())).toEqual({ tone: "pine", text: "judge ran it · held", runs: "3 lines · run:15 · 1 by the worker" });
+  });
+
+  it("says a new page failed on the base and passes on the head", () => {
+    const r = row({
+      isNew: true,
+      lines: 1,
+      failsOnBase: true,
+      runs: [{ id: 17, attemptNo: 2, agentNo: 3, role: "judge", at: "base", exit: 1, timedOut: false }],
+    });
+    expect(proofLine(r)).toEqual({ tone: "pine", text: "fails on base · passes on head", runs: "1 line · run:17 (base)" });
+  });
+
+  it("raises a page the judge never ran, and a new page that did not fail on the base", () => {
+    expect(proofLine(row({ status: "missing", runs: [] }))).toMatchObject({ tone: "bell", text: "the judge ran nothing for it" });
+    expect(proofLine(row({ status: "failed", isNew: true, failsOnBase: false }))).toMatchObject({ tone: "bell", text: "did not fail on the base" });
+    expect(proofLine(row({ status: "pending", runs: [] }))).toMatchObject({ tone: "muted", text: "not judged yet" });
   });
 });

@@ -1,3 +1,4 @@
+import { approvalProblem } from "./proof.js";
 import { z } from "zod";
 import { HANDOFF_STATUSES, JUDGE_VERDICTS, LEAD_ACTIONS, type AttemptId, type Handoff, type RecordKind, type Role } from "./domain.js";
 import { applyDelta, PlanDelta, PlanRejected } from "./plan.js";
@@ -109,8 +110,10 @@ const runsOfAttempt = (db: Db, attemptId: AttemptId) =>
 export function recordProblem<K extends LiveRecordKind>(db: Db, attemptId: AttemptId, kind: K, data: RecordData<K>): string | null {
   if (kind === "judge") {
     const mine = runsOfAttempt(db, attemptId);
-    const bad = (data as RecordData<"judge">).runs.filter((id) => !mine.has(id));
-    return bad.length ? `${bad.map((id) => `run:${id}`).join(", ")} ${bad.length === 1 ? "was" : "were"} not recorded by your yagura evidence run calls` : null;
+    const judge = data as RecordData<"judge">;
+    const bad = judge.runs.filter((id) => !mine.has(id));
+    if (bad.length) return `${bad.map((id) => `run:${id}`).join(", ")} ${bad.length === 1 ? "was" : "were"} not recorded by your yagura evidence run calls`;
+    return judge.verdict === "approve" ? approvalProblem(db, getUnit(db, getAttempt(db, attemptId).unitId), attemptId) : null;
   }
   if (kind !== "plan") return null;
   const unit = getUnit(db, getAttempt(db, attemptId).unitId);

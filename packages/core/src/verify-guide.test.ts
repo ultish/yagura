@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { normalizeAcceptance, readVerifyGuides, verifySection } from "./verify-guide.js";
+import { markNewPages, normalizeAcceptance, readVerifyGuides, verifySection } from "./verify-guide.js";
 
 function repoWithGuide(): string {
   const dir = mkdtempSync(join(tmpdir(), "yagura-guide-"));
@@ -70,7 +70,8 @@ describe("verifySection", () => {
     expect(text).toContain("returns shipped → page orders-api");
     expect(text).toContain("emails go out → NEW page shipping-email");
     expect(text).toContain("no proof here → (none named");
-    expect(text).toContain("--at base");
+    expect(text).toContain("while the code is still unchanged and see it fail");
+    expect(text).not.toContain("--at base");
     expect(text).toContain("$YAGURA_EVIDENCE");
     expect(text).not.toContain("curl -s http://127.0.0.1:PORT/orders/42");
   });
@@ -86,5 +87,21 @@ describe("verifySection", () => {
   it("tells a worker to create the guide when the repo has none", () => {
     expect(verifySection([], ["builds"], [null], "worker")).toContain("pstack:create-verification-skill");
     expect(verifySection([], ["builds"], [null], "judge")).not.toContain("create-verification-skill");
+  });
+});
+
+describe("markNewPages", () => {
+  it("marks a named page the guide does not have as new, and leaves the others alone", () => {
+    const guides = readVerifyGuides(repoWithGuide());
+    expect(
+      markNewPages(
+        [{ pages: ["orders-api"], isNew: false }, { pages: ["order-total"], isNew: false }, { pages: ["health", "shipping"], isNew: false }, null],
+        guides,
+      ),
+    ).toEqual([{ pages: ["orders-api"], isNew: false }, { pages: ["order-total"], isNew: true }, { pages: ["health", "shipping"], isNew: true }, null]);
+  });
+
+  it("calls every named page new in a repo with no guide", () => {
+    expect(markNewPages([{ pages: ["orders-api"], isNew: false }], [])).toEqual([{ pages: ["orders-api"], isNew: true }]);
   });
 });

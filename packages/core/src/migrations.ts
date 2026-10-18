@@ -11,6 +11,8 @@ export interface Migration {
 export const MIGRATIONS: readonly Migration[] = [
   // Which verification-guide page proves each acceptance line: a JSON array as long as acceptance_json, each entry null or { pages, isNew }.
   { version: 2, sql: "ALTER TABLE units ADD COLUMN proof_json TEXT NOT NULL DEFAULT '[]';" },
+  // The guide page a recorded run drove, so a judge's runs can be matched to the pages a unit names.
+  { version: 3, sql: "ALTER TABLE evidence_runs ADD COLUMN page TEXT;" },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

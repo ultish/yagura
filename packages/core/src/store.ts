@@ -665,6 +665,11 @@ export function bumpMaxAttempts(db: Db, unitId: UnitId, to: number): void {
   db.prepare("UPDATE units SET max_attempts = MAX(max_attempts, ?), updated_at = ? WHERE id = ?").run(to, now(), unitId);
 }
 
+export function setUnitProof(db: Db, unitId: UnitId, proof: (UnitProof | null)[]): void {
+  const unit = getUnit(db, unitId);
+  db.prepare("UPDATE units SET proof_json = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(alignedProof(unit.acceptance, proof)), now(), unitId);
+}
+
 export function amendUnit(db: Db, unitId: UnitId, patch: { goal?: string; acceptance?: string[]; proof?: (UnitProof | null)[]; context?: string[] }): void {
   const sets: string[] = [];
   const values: unknown[] = [];

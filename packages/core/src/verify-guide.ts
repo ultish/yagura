@@ -76,9 +76,16 @@ export function readVerifyGuides(checkout: string): VerifyGuide[] {
   return guides.sort((a, b) => a.skill.localeCompare(b.skill));
 }
 
-const RULES = `- Drive the guide through \`yagura evidence run -- <command>\` so each drive is a recorded run you can cite. Write proof files to \`$YAGURA_EVIDENCE\`, never into the checkout.
+const RULES = `- Drive the guide through \`yagura evidence run --page <page> -- <command>\` so each drive is a recorded run you can cite, tied to its page. Write proof files to \`$YAGURA_EVIDENCE\`, never into the checkout.
+- Make every drive exit non-zero when anything differs from what the page says it returns (use \`curl -f\` and compare the body), so a run's exit code means something: a new page must fail on the base, and a drive that succeeds without the change proves nothing.
 - The guide's ports and paths are examples. Pick a free port and a temporary directory of your own, so units running side by side do not collide, and stop what you started.
 - Drive a page by running its commands as written, then compare what comes back with what the page says it returns. A difference is a stale page or a defect in the code, never something to skip: the worker corrects the page in its branch (and says so with --decision) or fixes the code; the judge records a finding. Do this again after you merge the base branch.`;
+
+// A page the unit names that the repo's guide does not have yet is new, whatever the planner wrote: the worker writes it.
+export function markNewPages(proof: (UnitProof | null)[], guides: VerifyGuide[]): (UnitProof | null)[] {
+  const have = new Set(guides.flatMap((g) => g.pages.map((p) => p.name)));
+  return proof.map((p) => (p && !p.isNew && p.pages.some((page) => !have.has(page)) ? { ...p, isNew: true } : p));
+}
 
 const PAGE_TEXT_LIMIT = 4000;
 
@@ -113,11 +120,11 @@ export function verifySection(guides: VerifyGuide[], acceptance: string[], proof
   out.push("");
   if (role === "worker") {
     out.push(
-      "For a NEW page: write it first, drive it on the unchanged code and see it fail (`yagura evidence run --at base -- …`), then build the change, then drive it again and see it pass. If a step in an existing page is wrong, fix it in your branch and record it with --decision.",
+      "For a NEW page: write it first and commit it, drive it while the code is still unchanged and see it fail, build the change, then drive it again and see it pass. Tag every drive with `--page <page>`. If a step in an existing page is wrong, fix it in your branch and record it with --decision.",
     );
   } else {
     out.push(
-      "For each named page, in this order: (1) run each of its commands exactly as written, changing only the port and paths, as a recorded run; (2) write down what the page says it returns next to what you got; (3) any difference is a finding, because the page is stale or the code is wrong. Cite those runs in `judge approve --runs`. For a NEW page, also check it fails on the base (`--at base`); a page that would pass whatever the code does is a finding. A step the worker corrected in a page is part of the change: check the correction.",
+      "For each named page, in this order: (1) run each of its commands exactly as written, changing only the port and paths, as a recorded run with `--page <page>` (yagura refuses an approval unless you drove every named page this way); (2) write down what the page says it returns next to what you got; (3) any difference is a finding, because the page is stale or the code is wrong. Cite those runs in `judge approve --runs`. For a NEW page, also run it with `--page <page> --at base` and see it fail (yagura requires that too); a page that would pass whatever the code does is a finding. A step the worker corrected in a page is part of the change: check the correction.",
     );
     const texts: string[] = [];
     for (const name of new Set(proof.flatMap((p) => p?.pages ?? []))) {

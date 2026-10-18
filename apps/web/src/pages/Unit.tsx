@@ -1,3 +1,4 @@
+import { proofLine } from "../lib/proof";
 import { lazy, Suspense, useState } from "react";
 import type { RepoAt } from "./Repo";
 import type { UnitState } from "@yagura/core";
@@ -509,6 +510,26 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             )}
           </dd>
         </div>
+        {story.proof.length > 0 && (
+          <div className="wide">
+            <dt>Proof</dt>
+            <dd className="proof-rows">
+              {story.proof.map((row) => {
+                const line = proofLine(row);
+                return (
+                  <div key={row.page} className={`proof-row tone-${line.tone}`}>
+                    <span className="mono proof-page">
+                      {row.isNew && <span className="proof-new">new </span>}
+                      {row.page}
+                    </span>
+                    <span className="proof-result">{line.text}</span>
+                    <span className="mono proof-runs">{line.runs}</span>
+                  </div>
+                );
+              })}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Pull request</dt>
           <dd>

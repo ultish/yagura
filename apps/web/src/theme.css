@@ -713,6 +713,45 @@ textarea {
   margin: 0;
   padding-left: 18px;
 }
+.proof-rows {
+  display: grid;
+  gap: 8px;
+}
+.proof-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  align-items: baseline;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+.proof-row.tone-bell {
+  border-color: var(--bad-border);
+}
+.proof-page {
+  font-size: 13px;
+  font-weight: 500;
+}
+.proof-new {
+  color: var(--amber-text);
+}
+.proof-result {
+  font-size: 13px;
+  text-align: right;
+  color: var(--muted);
+}
+.proof-row.tone-pine .proof-result {
+  color: var(--pine);
+}
+.proof-row.tone-bell .proof-result {
+  color: var(--bell-text);
+}
+.proof-runs {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  color: var(--faint);
+}
 .unit-now {
   border: 1px solid var(--line2);
   border-left: 4px solid var(--tone);

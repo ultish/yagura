@@ -12,14 +12,14 @@ export async function evidenceCli(argv: string[], env: NodeJS.ProcessEnv = proce
   const split = argv.indexOf("--");
   const { positionals, values } = parseArgs({
     args: split === -1 ? argv : argv.slice(0, split),
-    options: { at: { type: "string" }, label: { type: "string" }, timeout: { type: "string" } },
+    options: { at: { type: "string" }, label: { type: "string" }, page: { type: "string" }, timeout: { type: "string" } },
     allowPositionals: true,
     strict: true,
   });
   const command = split === -1 ? "" : argv.slice(split + 1).join(" ");
   const at = values.at ?? "head";
   if (positionals[0] !== "run" || (at !== "base" && at !== "head") || !command)
-    return { code: 2, output: "usage: yagura evidence run [--label <name>] [--at base] [--timeout <seconds>] -- <command>\n" };
+    return { code: 2, output: "usage: yagura evidence run [--label <name>] [--page <guide page>] [--at base] [--timeout <seconds>] -- <command>\n" };
   if (!env.YAGURA_ATTEMPT) return { code: 2, output: "evidence run only works inside a yagura agent session (YAGURA_ATTEMPT is not set)\n" };
 
   const boot = loadBootstrap(env);
@@ -34,6 +34,7 @@ export async function evidenceCli(argv: string[], env: NodeJS.ProcessEnv = proce
       attemptId: Number(env.YAGURA_ATTEMPT) as AttemptId,
       at: at as At,
       label: values.label,
+      page: values.page,
       command,
       timeoutSeconds: values.timeout ? Number(values.timeout) : undefined,
     }).catch((e: unknown) => {

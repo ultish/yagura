@@ -73,6 +73,10 @@ describe("evidence run", () => {
     updateAttempt(db, attempt.id, { role: "worker", worktreePath: checkout });
     const run = await runEvidence(db, boot, { attemptId: attempt.id, at: "head", command: 'printf %s "$NEXUS_URL"' });
     expect(readArtifact(db, boot, run.stdoutArtifactId!).toString()).toBe("file:///maven");
+    expect(run.page).toBeNull();
+    const tagged = await runEvidence(db, boot, { attemptId: attempt.id, at: "head", page: "orders-api", command: "true" });
+    expect(tagged.page).toBe("orders-api");
+    expect(db.prepare("SELECT page FROM evidence_runs WHERE id = ?").get(tagged.id)).toEqual({ page: "orders-api" });
     db.close();
   });
 });

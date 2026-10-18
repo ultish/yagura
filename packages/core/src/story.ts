@@ -1,3 +1,4 @@
+import { proofRows, type ProofRow } from "./proof.js";
 import { listSteers } from "./steer.js";
 import type { Bootstrap } from "./config.js";
 import { listDisagreements, type Disagreement } from "./disagreements.js";
@@ -67,6 +68,8 @@ export interface UnitStory {
   running: { attemptId: number; agentNo: number; role: string; startedAt: IsoTime } | null;
   gates: Gate[];
   dependencies: DepEdge[];
+  // The guide pages the unit names, and whether the judge's own runs show each holds.
+  proof: ProofRow[];
 }
 // Every session that worked on a unit: the planner run that planned it (shared with the units planned beside it) and its own attempts.
 export interface StoryAgent {
@@ -429,6 +432,7 @@ export function unitStory(db: Db, _boot: Bootstrap, unit: Unit): UnitStory {
     running: live?.startedAt ? { attemptId: live.id, agentNo: live.agentNo, role: roleName(live), startedAt: live.startedAt } : null,
     gates,
     dependencies: dependencyEdges(db, unit),
+    proof: proofRows(db, unit),
     started: entries.find((e) => e.actor !== "planner")?.at ?? null,
     ended: merged?.at ?? null,
     moves,

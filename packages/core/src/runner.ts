@@ -1,4 +1,4 @@
-import { readVerifyGuides, verifySection } from "./verify-guide.js";
+import { markNewPages, readVerifyGuides, verifySection } from "./verify-guide.js";
 import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -33,6 +33,7 @@ import {
   recordEvent,
   setApprovedSha,
   setUnitBranch,
+  setUnitProof,
   transitionUnit,
   updateAttempt,
   type Db,
@@ -128,6 +129,9 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
   const references = await referenceCheckouts(ctx, project.id, unit.seq, attempt.n, setting("project.reference_repos"));
   const builds = builtBefore(db, unit);
   const envValues = unitEnv(db, project.environmentId, builds);
+  const guides = readVerifyGuides(checkout);
+  const proof = markNewPages(unit.proof, guides);
+  if (JSON.stringify(proof) !== JSON.stringify(unit.proof)) setUnitProof(db, unit.id, proof);
   const brief: RenderedBrief = {
     goal: unit.goal,
     repo: { id: repo.id, worktree: checkout, branch, baseSha: start },
@@ -143,7 +147,7 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
     ],
     readonly: references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
     acceptance: unit.acceptance,
-    verify: verifySection(readVerifyGuides(checkout), unit.acceptance, unit.proof, "worker"),
+    verify: verifySection(guides, unit.acceptance, proof, "worker"),
     environment: environmentSection(db, project.environmentId, repo.id),
     env: envValues,
     envNotes: Object.fromEntries(
