@@ -174,3 +174,17 @@ Reading: the new brief (named pages' text in the brief, run the page's commands 
 2. _The judge found a stale page that was not the worker's fault_ (in run D it drove the other pages as a regression sweep; `health-check` failed because the app now returns a version) and correctly did not count it against the unit. It said so only in its final message, which yagura never reads, so the finding is lost. A way to report it (`yagura judge approve --stale-page health-check`, say) would feed the upkeep job's trigger "a judge reports a stale page" and gives the "pre-existing" category the Anthropic review article uses. Not built: it belongs with the upkeep decisions.
 
 **Polish left.** The Proof row sits in the unit page's facts grid beside Acceptance; its runs line wraps in the narrow column.
+
+## Update 2026-10-18 (latest): guide upkeep and the stale-page report are built
+
+**Decisions (developer):** push (done), `--stale-page` yes, "an automated loop: try not to get stuck", so the recommendations stand: upkeep is an ordinary work unit in the newest active project, triggered by a request, by a judge's stale-page report, and after every 10 merges (`verify.upkeep_every_merges`). Written into DESIGN §13a.
+
+**Built.** `upkeep.ts` (derived due-ness, one per repo, skips a repo with no guide or no active project, ignores reports from an upkeep unit's own judge); the engine adds the unit on its tick; `yagura verify upkeep <repo>` and `POST /api/repos/:id/upkeep` ask for one; `judge approve|changes --stale-page "<page>: what is wrong"` records `guide.stale`; the worker and judge skills and the worker's method say what an upkeep unit is. 282 core tests pass.
+
+**Run 1 (real engine, Haiku worker, Sonnet judge, $0.31 + judge).** Asked through the CLI; the daemon added `shop4/U4` by itself. The worker drove every page, found `receipts` failing, corrected it; the judge approved; it merged and changed only `receipts.md`. But `features/README.md` (the index line) and `SKILL.md` (the doctor section) still said `/health` returns `{"ok": true}`, a claim the judge had reported stale an hour earlier. The acceptance lines said "every page", so the overview files were out of scope, and the Sonnet judge approved.
+
+**Run 2, after widening the acceptance to the guide's `SKILL.md` and `features/README.md` ($0.28 worker + $0.16 Sonnet judge).** The upkeep's two commits were exactly the missing ones (the README index and the doctor section), nothing outside `.claude/skills/verify-*` changed, and all three places now say `{"ok": true, "version": "2.0"}`. So the guide is true again after two upkeeps, with no one running anything by hand.
+
+**Cost of the loop.** About $0.45 to $0.60 per upkeep on this guide (five pages), against the $0.14 for the by-hand pass; it grows with the number of pages. Every 10 merges, that is a few percent of what the merged units cost.
+
+**Still open.** A button for "run upkeep" on the repo page (the CLI and the API route exist); the unit page does not mark an upkeep unit as such.
