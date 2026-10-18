@@ -125,6 +125,7 @@ import {
   runAction,
   actionAgentCli,
   requestDoctor,
+  repoHasGuide,
   requestUpkeep,
   doctorCli,
 } from "@yagura/core";
@@ -619,6 +620,7 @@ async function main() {
       const [sub, repoId] = rest;
       if (sub !== "upkeep" || !repoId) fail(USAGE);
       const { values } = args({ note: { type: "string" } });
+      if (!(await repoHasGuide(db, boot, repoId as RepoId))) return console.log(`${repoId} has no verification guide yet, so there is nothing to check`);
       const project = requestUpkeep(db, repoId as RepoId, values.note ?? "");
       console.log(
         project

@@ -2,6 +2,7 @@ import { byTime } from "./sort";
 import { atEnd } from "./follow";
 import { depLine } from "./units";
 import { proofLine } from "./proof";
+import { upkeepMessage } from "./upkeep";
 import { AGENT_EMOJI } from "@yagura/core";
 import { ICONS } from "../ui/RoleIcon";
 import { describe, expect, it } from "vitest";
@@ -547,5 +548,19 @@ describe("the unit page's proof row", () => {
     expect(proofLine(row({ status: "missing", runs: [] }))).toMatchObject({ tone: "bell", text: "the judge ran nothing for it" });
     expect(proofLine(row({ status: "failed", isNew: true, failsOnBase: false }))).toMatchObject({ tone: "bell", text: "did not fail on the base" });
     expect(proofLine(row({ status: "pending", runs: [] }))).toMatchObject({ tone: "muted", text: "not judged yet" });
+  });
+});
+
+describe("the repo row's upkeep message", () => {
+  it("says it started, where, or why it did not", () => {
+    expect(upkeepMessage({ asked: true, hasGuide: true, project: "shop4" })).toEqual({
+      tone: "lamp",
+      text: "Asked. A guide upkeep is added to shop4 within a few seconds.",
+    });
+    expect(upkeepMessage({ asked: true, hasGuide: true, project: null })).toMatchObject({ tone: "bell", text: expect.stringContaining("No active project") });
+    expect(upkeepMessage({ asked: false, hasGuide: false, project: null })).toMatchObject({
+      tone: "bell",
+      text: expect.stringContaining("no verification guide yet"),
+    });
   });
 });

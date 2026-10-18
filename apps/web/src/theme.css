@@ -713,6 +713,9 @@ textarea {
   margin: 0;
   padding-left: 18px;
 }
+.upkeep-tag {
+  color: var(--amber-text);
+}
 .proof-rows {
   display: grid;
   gap: 8px;

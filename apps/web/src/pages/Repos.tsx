@@ -1,3 +1,4 @@
+import { upkeepMessage, type UpkeepAnswer } from "../lib/upkeep";
 import { useEffect, useState } from "react";
 import { api, useApi, type RepoView } from "../api";
 import { clock, plural, sha } from "../lib/format";
@@ -112,6 +113,8 @@ export function AddRepo({ onAdded }: { onAdded: (added: RepoView) => void }) {
 export function Repos() {
   const { data, error, reload } = useApi<RepoView[]>("/api/repos");
   const [settings, setSettings] = useState<string | null>(null);
+  const upkeep = useAction();
+  const [upkeepSaid, setUpkeepSaid] = useState<({ repo: string } & ReturnType<typeof upkeepMessage>) | null>(null);
   const hash = typeof location !== "undefined" ? decodeURIComponent(location.hash.slice(1)) : "";
 
   useEffect(() => {
@@ -130,6 +133,7 @@ export function Repos() {
         <AddRepo onAdded={reload} />
       </section>
       {error && <div className="s-bell">{error}</div>}
+      {upkeep.error && <div className="s-bell">{upkeep.error}</div>}
       {data && (
         <section>
           <div className="gh">
@@ -187,17 +191,38 @@ export function Repos() {
                     </>
                   }
                   actions={
-                    <button
-                      className="btn"
-                      type="button"
-                      aria-expanded={settings === v.repo.id}
-                      onClick={() => setSettings(settings === v.repo.id ? null : v.repo.id)}
-                    >
-                      Settings
-                    </button>
+                    <>
+                      <button
+                        className="btn"
+                        type="button"
+                        title="Check this repo's verification guide against the app"
+                        disabled={upkeep.busy}
+                        onClick={() =>
+                          void upkeep.run(async () => {
+                            const a = await api<UpkeepAnswer>(`/api/repos/${v.repo.id}/upkeep`, { body: {} });
+                            setUpkeepSaid({ repo: v.repo.id, ...upkeepMessage(a) });
+                          })
+                        }
+                      >
+                        Run upkeep
+                      </button>
+                      <button
+                        className="btn"
+                        type="button"
+                        aria-expanded={settings === v.repo.id}
+                        onClick={() => setSettings(settings === v.repo.id ? null : v.repo.id)}
+                      >
+                        Settings
+                      </button>
+                    </>
                   }
                   extra={
                     <>
+                      {upkeepSaid?.repo === v.repo.id && (
+                        <div className={`s-${upkeepSaid.tone}`} style={{ fontSize: 13.5 }}>
+                          {upkeepSaid.text}
+                        </div>
+                      )}
                       {settings === v.repo.id && <ScopedSettings scope="repo" id={v.repo.id} />}
                       {v.landingQueue.length > 0 && (
                         <div className="s-lamp" style={{ fontSize: 13.5 }}>

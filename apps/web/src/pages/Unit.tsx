@@ -489,6 +489,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
       <div className="story-crumb mono">
         <Link to={`/p/${projectId}`}>{projectId}</Link> / U{u.seq}
         {u.repoId ? ` · ${u.repoId}` : ` · ${u.type}`}
+        {u.playbook === "guide-upkeep" && <span className="upkeep-tag"> · guide upkeep</span>}
       </div>
       <h1 className="serif story-title">
         <Inline text={u.goal} />

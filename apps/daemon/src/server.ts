@@ -116,6 +116,7 @@ import {
   getDoctorRun,
   stopDoctorRun,
   requestDoctor,
+  repoHasGuide,
   requestUpkeep,
   setValue,
   artifactContentType,
@@ -546,8 +547,10 @@ export function createApp(opts: ServerOptions): Hono {
     return c.json({ asked: true, repos });
   });
   app.post("/api/repos/:id/upkeep", async (c) => {
+    const repoId = c.req.param("id") as RepoId;
     const note = String(((await c.req.json().catch(() => ({}))) as { note?: string }).note ?? "");
-    return c.json({ asked: true, project: requestUpkeep(db, c.req.param("id") as RepoId, note) });
+    if (!(await repoHasGuide(db, boot, repoId))) return c.json({ asked: false, hasGuide: false, project: null });
+    return c.json({ asked: true, hasGuide: true, project: requestUpkeep(db, repoId, note) });
   });
   app.post("/api/actions/:id/delete", (c) => {
     deleteAction(db, Number(c.req.param("id")));

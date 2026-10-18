@@ -187,4 +187,4 @@ Reading: the new brief (named pages' text in the brief, run the page's commands 
 
 **Cost of the loop.** About $0.45 to $0.60 per upkeep on this guide (five pages), against the $0.14 for the by-hand pass; it grows with the number of pages. Every 10 merges, that is a few percent of what the merged units cost.
 
-**Still open.** A button for "run upkeep" on the repo page (the CLI and the API route exist); the unit page does not mark an upkeep unit as such.
+**Dashboard (built after, same day).** A Run upkeep button beside Settings on each repo row, with a message saying whether it started and where, or why not; the route and the CLI refuse, and record nothing, for a repo with no guide. An upkeep unit's page shows a "guide upkeep" tag on its crumb line.
