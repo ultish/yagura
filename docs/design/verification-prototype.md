@@ -136,3 +136,41 @@ Reading: the new brief (named pages' text in the brief, run the page's commands 
 **Not yet done:** make Sonnet the default `role.judge.model` (left as a setting; a real engine run with a Sonnet judge on a project with planted drift is the next check); the web page for a unit does not show `proof`; the upkeep job.
 
 **Real engine run with the Sonnet default (run C, 2026-10-18).** A stale `health-check` page was planted in the repo (it claimed `{"status": "up", "uptime": 0}`); the project asked for `/health` to report a version, one unit, `proof: health-check` on both lines (the planner named the page). The Haiku worker drove the page, found the planted drift, and fixed both stale lines in its branch ($0.25). The judge ran as `claude-sonnet-5-5` by the new default, ran the unit tests and drove the page on its own free ports (19431 to 19433), approved, and the unit merged ($0.22). So the engine path works end to end with a Sonnet judge. What it did not test is a judge catching drift through the engine, because the worker had already fixed it; that case is covered by the stand-in tests above.
+
+## Proposal: guide upkeep (2026-10-18, for review; not built)
+
+**What it is.** `pstack:maintain-verification-skill` as a yagura job: drive every page of a repo's guide against the live app, correct the pages that are stale, and report behaviour that is really broken (a product gap) without touching product code. By hand it took 72 seconds and $0.14 on a three-page guide, and it found the stale page the units missed.
+
+```
+ trigger ──▶ upkeep job ──▶ branch yagura/<project>/u<n>  (edits only .claude/skills/verify-*)
+   │            │                       │
+   │            │ drives each page      ▼
+   │            │ against the app    judge (Sonnet): did it only touch the guide,
+   │            ▼                    did it re-drive what it changed?
+   │         product gaps ──▶ listed in the hand-off, never fixed here
+   │                                   │
+   └─ every N merges · a judge finding  ▼
+      on a stale page · "Run upkeep"   merge through the usual pull request
+```
+
+**Triggers (derived, like the doctor's wakes; never a schedule).** After `verify.upkeep_every_merges` merges (default 10, 0 turns it off) to a repo's base since its last upkeep; when a judge records a finding about a stale page; and on request (`yagura verify upkeep <repo>`, a button on the repo page).
+
+**Two shapes, one decision (asked below).**
+
+- _A work unit in a project._ yagura creates a normal `work` unit (playbook `maintain-verification-skill`, acceptance "every page was driven and matches; only the guide changed") in the newest open project that uses the repo. It reuses the branch, pull request, judge, merge, cost, and story with no new machinery. It needs an open project, so a repo whose projects are all closed cannot be tended.
+- _Its own numbered run, like the doctor_ (K1, K2, a page of its own). It works for closed projects and keeps project budgets clean, but a run that changes files needs a branch and a pull request, and today those belong to units; the merge request machinery would have to be generalised.
+
+## Update 2026-10-18 (later): option 3 built, and what the runs showed
+
+**Built (the developer chose option 3, the Proof row).** `evidence run --page <page>` tags a run with the page it drove (migration 3); `proof.ts` summarises each named page from the judge's own runs; `yagura judge approve` is refused unless the judge drove every named page on the head, and a new page also on the base where it must fail; the unit page shows a Proof row (`UnitStory.proof`). A page the guide does not have when the worker starts is marked new whatever the planner wrote. 273 core, 40 web, 24 daemon tests pass.
+
+**Run D (real engine, Haiku worker, Sonnet judge by default).** New page `order-count`: the worker wrote and drove it ($0.26); the judge drove it on the base (run 63, exit 1) and on the head (run 64, exit 0), approved ($0.16), and the dashboard shows "new order-count · fails on base · passes on head" with those runs.
+
+**What the earlier run (shop4, before the new-page rule) showed.** The planner declared `order-total` as an existing page, so nothing required it to fail on the base; the judge ran it on the base twice and it passed both times (a drive script that succeeds without the change proves nothing), and the approval went through. That is why unmarked pages are now new automatically, and why the rules say a drive must exit non-zero on any difference.
+
+**Two things I did not plan for.**
+
+1. _A worker cannot run on the base_ (the engine refuses: "only the judge runs commands on the base"). My first worker instructions said to use `--at base`; they now say: commit the page, drive it while the code is still unchanged, then build.
+2. _The judge found a stale page that was not the worker's fault_ (in run D it drove the other pages as a regression sweep; `health-check` failed because the app now returns a version) and correctly did not count it against the unit. It said so only in its final message, which yagura never reads, so the finding is lost. A way to report it (`yagura judge approve --stale-page health-check`, say) would feed the upkeep job's trigger "a judge reports a stale page" and gives the "pre-existing" category the Anthropic review article uses. Not built: it belongs with the upkeep decisions.
+
+**Polish left.** The Proof row sits in the unit page's facts grid beside Acceptance; its runs line wraps in the narrow column.
