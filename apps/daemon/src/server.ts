@@ -541,8 +541,8 @@ export function createApp(opts: ServerOptions): Hono {
     return stopped ? c.json({ stopped }) : c.json({ error: "that doctor run is not running" }, 409);
   });
   app.post("/api/environments/:id/doctor", async (c) => {
-    requestDoctor(db, c.req.param("id") as EnvironmentId, String(((await c.req.json().catch(() => ({}))) as { note?: string }).note ?? ""));
-    return c.json({ asked: true });
+    const repos = requestDoctor(db, c.req.param("id") as EnvironmentId, String(((await c.req.json().catch(() => ({}))) as { note?: string }).note ?? ""));
+    return c.json({ asked: true, repos });
   });
   app.post("/api/actions/:id/delete", (c) => {
     deleteAction(db, Number(c.req.param("id")));

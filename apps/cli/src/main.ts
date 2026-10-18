@@ -783,8 +783,12 @@ async function main() {
         return;
       }
       if (sub === "doctor" && id) {
-        requestDoctor(db, id as EnvironmentId, values.note ?? "");
-        console.log(`asked for a doctor on every repo of the projects in ${id}; the daemon starts it`);
+        const repos = requestDoctor(db, id as EnvironmentId, values.note ?? "");
+        console.log(
+          repos.length
+            ? `asked for a doctor on ${repos.join(", ")}; the daemon starts it`
+            : `no project uses ${id} yet, so there is no repo for a doctor to look at: create a project on this environment first`,
+        );
         return;
       }
       if (sub === "answers" && id) {

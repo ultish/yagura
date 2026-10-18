@@ -313,6 +313,7 @@ const TRIGGER: Record<DoctorRun["trigger"], string> = { setup: "a project was se
 
 function StatusCard({ id, actions, runs, reload }: { id: string; actions: ActionView[]; runs: DoctorRun[]; reload: () => void }) {
   const ask = useAction();
+  const [noRepos, setNoRepos] = useState(false);
   const broken = actions.filter((a) => a.state === "broken");
   const running = runs.filter((r) => r.state === "running");
   const latest = runs.filter((r, i) => runs.findIndex((x) => x.repoId === r.repoId) === i);
@@ -351,12 +352,24 @@ function StatusCard({ id, actions, runs, reload }: { id: string; actions: Action
           className="btn lamp"
           type="button"
           disabled={ask.busy || running.length > 0}
-          onClick={() => void ask.run(() => api(`/api/environments/${id}/doctor`, { body: { note: "" } }).then(reload))}
+          onClick={() =>
+            void ask.run(async () => {
+              const r = await api<{ asked: boolean; repos: string[] }>(`/api/environments/${id}/doctor`, { body: { note: "" } });
+              setNoRepos(r.repos.length === 0);
+              reload();
+            })
+          }
         >
           Run the doctor
         </button>
       </div>
       {ask.error && <div className="s-bell">{ask.error}</div>}
+      {noRepos && !running.length && (
+        <p className="muted">
+          A doctor looks at the repos of the projects that use this environment, and no project does yet. <Link to="/projects/new">Create a project</Link> and
+          pick this environment ({id}), then come back and run the doctor.
+        </p>
+      )}
     </section>
   );
 }

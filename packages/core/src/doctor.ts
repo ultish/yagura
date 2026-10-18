@@ -78,17 +78,7 @@ export function doctorWakes(db: Db, environmentId: EnvironmentId): DoctorWake[] 
       .prepare("SELECT state, ended_at FROM doctor_runs WHERE environment_id = ? AND repo_id = ? ORDER BY id DESC LIMIT 1")
       .get(environmentId, repoId) as { state: string; ended_at: IsoTime | null } | undefined;
     if (last?.state === "running") continue;
-    if (!last) {
-      if (openProject)
-        wakes.push({
-          repoId,
-          trigger: "setup",
-          detail: `Project ${openProject} was set up on this environment, and no doctor has looked at ${repoId} here yet.`,
-          projectId: openProject,
-        });
-      continue;
-    }
-    const since = last.ended_at ?? "";
+    const since = last?.ended_at ?? "";
     const asked = (
       db
         .prepare(
@@ -97,6 +87,15 @@ export function doctorWakes(db: Db, environmentId: EnvironmentId): DoctorWake[] 
         )
         .all(since, environmentId, repoId, repoId) as { data_json: string }[]
     ).map((r) => String((JSON.parse(r.data_json) as { note?: string }).note ?? "").trim());
+    if (!last && openProject) {
+      wakes.push({
+        repoId,
+        trigger: "setup",
+        detail: `Project ${openProject} was set up on this environment, and no doctor has looked at ${repoId} here yet.`,
+        projectId: openProject,
+      });
+      continue;
+    }
     if (asked.length) {
       wakes.push({
         repoId,
@@ -106,6 +105,7 @@ export function doctorWakes(db: Db, environmentId: EnvironmentId): DoctorWake[] 
       });
       continue;
     }
+    if (!last) continue;
     const broken = actionsFor(db, environmentId, repoId).filter((a) => a.state === "broken" && a.updatedAt > since);
     if (broken.length)
       wakes.push({
@@ -118,9 +118,14 @@ export function doctorWakes(db: Db, environmentId: EnvironmentId): DoctorWake[] 
   return wakes;
 }
 
-export function requestDoctor(db: Db, environmentId: EnvironmentId, note: string, repoId?: RepoId): void {
+// The repos a doctor will look at for this ask: those of the projects on the environment, or the one named. None means the ask will do
+// nothing, and the caller should say so.
+export function requestDoctor(db: Db, environmentId: EnvironmentId, note: string, repoId?: RepoId): RepoId[] {
   getEnvironment(db, environmentId);
   recordEvent(db, "doctor.wake", {}, { environment: environmentId, note, ...(repoId ? { repo: repoId } : {}) });
+  return reposOf(db, environmentId)
+    .map((r) => r.repoId)
+    .filter((r) => !repoId || r === repoId);
 }
 
 const REPORT_USAGE = 'yagura doctor report [--works "<what>: <action>"] [--fails "<what>: <why>"] [--unknown "<what>: <why>"]';
