@@ -1,3 +1,4 @@
+import { readVerifyGuides, verifySection } from "./verify-guide.js";
 import { promptPlugin, standingFor } from "./prompts.js";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -142,6 +143,7 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
     ],
     readonly: references.map((r) => ({ repoId: r.repoId, path: r.path, sha: r.sha })),
     acceptance: unit.acceptance,
+    verify: verifySection(readVerifyGuides(checkout), unit.acceptance, unit.proof, "worker"),
     environment: environmentSection(db, project.environmentId, repo.id),
     env: envValues,
     envNotes: Object.fromEntries(

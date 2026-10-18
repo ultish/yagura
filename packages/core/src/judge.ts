@@ -1,3 +1,4 @@
+import { readVerifyGuides, verifySection } from "./verify-guide.js";
 import { environmentSection } from "./actions.js";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
@@ -53,6 +54,7 @@ export interface JudgeBrief {
   head: Sha;
   diffBase: Sha;
   diff: string;
+  verify?: string;
   environment: string;
   worker: string[];
   runs: string[];
@@ -86,7 +88,7 @@ Your checkout ${b.checkout} is at the head ${b.head}. The change is everything s
 
 ${b.diff}
 
-## YOUR RUNS
+${b.verify ? `## VERIFY\n${b.verify}\n\n` : ""}## YOUR RUNS
 ${b.environment}
 Run what proves or disproves each outcome with \`yagura evidence run -- <command>\`; yagura runs it on this head and gives you a run id. When running a test on the base would tell you something (does it fail without the change?), add \`--at base\`.
 
@@ -188,6 +190,7 @@ export async function runJudgeRound(ctx: RunContext, unitId: UnitId): Promise<vo
     head,
     diffBase,
     diff: diff.length > DIFF_LIMIT ? `(the diff is ${diff.length} bytes; read it in your checkout with \`git diff ${diffBase} HEAD\`)` : diff || "(empty)",
+    verify: verifySection(readVerifyGuides(checkout), unit.acceptance, unit.proof, "judge"),
     environment: environmentSection(db, project.environmentId, unit.repoId),
     worker: workers.map((a) => `A${a.agentNo}: ${describeRecords(db, a.id) ?? "(nothing recorded)"}`),
     runs: workers.flatMap((a) =>

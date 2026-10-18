@@ -1,3 +1,4 @@
+import { LATEST_VERSION } from "./migrations.js";
 import Database from "better-sqlite3";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -107,7 +108,7 @@ describe("importHome", () => {
       { message_id: 1, session_id: null, state: "done", cost_usd: 0.02 },
       { message_id: 3, session_id: null, state: "stopped", cost_usd: 0.01 },
     ]);
-    expect(db.prepare("SELECT version FROM schema_version").get()).toEqual({ version: 1 });
+    expect(db.prepare("SELECT version FROM schema_version").get()).toEqual({ version: LATEST_VERSION });
     expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
   });
 

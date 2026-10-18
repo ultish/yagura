@@ -57,6 +57,22 @@ const newUnit = () =>
   });
 
 describe("store", () => {
+  it("refuses a proof list that is not as long as the acceptance list", () => {
+    expect(() =>
+      addUnit(db, {
+        projectId: project,
+        type: "work",
+        repoId: "testbed" as RepoId,
+        goal: "g",
+        acceptance: ["a", "b"],
+        proof: [null],
+        timeboxSeconds: 60,
+        maxAttempts: 1,
+      }),
+    ).toThrow(/proof has 1 entries for 2 acceptance lines/);
+    expect(newUnit().proof).toEqual([null]);
+  });
+
   it("reopens an existing database without re-applying the schema", () => {
     const path = join(mkdtempSync(join(tmpdir(), "yagura-db-")), "yagura.db");
     const first = openStore(path);
@@ -71,7 +87,7 @@ describe("store", () => {
     const first = openStore(path);
     first.prepare("UPDATE schema_version SET version = 34").run();
     first.close();
-    expect(() => openStore(path)).toThrow(/version 34.*only knows up to 1.*yagura import <old home>/);
+    expect(() => openStore(path)).toThrow(new RegExp(`version 34.*only knows up to ${LATEST_VERSION}.*yagura import <old home>`));
   });
 
   it("takes the write lock before a transaction reads, so another process cannot commit between its read and its write", () => {

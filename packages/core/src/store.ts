@@ -15,6 +15,7 @@ import type {
   Repo,
   RepoId,
   Unit,
+  UnitProof,
   UnitId,
   UnitState,
   UnitType,
@@ -236,6 +237,7 @@ export interface NewUnit {
   base?: string | null;
   goal: string;
   acceptance: string[];
+  proof?: (UnitProof | null)[];
   context?: string[];
   after?: UnitId[];
   refs?: string[];
@@ -245,14 +247,21 @@ export interface NewUnit {
   maxAttempts: number;
 }
 
+function alignedProof(acceptance: string[], proof: (UnitProof | null)[] | undefined): (UnitProof | null)[] {
+  if (proof === undefined) return acceptance.map(() => null);
+  if (proof.length !== acceptance.length) throw new Error(`proof has ${proof.length} entries for ${acceptance.length} acceptance lines`);
+  return proof;
+}
+
 export function addUnit(db: Db, u: NewUnit): Unit {
+  const proof = alignedProof(u.acceptance, u.proof);
   const id = db.transaction(() => {
     const seq = (db.prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM units WHERE project_id = ?").get(u.projectId) as { next: number }).next;
     const t = now();
     const result = db
       .prepare(
-        `INSERT INTO units (project_id, seq, type, repo_id, base, goal, acceptance_json, context_json, playbook, scaffold, timebox_seconds, max_attempts, refs_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO units (project_id, seq, type, repo_id, base, goal, acceptance_json, proof_json, context_json, playbook, scaffold, timebox_seconds, max_attempts, refs_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         u.projectId,
@@ -262,6 +271,7 @@ export function addUnit(db: Db, u: NewUnit): Unit {
         u.base ?? null,
         u.goal,
         JSON.stringify(u.acceptance),
+        JSON.stringify(proof),
         JSON.stringify(u.context ?? []),
         u.playbook ?? null,
         u.scaffold ? 1 : 0,
@@ -279,6 +289,12 @@ export function addUnit(db: Db, u: NewUnit): Unit {
   return getUnit(db, id);
 }
 
+function parseProof(r: Record<string, unknown>): (UnitProof | null)[] {
+  const acceptance = JSON.parse(r.acceptance_json as string) as string[];
+  const proof = JSON.parse((r.proof_json as string | undefined) ?? "[]") as (UnitProof | null)[];
+  return proof.length === acceptance.length ? proof : acceptance.map(() => null);
+}
+
 function toUnit(r: Record<string, unknown>, after: UnitId[]): Unit {
   return {
     id: r.id as UnitId,
@@ -290,6 +306,7 @@ function toUnit(r: Record<string, unknown>, after: UnitId[]): Unit {
     base: (r.base as string | null) ?? null,
     goal: r.goal as string,
     acceptance: JSON.parse(r.acceptance_json as string),
+    proof: parseProof(r),
     context: JSON.parse(r.context_json as string),
     after,
     refs: JSON.parse(r.refs_json as string),
@@ -648,11 +665,14 @@ export function bumpMaxAttempts(db: Db, unitId: UnitId, to: number): void {
   db.prepare("UPDATE units SET max_attempts = MAX(max_attempts, ?), updated_at = ? WHERE id = ?").run(to, now(), unitId);
 }
 
-export function amendUnit(db: Db, unitId: UnitId, patch: { goal?: string; acceptance?: string[]; context?: string[] }): void {
+export function amendUnit(db: Db, unitId: UnitId, patch: { goal?: string; acceptance?: string[]; proof?: (UnitProof | null)[]; context?: string[] }): void {
   const sets: string[] = [];
   const values: unknown[] = [];
   if (patch.goal !== undefined) (sets.push("goal = ?"), values.push(patch.goal));
-  if (patch.acceptance !== undefined) (sets.push("acceptance_json = ?"), values.push(JSON.stringify(patch.acceptance)));
+  if (patch.acceptance !== undefined) {
+    sets.push("acceptance_json = ?", "proof_json = ?");
+    values.push(JSON.stringify(patch.acceptance), JSON.stringify(alignedProof(patch.acceptance, patch.proof)));
+  }
   if (patch.context !== undefined) (sets.push("context_json = ?"), values.push(JSON.stringify(patch.context)));
   if (!sets.length) return;
   db.prepare(`UPDATE units SET ${sets.join(", ")}, updated_at = ? WHERE id = ?`).run(...values, now(), unitId);

@@ -862,7 +862,9 @@ async function main() {
         return;
       }
       const u = getUnitBySeq(db, project.id, Number(seq));
-      console.log(`U${u.seq} [${u.state}] ${u.goal}\n  accept: ${u.acceptance.join(" / ")}${u.after.length ? `\n  after: ${u.after.length} unit(s)` : ""}`);
+      console.log(
+        `U${u.seq} [${u.state}] ${u.goal}\n  accept: ${u.acceptance.map((a, i) => `${a}${u.proof[i] ? ` (proof: ${u.proof[i]!.isNew ? "new " : ""}${u.proof[i]!.pages.join(", ")})` : ""}`).join(" / ")}${u.after.length ? `\n  after: ${u.after.length} unit(s)` : ""}`,
+      );
       if (u.notes.length) console.log(`  notes:\n${u.notes.map((n) => `    - ${n}`).join("\n")}`);
       const moves = db.prepare("SELECT json_extract(data_json, '$.to') AS to_ FROM events WHERE type = 'unit.state' AND unit_id = ? ORDER BY id").all(u.id) as {
         to_: string;

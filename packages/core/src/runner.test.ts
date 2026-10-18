@@ -1,3 +1,4 @@
+import { normalizeAcceptance } from "./verify-guide.js";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createRequire } from "node:module";
@@ -327,6 +328,49 @@ describe("runWorkerRound", () => {
       } finally {
         delete process.env.FAKE_DELAY_MS;
       }
+    });
+  });
+
+  describe("the repo's verification guide", () => {
+    const worker = async (lines: string[]) => {
+      const { acceptance, proof } = normalizeAcceptance(lines);
+      process.env.FAKE_MODE = "success";
+      const u = addUnit(db, {
+        projectId: project,
+        type: "work",
+        repoId: "guided" as RepoId,
+        goal: "Ship it",
+        acceptance,
+        proof,
+        timeboxSeconds: 60,
+        maxAttempts: 2,
+      });
+      const attempt = await startRound(u.id);
+      return readFileSync(layout(boot).brief(project, u.seq, attempt.n), "utf8");
+    };
+
+    it("names the guide's pages and the page that proves each acceptance line", async () => {
+      const guided = mkdtempSync(join(tmpdir(), "yagura-guided-"));
+      const features = join(guided, ".claude/skills/verify-orders/features");
+      mkdirSync(features, { recursive: true });
+      writeFileSync(join(features, "orders-api.md"), "# Orders API\n\nFetch an order by id.\n");
+      await git(["init", "--quiet", "-b", "main"], { cwd: guided });
+      await commitAll(guided, "init", { name: "t", email: "t@t" });
+      addRepo(db, { id: "guided", url: guided, defaultBranch: "main" });
+      const brief = await worker(["order 42 is shipped (proof: orders-api)", "emails go out (proof: new shipping-email)"]);
+      expect(brief).toContain("## VERIFY");
+      expect(brief).toContain("- page orders-api: Fetch an order by id.");
+      expect(brief).toContain("order 42 is shipped → page orders-api");
+      expect(brief).toContain("emails go out → NEW page shipping-email");
+    });
+
+    it("says there is no guide when the repo has none", async () => {
+      const bare = mkdtempSync(join(tmpdir(), "yagura-bare-"));
+      writeFileSync(join(bare, "a.txt"), "a\n");
+      await git(["init", "--quiet", "-b", "main"], { cwd: bare });
+      await commitAll(bare, "init", { name: "t", email: "t@t" });
+      addRepo(db, { id: "guided", url: bare, defaultBranch: "main" });
+      expect(await worker(["it builds"])).toContain("This repo has no verification guide yet.");
     });
   });
 

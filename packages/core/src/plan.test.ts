@@ -73,6 +73,38 @@ describe("applyDelta", () => {
     expect(getUnitBySeq(db, project, 1)).toMatchObject({ goal: "do a", acceptance: ["a works"], context: ["why: checkout needs a total"], refs: ["svc#12"] });
   });
 
+  it("stores which guide page proves each acceptance line, from the object form or the text form", () => {
+    applyDelta(
+      db,
+      project,
+      delta({
+        add: [
+          unit("a", {
+            acceptance: [
+              { outcome: "order 42 is shipped", proof: "orders-api" },
+              "emails go out (proof: new shipping-email)",
+              { outcome: "no page named" },
+              "a plain line",
+            ],
+          }),
+        ],
+      }),
+      null,
+    );
+    expect(getUnitBySeq(db, project, 1)).toMatchObject({
+      acceptance: ["order 42 is shipped", "emails go out", "no page named", "a plain line"],
+      proof: [{ pages: ["orders-api"], isNew: false }, { pages: ["shipping-email"], isNew: true }, null, null],
+    });
+  });
+
+  it("keeps proof the same length as acceptance when a waiting unit is amended", () => {
+    applyDelta(db, project, delta({ add: [unit("a", { acceptance: [{ outcome: "one", proof: "orders-api" }, "two"] })] }), null);
+    applyDelta(db, project, delta({ amend: [{ unit: "U1", acceptance: ["only (proof: health)"] }] }), null);
+    expect(getUnitBySeq(db, project, 1)).toMatchObject({ acceptance: ["only"], proof: [{ pages: ["health"], isNew: false }] });
+    applyDelta(db, project, delta({ amend: [{ unit: "U1", goal: "new goal" }] }), null);
+    expect(getUnitBySeq(db, project, 1).proof).toEqual([{ pages: ["health"], isNew: false }]);
+  });
+
   it("resolves after by key and by U-number", () => {
     applyDelta(db, project, delta({ add: [unit("store")] }), null);
     applyDelta(db, project, delta({ add: [unit("api", { after: ["U1"] }), unit("docs", { after: ["api"] })] }), null);

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { resolveSetting } from "./config.js";
 import { listDisagreements, markPlanned } from "./disagreements.js";
 import { TERMINAL_STATES, type ProjectId, type RepoId, type Unit, type UnitId } from "./domain.js";
+import { normalizeAcceptance } from "./verify-guide.js";
 import {
   addDep,
   addGate,
@@ -33,6 +34,8 @@ export const WORK_PLAYBOOKS = [
   "authoring-a-skill",
 ] as const;
 
+const AcceptanceItem = z.union([z.string().min(1), z.object({ outcome: z.string().min(1), proof: z.string().min(1).optional() }).strict()]);
+
 const UnitRef = z.string().regex(/^U\d+$/, "unit references look like U3");
 
 export const PlanUnit = z
@@ -41,7 +44,7 @@ export const PlanUnit = z
     repo: z.string(),
     base: z.string().min(1).optional(),
     goal: z.string().min(1),
-    acceptance: z.array(z.string().min(1)).min(1),
+    acceptance: z.array(AcceptanceItem).min(1),
     context: z.array(z.string()).default([]),
     after: z.array(z.string()).default([]),
     refs: z.array(z.string().min(1)).default([]),
@@ -61,7 +64,7 @@ export const PlanDelta = z
           .object({
             unit: UnitRef,
             goal: z.string().min(1).optional(),
-            acceptance: z.array(z.string().min(1)).min(1).optional(),
+            acceptance: z.array(AcceptanceItem).min(1).optional(),
             context: z.array(z.string()).optional(),
             after: z.array(z.string()).optional(),
           })
@@ -137,7 +140,7 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
         repoId: a.repo as RepoId,
         base: a.base ?? null,
         goal: a.goal,
-        acceptance: a.acceptance,
+        ...normalizeAcceptance(a.acceptance),
         context: [...a.context, ...(because ? [because] : [])],
         playbook: a.playbook,
         scaffold: a.scaffold,
@@ -169,7 +172,7 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
     for (const m of delta.amend) {
       const u = unitRef(m.unit, "amend");
       if (u.state !== "waiting" || listAttempts(db, u.id).length) throw new PlanRejected(`amend: ${m.unit} has already started (${u.state})`);
-      amendUnit(db, u.id, { goal: m.goal, acceptance: m.acceptance, context: m.context });
+      amendUnit(db, u.id, { goal: m.goal, ...(m.acceptance ? normalizeAcceptance(m.acceptance) : {}), context: m.context });
       if (m.after) {
         db.prepare("DELETE FROM unit_deps WHERE unit_id = ?").run(u.id);
         after(u, m.unit, m.after);

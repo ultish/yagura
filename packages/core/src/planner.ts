@@ -1,3 +1,4 @@
+import { readVerifyGuides } from "./verify-guide.js";
 import { promptPlugin, standingFor } from "./prompts.js";
 import { getSpec } from "./spec.js";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
@@ -111,6 +112,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
       spec: getSpec(db, projectId)?.text ?? null,
       scaffoldSkills: resolveSetting(db, "skills.scaffold", { projectId, environmentId: project.environmentId }).value,
       references: setting("project.reference_repos"),
+      guides: checkouts.flatMap((c) => readVerifyGuides(c.path).map((g) => ({ repo: c.id, skill: g.skill, pages: g.pages }))),
     });
     write(paths.brief(projectId, unit.seq, attempt.n), briefText);
     transitionUnit(db, unit.id, "building", { attempt: attempt.n, drain: drainId });

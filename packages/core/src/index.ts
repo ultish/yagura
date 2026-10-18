@@ -61,3 +61,4 @@ export * from "./prompts.js";
 export * from "./watchman-guard.js";
 export * from "./publish.js";
 export * from "./import.js";
+export * from "./verify-guide.js";

@@ -275,6 +275,8 @@ export interface Unit {
   base: string | null;
   goal: string;
   acceptance: string[];
+  // For each acceptance line, the verification-guide page(s) that prove it, or null; always as long as `acceptance`.
+  proof: (UnitProof | null)[];
   context: string[];
   // Units that must merge first.
   after: UnitId[];
@@ -329,12 +331,20 @@ export interface Attempt {
   endedAt: IsoTime | null;
 }
 
+export interface UnitProof {
+  pages: string[];
+  // The unit writes these pages itself, before the change.
+  isNew: boolean;
+}
+
 export interface RenderedBrief {
   goal: string;
   repo: { id: RepoId; worktree: string; branch: string; baseSha: Sha };
   context: string[];
   readonly: { repoId: RepoId; path: string; sha: Sha; version?: string }[];
   acceptance: string[];
+  // The repo's verification guide and which page proves each acceptance line, as `verifySection` writes it.
+  verify?: string;
   // The environment's answers and actions, as \`environmentSection\` writes them.
   environment: string;
   env: Record<string, string>;

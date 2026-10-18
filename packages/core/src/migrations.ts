@@ -8,6 +8,9 @@ export interface Migration {
 }
 
 // schema.sql is version 1, the clean start of the core-loop build; every later change to it is one entry here.
-export const MIGRATIONS: readonly Migration[] = [];
+export const MIGRATIONS: readonly Migration[] = [
+  // Which verification-guide page proves each acceptance line: a JSON array as long as acceptance_json, each entry null or { pages, isNew }.
+  { version: 2, sql: "ALTER TABLE units ADD COLUMN proof_json TEXT NOT NULL DEFAULT '[]';" },
+];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;
