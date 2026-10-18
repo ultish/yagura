@@ -79,7 +79,7 @@ describe("approving", () => {
     const u = unit();
     const judge = attempt(u.id, "judge");
     const cited = run(judge.id, null, "head", 0);
-    const verdict = { verdict: "approve" as const, runs: [cited], findings: [], question: null };
+    const verdict = { verdict: "approve" as const, runs: [cited], findings: [], stalePages: [], question: null };
     expect(recordProblem(db, judge.id, "judge", verdict)).toMatch(/page orders-api has no run of yours.*--page orders-api/);
     run(judge.id, "orders-api", "head", 0);
     run(judge.id, "order-status", "head", 0);
@@ -99,6 +99,6 @@ describe("approving", () => {
     expect(approvalProblem(db, u, judge.id)).toBeNull();
     const named = unit();
     const judge2 = attempt(named.id, "judge");
-    expect(recordProblem(db, judge2.id, "judge", { verdict: "changes", runs: [], findings: ["a.md:1 stale"], question: null })).toBeNull();
+    expect(recordProblem(db, judge2.id, "judge", { verdict: "changes", runs: [], findings: ["a.md:1 stale"], stalePages: [], question: null })).toBeNull();
   });
 });

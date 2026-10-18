@@ -25,6 +25,7 @@ const OPTIONS = {
   note: { type: "string", multiple: true },
   "follow-up": { type: "string", multiple: true },
   finding: { type: "string", multiple: true },
+  "stale-page": { type: "string", multiple: true },
   runs: { type: "string" },
   reason: { type: "string" },
   question: { type: "string" },
@@ -61,7 +62,7 @@ function build(db: Db, attemptId: AttemptId, command: Exclude<RecordCommand, "ch
     case "judge": {
       const runs = runList(v.runs);
       if (typeof runs === "string") return { problem: runs };
-      return { key: "", data: { verdict: pos[0], runs, findings: v.finding ?? [], question: v.question ?? null } };
+      return { key: "", data: { verdict: pos[0], runs, findings: v.finding ?? [], stalePages: v["stale-page"] ?? [], question: v.question ?? null } };
     }
     case "decide":
       return { key: "", data: { action: pos[0], reason: v.reason, note: one(v.note), question: v.question ?? null, reply: v.reply ?? null } };

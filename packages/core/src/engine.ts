@@ -40,6 +40,7 @@ import { listThreads } from "./threads.js";
 import { listTurns, stopTurn } from "./turns.js";
 import { doctorWakes, runDoctor, runningDoctorRuns, stopDoctorRun } from "./doctor.js";
 import { publishDue, publishTestBuild } from "./publish.js";
+import { scheduleUpkeep } from "./upkeep.js";
 import { sweepWorktrees } from "./worktrees.js";
 import { savedHandoff } from "./finish.js";
 
@@ -424,6 +425,12 @@ export class Engine {
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
     for (const project of this.scope()) this.retro(project);
+    if (!this.opts.projectId)
+      for (const u of await scheduleUpkeep(this.db, this.ctx.boot).catch((e: unknown) => {
+        this.log(`✗ guide upkeep: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);
+        return [];
+      }))
+        this.log(`  guide upkeep: ${u.projectId}/U${u.seq} on ${u.repoId}`);
     if (!this.opts.projectId) this.issues();
     if (Date.now() - this.lastRevertScan > (this.opts.revertScanMs ?? REVERT_SCAN_MS)) {
       this.lastRevertScan = Date.now();

@@ -32,10 +32,11 @@ export const isInstalled = (installed: Set<string>, skill: string) =>
   installed.has(skill) || (!skill.includes(":") && [...installed].some((n) => n.slice(n.indexOf(":") + 1) === skill));
 
 // The project skills a session must load, on top of the role's own required skills.
-export function requiredProjectSkills(db: Db, unit: Pick<Unit, "projectId" | "repoId" | "type" | "scaffold">): string[] {
+export function requiredProjectSkills(db: Db, unit: Pick<Unit, "projectId" | "repoId" | "type" | "scaffold" | "playbook">): string[] {
   const at = { projectId: unit.projectId, repoId: unit.repoId ?? undefined, environmentId: getProject(db, unit.projectId).environmentId };
   const purpose: SkillPurpose = unit.scaffold ? "scaffold" : "work";
-  return resolveSetting(db, `skills.${purpose}`, at).value;
+  const skills = resolveSetting(db, `skills.${purpose}`, at).value;
+  return unit.playbook === "guide-upkeep" ? [...skills, "pstack:maintain-verification-skill"] : skills;
 }
 
 export interface SkillCheck {

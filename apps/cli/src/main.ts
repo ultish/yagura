@@ -125,6 +125,7 @@ import {
   runAction,
   actionAgentCli,
   requestDoctor,
+  requestUpkeep,
   doctorCli,
 } from "@yagura/core";
 
@@ -176,6 +177,7 @@ const USAGE = `yagura — agent orchestration
   yagura drive <project>                 plan and run workers until nothing is left to do (without a daemon)
   yagura import <old home>               copy settings, repos, environments, templates, and conversations from an old home (projects and units stay behind)
   yagura andon <project> --reason <text> | --clear
+  yagura verify upkeep <repo> [--note <text>]   check the repo's verification guide against the app now (a unit in the newest active project that uses the repo)
   yagura limit [--clear]                 whether the account's usage limit holds new agents back, and until when; --clear starts them now
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
@@ -611,6 +613,18 @@ async function main() {
       const path = dir.endsWith(".db") ? dir : join(dir, "yagura.db");
       if (!existsSync(path)) fail(`no yagura database at ${path}`);
       console.log(describeImport(importHome(db, path)));
+      return;
+    }
+    case "verify": {
+      const [sub, repoId] = rest;
+      if (sub !== "upkeep" || !repoId) fail(USAGE);
+      const { values } = args({ note: { type: "string" } });
+      const project = requestUpkeep(db, repoId as RepoId, values.note ?? "");
+      console.log(
+        project
+          ? `asked for a guide upkeep on ${repoId}; the daemon adds the unit to ${project}`
+          : `asked for a guide upkeep on ${repoId}; no active project uses it, so it waits until one does`,
+      );
       return;
     }
     case "limit": {

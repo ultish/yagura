@@ -21,6 +21,10 @@ You are the worker on one unit of a yagura project. The unit says what must be t
 - **No stand-ins.** No placeholders, empty functions, stubs, TODOs, or skipped tests in place of required behaviour, unless CONTEXT says another unit fills them in.
 - **Pin the version you are given.** When READONLY says a repo is "published as" a version (also in `$YAGURA_VERSION_<REPO>`), depend on exactly that version, with no range or `latest`.
 
+## A guide upkeep unit
+
+When the goal is to bring the repo's verification guide back in line with the app, the brief says so. Load `pstack:maintain-verification-skill` and follow its pass: drive every page of `.claude/skills/verify-*` as written, as recorded runs with `--page <page>`, compare each with what the page says it returns, and correct the pages that no longer match. Change only files under `.claude/skills/verify-*`, never product code. Behaviour that is really broken in the app goes in `--follow-up`, not in your change. The skill's own branch and pull request steps are yagura's: skip them.
+
 ## When the unit comes back to you
 
 A round prompt resumes your own session with the reason. When the judge asked for changes, do what each finding says. When yagura could not merge the base, merge it with the `git merge` it gives you, resolve the files it names, run the tests, and commit the merge. Then hand off again. Earlier commits stay on the branch.

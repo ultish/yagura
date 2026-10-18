@@ -116,6 +116,7 @@ import {
   getDoctorRun,
   stopDoctorRun,
   requestDoctor,
+  requestUpkeep,
   setValue,
   artifactContentType,
   artifactName,
@@ -543,6 +544,10 @@ export function createApp(opts: ServerOptions): Hono {
   app.post("/api/environments/:id/doctor", async (c) => {
     const repos = requestDoctor(db, c.req.param("id") as EnvironmentId, String(((await c.req.json().catch(() => ({}))) as { note?: string }).note ?? ""));
     return c.json({ asked: true, repos });
+  });
+  app.post("/api/repos/:id/upkeep", async (c) => {
+    const note = String(((await c.req.json().catch(() => ({}))) as { note?: string }).note ?? "");
+    return c.json({ asked: true, project: requestUpkeep(db, c.req.param("id") as RepoId, note) });
   });
   app.post("/api/actions/:id/delete", (c) => {
     deleteAction(db, Number(c.req.param("id")));

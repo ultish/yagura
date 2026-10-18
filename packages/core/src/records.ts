@@ -32,6 +32,8 @@ export const JudgeRecord = z
     verdict: z.enum(JUDGE_VERDICTS),
     runs: runIds,
     findings: lines,
+    // Guide pages the judge found stale that this unit did not cause, each `<page>: what is wrong`.
+    stalePages: lines,
     question: text.nullable().default(null),
   })
   .strict()

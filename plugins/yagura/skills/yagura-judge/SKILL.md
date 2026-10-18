@@ -31,4 +31,8 @@ Record exactly one:
 - `yagura judge changes --finding "<file:line> what is wrong"` with one `--finding` per problem. Write each so the worker can act on it without you: where, what is wrong, and what would make it right.
 - `yagura judge ask --question "…"` when only a person can settle it: the goal is ambiguous, or two outcomes contradict.
 
+**A guide page that is stale but not this unit's doing.** When you drive other pages and one no longer matches the app, and the change did not cause it, do not count it against the unit: add `--stale-page "<page>: what is wrong"` to your verdict (any verdict, repeatable). yagura then sends a guide upkeep for the repo. This is not for a page the unit's change made stale: that is a finding.
+
+**A guide upkeep unit** (its goal is to bring the repo's verification guide back in line with the app) is judged like any other unit: every page was driven as written and each page's stated output matches what came back, only files under `.claude/skills/verify-*` changed, and no product code was touched. A page you find wrong there is a finding, not a stale-page report.
+
 yagura reads only the verdict you record, never your final message. A session that ends without one is reminded once; then a fresh judge looks instead. End with a short report for the developer.

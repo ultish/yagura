@@ -100,6 +100,14 @@ export const SETTINGS = {
     .describe("Watchman turns one issue may start in a day; later comments wait for the next day"),
   "lead.max_decisions_per_unit": z.number().int().min(1).default(4).describe("Decisions a unit's lead may make before the unit waits for the developer"),
   "judge.max_rounds": z.number().int().min(1).default(3).describe("Rounds of changes the judge may ask for in a row before the unit lead is woken"),
+  "verify.upkeep_every_merges": z
+    .number()
+    .int()
+    .min(0)
+    .default(10)
+    .describe(
+      "Merges into a repo before a guide upkeep unit checks its verification guide against the app (0: only when a judge reports a stale page or you ask)",
+    ),
   "timebox.judge_seconds": z.number().int().positive().default(1200).describe("How long a judge may run before it is stopped"),
   "role.planner.harness": z.string().default("claude").describe("Harness that runs planners"),
   "role.planner.model": z.string().nullable().default(null).describe("Model for planners (empty: the harness default)"),
@@ -201,6 +209,7 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "role.judge.harness": PR,
   "role.judge.model": PR,
   "judge.max_rounds": PR,
+  "verify.upkeep_every_merges": R,
   "timebox.judge_seconds": PRE,
   "forge.trusted_authors": PR,
   "forge.watch_issues": R,

@@ -5,7 +5,7 @@ export type RecordCommand = (typeof RECORD_COMMANDS)[number];
 export const RECORD_USAGE: Record<RecordCommand, string> = {
   handoff: 'yagura handoff done [--did "…"] [--evidence "run:12"] [--decision "…"] [--note "…"] [--follow-up "…"]  |  yagura handoff stuck --reason "…"',
   judge:
-    'yagura judge approve --runs <id,…>  |  yagura judge changes --finding "<file:line> what is wrong" [--finding "…"]  |  yagura judge ask --question "…"',
+    'yagura judge approve --runs <id,…>  |  yagura judge changes --finding "<file:line> what is wrong" [--finding "…"]  |  yagura judge ask --question "…"  (any of them may add --stale-page "<page>: what is wrong" for a guide page that is stale but not caused by this unit)',
   decide: 'yagura decide <resume|fresh|answer|reply|ask|replan|drop> --reason "…" [--note "…"] [--question "…"] [--reply "…"]',
   plan: "yagura plan --file <delta.json>   (or --file - for stdin, or --json '<delta>' inline)",
   "check-done": "yagura check-done   (says what you still have to record)",

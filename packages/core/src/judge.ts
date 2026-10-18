@@ -41,6 +41,7 @@ export const JUDGE_REPORT = recordInstructions(
     "- `approve` only when every acceptance outcome holds on this head, citing the runs you made that show it (--runs).",
     "- `changes` with one --finding per problem, each `<file:line> what is wrong`; the worker gets them as written.",
     "- `ask` when only a person can settle it (the goal is ambiguous, two outcomes contradict); the unit lead decides what happens.",
+    '- --stale-page "<page>: what is wrong" on any verdict, for a guide page you found stale that this unit did not cause (do not fail the unit for it): yagura sends a guide upkeep for the repo.',
   ],
 );
 
@@ -256,6 +257,7 @@ async function applyVerdict(ctx: RunContext, unit: Unit, attempt: Attempt): Prom
     if (failedBefore) return transitionUnit(db, unit.id, "stuck", { reason: `two judge sessions in a row ended without a verdict (${attempt.failureMode})` });
     return transitionUnit(db, unit.id, "judging", { reason: `the judge ended without a verdict (${attempt.failureMode}); a fresh judge looks again` });
   }
+  for (const stale of verdict.stalePages ?? []) recordEvent(db, "guide.stale", refs, { repo: unit.repoId, report: stale });
   if (verdict.verdict === "ask")
     return transitionUnit(db, unit.id, "stuck", { reason: `the judge asks: ${verdict.question}`, question: verdict.question, trigger: "judge-asks" });
   if (verdict.verdict === "changes") {
