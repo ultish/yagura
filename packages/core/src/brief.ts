@@ -78,7 +78,7 @@ ${b.standing.trim() || "(none)"}
 }
 
 export interface PlanBrief {
-  project: { id: string; goal: string; predicate: string };
+  project: { id: string; goal: string; predicate: string; standing?: boolean };
   repos: { id: string; path: string; trunkSha: string }[];
   status: string;
   playbooks: readonly string[];
@@ -99,7 +99,7 @@ You are the planner for project ${p.project.id}. You never write code. You read 
 ${p.project.goal}
 
 ## DONE WHEN
-${p.project.predicate}
+${p.project.standing ? "Never: this is a standing project that the developer adds work to over time. Leave `done` unset. Plan only what the state, the spec, and the developer's notes call for; with nothing to plan, record an empty delta." : p.project.predicate}
 
 ## CODE (read-only checkouts at trunk)
 ${list(p.repos.map((r) => `${r.id}: ${r.path} @ ${r.trunkSha}`))}

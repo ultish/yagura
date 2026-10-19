@@ -13,6 +13,8 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 2, sql: "ALTER TABLE units ADD COLUMN proof_json TEXT NOT NULL DEFAULT '[]';" },
   // The guide page a recorded run drove, so a judge's runs can be matched to the pages a unit names.
   { version: 3, sql: "ALTER TABLE evidence_runs ADD COLUMN page TEXT;" },
+  // A standing project has no end: it is never closed, and the developer adds work to it whenever they like.
+  { version: 4, sql: "ALTER TABLE projects ADD COLUMN standing INTEGER NOT NULL DEFAULT 0 CHECK (standing IN (0, 1));" },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

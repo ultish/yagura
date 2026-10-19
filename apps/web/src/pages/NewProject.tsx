@@ -29,6 +29,7 @@ export function NewProject() {
   const envs = useApi<EnvironmentView[]>("/api/environments");
   const [goal, setGoal] = useState("");
   const [predicate, setPredicate] = useState("");
+  const [standing, setStanding] = useState(false);
   const [name, setName] = useState("");
   const [chosen, setChosen] = useState<string[]>([]);
   const [references, setReferences] = useState<string[]>([]);
@@ -43,7 +44,7 @@ export function NewProject() {
     if (!environment && envs.data?.length === 1) setEnvironment(envs.data[0]!.environment.id);
   }, [envs.data, environment]);
 
-  const ready = goal.trim() && predicate.trim() && chosen.length > 0 && environment;
+  const ready = goal.trim() && (standing || predicate.trim()) && chosen.length > 0 && environment;
 
   return (
     <main style={{ padding: "26px 36px 48px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 820 }}>
@@ -64,6 +65,7 @@ export function NewProject() {
                 name: name.trim() || undefined,
                 goal,
                 predicate,
+                standing,
                 repos: chosen,
                 references,
                 environment,
@@ -81,9 +83,17 @@ export function NewProject() {
         <Field label="Goal" hint="What you want done, in your own words.">
           <textarea className="mono" rows={3} value={goal} onChange={(e) => setGoal(e.target.value)} style={{ ...field, resize: "vertical" }} />
         </Field>
-        <Field label="Done when" hint="How anyone could tell it is finished. The project lead checks this before it closes the project.">
-          <textarea className="mono" rows={2} value={predicate} onChange={(e) => setPredicate(e.target.value)} style={{ ...field, resize: "vertical" }} />
+        <Field label="Does it end?">
+          <label style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+            <input type="checkbox" checked={standing} onChange={(e) => setStanding(e.target.checked)} />
+            Standing project: it never closes, and I add work to it whenever I like
+          </label>
         </Field>
+        {!standing && (
+          <Field label="Done when" hint="How anyone could tell it is finished. The project lead checks this before it closes the project.">
+            <textarea className="mono" rows={2} value={predicate} onChange={(e) => setPredicate(e.target.value)} style={{ ...field, resize: "vertical" }} />
+          </Field>
+        )}
         <Field label="Name (optional)" hint="Becomes the project's id; left empty, it is taken from the goal.">
           <input className="mono" value={name} onChange={(e) => setName(e.target.value)} style={{ ...field, maxWidth: 320 }} />
         </Field>

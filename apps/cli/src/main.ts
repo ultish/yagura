@@ -36,6 +36,7 @@ import {
   findByRef,
   findUnitsByCommit,
   setProjectRefs,
+  setProjectStanding,
   traceUnit,
   listGates,
   setAndon,
@@ -133,7 +134,7 @@ import {
 const USAGE = `yagura — agent orchestration
 
   yagura repo add <git URL> [--id <id>] [--forge gh|glab | --land push]   mirror an existing repo; github.com lands through pull requests, hosts in forge.glab_hosts through merge requests; any other remote needs --forge or --land push
-  yagura project new <id> --goal <text> --predicate <text> --repo <id>... [--name <text>] [--issue <ref>...]
+  yagura project new <id> --goal <text> (--predicate <text> | --standing) --repo <id>... [--name <text>] [--issue <ref>...]
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --accept <text>...
                   [--context <text>...] [--base <branch>] [--after <unit#>...] [--playbook <name>] [--timebox <seconds>] [--issue <ref>...]
@@ -162,6 +163,7 @@ const USAGE = `yagura — agent orchestration
   yagura template export <name>                     print a template as YAML, to share
   yagura template import <file | ->                 add or replace a template from YAML
   yagura template rm <name>
+  yagura project set <id> --standing | --not-standing   a standing project never closes: you add work whenever you like
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...] [--reference <repo id>...]
   yagura project skills <id>                       checks the project's skills.* are installed where agents run
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
@@ -438,6 +440,8 @@ async function main() {
         issue: { type: "string", multiple: true },
         after: { type: "string", multiple: true },
         "phase-gate": { type: "boolean" },
+        standing: { type: "boolean" },
+        "not-standing": { type: "boolean" },
         reference: { type: "string", multiple: true },
       });
       const id = positionals[1];
@@ -468,13 +472,21 @@ async function main() {
         );
         return;
       }
-      if (positionals[0] !== "new" || !id || !values.goal || !values.predicate || !many(values.repo).length) fail(USAGE);
+      if (positionals[0] === "set" && id && (values.standing || values["not-standing"])) {
+        setProjectStanding(db, id as ProjectId, !!values.standing);
+        console.log(
+          `project ${id}: ${values.standing ? "standing: it never closes, and you add work whenever you like" : "no longer standing: it closes when its goal is met"}`,
+        );
+        return;
+      }
+      if (positionals[0] !== "new" || !id || !values.goal || (!values.predicate && !values.standing) || !many(values.repo).length) fail(USAGE);
       const p = addProject(db, {
         id: id!,
         name: (values.name as string) ?? id!,
         goal: values.goal as string,
-        predicate: values.predicate as string,
+        predicate: (values.predicate as string | undefined) ?? "Standing project: never done.",
         repos: many(values.repo) as RepoId[],
+        standing: !!values.standing,
         refs: many(values.issue),
         after: many(values.after) as ProjectId[],
         phaseGate: !!values["phase-gate"],

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RunContext } from "./agent.js";
 import { setSetting, type Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
+import { writeSpec } from "./spec.js";
 import { Engine } from "./engine.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
@@ -25,6 +26,7 @@ import {
   openStore,
   setMergePolicy,
   setProjectEnvironment,
+  setProjectStanding,
   setRepoForge,
   type Db,
 } from "./store.js";
@@ -91,6 +93,22 @@ const states = (unitId: number) =>
 const workUnits = () => listUnits(db, project).filter((u) => u.type === "work");
 
 describe("Engine", () => {
+  it("never closes a standing project, even when the planner says its goal is met", async () => {
+    setProjectStanding(db, project, true);
+    writeSpec(db, project, "# Work\n\nLand the files.\n", "test");
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    expect(workUnits().length).toBeGreaterThan(0);
+    expect(workUnits().every((u) => u.state === "merged")).toBe(true);
+    expect(getProject(db, project).state).toBe("active");
+  }, 60_000);
+
+  it("does not plan a standing project that has nothing to plan yet", async () => {
+    setProjectStanding(db, project, true);
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    expect(listUnits(db, project)).toEqual([]);
+    expect(getProject(db, project).state).toBe("active");
+  }, 30_000);
+
   it("stops starting work past 70% of the wall-clock budget, and raises an andon when it is spent", async () => {
     setSetting(db, "project", project, "project.budget_hours", 1);
     const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();

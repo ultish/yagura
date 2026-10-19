@@ -252,9 +252,10 @@ export function createApp(opts: ServerOptions): Hono {
       environment?: string;
       merge?: string;
       issues?: string[];
+      standing?: boolean;
     };
     const goal = b.goal?.trim();
-    const predicate = b.predicate?.trim();
+    const predicate = b.predicate?.trim() || (b.standing ? "Standing project: never done." : "");
     if (!goal) return c.json({ error: "say what the project should get done" }, 400);
     if (!predicate) return c.json({ error: "say how anyone can tell it is done" }, 400);
     const repos = [...new Set(b.repos ?? [])];
@@ -284,6 +285,7 @@ export function createApp(opts: ServerOptions): Hono {
       refs: (b.issues ?? []).map((i) => i.trim()).filter(Boolean),
       mergePolicy: b.merge === "auto" ? "auto" : "human",
       environmentId: b.environment as EnvironmentId,
+      standing: !!b.standing,
     });
     if (b.references?.length) setSetting(db, "project", project.id, "project.reference_repos", b.references);
     return c.json(projectSummary(db, project.id), 201);

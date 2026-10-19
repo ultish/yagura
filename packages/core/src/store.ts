@@ -178,6 +178,7 @@ export function addProject(
     refs?: string[];
     after?: ProjectId[];
     phaseGate?: boolean;
+    standing?: boolean;
     mergePolicy?: Project["mergePolicy"];
     land?: Project["land"];
     environmentId?: EnvironmentId | null;
@@ -187,8 +188,8 @@ export function addProject(
     for (const dep of p.after ?? []) getProject(db, dep);
     if (p.environmentId) getEnvironment(db, p.environmentId);
     db.prepare(
-      `INSERT INTO projects (id, name, goal, predicate, state, refs_json, after_json, phase_gate, merge_policy, land, environment_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO projects (id, name, goal, predicate, state, refs_json, after_json, phase_gate, standing, merge_policy, land, environment_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       p.id,
       p.name,
@@ -198,6 +199,7 @@ export function addProject(
       JSON.stringify(p.refs ?? []),
       JSON.stringify(p.after ?? []),
       p.phaseGate ? 1 : 0,
+      p.standing ? 1 : 0,
       p.mergePolicy ?? "human",
       p.land ?? null,
       p.environmentId ?? null,
@@ -225,6 +227,7 @@ export function getProject(db: Db, id: ProjectId): Project {
     refs: JSON.parse((r.refs_json as string | undefined) ?? "[]"),
     after: JSON.parse((r.after_json as string | undefined) ?? "[]"),
     phaseGate: r.phase_gate === 1,
+    standing: r.standing === 1,
     createdAt: r.created_at as IsoTime,
     closedAt: (r.closed_at as IsoTime | null) ?? null,
   };
@@ -520,6 +523,12 @@ export function updateEnvironment(db: Db, id: EnvironmentId, patch: { name?: str
   db.prepare("UPDATE environments SET name = ?, capacity = ? WHERE id = ?").run(next.name, next.capacity, id);
   recordEvent(db, "environment.updated", {}, { environment: id, from: { name: before.name, capacity: before.capacity }, to: next });
   return getEnvironment(db, id);
+}
+
+export function setProjectStanding(db: Db, projectId: ProjectId, standing: boolean): void {
+  getProject(db, projectId);
+  db.prepare("UPDATE projects SET standing = ? WHERE id = ?").run(standing ? 1 : 0, projectId);
+  recordEvent(db, "project.standing", { projectId }, { standing });
 }
 
 export function setProjectEnvironment(db: Db, projectId: ProjectId, environmentId: EnvironmentId | null): void {

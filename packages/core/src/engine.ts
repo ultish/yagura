@@ -41,6 +41,7 @@ import { listTurns, stopTurn } from "./turns.js";
 import { doctorWakes, runDoctor, runningDoctorRuns, stopDoctorRun } from "./doctor.js";
 import { publishDue, publishTestBuild } from "./publish.js";
 import { scheduleUpkeep } from "./upkeep.js";
+import { getSpec } from "./spec.js";
 import { sweepWorktrees } from "./worktrees.js";
 import { savedHandoff } from "./finish.js";
 
@@ -151,7 +152,8 @@ export class Engine {
   private planNeeded(project: Project): boolean {
     if (this.inflight.has(`plan:${project.id}`)) return false;
     const since = lastDrainEventId(this.db, project.id);
-    if (since === 0) return true;
+    // A standing project plans when there is something to plan (a spec, a merge, a note), not just because it exists.
+    if (since === 0 && (!project.standing || getSpec(this.db, project.id))) return true;
     const events = this.db
       .prepare(
         `SELECT e.type, e.unit_id, e.data_json, u.type AS unit_type FROM events e LEFT JOIN units u ON u.id = e.unit_id WHERE e.project_id = ? AND e.id > ? AND (
@@ -337,6 +339,7 @@ export class Engine {
   }
 
   private maybeClose(project: Project): boolean {
+    if (project.standing) return false;
     const delta = latestDelta(this.db, project.id);
     const units = listUnits(this.db, project.id).filter(isBuild);
     if (!delta?.done || this.planNeeded(project) || units.some((u) => !TERMINAL_STATES.has(u.state) && u.state !== "stuck")) return false;

@@ -103,7 +103,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
     const status = generateStatus(db, boot, projectId, since);
     write(join(boot.home, "projects", projectId, "status.md"), status);
     const briefText = renderPlanBrief({
-      project: { id: project.id, goal: project.goal, predicate: project.predicate },
+      project: { id: project.id, goal: project.goal, predicate: project.predicate, standing: project.standing },
       repos: checkouts.map(({ id, path, trunkSha }) => ({ id, path, trunkSha })),
       status,
       playbooks: WORK_PLAYBOOKS,

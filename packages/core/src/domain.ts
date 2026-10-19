@@ -260,6 +260,8 @@ export interface Project {
   refs: string[];
   after: ProjectId[];
   phaseGate: boolean;
+  // Never closes by itself; the developer adds work whenever they like.
+  standing: boolean;
   createdAt: IsoTime;
   closedAt: IsoTime | null;
 }
