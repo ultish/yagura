@@ -1,3 +1,4 @@
+import { commandFromArgv } from "./shell.js";
 import { timingSafeEqual } from "node:crypto";
 import { parseArgs } from "node:util";
 import { loadBootstrap } from "./config.js";
@@ -16,7 +17,7 @@ export async function evidenceCli(argv: string[], env: NodeJS.ProcessEnv = proce
     allowPositionals: true,
     strict: true,
   });
-  const command = split === -1 ? "" : argv.slice(split + 1).join(" ");
+  const command = split === -1 ? "" : commandFromArgv(argv.slice(split + 1));
   const at = values.at ?? "head";
   if (positionals[0] !== "run" || (at !== "base" && at !== "head") || !command)
     return { code: 2, output: "usage: yagura evidence run [--label <name>] [--page <guide page>] [--at base] [--timeout <seconds>] -- <command>\n" };

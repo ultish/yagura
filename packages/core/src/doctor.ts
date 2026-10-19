@@ -144,7 +144,7 @@ ${run.detail}
 - checkout: ${checkout} (a throwaway checkout of its main branch, your working directory)
 
 ## THE ENVIRONMENT
-${environmentSection(db, env, run.repoId)}
+${environmentSection(db, env, run.repoId, { records: false })}
 
 Values (names agents and commands read from the environment): ${
     listValues(db, env)

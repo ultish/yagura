@@ -185,7 +185,7 @@ ${unit.notes.length ? `- notes:\n${unit.notes.map((n) => `  - ${n}`).join("\n")}
 ${record.join("\n\n") || "(nothing yet)"}
 
 ## THE ENVIRONMENT
-${environmentSection(db, project.environmentId, unit.repoId)}
+${environmentSection(db, project.environmentId, unit.repoId, { records: false })}
 
 ## YOUR CHOICES
 ${Object.values(ACTIONS)

@@ -8,6 +8,7 @@ import {
   answerLines,
   answerSuggestion,
   deleteAction,
+  environmentSection,
   getAction,
   listActions,
   recordActionRun,
@@ -136,5 +137,15 @@ describe("actions", () => {
     expect(() => saveAction(db, { ...base, name: "Run Tests" })).toThrow('action name "Run Tests" must be lower case letters, digits and dashes');
     expect(() => saveAction(db, { ...base, use: " " })).toThrow("say when to use the action");
     expect(() => saveAction(db, { ...base, command: "" })).toThrow("the action needs a command");
+  });
+});
+
+describe("what a brief says about recording runs", () => {
+  it("tells a worker or judge to record runs, and the doctor and unit lead that they cannot", () => {
+    expect(environmentSection(db, env, lib)).toContain("yagura evidence run -- <command>");
+    const noRecords = environmentSection(db, env, lib, { records: false });
+    expect(noRecords).not.toContain("yagura evidence run -- <command>");
+    expect(noRecords).toContain("You cannot record runs in this session");
+    expect(noRecords).toContain("yagura action propose");
   });
 });

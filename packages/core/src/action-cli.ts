@@ -1,3 +1,4 @@
+import { commandFromArgv } from "./shell.js";
 import { timingSafeEqual } from "node:crypto";
 import { parseArgs } from "node:util";
 import { adoptProposal, findAction, reportBroken } from "./actions.js";
@@ -41,7 +42,7 @@ export async function actionAgentCli(argv: string[], env: NodeJS.ProcessEnv = pr
     allowPositionals: true,
     strict: true,
   });
-  const command = split === -1 ? "" : argv.slice(split + 1).join(" ");
+  const command = split === -1 ? "" : commandFromArgv(argv.slice(split + 1));
   const sub = positionals[0];
   if ((sub !== "propose" && sub !== "broken") || !values.name) return { code: 2, output: USAGE };
   if (!env.YAGURA_ATTEMPT && !env.YAGURA_DOCTOR_RUN) return { code: 2, output: "yagura action only works inside a yagura agent session or doctor run\n" };

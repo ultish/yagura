@@ -283,7 +283,8 @@ export function answerSuggestion(db: Db, id: number, accept: boolean): Action {
 }
 
 // What every agent's brief says about its environment: the developer's answers, then the actions for its repo and how to use them.
-export function environmentSection(db: Db, environmentId: EnvironmentId | null, repoId: RepoId | null): string {
+// `records` is false for the roles that cannot record runs (the doctor and the unit lead): only a worker's or a judge's session can.
+export function environmentSection(db: Db, environmentId: EnvironmentId | null, repoId: RepoId | null, opts: { records?: boolean } = {}): string {
   if (!environmentId) return "This project has no environment, so yagura knows nothing about how things run here: work it out and say so in your decision log.";
   const env = getEnvironment(db, environmentId);
   const words = answerLines(env.answers);
@@ -299,7 +300,9 @@ export function environmentSection(db: Db, environmentId: EnvironmentId | null, 
       ? ["- No action runs this repo's tests yet: work out the command from the answers above, use it, and say so in your decision log."]
       : []),
     "",
-    "Run an action's command with `yagura evidence run -- <command>` so the run is recorded and can be cited.",
+    opts.records === false
+      ? "You cannot record runs in this session (`yagura evidence run` is for workers and judges): run commands directly in your checkout. `yagura action propose` runs a command on a clean checkout and records it."
+      : "Run an action's command with `yagura evidence run -- <command>` so the run is recorded and can be cited.",
     'When one does not work here, say so: `yagura action broken --name <name> --reason "…"`. When you work out a command worth keeping, offer it: `yagura action propose --name <name> --use "<when to use it>" -- <command>`; yagura runs it on a clean checkout and keeps it only if it passes.',
   ]
     .filter((l, i, all) => l !== "" || all[i - 1] !== "")
