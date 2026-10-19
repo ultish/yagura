@@ -12,6 +12,8 @@ import { runningTurn } from "./turns.js";
 
 // Issues are read from a little before the last poll, so one updated while a poll ran is not missed; ids already read are skipped.
 const POLL_OVERLAP_MS = 5 * 60_000;
+// A watch that takes up every open issue starts here, so no issue's creation time is too early for it.
+const EVERYTHING = "1970-01-01T00:00:00.000Z";
 const APPROVE = new Set(["yes", "y", "go", "approve", "approved", "lgtm", "ok", "👍"]);
 const DECLINE = new Set(["no", "n", "decline", "declined", "stop", "👎"]);
 
@@ -176,17 +178,25 @@ async function decide(ctx: RunContext, forge: ForgeAdapter, row: IssueRow, propo
 }
 
 // One poll of a watched repo: new issues become threads and new comments become messages; a trusted yes or no to a pending
-// proposal is decided here, without an agent. The first poll only sets the watermark, so issues opened earlier are left alone.
+// proposal is decided here, without an agent. The first poll only sets the watermark, so issues opened earlier are left alone, unless
+// forge.watch_existing_issues asks for them.
 export async function pollIssues(ctx: RunContext, repo: Repo): Promise<void> {
   const { db } = ctx;
   const forge = forgeFor(db, repo);
   if (!forge) return;
-  const watch = db.prepare("SELECT since, polled_at FROM issue_watches WHERE repo_id = ?").get(repo.id) as
+  let watch = db.prepare("SELECT since, polled_at FROM issue_watches WHERE repo_id = ?").get(repo.id) as
     { since: string; polled_at: string | null } | undefined;
+  const existing = resolveSetting(db, "forge.watch_existing_issues", { repoId: repo.id }).value;
   if (!watch) {
-    db.prepare("INSERT INTO issue_watches (repo_id, since, polled_at) VALUES (?, ?, ?)").run(repo.id, now(), now());
-    recordEvent(db, "issue.watch_started", {}, { repo: repo.id });
-    return;
+    db.prepare("INSERT INTO issue_watches (repo_id, since, polled_at) VALUES (?, ?, ?)").run(repo.id, existing ? EVERYTHING : now(), existing ? null : now());
+    recordEvent(db, "issue.watch_started", {}, { repo: repo.id, existing });
+    if (!existing) return;
+    watch = { since: EVERYTHING, polled_at: null };
+  } else if (existing && watch.since !== EVERYTHING) {
+    // Turned on after watching began: widen the watch so the issues opened earlier are taken up on this poll.
+    db.prepare("UPDATE issue_watches SET since = ?, polled_at = NULL WHERE repo_id = ?").run(EVERYTHING, repo.id);
+    recordEvent(db, "issue.watch_widened", {}, { repo: repo.id });
+    watch = { since: EVERYTHING, polled_at: null };
   }
   const started = now();
   const issues = await forge.issues(new Date(Date.parse(watch.polled_at ?? watch.since) - POLL_OVERLAP_MS).toISOString());
@@ -255,6 +265,14 @@ function turnsToday(db: Db, threadId: number): number {
   return (db.prepare("SELECT COUNT(*) AS n FROM watchman_turns WHERE thread_id = ? AND started_at >= ?").get(threadId, now().slice(0, 10)) as { n: number }).n;
 }
 
+function repoTurnsToday(db: Db, repoId: RepoId): number {
+  return (
+    db
+      .prepare("SELECT COUNT(*) AS n FROM watchman_turns t JOIN forge_issues f ON f.thread_id = t.thread_id WHERE f.repo_id = ? AND t.started_at >= ?")
+      .get(repoId, now().slice(0, 10)) as { n: number }
+  ).n;
+}
+
 // Answers what is waiting on one issue: the watchman reads the queued comments (within the day's cap), a proposal only trusted
 // logins asked for starts at once, and every watchman reply not yet on the issue is posted with its key.
 export async function answerIssue(ctx: RunContext, repo: Repo, number: number): Promise<void> {
@@ -264,8 +282,10 @@ export async function answerIssue(ctx: RunContext, repo: Repo, number: number): 
   if (!forge || !row) return;
   if (queuedMessages(db, row.threadId).length && !runningTurn(db, row.threadId) && !activeHold(db)) {
     const cap = resolveSetting(db, "issues.max_turns_per_day", { repoId: repo.id }).value;
-    if (turnsToday(db, row.threadId) < cap) await runQueuedTurns(ctx, row.threadId);
-    else recordEvent(db, "issue.turn_cap", {}, { repo: repo.id, number, cap });
+    const repoCap = resolveSetting(db, "issues.max_repo_turns_per_day", { repoId: repo.id }).value;
+    if (turnsToday(db, row.threadId) >= cap) recordEvent(db, "issue.turn_cap", {}, { repo: repo.id, number, cap });
+    else if (repoTurnsToday(db, repo.id) >= repoCap) recordEvent(db, "issue.repo_turn_cap", {}, { repo: repo.id, number, cap: repoCap });
+    else await runQueuedTurns(ctx, row.threadId);
   }
   row = getIssue(db, repo.id, number)!;
   const pending = pendingProposal(db, row.threadId);

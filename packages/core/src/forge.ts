@@ -353,7 +353,7 @@ export function githubForge(bin: string, repo: string, timeoutMs = 120_000): For
     },
     async issues(since) {
       const listed = JSON.parse(
-        await gh(bin, ["issue", "list", ...R, "--state", "open", "--limit", "100", "--json", "number,title,author,body,url,createdAt,updatedAt"]),
+        await gh(bin, ["issue", "list", ...R, "--state", "open", "--limit", "1000", "--json", "number,title,author,body,url,createdAt,updatedAt"]),
       ) as { number: number; title: string; author: Author; body: string; url: string; createdAt: string; updatedAt: string }[];
       return Promise.all(
         listed
@@ -586,7 +586,7 @@ export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): For
     },
     async issues(since) {
       const listed = JSON.parse(
-        await api([`${project}/issues?state=opened&updated_after=${encodeURIComponent(since)}&per_page=100&order_by=created_at&sort=asc`]),
+        await api(["--paginate", `${project}/issues?state=opened&updated_after=${encodeURIComponent(since)}&per_page=100&order_by=created_at&sort=asc`]),
       ) as GlIssue[];
       return Promise.all(
         listed.map(async (i) => readGitlabIssue(i, JSON.parse(await api([`${project}/issues/${i.iid}/notes?per_page=100&sort=asc`])) as GlNote[])),

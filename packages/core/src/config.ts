@@ -98,6 +98,20 @@ export const SETTINGS = {
     .positive()
     .default(10)
     .describe("Watchman turns one issue may start in a day; later comments wait for the next day"),
+  "forge.watch_existing_issues": z
+    .boolean()
+    .default(false)
+    .describe(
+      "Also take up the open issues already on the repo (up to 1000), not only those opened from now on. Turning it on after watching has begun takes up the backlog too. Each issue's reply is paced by issues.max_repo_turns_per_day",
+    ),
+  "issues.max_repo_turns_per_day": z
+    .number()
+    .int()
+    .positive()
+    .default(100)
+    .describe(
+      "Watchman turns all of a repo's issues may start in a day together; the rest wait for the next day (set it lower, say 10, to pace a big backlog)",
+    ),
   "lead.max_decisions_per_unit": z.number().int().min(1).default(4).describe("Decisions a unit's lead may make before the unit waits for the developer"),
   "judge.max_rounds": z.number().int().min(1).default(3).describe("Rounds of changes the judge may ask for in a row before the unit lead is woken"),
   "verify.upkeep_every_merges": z
@@ -214,6 +228,8 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "forge.trusted_authors": PR,
   "forge.watch_issues": R,
   "issues.max_turns_per_day": R,
+  "forge.watch_existing_issues": R,
+  "issues.max_repo_turns_per_day": R,
   "lead.max_decisions_per_unit": PR,
   "role.planner.harness": P,
   "role.planner.model": P,

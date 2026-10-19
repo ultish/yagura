@@ -249,6 +249,36 @@ describe("forge issues (§30, fake gh)", () => {
     ]);
   }, 60_000);
 
+  it("takes up the issues already open when asked to, from the first poll", async () => {
+    setSetting(db, "repo", "testbed", "forge.watch_existing_issues", true);
+    open(1, "stranger", "an old one", "2020-01-01T00:00:00Z");
+    open(2, "stranger", "an older one", "2019-01-01T00:00:00Z");
+    await cycle();
+    expect(listIssues(db, "testbed" as RepoId).map((i) => i.number)).toEqual([1, 2]);
+    expect(posted(1)).toHaveLength(1);
+  }, 60_000);
+
+  it("takes up the backlog when the setting is turned on after watching began", async () => {
+    open(1, "stranger", "an old one", "2020-01-01T00:00:00Z");
+    await cycle();
+    expect(listIssues(db, "testbed" as RepoId)).toEqual([]);
+    setSetting(db, "repo", "testbed", "forge.watch_existing_issues", true);
+    await cycle();
+    expect(listIssues(db, "testbed" as RepoId).map((i) => i.number)).toEqual([1]);
+    expect(posted(1)).toHaveLength(1);
+  }, 60_000);
+
+  it("paces the replies to a backlog with the repo's daily cap, keeping the rest queued", async () => {
+    setSetting(db, "repo", "testbed", "forge.watch_existing_issues", true);
+    setSetting(db, "repo", "testbed", "issues.max_repo_turns_per_day", 1);
+    for (const n of [1, 2, 3]) open(n, "stranger", `old ${n}`, `2020-01-0${n}T00:00:00Z`);
+    await cycle();
+    expect(listIssues(db, "testbed" as RepoId)).toHaveLength(3);
+    expect([1, 2, 3].filter((n) => posted(n).length > 0)).toHaveLength(1);
+    const capped = db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'issue.repo_turn_cap'").get() as { n: number };
+    expect(capped.n).toBeGreaterThan(0);
+  }, 60_000);
+
   it("stops answering an issue for the day once it reaches its cap, keeping the comments for later", async () => {
     setSetting(db, "repo", "testbed", "issues.max_turns_per_day", 1);
     await cycle();
