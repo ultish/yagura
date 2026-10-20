@@ -1145,7 +1145,10 @@ button.story-time:hover {
 }
 .repo.embedded .repo-body {
   grid-template-columns: 220px minmax(0, 1fr);
-  height: 560px;
+  height: clamp(560px, calc(100vh - 120px), 1100px);
+}
+.repo.embedded .diff-files {
+  max-height: 224px;
 }
 @media (max-width: 640px) {
   .repo.embedded .repo-body {
