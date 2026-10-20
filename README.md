@@ -9,7 +9,7 @@
 
 Yagura runs coding agents on long engineering projects while you stay in charge. You give a project a goal. A daemon splits it into small units, runs an agent on each one in its own git worktree, and has a fresh agent judge the result against test runs the daemon recorded itself. Each unit ends as one pull request, and nothing merges until the judge approves it and, by default, you do too.
 
-It runs as one daemon per developer, with no cloud service. The target is a developer's own RHEL 9 VM on an air-gapped network. You drive it from a web dashboard.
+It runs as one daemon per developer, with no cloud service. You drive it from a web dashboard.
 
 ## How it works
 
@@ -40,9 +40,9 @@ yagura start
 
 `yagura --help` lists the everyday commands, and `yagura help all` lists every one.
 
-### On an air-gapped machine
+### Native build
 
-`pnpm install` needs a package registry, so point pnpm at your internal mirror or copy a populated pnpm store to the machine. Build elsewhere and run `scripts/setup.sh --no-build` if you can't install there at all. `better-sqlite3` compiles natively, so the machine needs `gcc`, `make` and Python. After any Node switch, run `pnpm rebuild better-sqlite3`. I haven't run this path end to end on the target VM yet.
+`better-sqlite3` compiles natively, so the machine needs `gcc`, `make` and Python. After any Node switch, run `pnpm rebuild better-sqlite3`.
 
 ## Configure
 
@@ -58,7 +58,7 @@ Agents use your whole `claude` setup, and the default method comes from the [pst
 /plugin install cursor-team-kit@pstack-claude
 ```
 
-With no internet, clone `pstack-claude` onto the machine and give `/plugin marketplace add` the path on disk. Any other plugin or skill your work needs goes into the same `claude`, and every agent gets it. To make yagura stop a unit whose worker skipped a skill, list that skill in the `skills.work` setting.
+Any other plugin or skill your work needs goes into the same `claude`, and every agent gets it. To make yagura stop a unit whose worker skipped a skill, list that skill in the `skills.work` setting.
 
 ### Your `claude` command
 
@@ -75,7 +75,7 @@ You can fill one in on the Environments page, or let a Claude session do it. Ins
 /plugin install yagura-skills@yagura
 ```
 
-With no internet, give `/plugin marketplace add` the path to this repo on disk. Then, in the session that's working on your project, say "create a yagura environment for this project". The skill reads your project, then creates the environment with the `yagura` command, so `yagura` has to be on its PATH.
+In the session that's working on your project, say "create a yagura environment for this project". The skill reads your project, then creates the environment with the `yagura` command, so `yagura` has to be on its PATH.
 
 ### GitLab
 
