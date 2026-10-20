@@ -346,7 +346,7 @@ export async function openOrUpdateDraft(ctx: RunContext, unit: Unit, head: Sha, 
   const forge = forgeFor(db, repo);
   if (!forge) return;
   const project = getProject(db, unit.projectId);
-  const body = pullRequestBody(project, unit, resolveSetting(db, "yagura.url").value);
+  const body = pullRequestBody(db, project, unit, resolveSetting(db, "yagura.url").value);
   const existing = getMergeRequest(db, unit.id);
   const pr = existing ?? (await forge.openDraft({ branch: unit.branch!, base: baseOf(db, unit), title: commitSubject(unit.goal), body }));
   if (existing) await forge.updateBody(existing.number, body);

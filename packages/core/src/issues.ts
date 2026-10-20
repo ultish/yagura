@@ -158,6 +158,7 @@ async function decide(ctx: RunContext, forge: ForgeAdapter, row: IssueRow, propo
     addMessage(db, { threadId: row.threadId, role: "system", body: `Proposal ${proposal.id} declined by ${who} on the issue.` });
     return post(forge, row, `p${proposal.id}`, `Declined by ${who}: nothing will be built for this.`);
   }
+  recordEvent(db, "issue.approved", {}, { repo: row.repoId, number: row.number, proposal: proposal.id, by });
   try {
     const applied = await applyProposal(ctx, proposal.id);
     addMessage(db, {

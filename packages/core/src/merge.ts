@@ -1,5 +1,5 @@
 import type { RunContext } from "./agent.js";
-import { mergeMessage } from "./audit.js";
+import { mergeMessage, pullRequestBody } from "./audit.js";
 import { commitBaseMerge, mergeWithBase, mergeWithoutForge } from "./branch.js";
 import { resolveSetting } from "./config.js";
 import type { Repo, Sha, Unit, UnitId } from "./domain.js";
@@ -136,6 +136,10 @@ export async function checkReady(ctx: RunContext, unitId: UnitId): Promise<{ rep
 
   const message = mergeMessage(db, unit, mr?.number ?? null, resolveSetting(db, "yagura.url").value);
   if (forge && mr) {
+    // The description is what a reader sees on the forge, so it gets the approval before the merge, not after.
+    await forge.updateBody(mr.number, pullRequestBody(db, project, unit, resolveSetting(db, "yagura.url").value)).catch((e: unknown) => {
+      recordEvent(db, "audit.body_failed", refs, { error: e instanceof Error ? e.message : String(e) });
+    });
     await forge.mergeCommit(mr.number, head, message);
     const status = await forge.status(mr.number);
     recordMergeStatus(db, unit.id, status);

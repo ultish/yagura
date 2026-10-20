@@ -164,7 +164,10 @@ describe("Engine", () => {
     ).toEqual([`yagura/p/u${a!.seq} MERGED draft:false`, `yagura/p/u${b!.seq} MERGED draft:false`, `yagura/p/u${c!.seq} MERGED draft:false`]);
     const pr = ghPrs().find((p) => p.head === `yagura/p/u${a!.seq}`)!;
     expect(pr.title).toBe("write a");
-    expect(pr.body).toBe(`write a\n\n## Acceptance\n- a file exists\n\nBuilt by yagura: p/U${a!.seq}.`);
+    expect(pr.body).toMatch(new RegExp(`^write a\\n\\n## Acceptance\\n- a file exists\\n\\n## How it was made\\n`));
+    expect(pr.body).toContain("- Allowed to merge by: the auto-merge policy of project p");
+    expect(pr.body).toContain("- `true`: exit 0");
+    expect(pr.body.endsWith(`Built by yagura: p/U${a!.seq}.`)).toBe(true);
 
     const merge = getUnit(db, a!.id).mergedSha!;
     const parents = (await git(["log", "-1", "--format=%P", merge], { gitDir: origin })).split(" ");
@@ -172,7 +175,9 @@ describe("Engine", () => {
     expect(parents[1]).toBe(getUnit(db, a!.id).approvedSha);
     const message = await git(["log", "-1", "--format=%B", merge], { gitDir: origin });
     expect(message).toMatch(
-      new RegExp(`^p/U${a!.seq}: write a \\(#\\d\\)\\n\\nWorkers: A\\d+ \\(fake-model\\)\\nJudge: A\\d+ approved [0-9a-f]{10}, on run:\\d+$`),
+      new RegExp(
+        `^p/U${a!.seq}: write a \\(#\\d\\)\\n\\nWorkers: A\\d+ \\(fake-model\\)\\nJudge: A\\d+ approved [0-9a-f]{10}, on run:\\d+\\nApproved-by: the auto-merge policy of project p$`,
+      ),
     );
     expect(await git(["show", `main:app/a/p-U${a!.seq}.txt`], { gitDir: origin })).toBe("work");
     expect(getProject(db, project).state).toBe("closed");

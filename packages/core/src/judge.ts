@@ -276,7 +276,7 @@ async function applyVerdict(ctx: RunContext, unit: Unit, attempt: Attempt): Prom
   const forge = forgeFor(db, getRepo(db, unit.repoId!));
   const mr = getMergeRequest(db, unit.id);
   if (forge && mr) {
-    await forge.updateBody(mr.number, pullRequestBody(getProject(db, unit.projectId), unit, resolveSetting(db, "yagura.url").value));
+    await forge.updateBody(mr.number, pullRequestBody(db, getProject(db, unit.projectId), unit, resolveSetting(db, "yagura.url").value));
     await forge.markReady(mr.number);
     db.prepare("UPDATE merge_requests SET draft = 0 WHERE unit_id = ?").run(unit.id);
   }
