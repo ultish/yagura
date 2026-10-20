@@ -1,0 +1,17 @@
+{
+  "name": "yagura",
+  "owner": {
+    "name": "Jimmy"
+  },
+  "plugins": [
+    {
+      "name": "yagura-skills",
+      "source": "./plugins/yagura-skills",
+      "description": "Skills for your own Claude sessions that work with yagura.",
+      "author": {
+        "name": "Jimmy"
+      }
+    }
+  ],
+  "description": "Skills for working with yagura from your own Claude sessions."
+}

@@ -1,0 +1,8 @@
+{
+  "name": "yagura-skills",
+  "version": "0.1.0",
+  "description": "Skills for your own Claude sessions that work with yagura, such as creating a yagura environment from the project you are in.",
+  "author": {
+    "name": "Jimmy"
+  }
+}
