@@ -2,18 +2,43 @@ import { execFile } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { shellLine, timed } from "./debug.js";
 import type { Sha } from "./domain.js";
 
 const run = promisify(execFile);
 
+// Calls that come by the hundred while a unit waits: with --debug they show only when they fail or run slowly.
+const ROUTINE = new Set([
+  "fetch",
+  "rev-parse",
+  "remote",
+  "merge-tree",
+  "diff",
+  "log",
+  "show",
+  "ls-tree",
+  "cat-file",
+  "for-each-ref",
+  "status",
+  "rev-list",
+  "merge-base",
+  "symbolic-ref",
+  "config",
+]);
+
 // Output is trimmed of trailing whitespace unless `raw` is set; file contents must keep their final newline.
 export async function git(args: string[], opts: { cwd?: string; gitDir?: string; raw?: boolean } = {}): Promise<string> {
   const full = opts.gitDir ? ["--git-dir", opts.gitDir, ...args] : args;
-  const { stdout } = await run("git", full, {
-    cwd: opts.cwd,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  const { stdout } = await timed(
+    () => shellLine("git", args),
+    () =>
+      run("git", full, {
+        cwd: opts.cwd,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        maxBuffer: 64 * 1024 * 1024,
+      }),
+    { quiet: ROUTINE.has(args[0] ?? "") },
+  );
   return opts.raw ? stdout : stdout.trimEnd();
 }
 

@@ -63,5 +63,6 @@ export * from "./publish.js";
 export * from "./import.js";
 export * from "./verify-guide.js";
 export * from "./proof.js";
+export * from "./debug.js";
 export * from "./guide.js";
 export * from "./upkeep.js";

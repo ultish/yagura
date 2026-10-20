@@ -7,9 +7,11 @@ import {
   acquireDaemonLock,
   claudeAdapter,
   Engine,
+  debug,
   layout,
   loadBootstrap,
   openStore,
+  setDebug,
   type Bootstrap,
   importSpecFiles,
   importStandingFiles,
@@ -30,12 +32,18 @@ export function loadOrCreateToken(boot: Bootstrap): string {
   return token;
 }
 
-export async function startDaemon(cli: string[]): Promise<void> {
+export async function startDaemon(cli: string[], opts: { debug?: boolean } = {}): Promise<void> {
   const boot = loadBootstrap();
   const db = openStore(layout(boot).db);
   const release = acquireDaemonLock(boot);
   const token = LOOPBACK.has(boot.bind) ? null : loadOrCreateToken(boot);
   const log = daemonLog(layout(boot).daemonLog);
+  if (opts.debug) {
+    setDebug(log);
+    debug(
+      `debug logging on: external commands (git, gh, glab), agent starts and exits, evidence runs, every API change, failure or slow read, and quiet background polls`,
+    );
+  }
   for (const path of importStandingFiles(db, boot)) log(`moved ${path} into the store (Prompts page notes)`);
   for (const path of importSpecFiles(db, boot)) log(`moved ${path} into the store (the project's spec page)`);
   const templates = importTemplateFiles(db, boot);

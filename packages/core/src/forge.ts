@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { shellLine, timed } from "./debug.js";
 import { tmpdir } from "node:os";
 import { resolveSetting } from "./config.js";
 import type { IsoTime, Repo, Sha, UnitId } from "./domain.js";
@@ -181,6 +182,13 @@ const LOG_LINES = 60;
 // A call the forge never answers (a connection dropped while the machine slept) would hold its watcher, and the daemon's
 // shutdown, forever; past the timeout it fails and the next check tries again.
 function runForge(bin: string, args: string[], stdin: string | undefined, env: Record<string, string>, timeout: number): Promise<string> {
+  return timed(
+    () => shellLine(bin, args),
+    () => execForge(bin, args, stdin, env, timeout),
+  );
+}
+
+function execForge(bin: string, args: string[], stdin: string | undefined, env: Record<string, string>, timeout: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = execFile(
       bin,

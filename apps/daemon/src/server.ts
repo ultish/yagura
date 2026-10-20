@@ -116,6 +116,7 @@ import {
   getDoctorRun,
   stopDoctorRun,
   requestDoctor,
+  debug,
   repoHasGuide,
   guideCreationUnder,
   createGuideUnit,
@@ -226,6 +227,14 @@ export function createApp(opts: ServerOptions): Hono {
   const { db, boot } = opts;
   const app = new Hono();
   const pollMs = opts.pollMs ?? 500;
+
+  // The dashboard polls, so a quick successful read is not worth a line; every change, every failure, and every slow read is.
+  app.use("/api/*", async (c, next) => {
+    const start = Date.now();
+    await next();
+    const ms = Date.now() - start;
+    if (c.req.method !== "GET" || c.res.status >= 400 || ms >= 250) debug(() => `${c.req.method} ${c.req.path} ${c.res.status} (${ms} ms)`);
+  });
 
   app.use("/api/*", async (c, next) => {
     if (!opts.token) return next();

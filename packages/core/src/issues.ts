@@ -1,3 +1,4 @@
+import { debug } from "./debug.js";
 import type { RunContext } from "./agent.js";
 // First: proposal.js reaches watchman.js through a cycle, and watchman.js needs ProposalBody while it loads.
 import { queuedMessages, runQueuedTurns } from "./watchman.js";
@@ -199,7 +200,10 @@ export async function pollIssues(ctx: RunContext, repo: Repo): Promise<void> {
     watch = { since: EVERYTHING, polled_at: null };
   }
   const started = now();
-  const issues = await forge.issues(new Date(Date.parse(watch.polled_at ?? watch.since) - POLL_OVERLAP_MS).toISOString());
+  const sinceIso = new Date(Date.parse(watch.polled_at ?? watch.since) - POLL_OVERLAP_MS).toISOString();
+  debug(`issues ${repo.id}: asking the forge for issues updated since ${sinceIso}`);
+  const issues = await forge.issues(sinceIso);
+  debug(`issues ${repo.id}: ${issues.length} issue(s) came back`);
   for (const issue of issues) {
     let row = getIssue(db, repo.id, issue.number);
     if (!row) {

@@ -177,7 +177,7 @@ const USAGE = `yagura — agent orchestration
   yagura stop                            stop the background daemon
   yagura restart                         stop it, then start it
   yagura status                          whether it runs, its pid, URL, and log
-  yagura daemon                          run yagura in this terminal for every active project and serve the API (YAGURA_BIND/YAGURA_PORT)
+  yagura daemon [--debug]                run yagura in this terminal for every active project and serve the API (YAGURA_BIND/YAGURA_PORT); --debug (or YAGURA_DEBUG=1) also logs every git, gh and glab call, agent start and exit, evidence run, API change, and quiet poll
   yagura drive <project>                 plan and run workers until nothing is left to do (without a daemon)
   yagura import <old home>               copy settings, repos, environments, templates, and conversations from an old home (projects and units stay behind)
   yagura andon <project> --reason <text> | --clear
@@ -207,7 +207,7 @@ const SHORT = `yagura 櫓: agent orchestration. The dashboard is at http://127.0
 
 Server
   yagura start | stop | restart | status   run the daemon in the background
-  yagura daemon                            run it in this terminal instead (logs show here)
+  yagura daemon [--debug]                  run it in this terminal instead (logs show here); --debug also logs every git, gh and glab call, agent, and poll
 
 Set up
   yagura repo add <git URL>                register a repo
@@ -313,12 +313,14 @@ if (command === "start" || command === "stop" || command === "restart" || comman
   );
 }
 if (command === "daemon") {
-  if (rest.length) {
-    process.stderr.write(`yagura daemon takes no arguments (got ${rest.join(" ")}); set YAGURA_HOME, YAGURA_BIND, YAGURA_PORT instead\n`);
+  const debug = rest.includes("--debug") || Boolean(process.env.YAGURA_DEBUG);
+  const stray = rest.filter((a) => a !== "--debug");
+  if (stray.length) {
+    process.stderr.write(`yagura daemon takes only --debug (got ${stray.join(" ")}); set YAGURA_HOME, YAGURA_BIND, YAGURA_PORT instead\n`);
     process.exit(2);
   }
   const { startDaemon } = await import("@yagura/daemon");
-  await startDaemon([process.execPath, fileURLToPath(import.meta.url)]).catch((e: unknown) => {
+  await startDaemon([process.execPath, fileURLToPath(import.meta.url)], { debug }).catch((e: unknown) => {
     console.error(e instanceof Error ? e.message : String(e));
     process.exit(1);
   });

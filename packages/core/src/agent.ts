@@ -1,7 +1,8 @@
+import { debug } from "./debug.js";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { appendFileSync, chmodSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import type { Bootstrap } from "./config.js";
 import type { Attempt, HarnessEvent, ProjectId, Role, Unit } from "./domain.js";
@@ -187,6 +188,9 @@ async function runOnce(
     },
   });
   s.recorder.started(child.pid ?? null);
+  const began = Date.now();
+  debug(() => `agent started: ${s.recorder.env.YAGURA_ROLE ?? "agent"}, attempt ${s.recorder.env.YAGURA_ATTEMPT ?? "?"}, ${basename(cmd)} (pid ${child.pid})`);
+  child.on("close", (code) => debug(() => `agent pid ${child.pid} exited ${code} after ${Math.round((Date.now() - began) / 1000)} s`));
   child.stdin.on("error", () => {});
   // A harness that reads messages from stdin stays alive after its result until stdin closes. Input closes on the result even with a message unread:
   // answering it would start a new response whose text replaces the handoff.

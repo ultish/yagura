@@ -1,3 +1,4 @@
+import { debug } from "./debug.js";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -68,6 +69,9 @@ export function runShell(
 ): Promise<{ exitCode: number | null; timedOut: boolean; stdout: Buffer; stderr: Buffer }> {
   return new Promise((resolve) => {
     const child = spawn("sh", ["-c", command], { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const began = Date.now();
+    debug(() => `run: ${command.replace(/\s+/g, " ").slice(0, 110)}`);
+    child.on("close", (code) => debug(() => `run exited ${code} after ${Date.now() - began} ms`));
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let outLen = 0;

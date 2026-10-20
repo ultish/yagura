@@ -1,3 +1,4 @@
+import { debug } from "./debug.js";
 import { stopAttempt, type RunContext } from "./agent.js";
 import { resolveSetting } from "./config.js";
 import { TERMINAL_STATES, isBuild, type EnvironmentId, type Project, type ProjectId, type Unit, type UnitId } from "./domain.js";
@@ -106,9 +107,14 @@ export class Engine {
   // A quiet start (routine polling: retro watches, revert scans) logs only what it finds and its errors.
   private start(key: string, label: string, work: () => Promise<unknown>, onError: (e: unknown) => void, quiet = false): void {
     if (!quiet) this.log(`▶ ${label}`);
+    // A unit's own quiet checks (ready, base) run every pass while it waits, so they are left out; polls always show.
+    const chatty = quiet && key.startsWith("unit:");
+    if (quiet && !chatty) debug(`▶ ${label}`);
+    const began = Date.now();
     const p = work()
       .then(() => {
         if (!quiet) this.log(`■ ${label}`);
+        else if (!chatty) debug(`■ ${label} (${Date.now() - began} ms)`);
       })
       .catch((e: unknown) => {
         this.log(`✗ ${label}: ${e instanceof Error ? e.message : String(e)}`);
