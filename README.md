@@ -91,6 +91,32 @@ The daemon listens on localhost. To open it from another machine, start it with 
 
 `yagura start` keeps running after you close the terminal. On a Mac, wrap it as `caffeinate -is yagura daemon` to keep the machine awake. For systemd, run `yagura daemon` in a user service.
 
+### Giving the dashboard a name
+
+A DNS name maps to an address, not a port. To open the dashboard as `http://yagura:7300` on your own machine, add a line to `/etc/hosts` as root:
+
+```
+127.0.0.1   yagura
+```
+
+To leave off the `:7300`, either put a reverse proxy on port 80, or let yagura listen on port 80 itself. A Caddyfile for the proxy:
+
+```
+http://yagura {
+  reverse_proxy 127.0.0.1:7300
+}
+```
+
+With nginx on RHEL, SELinux also needs `sudo setsebool -P httpd_can_network_connect 1` before it can proxy to a local port. To listen on 80 directly, run `sudo sysctl -w net.ipv4.ip_unprivileged_port_start=80`, save the same line in a file under `/etc/sysctl.d/`, and start yagura with `YAGURA_PORT=80`.
+
+An `/etc/hosts` line only works on the machine it is in. For teammates, ask for an A record in your DNS that points the name at the VM's address, and start yagura with `YAGURA_BIND` so it listens beyond localhost (see above). A full name such as `yagura.corp.example.com` is safer than a bare `yagura`, which can collide with a search domain.
+
+Then tell yagura its address, so pull requests and merge commits link to the right place:
+
+```sh
+yagura set yagura.url '"http://yagura"'
+```
+
 ## Set up a project in the dashboard
 
 ### 1. Add the repos
@@ -128,5 +154,11 @@ On Agents you can read a running agent's work, steer it, or stop it. A stuck uni
 A repo can carry a verification guide: a skill in `.claude/skills/verify-<app>/` that says how to run the app and check each feature. With one, the planner names the page that proves each acceptance line, and the judge has to drive that page before it can approve. Without one, units are proved with the environment's tests only.
 
 A unit page says when its repo has no guide. Press Create the guide, say how to start the app and what to avoid, and yagura adds one unit to the project that writes it. The agent can't ask you questions while it works, so put what only you know in that box. You can also start it with `yagura verify create <repo> --project <id>`, or from the Repos page.
+
+### Tracing a commit back to yagura
+
+A merge commit names the unit (`rakko/U1`), the agents and models that built and judged it, the runs the approval rests on, who asked for the work (a trusted user's yes on an issue, or the Talk conversation), and who allowed the merge (`Approved-by`, with the merge gate and the time). The pull request description has the same, plus the commands yagura recorded and the judgment calls the agents made that nobody checked.
+
+Set `yagura.url` to the dashboard's address and both link to the unit's page. A commit message can't be edited after it merges, so if that address may change, turn off `yagura.link_in_commits` and only the pull request keeps the link. In the repo browser, a gutter label on each block of lines shows the unit that last wrote it, and `yagura trace <sha>` gives the same from the terminal.
 
 Logging in to `claude`, `gh` and `glab`, `yagura project set` and `yagura unit requeue` are CLI only for now.
