@@ -28,6 +28,8 @@ export interface SettingDoc {
   advanced?: true;
   // A list whose entries can contain spaces is typed one per line.
   lines?: true;
+  // What an empty box does, for the settings whose default is empty.
+  emptyMeans?: string;
   // A fixed set of values, shown as a choice instead of a text box.
   options?: readonly string[];
 }
@@ -37,12 +39,14 @@ const HARNESS = "The agent program that runs this role. Leave it as claude unles
 export const SETTING_DOCS: Record<SettingKey, SettingDoc> = {
   "role.planner.model": {
     group: "Agents and models",
+    emptyMeans: "claude's own default model",
     title: "Planner model",
     help: "The model that splits a project's goal into units. Empty uses claude's own default.",
     example: "claude-opus-5-5",
   },
   "role.worker.model": {
     group: "Agents and models",
+    emptyMeans: "claude's own default model",
     title: "Worker model",
     help: "The model that writes the code for each unit. Empty uses claude's own default. A cheaper model costs less per unit but gets more things wrong.",
     example: "claude-sonnet-5-5",
@@ -55,12 +59,14 @@ export const SETTING_DOCS: Record<SettingKey, SettingDoc> = {
   },
   "role.lead.model": {
     group: "Agents and models",
+    emptyMeans: "claude's own default model",
     title: "Unit lead model",
     help: "The model for the unit lead, the agent that steps in when a unit needs a decision, such as a failing CI run, a review comment or repeated rejections. Empty uses claude's own default.",
     example: "claude-sonnet-5-5",
   },
   "role.doctor.model": {
     group: "Agents and models",
+    emptyMeans: "claude's own default model",
     title: "Doctor model",
     help: "The model for the doctor, which runs an environment's answers to prove they work. Empty uses claude's own default.",
     example: "claude-haiku-4-5-20251001",
@@ -73,12 +79,14 @@ export const SETTING_DOCS: Record<SettingKey, SettingDoc> = {
 
   "skills.work": {
     group: "Skills",
+    emptyMeans: "no required skills",
     title: "Skills every worker must load",
     help: "Skill names a worker has to load before it starts. Work that skipped one is sent back (see the next setting). Separate names with spaces or commas.",
     example: "pstack:principle-prove-it-works pstack:tdd",
   },
   "skills.scaffold": {
     group: "Skills",
+    emptyMeans: "no extra skills",
     title: "Extra skills for scaffold units",
     help: "Skills a worker must also load when its unit builds a new project's skeleton.",
     example: "pstack:architect",
@@ -171,12 +179,14 @@ export const SETTING_DOCS: Record<SettingKey, SettingDoc> = {
 
   "project.budget_usd": {
     group: "Budget",
+    emptyMeans: "no spending limit",
     title: "Spending limit, in dollars",
     help: "Once the project's agents have spent this much, nothing new starts and running agents finish. Empty: no limit.",
     example: "25",
   },
   "project.budget_hours": {
     group: "Budget",
+    emptyMeans: "no time limit",
     title: "Time limit, in hours",
     help: "Wall-clock hours since the project became active. At 70% no new work starts but verified work still lands; at 100% everything stops. Empty: no limit.",
     example: "8",
@@ -202,12 +212,14 @@ export const SETTING_DOCS: Record<SettingKey, SettingDoc> = {
   },
   "forge.repo": {
     group: "Git and merging",
+    emptyMeans: "read from the repo's URL",
     title: "Name of the repo on its forge",
     help: "Only needed when yagura cannot read the name from the repo's URL, such as a self-hosted or renamed repo. Written as [host/]owner/name. Empty: read it from the URL.",
     example: "gitlab.internal/team/payments",
   },
   "forge.glab_hosts": {
     group: "Git and merging",
+    emptyMeans: "no GitLab hosts",
     title: "GitLab hosts",
     help: "Hosts whose repos are merged through merge requests. Add your internal GitLab here and 'Detect' will recognise it when you add a repo. Separate hosts with spaces or commas.",
     example: "gitlab.internal gitlab.corp.example.com",
@@ -231,6 +243,7 @@ export const SETTING_DOCS: Record<SettingKey, SettingDoc> = {
   },
   "project.reference_repos": {
     group: "Git and merging",
+    emptyMeans: "no reference repos",
     title: "Reference repos",
     help: "Registered repos that already do something the way you want it done. Workers get a read-only copy to follow. Use repo ids, separated by spaces or commas.",
     example: "billing-service",
@@ -256,16 +269,24 @@ export const SETTING_DOCS: Record<SettingKey, SettingDoc> = {
     example: "/usr/local/bin/glab",
     advanced: true,
   },
+  "yagura.link_in_commits": {
+    group: "Git and merging",
+    title: "Put the dashboard link in merge commit messages",
+    help: "On: the link is written into the merge commit and the pull request. Off: only the pull request has it. A commit message cannot be changed after it merges, so turn this off if the dashboard's address may change or should not appear in the repo's history; the pull request description can be updated later.",
+    advanced: true,
+  },
   "yagura.url": {
     group: "Git and merging",
-    title: "Dashboard link for commit messages",
-    help: "Linked from the trailer on landed commits so a reader can find the unit that made them. Empty: no link.",
+    emptyMeans: "no dashboard link",
+    title: "Dashboard address for links",
+    help: "A link to the unit is added to pull request descriptions and merge commit messages as <this URL>/p/<project>/u/<number>, so a reader can open it from the forge. Empty: no link.",
     example: "http://devbox:7300",
     advanced: true,
   },
 
   "forge.trusted_authors": {
     group: "Issues",
+    emptyMeans: "nobody is trusted",
     title: "Trusted forge users",
     help: "People whose word is yours. Their issues start work with no approval step, their review comments change what a unit must do, and their 'yes' approves the watchman's proposal. An issue from anyone else waits until a trusted user says yes. Type logins separated by spaces or commas.",
     example: "ultish alice",
@@ -316,6 +337,7 @@ export const SETTING_DOCS: Record<SettingKey, SettingDoc> = {
 
   "role.watchman.model": {
     group: "The watchman",
+    emptyMeans: "claude's own default model",
     title: "Watchman model",
     help: "The model for the watchman, the assistant you talk to on the Talk page and on issues. Empty uses claude's own default.",
     example: "claude-sonnet-5-5",
@@ -373,6 +395,7 @@ export const SETTING_DOCS: Record<SettingKey, SettingDoc> = {
   },
   "harness.claude.extra_args": {
     group: "The claude command",
+    emptyMeans: "no extra arguments",
     title: "Extra arguments for every claude run",
     help: "Added to every claude command yagura starts. Separate arguments with spaces.",
     example: "--add-dir /data/shared",

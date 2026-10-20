@@ -178,7 +178,8 @@ export const SETTINGS = {
   "git.author_name": z.string().default("yagura").describe("Author name on landed commits"),
   "git.author_email": z.string().default("yagura@localhost").describe("Author email on landed commits"),
   "git.branch_prefix": z.string().default("yagura").describe("Prefix for unit branches"),
-  "yagura.url": z.string().url().nullable().default(null).describe("Dashboard URL linked from commit trailers"),
+  "yagura.url": z.string().url().nullable().default(null).describe("Dashboard URL linked from pull request descriptions and merge commits"),
+  "yagura.link_in_commits": z.boolean().default(true).describe("Put the dashboard link in merge commit messages too, not only in pull request descriptions"),
   "method.enforce_required_skills": z.boolean().default(true).describe("Reject work that skipped a required skill"),
   "lease.keep": z.enum(["never", "failed", "always"]).default("never").describe("Keep what a verification deployed afterwards"),
   "lease.keep_hours": z.number().positive().default(2).describe("Hours a kept namespace or slot lives before it is deleted"),
@@ -256,6 +257,7 @@ export const SETTING_LAYERS: Record<SettingKey, readonly OverrideScope[]> = {
   "git.author_email": PR,
   "git.branch_prefix": PR,
   "yagura.url": PR,
+  "yagura.link_in_commits": PR,
   "method.enforce_required_skills": PR,
   "gates.timeout_hours": P,
   "lease.keep": PE,
@@ -343,6 +345,9 @@ export interface SettingInfo {
   title: string;
   help: string;
   example?: string;
+  emptyMeans?: string;
+  // What the setting is without this layer: the global value, or the default. Only set when asked for one layer.
+  inherited?: unknown;
   advanced?: true;
   lines?: true;
   options?: readonly string[];
@@ -360,6 +365,7 @@ export function describeSettings(db: Db, ctx: SettingsContext = {}, scope: Overr
       default: SETTINGS[key].parse(undefined),
       description: SETTINGS[key].description ?? "",
       layers: SETTING_LAYERS[key],
+      ...(scope ? { inherited: resolveSetting(db, key, {}).value } : {}),
       ...SETTING_DOCS[key],
     }));
 }

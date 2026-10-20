@@ -21,6 +21,8 @@ const slug = (scopeId: string, title: string) => `settings-${scopeId}-${title}`.
 
 const LAYER_NAME: Record<string, string> = { project: "a project", repo: "a repo", environment: "an environment" };
 
+const isEmpty = (v: unknown) => v === null || v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
+
 // "900 (15 minutes)" is an example for the reader; only the part before the bracket is a value to type.
 const typed = (example: string | undefined) => example?.replace(/\s*\(.*\)$/, "");
 
@@ -51,7 +53,7 @@ function Control({ s, id, text, setText }: { s: Setting; id: string; text: strin
       className="mono"
       type={number ? "number" : "text"}
       value={text}
-      placeholder={s.default === null ? "empty" : undefined}
+      placeholder={s.emptyMeans ?? undefined}
       onChange={(e) => setText(e.target.value)}
       style={{ ...field, width: number ? 110 : 260 }}
     />
@@ -68,13 +70,17 @@ export function SettingRow({ s, scope, scopeId, cap, onSaved }: { s: Setting; sc
     );
   const reset = () => action.run(async () => (await api("/api/settings/clear", { body: { scope, id: scopeId, key: s.key } }), onSaved()));
   const id = `setting-${scope}-${scopeId}-${s.key}`.replace(/\W+/g, "-");
-  const shownDefault = settingShown(s.default, s.lines).split("\n")[0] ?? "";
+  const clip = (t: string) => (t.length > 40 ? `${t.slice(0, 39)}…` : t);
+  const show = (v: unknown) => (isEmpty(v) ? `empty, which means ${s.emptyMeans ?? "nothing is set"}` : clip(settingShown(v, s.lines).split("\n").join(", ")));
   const status =
     s.source === scope
-      ? `set ${scope === "global" ? "globally" : "here"}; default ${shownDefault || "empty"}`
+      ? scope === "global"
+        ? `set globally; default ${show(s.default)}`
+        : `set here, instead of: ${show(s.inherited)}`
       : s.source === "default"
-        ? `using the default${shownDefault ? `: ${shownDefault.length > 40 ? `${shownDefault.slice(0, 39)}…` : shownDefault}` : " (empty)"}`
+        ? `using the default: ${show(s.default)}`
         : SOURCE[s.source];
+  const masks = scope !== "global" && s.source === scope && isEmpty(s.value) && !isEmpty(s.inherited);
   const others = s.layers.filter((l) => l !== scope).map((l) => LAYER_NAME[l]);
   return (
     <div className="item setting" style={{ alignItems: "flex-start" }}>
@@ -94,6 +100,12 @@ export function SettingRow({ s, scope, scopeId, cap, onSaved }: { s: Setting; sc
           {scope === "global" && others.length > 0 && <span>can also be set on {others.join(", ")}</span>}
           {cap && <span className="s-lamp">{cap}</span>}
         </div>
+        {masks && (
+          <div className="s-bell" style={{ fontSize: 13, marginTop: 4 }}>
+            This is empty here, so the value from further up ({clip(settingShown(s.inherited, s.lines).split("\n").join(", "))}) is not used. Remove the
+            override to use it.
+          </div>
+        )}
         {action.error && (
           <div className="s-bell" style={{ fontSize: 13 }}>
             {action.error}
@@ -114,7 +126,7 @@ export function SettingRow({ s, scope, scopeId, cap, onSaved }: { s: Setting; sc
         </button>
         {s.source === scope && (
           <button className="btn sm" type="button" disabled={action.busy} onClick={() => void reset()}>
-            Reset
+            {scope === "global" ? "Reset" : "Remove override"}
           </button>
         )}
       </form>
@@ -185,6 +197,9 @@ export function ScopedSettings({ scope, id }: { scope: Exclude<SettingScope, "gl
   const { data, error, reload } = useApi<SettingsOverview>(`/api/settings/overview?scope=${scope}&id=${encodeURIComponent(id)}`);
   return (
     <div style={{ marginTop: 8 }}>
+      <h3 className="setting-panel-title">
+        Settings for {scope} <span className="mono">{id}</span>
+      </h3>
       <div className="muted" style={{ fontSize: 13 }}>
         Values set here apply to this {scope} only and win over the global ones. Only settings yagura reads per {scope} are listed.
       </div>
