@@ -1,3 +1,4 @@
+import { isGuideCreate } from "./guide.js";
 import { isUpkeep } from "./upkeep.js";
 import { markNewPages, readVerifyGuides, verifySection } from "./verify-guide.js";
 import { promptPlugin, standingFor } from "./prompts.js";
@@ -162,9 +163,12 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
       "opening, readying, merging, or closing a pull request: yagura does that",
     ],
     method:
-      `Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and ${isUpkeep(unit) ? "use it for how you work" : `follow its ${unit.playbook ?? "feature"} playbook`}. Then load pstack:principle-prove-it-works and pstack:principle-test-behavior-not-implementation, and write the test that proves the change before the change itself. All four are required: an attempt that does not load them is sent back.` +
+      `Load the yagura-worker skill first and follow it. Then load pstack:poteto-mode with the Skill tool and ${isUpkeep(unit) || isGuideCreate(unit) ? "use it for how you work" : `follow its ${unit.playbook ?? "feature"} playbook`}. Then load pstack:principle-prove-it-works and pstack:principle-test-behavior-not-implementation, and write the test that proves the change before the change itself. All four are required: an attempt that does not load them is sent back.` +
       (isUpkeep(unit)
         ? " This is a guide upkeep, not a feature: follow pstack:maintain-verification-skill's pass over the repo's guide, change only files under .claude/skills/verify-*, never product code, and open no pull request or branch of your own: yagura does that."
+        : "") +
+      (isGuideCreate(unit)
+        ? " This is a guide creation, not a feature: follow pstack:create-verification-skill to write the repo's guide under .claude/skills/verify-<app>/, drive one feature to prove it, change only files under .claude/skills/verify-*, never product code, and open no pull request or branch of your own: yagura does that."
         : "") +
       (unit.scaffold ? " This is a scaffold unit: build the new project's skeleton the way the project skills below say, and nothing more." : "") +
       skillMethod(projectSkills),

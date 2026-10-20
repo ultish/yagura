@@ -2,6 +2,7 @@ import { upkeepMessage, type UpkeepAnswer } from "../lib/upkeep";
 import { useEffect, useState } from "react";
 import { api, useApi, type RepoView } from "../api";
 import { clock, plural, sha } from "../lib/format";
+import { GuideNotice } from "../ui/GuideNotice";
 import { Link } from "../ui/Link";
 import { Row, useAction } from "../ui/rows";
 import { ScopedSettings } from "../ui/settings";
@@ -218,6 +219,7 @@ export function Repos() {
                   }
                   extra={
                     <>
+                      <GuideNotice repoId={v.repo.id} projects={v.projects.filter((p) => p.state === "active").map((p) => p.id)} />
                       {upkeepSaid?.repo === v.repo.id && (
                         <div className={`s-${upkeepSaid.tone}`} style={{ fontSize: 13.5 }}>
                           {upkeepSaid.text}

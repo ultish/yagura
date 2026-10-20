@@ -117,6 +117,8 @@ import {
   stopDoctorRun,
   requestDoctor,
   repoHasGuide,
+  guideCreationUnder,
+  createGuideUnit,
   requestUpkeep,
   setValue,
   artifactContentType,
@@ -553,6 +555,22 @@ export function createApp(opts: ServerOptions): Hono {
     const note = String(((await c.req.json().catch(() => ({}))) as { note?: string }).note ?? "");
     if (!(await repoHasGuide(db, boot, repoId))) return c.json({ asked: false, hasGuide: false, project: null });
     return c.json({ asked: true, hasGuide: true, project: requestUpkeep(db, repoId, note) });
+  });
+  app.get("/api/repos/:id/guide", async (c) => {
+    const repoId = c.req.param("id") as RepoId;
+    return c.json({ hasGuide: await repoHasGuide(db, boot, repoId), creating: guideCreationUnder(db, repoId) });
+  });
+  app.post("/api/repos/:id/guide", async (c) => {
+    const repoId = c.req.param("id") as RepoId;
+    const body = (await c.req.json().catch(() => ({}))) as { projectId?: string; note?: string };
+    if (!body.projectId) return c.json({ error: "say which project takes the unit" }, 400);
+    if (await repoHasGuide(db, boot, repoId)) return c.json({ error: `${repoId} already has a verification guide` }, 409);
+    try {
+      const unit = createGuideUnit(db, { projectId: body.projectId as ProjectId, repoId, note: body.note });
+      return c.json({ projectId: unit.projectId, seq: unit.seq });
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 409);
+    }
   });
   app.post("/api/actions/:id/delete", (c) => {
     deleteAction(db, Number(c.req.param("id")));

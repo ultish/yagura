@@ -127,6 +127,7 @@ import {
   actionAgentCli,
   requestDoctor,
   repoHasGuide,
+  createGuideUnit,
   requestUpkeep,
   doctorCli,
 } from "@yagura/core";
@@ -180,6 +181,7 @@ const USAGE = `yagura — agent orchestration
   yagura drive <project>                 plan and run workers until nothing is left to do (without a daemon)
   yagura import <old home>               copy settings, repos, environments, templates, and conversations from an old home (projects and units stay behind)
   yagura andon <project> --reason <text> | --clear
+  yagura verify create <repo> --project <id> [--note <text>]   add a unit that creates the repo's verification guide
   yagura verify upkeep <repo> [--note <text>]   check the repo's verification guide against the app now (a unit in the newest active project that uses the repo)
   yagura limit [--clear]                 whether the account's usage limit holds new agents back, and until when; --clear starts them now
   yagura gates [project]                 open questions for a human
@@ -630,8 +632,14 @@ async function main() {
     }
     case "verify": {
       const [sub, repoId] = rest;
-      if (sub !== "upkeep" || !repoId) fail(USAGE);
-      const { values } = args({ note: { type: "string" } });
+      if ((sub !== "upkeep" && sub !== "create") || !repoId) fail(USAGE);
+      const { values } = args({ note: { type: "string" }, project: { type: "string" } });
+      if (sub === "create") {
+        if (!values.project) fail("say which project takes the unit: --project <id>");
+        if (await repoHasGuide(db, boot, repoId as RepoId)) return console.log(`${repoId} already has a verification guide`);
+        const unit = createGuideUnit(db, { projectId: values.project as ProjectId, repoId: repoId as RepoId, note: values.note });
+        return console.log(`added ${unit.projectId} U${unit.seq} to create ${repoId}'s verification guide`);
+      }
       if (!(await repoHasGuide(db, boot, repoId as RepoId))) return console.log(`${repoId} has no verification guide yet, so there is nothing to check`);
       const project = requestUpkeep(db, repoId as RepoId, values.note ?? "");
       console.log(
