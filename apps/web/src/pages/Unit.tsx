@@ -576,6 +576,14 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             )}
           </dd>
         </div>
+        {story.origin && (
+          <div>
+            <dt>From</dt>
+            <dd>
+              <Link to={`/talk/${story.origin.threadId}`}>{story.origin.title}</Link>
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Branch</dt>
           <dd className="mono">{u.branch ? `${u.branch} → ${story.base ?? "base"}` : <span className="muted">not started</span>}</dd>

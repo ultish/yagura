@@ -1,3 +1,4 @@
+import { startedBy } from "./audit.js";
 import { proofRows, type ProofRow } from "./proof.js";
 import { listSteers } from "./steer.js";
 import type { Bootstrap } from "./config.js";
@@ -68,6 +69,8 @@ export interface UnitStory {
   running: { attemptId: number; agentNo: number; role: string; startedAt: IsoTime } | null;
   gates: Gate[];
   dependencies: DepEdge[];
+  // The Talk conversation whose proposal started this unit or its project, when one did.
+  origin: { threadId: number; title: string } | null;
   // The guide pages the unit names, and whether the judge's own runs show each holds.
   proof: ProofRow[];
 }
@@ -166,6 +169,12 @@ function roundText(n: number, r: WorkerRound | undefined, by: Ev | undefined, pr
     case "lead":
       return `Round ${n} · sent back by the unit lead${after}`;
   }
+}
+
+// An applied proposal records what it made; the conversation behind a unit is the one whose result names the unit or created its project.
+function originOf(db: Db, unit: Unit): UnitStory["origin"] {
+  const row = startedBy(db, unit);
+  return row ? { threadId: row.threadId, title: row.title } : null;
 }
 
 export function unitStory(db: Db, _boot: Bootstrap, unit: Unit): UnitStory {
@@ -446,6 +455,7 @@ export function unitStory(db: Db, _boot: Bootstrap, unit: Unit): UnitStory {
     running: live?.startedAt ? { attemptId: live.id, agentNo: live.agentNo, role: roleName(live), startedAt: live.startedAt } : null,
     gates,
     dependencies: dependencyEdges(db, unit),
+    origin: originOf(db, unit),
     proof: proofRows(db, unit),
     started: entries.find((e) => e.actor !== "planner")?.at ?? null,
     ended: merged?.at ?? null,

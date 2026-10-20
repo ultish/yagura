@@ -213,10 +213,11 @@ export function Repos() {
                         aria-expanded={settings === v.repo.id}
                         onClick={() => setSettings(settings === v.repo.id ? null : v.repo.id)}
                       >
-                        Settings
+                        {settings === v.repo.id ? "Hide settings" : "Settings"}
                       </button>
                     </>
                   }
+                  below={settings === v.repo.id ? <ScopedSettings scope="repo" id={v.repo.id} /> : null}
                   extra={
                     <>
                       <GuideNotice repoId={v.repo.id} projects={v.projects.filter((p) => p.state === "active").map((p) => p.id)} />
@@ -225,7 +226,6 @@ export function Repos() {
                           {upkeepSaid.text}
                         </div>
                       )}
-                      {settings === v.repo.id && <ScopedSettings scope="repo" id={v.repo.id} />}
                       {v.landingQueue.length > 0 && (
                         <div className="s-lamp" style={{ fontSize: 13.5 }}>
                           {plural(v.landingQueue.length, "verified unit")} waiting to land:{" "}

@@ -239,6 +239,18 @@ textarea {
   padding: 14px 0;
   border-top: 1px solid var(--line2);
 }
+.item:has(> .item-below) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+}
+.item-below {
+  grid-column: 2 / -1;
+  min-width: 0;
+  margin-top: 10px;
+  padding-left: 18px;
+  border-left: 2px solid var(--line2);
+}
 .item .seq {
   font-family: "JetBrains Mono", monospace;
   font-size: 12.5px;
@@ -2177,4 +2189,13 @@ b .role-icon,
   gap: 6px 16px;
   margin: 12px 0 4px;
   font-size: 13.5px;
+}
+.setting-panel-title {
+  margin: 0 0 4px;
+  font-size: 17px;
+  font-weight: 600;
+}
+.setting-panel-title .mono {
+  color: var(--amber-text);
+  font-weight: 500;
 }

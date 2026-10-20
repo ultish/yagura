@@ -58,6 +58,7 @@ export function Row({
   facts,
   actions,
   extra,
+  below,
 }: {
   seq: ReactNode;
   goal: ReactNode;
@@ -69,6 +70,8 @@ export function Row({
   facts?: ReactNode;
   actions?: ReactNode;
   extra?: ReactNode;
+  // Full width under the whole row, for a panel that needs more room than the middle column.
+  below?: ReactNode;
 }) {
   return (
     <div className="item">
@@ -84,6 +87,7 @@ export function Row({
         {extra}
       </div>
       {actions && <div className="actions">{actions}</div>}
+      {below && <div className="item-below">{below}</div>}
     </div>
   );
 }

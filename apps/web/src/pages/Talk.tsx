@@ -4,6 +4,7 @@ import { atEnd } from "../lib/follow";
 import { clock } from "../lib/format";
 import { Inline, Markdown } from "../lib/markdown";
 import { needsYou } from "../lib/scene";
+import { hasStarted, startedBy } from "../lib/proposal-result";
 import { Link } from "../ui/Link";
 import { MentionInput } from "../ui/MentionInput";
 import { LiveTurnCalls, TurnCallsFor } from "../ui/TurnCalls";
@@ -33,6 +34,36 @@ interface ProposalBody {
     units?: { key: string; goal: string }[];
   }[];
   amend?: { project: string; units: { key: string; goal: string }[] }[];
+}
+
+function Outcome({ result }: { result: unknown }) {
+  const s = startedBy(result);
+  if (!hasStarted(s)) return null;
+  return (
+    <div className="facts" style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--line2)" }}>
+      <span>Started:</span>
+      {s.projects.map((id) => (
+        <Link key={`p${id}`} to={`/p/${id}`}>
+          project {id}
+        </Link>
+      ))}
+      {s.units.map((u) => (
+        <Link key={`u${u.project}${u.seq}`} to={`/p/${u.project}/u/${u.seq}`}>
+          {u.project} U{u.seq}
+        </Link>
+      ))}
+      {s.environments.map((id) => (
+        <Link key={`e${id}`} to={`/e/${id}`}>
+          environment {id}
+        </Link>
+      ))}
+      {s.repos.map((id) => (
+        <Link key={`r${id}`} to={`/repos#${id}`}>
+          repo {id}
+        </Link>
+      ))}
+    </div>
+  );
 }
 
 function ProposalCard({ p, onEdit }: { p: Proposal & { routes?: Record<string, { text: string; ok: boolean }> }; onEdit: (text: string) => void }) {
@@ -114,6 +145,7 @@ function ProposalCard({ p, onEdit }: { p: Proposal & { routes?: Record<string, {
           )),
         )}
       </ul>
+      {p.state === "applied" && <Outcome result={p.result} />}
       {p.state === "failed" && (
         <div className="s-bell" style={{ fontSize: 13, marginTop: 8 }}>
           {String((p.result as { error?: string } | null)?.error ?? "failed")}
@@ -257,6 +289,10 @@ function ThreadList({ current }: { current: number | null }) {
 function Ledger({ v }: { v: ThreadView }) {
   const active = v.decisions.filter((d) => d.supersededBy === null).length;
   const open = v.questions.filter((q) => q.answer === null);
+  const started = v.proposals
+    .filter((p) => p.state === "applied")
+    .flatMap((p) => startedBy(p.result).units)
+    .filter((u, i, all) => all.findIndex((x) => x.project === u.project && x.seq === u.seq) === i);
   const dot = (s: ProjectSummary) =>
     needsYou(s) ? "var(--bell)" : s.running || s.planning ? "var(--lamp)" : s.project.state === "closed" ? "var(--pine)" : "var(--beacon-off-line)";
   return (
@@ -304,6 +340,21 @@ function Ledger({ v }: { v: ThreadView }) {
           </Link>
         ))}
       </div>
+      {started.length > 0 && (
+        <div>
+          <h2 className="h2">Units started</h2>
+          {started.map((u) => (
+            <Link
+              key={`${u.project}${u.seq}`}
+              to={`/p/${u.project}/u/${u.seq}`}
+              className="mono"
+              style={{ display: "block", padding: "6px 0", borderTop: "1px solid var(--line2)", fontSize: 13 }}
+            >
+              {u.project} U{u.seq}
+            </Link>
+          ))}
+        </div>
+      )}
       <div>
         <div className="gh">
           <h2 className="h2">Decisions</h2>

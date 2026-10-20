@@ -649,3 +649,22 @@ describe("settings lists", () => {
     expect(settingParsed([], "Bash(yagura show:*)\n Skill \n", true)).toEqual(tools);
   });
 });
+
+describe("what a proposal started", () => {
+  it("reads the units and projects an applied proposal made", async () => {
+    const { startedBy, hasStarted } = await import("./proposal-result");
+    const s = startedBy({ repos: [], environments: ["local"], projects: ["demo"], units: { rakko: ["U2", "U5"], demo: ["U1"] } });
+    expect(s.units).toEqual([
+      { project: "rakko", seq: 2 },
+      { project: "rakko", seq: 5 },
+      { project: "demo", seq: 1 },
+    ]);
+    expect(s.projects).toEqual(["demo"]);
+    expect(hasStarted(s)).toBe(true);
+  });
+
+  it("copes with a missing or odd result", async () => {
+    const { startedBy, hasStarted } = await import("./proposal-result");
+    for (const r of [null, undefined, "x", { units: "no" }, { units: { p: ["nope"] } }]) expect(hasStarted(startedBy(r))).toBe(false);
+  });
+});
