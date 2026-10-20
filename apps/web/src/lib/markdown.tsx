@@ -4,7 +4,8 @@ import { mentionHref } from "./mention";
 
 function inline(text: string, known: ReadonlySet<string> | null, key: string): ReactNode[] {
   const out: ReactNode[] = [];
-  const re = /(`[^`]+`)|(\*\*(?:[^*]|\*(?!\*))+?\*\*)|(?<![\w@])@(thread:\d+|repo:[a-z][a-z0-9-]*|[a-z][a-z0-9-]*(?:\/U\d+(?:\.\d+)?)?)/g;
+  const re =
+    /(`[^`]+`)|(\*\*(?:[^*]|\*(?!\*))+?\*\*)|(\[[^\]]+\]\(https?:\/\/[^\s)]+\))|(?<![\w@])@(thread:\d+|repo:[a-z][a-z0-9-]*|[a-z][a-z0-9-]*(?:\/U\d+(?:\.\d+)?)?)/g;
   let last = 0;
   let i = 0;
   for (const m of text.matchAll(re)) {
@@ -12,8 +13,15 @@ function inline(text: string, known: ReadonlySet<string> | null, key: string): R
     const k = `${key}-${i++}`;
     if (m[1]) out.push(<code key={k}>{m[1].slice(1, -1)}</code>);
     else if (m[2]) out.push(<b key={k}>{inline(m[2].slice(2, -2), known, k)}</b>);
-    else {
-      const token = m[3]!.replace(/[-.]+$/, "");
+    else if (m[3]) {
+      const split = m[3].lastIndexOf("](");
+      out.push(
+        <a key={k} href={m[3].slice(split + 2, -1)} target="_blank" rel="noreferrer noopener">
+          {m[3].slice(1, split)}
+        </a>,
+      );
+    } else {
+      const token = m[4]!.replace(/[-.]+$/, "");
       const project = token.split(/[/:]/)[0]!;
       const href = mentionHref(token);
       const trusted = token.includes(":") || !known || known.has(project);
@@ -30,7 +38,7 @@ function inline(text: string, known: ReadonlySet<string> | null, key: string): R
           </span>,
         );
       else out.push(`@${token}`);
-      if (token.length < m[3]!.length) out.push(m[3]!.slice(token.length));
+      if (token.length < m[4]!.length) out.push(m[4]!.slice(token.length));
     }
     last = m.index! + m[0].length;
   }

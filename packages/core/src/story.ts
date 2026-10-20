@@ -115,6 +115,15 @@ const WAKE_TEXT: Record<string, string> = {
   conflict: "a conflict the worker could not resolve",
   developer: "your note",
 };
+// A pull or merge request's address gives the repo's page on its forge: https://github.com/o/r/pull/22 or https://host/g/p/-/merge_requests/3.
+const forgeHome = (url: string) => /^(.*?)(\/-)?\/(?:pull|merge_requests)\/\d+/.exec(url);
+const prLink = (number: number, mr: { number: number; url: string } | null) =>
+  mr?.url && mr.number === number ? `[PR #${number}](${mr.url})` : `PR #${number}`;
+const branchLink = (branch: string, mr: { url: string } | null) => {
+  const m = mr?.url ? forgeHome(mr.url) : null;
+  return m ? `[${branch}](${m[1]}${m[2] ?? ""}/tree/${branch})` : branch;
+};
+
 const wakeText = (trigger: unknown, pr: number | null) =>
   trigger === "comment" ? `a comment on ${pr ? `PR #${pr}` : "the pull request"}` : (WAKE_TEXT[String(trigger)] ?? String(trigger));
 
@@ -341,7 +350,12 @@ export function unitStory(db: Db, _boot: Bootstrap, unit: Unit): UnitStory {
     const to = e.data.to as UnitState | undefined;
     if (e.type === "pr.opened")
       entries.push(
-        yagura(e, "yagura", { text: "draft", tone: "muted" }, `Pushed ${unit.branch ?? "the branch"} and opened PR #${String(e.data.number)} as a draft.`),
+        yagura(
+          e,
+          "yagura",
+          { text: "draft", tone: "muted" },
+          `Pushed ${unit.branch ? branchLink(unit.branch, mr) : "the branch"} and opened ${prLink(Number(e.data.number), mr)} as a draft.`,
+        ),
       );
     else if (e.type === "unit.base_merged")
       entries.push(
@@ -369,7 +383,7 @@ export function unitStory(db: Db, _boot: Bootstrap, unit: Unit): UnitStory {
           e,
           "yagura",
           { text: "ready", tone: "pine" },
-          `${mr ? `PR #${mr.number} is out of draft` : "Ready"}: the judge approved ${String(e.data.head ?? "").slice(0, 7)}. It merges when CI passes${project.mergePolicy === "human" ? " and you say merge" : ""}.`,
+          `${mr ? `${prLink(mr.number, mr)} is out of draft` : "Ready"}: the judge approved ${String(e.data.head ?? "").slice(0, 7)}. It merges when CI passes${project.mergePolicy === "human" ? " and you say merge" : ""}.`,
         ),
       );
     else if (e.type === "unit.state" && to === "merged")

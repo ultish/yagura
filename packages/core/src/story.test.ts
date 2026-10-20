@@ -6,7 +6,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RunContext } from "./agent.js";
 import { setSetting, type Bootstrap } from "./config.js";
-import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
+import type { EnvironmentId, ProjectId, RepoId, Sha } from "./domain.js";
+import { saveMergeRequest } from "./forge.js";
 import { Engine } from "./engine.js";
 import { commitAll, git } from "./git.js";
 import type { HarnessAdapter } from "./harness/adapter.js";
@@ -22,9 +23,11 @@ import {
   getUnit,
   listUnits,
   openStore,
+  recordEvent,
   setMergePolicy,
   setProjectEnvironment,
   setRepoForge,
+  setUnitBranch,
   transitionUnit,
   type Db,
 } from "./store.js";
@@ -129,5 +132,43 @@ describe("unitStory", () => {
     const now = unitStory(db, boot, getUnit(db, unit.id)).now;
     expect(now.headline).toBe("Approved, but held by an open question to you.");
     expect(now.detail).toContain("Its unit lead asks you: U1's unit lead asks: which Nexus?");
+  });
+
+  it("links the branch and the pull request in the line that says it opened one", () => {
+    const unit = addUnit(db, {
+      projectId: project,
+      type: "work",
+      repoId: "testbed" as RepoId,
+      goal: "g",
+      acceptance: ["a"],
+      timeboxSeconds: 60,
+      maxAttempts: 3,
+    });
+    setUnitBranch(db, unit.id, "yagura/p/u1");
+    const mr = {
+      unitId: unit.id,
+      forge: "gh" as const,
+      forgeRepo: "ultish/testbed",
+      number: 22,
+      url: "https://github.com/ultish/testbed/pull/22",
+      branch: "yagura/p/u1",
+      headSha: "a".repeat(40) as Sha,
+      baseSha: "b".repeat(40) as Sha,
+    };
+    saveMergeRequest(db, mr);
+    recordEvent(db, "pr.opened", { projectId: project, unitId: unit.id }, { number: 22 });
+    const body = () => unitStory(db, boot, getUnit(db, unit.id)).entries.find((e) => e.status?.text === "draft")?.body;
+    expect(body()).toBe(
+      "Pushed [yagura/p/u1](https://github.com/ultish/testbed/tree/yagura/p/u1) and opened [PR #22](https://github.com/ultish/testbed/pull/22) as a draft.",
+    );
+    saveMergeRequest(db, { ...mr, forge: "glab" as const, number: 3, url: "https://gitlab.example.com/team/testbed/-/merge_requests/3" });
+    recordEvent(db, "pr.opened", { projectId: project, unitId: unit.id }, { number: 3 });
+    expect(
+      unitStory(db, boot, getUnit(db, unit.id))
+        .entries.filter((e) => e.status?.text === "draft")
+        .at(-1)?.body,
+    ).toBe(
+      "Pushed [yagura/p/u1](https://gitlab.example.com/team/testbed/-/tree/yagura/p/u1) and opened [PR #3](https://gitlab.example.com/team/testbed/-/merge_requests/3) as a draft.",
+    );
   });
 });

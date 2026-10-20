@@ -2,10 +2,15 @@ import { byTime } from "./sort";
 import { atEnd } from "./follow";
 import { depLine } from "./units";
 import { proofLine } from "./proof";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { Inline } from "./markdown";
+
+vi.mock("../ui/Link", () => ({ Link: () => null }));
 import { upkeepMessage } from "./upkeep";
 import { AGENT_EMOJI } from "@yagura/core";
 import { ICONS } from "../ui/RoleIcon";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { BellItem, LogLine, ProjectDetail, ProjectSummary, UnitView } from "../api";
 import { lineDiff } from "./linediff";
 import { clip, clock, duration, modelName, when } from "./format";
@@ -562,5 +567,23 @@ describe("the repo row's upkeep message", () => {
       tone: "bell",
       text: expect.stringContaining("no verification guide yet"),
     });
+  });
+});
+
+describe("links in a timeline entry", () => {
+  const html = (text: string) => renderToStaticMarkup(createElement(Inline, { text }));
+
+  it("makes a [text](https://…) link open in a new tab, next to code and bold", () => {
+    expect(
+      html(
+        "Pushed [yagura/rakko/u1](https://github.com/ultish/rakko/tree/yagura/rakko/u1) and opened [PR #22](https://github.com/ultish/rakko/pull/22) as `draft`.",
+      ),
+    ).toBe(
+      'Pushed <a href="https://github.com/ultish/rakko/tree/yagura/rakko/u1" target="_blank" rel="noreferrer noopener">yagura/rakko/u1</a> and opened <a href="https://github.com/ultish/rakko/pull/22" target="_blank" rel="noreferrer noopener">PR #22</a> as <code>draft</code>.',
+    );
+  });
+
+  it("does not link anything but http and https", () => {
+    expect(html("[click](javascript:alert(1)) and [file](file:///etc/passwd)")).not.toContain("<a ");
   });
 });
