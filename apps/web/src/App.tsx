@@ -25,6 +25,7 @@ import markLight from "./assets/mark-light.png";
 import { Link } from "./ui/Link";
 import { BellAlert } from "./ui/BellAlert";
 import { SearchBox } from "./ui/SearchBox";
+import { markTourSeen, startTour, tourSeen } from "./lib/tour";
 
 type Theme = "night" | "day";
 
@@ -54,6 +55,12 @@ function Header() {
   const path = usePath();
   const [theme, toggle] = useTheme();
   const health = useApi<{ ok: boolean; home: string }>("/api/health");
+  useEffect(() => {
+    if (tourSeen(localStorage)) return;
+    markTourSeen(localStorage);
+    const t = setTimeout(startTour, 800);
+    return () => clearTimeout(t);
+  }, []);
   return (
     <header
       style={{ minHeight: 60, display: "flex", alignItems: "center", gap: 36, padding: "0 36px", borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}
@@ -69,6 +76,7 @@ function Header() {
           <Link
             key={n.to}
             to={n.to}
+            data-tour={n.to.slice(1) || "watch"}
             aria-current={n.match(path) ? "page" : undefined}
             style={{ color: n.match(path) ? "var(--text)" : "var(--muted)", fontWeight: n.match(path) ? 700 : 400, textDecoration: "none", fontSize: 14.5 }}
           >
@@ -81,6 +89,17 @@ function Header() {
         {health.error ? "daemon unreachable" : `${location.host}`}
       </div>
       <BellAlert />
+      <button
+        type="button"
+        data-tour="help"
+        onClick={startTour}
+        aria-label="Show the tour of how yagura works"
+        title="How yagura works"
+        className="mono"
+        style={{ fontSize: 12, border: "1px solid var(--btnline)", background: "transparent", borderRadius: 999, width: 30, height: 30, cursor: "pointer" }}
+      >
+        ?
+      </button>
       <button
         type="button"
         onClick={toggle}

@@ -99,8 +99,21 @@
   color-scheme: light;
 }
 
+:root {
+  --page-max: 1320px;
+  --page-pad: 36px;
+}
 * {
   box-sizing: border-box;
+}
+main {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+}
+main.home,
+main.repo:not(.embedded) {
+  max-width: none;
 }
 html,
 body {
@@ -515,9 +528,7 @@ textarea {
 
 /* The unit page: one ledger of who did what, each line with yagura's check where one exists. */
 .story {
-  max-width: 960px;
-  margin: 0 auto;
-  padding-inline: 24px;
+  padding-inline: var(--page-pad);
   padding-block: 28px 64px;
 }
 .story-crumb {
@@ -525,11 +536,32 @@ textarea {
   color: var(--muted);
 }
 .story-title {
-  font-size: 32px;
+  font-size: 28px;
   font-weight: 600;
-  line-height: 1.2;
-  margin: 6px 0 12px;
+  line-height: 1.25;
+  margin: 6px 0 4px;
+  max-width: 62ch;
   text-wrap: balance;
+}
+.story-title.clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.story-goal {
+  margin-bottom: 12px;
+}
+.story-more {
+  border: 0;
+  background: none;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--amber-text);
+  cursor: pointer;
+}
+.story-more:hover {
+  color: var(--amber-hover);
 }
 .story-legend {
   display: flex;
@@ -548,7 +580,7 @@ textarea {
 }
 .story-time {
   font-size: 12px;
-  color: var(--faint);
+  color: var(--muted);
   text-align: right;
   padding-top: 2px;
   font-variant-numeric: tabular-nums;
@@ -632,6 +664,30 @@ textarea {
   font-size: 12.5px;
   margin-left: 6px;
 }
+.story-judgment {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--amber);
+  border-radius: 10px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--amber-text);
+  white-space: nowrap;
+}
+.story-legend .story-judgment {
+  margin-left: 0;
+}
+.btn.story-disagree.quiet {
+  background: none;
+  border-color: transparent;
+  color: var(--muted);
+}
+.btn.story-disagree.quiet:hover {
+  color: var(--bell-text);
+  border-color: var(--bad-border);
+}
 .story-disagreed {
   font-size: 13px;
   color: var(--bell-text);
@@ -686,7 +742,7 @@ textarea {
 }
 .unit-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 14px 24px;
   margin: 0 0 20px;
   padding: 14px 0;
@@ -754,6 +810,47 @@ textarea {
   grid-column: 1 / -1;
   font-size: 12px;
   color: var(--faint);
+}
+.guide-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding: 9px 14px;
+  border: 1px dashed var(--btnline);
+  border-radius: 8px;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+.guide-ask {
+  flex: 1 1 100%;
+  display: grid;
+  gap: 8px;
+}
+.guide-ask label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+.guide-ask textarea,
+.guide-ask select {
+  background: var(--bg);
+  border: 1px solid var(--btnline);
+  border-radius: 4px;
+  padding: 7px 10px;
+  font-size: 14px;
+}
+.guide-ask-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+.guide-notice b {
+  color: var(--soft);
+  font-weight: 500;
 }
 .unit-now {
   border: 1px solid var(--line2);
@@ -1143,6 +1240,9 @@ button.story-time:hover {
 .repo.embedded {
   padding: 0;
 }
+.repo.embedded .repo-bar {
+  display: none;
+}
 .repo.embedded .repo-body {
   grid-template-columns: 220px minmax(0, 1fr);
   height: clamp(560px, calc(100vh - 120px), 1100px);
@@ -1415,6 +1515,26 @@ button.story-time:hover {
   gap: 0;
   border-bottom: 1px solid var(--line2);
   margin: 14px 0 16px;
+}
+.hub-tabs.sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+}
+.hub-tabs a.none {
+  color: var(--faint);
+}
+.nowrap {
+  white-space: nowrap;
+}
+.agent-link {
+  font-weight: 600;
+}
+.hub-table tfoot td {
+  border-top: 1px solid var(--line2);
+  color: var(--muted);
+  font-size: 13px;
 }
 .hub-tabs a,
 .hub-tabs button {
@@ -1979,4 +2099,40 @@ b .role-icon,
 .mgr-head {
   font-size: 12px;
   color: var(--muted);
+}
+
+.driver-popover.yagura-tour {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--btnline);
+  border-radius: 8px;
+  font-family: inherit;
+}
+.driver-popover.yagura-tour .driver-popover-title {
+  font-family: "Shippori Mincho", serif;
+  font-size: 18px;
+  color: var(--text);
+}
+.driver-popover.yagura-tour .driver-popover-description,
+.driver-popover.yagura-tour .driver-popover-progress-text {
+  color: var(--soft);
+  font-size: 14px;
+}
+.driver-popover.yagura-tour .driver-popover-arrow-side-bottom {
+  border-bottom-color: var(--panel);
+}
+.driver-popover.yagura-tour .driver-popover-arrow-side-top {
+  border-top-color: var(--panel);
+}
+.driver-popover.yagura-tour button {
+  background: var(--bg2);
+  color: var(--text);
+  border: 1px solid var(--btnline);
+  border-radius: 4px;
+  text-shadow: none;
+}
+.driver-popover.yagura-tour .driver-popover-next-btn {
+  background: var(--amber);
+  color: var(--on-accent);
+  border-color: var(--amber);
 }

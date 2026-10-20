@@ -587,3 +587,24 @@ describe("links in a timeline entry", () => {
     expect(html("[click](javascript:alert(1)) and [file](file:///etc/passwd)")).not.toContain("<a ");
   });
 });
+
+describe("tour", () => {
+  it("points at header items that exist, and shows once", async () => {
+    const { TOUR_STEPS, TOUR_SEEN_KEY, tourSeen, markTourSeen } = await import("./tour");
+    const targets = TOUR_STEPS.flatMap((s) => (typeof s.element === "string" ? [s.element] : []));
+    expect(targets).toEqual([
+      '[data-tour="repos"]',
+      '[data-tour="environments"]',
+      '[data-tour="projects"]',
+      '[data-tour="talk"]',
+      '[data-tour="gates"]',
+      '[data-tour="help"]',
+    ]);
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+    expect(tourSeen(storage)).toBe(false);
+    markTourSeen(storage);
+    expect(store.has(TOUR_SEEN_KEY)).toBe(true);
+    expect(tourSeen(storage)).toBe(true);
+  });
+});

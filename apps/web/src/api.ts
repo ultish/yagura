@@ -360,10 +360,10 @@ export function useNow(ms = 1000): number {
 const listeners = new Set<() => void>();
 window.addEventListener("popstate", () => listeners.forEach((l) => l()));
 
-export function navigate(to: string): void {
+export function navigate(to: string, keepScroll = false): void {
   if (to === location.pathname + location.search) return;
   history.pushState(null, "", to);
-  window.scrollTo(0, 0);
+  if (!keepScroll) window.scrollTo(0, 0);
   listeners.forEach((l) => l());
 }
 

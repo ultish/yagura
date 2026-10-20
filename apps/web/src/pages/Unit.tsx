@@ -10,6 +10,7 @@ import { buildTimeline } from "../lib/timeline";
 import { unitActions, unitTone } from "../lib/units";
 import { StateMap } from "../scene/StateMap";
 import { RoleIcon } from "../ui/RoleIcon";
+import { GuideNotice } from "../ui/GuideNotice";
 import { Link } from "../ui/Link";
 import { RunningDot } from "../ui/Running";
 import { DisagreeButton, DisagreeForm as Disagreement } from "../ui/Disagree";
@@ -24,12 +25,18 @@ function Line({ l }: { l: StoryLine }) {
   return (
     <li className="story-line">
       <Inline text={l.text} />
-      {l.checks.map((c, i) => (
-        <span key={i} className={`story-check ${c.ok ? "s-pine" : "s-bell"}`}>
-          {c.ok ? "✓" : "✗"} <Inline text={c.text} />
-        </span>
-      ))}
-      {JUDGMENT[l.kind] && <span className="story-check muted">· {JUDGMENT[l.kind]}</span>}
+      {l.checks.map((c, i) =>
+        c.ok ? (
+          <span key={i} className="story-check s-pine" title={c.text}>
+            ✓
+          </span>
+        ) : (
+          <span key={i} className="story-check s-bell">
+            ✗ <Inline text={c.text} />
+          </span>
+        ),
+      )}
+      {JUDGMENT[l.kind] && <span className="story-judgment">{JUDGMENT[l.kind]}</span>}
       {l.disagreements.map((d) => (
         <div key={d.id} className="story-disagreed">
           You disagreed: {d.reason}
@@ -186,7 +193,9 @@ function Timeline({
         <span>
           <span className="s-pine">✓</span> checked by yagura against runs it recorded
         </span>
-        <span>· choice / note: judgment nobody checked</span>
+        <span>
+          <span className="story-judgment">choice</span> <span className="story-judgment">note</span> judgment nobody checked
+        </span>
       </div>
       {items.length ? <ol className="story-ledger plain-list">{items}</ol> : <div className="muted">Nothing has happened on U{story.unit.seq} yet.</div>}
     </>
@@ -212,7 +221,9 @@ function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
           {byTime(story.agents, (a) => a.startedAt, order).map((a) => (
             <tr key={a.attemptId} className={a.counted || a.outcome === "running" ? undefined : "dim"}>
               <td>
-                <Link to={`/a/${a.attemptId}`}>A{a.agentNo}</Link>
+                <Link className="agent-link" to={`/a/${a.attemptId}`}>
+                  A{a.agentNo}
+                </Link>
                 {a.shared && <div className="muted hub-small">also planned other units</div>}
               </td>
               <td>{a.role}</td>
@@ -227,12 +238,18 @@ function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
                   </div>
                 )}
               </td>
-              <td className="mono">{a.startedAt ? clock(a.startedAt) : "—"}</td>
-              <td className="mono">{a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "—"}</td>
+              <td className="mono nowrap">{a.startedAt ? clock(a.startedAt) : "—"}</td>
+              <td className="mono nowrap">{a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "—"}</td>
               <td className="num mono">${a.costUsd.toFixed(2)}</td>
             </tr>
           ))}
         </tbody>
+        <tfoot>
+          <tr>
+            <td colSpan={5}>Total</td>
+            <td className="num mono">${story.agents.reduce((n, a) => n + a.costUsd, 0).toFixed(2)}</td>
+          </tr>
+        </tfoot>
       </table>
       <p className="muted hub-small">Dimmed rows did not count against the unit's tries.</p>
     </div>
@@ -447,6 +464,23 @@ function useLiveStep(running: UnitStory["running"]): string | null {
   return `A${running.agentNo} · ${took}${step?.kind === "tool" ? ` · ${clip(`${step.name}: ${step.summary}`, 52)}` : ""}`;
 }
 
+function Goal({ goal }: { goal: string }) {
+  const [open, setOpen] = useState(false);
+  const long = goal.length > 200;
+  return (
+    <div className="story-goal">
+      <h1 className={`serif story-title${long && !open ? " clamp" : ""}`}>
+        <Inline text={goal} />
+      </h1>
+      {long && (
+        <button type="button" className="story-more" onClick={() => setOpen(!open)}>
+          {open ? "Show less" : "Show the whole task"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 type Tab = "timeline" | "code" | "agents" | "deps";
 
 export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
@@ -482,7 +516,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
     ["timeline", "Timeline"],
     ["code", "Code"],
     ["agents", `Agents (${own.length})`],
-    ["deps", `Dependencies (${story.dependencies.length})`],
+    ["deps", story.dependencies.length ? `Dependencies (${story.dependencies.length})` : "Dependencies"],
   ];
   return (
     <main className="story">
@@ -491,9 +525,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
         {u.repoId ? ` · ${u.repoId}` : ` · ${u.type}`}
         {u.playbook === "guide-upkeep" && <span className="upkeep-tag"> · guide upkeep</span>}
       </div>
-      <h1 className="serif story-title">
-        <Inline text={u.goal} />
-      </h1>
+      <Goal goal={u.goal} />
       <dl className="unit-facts">
         <div className="wide">
           <dt>Acceptance</dt>
@@ -557,21 +589,22 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
           </dd>
         </div>
       </dl>
+      {u.repoId && u.playbook !== "guide-create" && <GuideNotice repoId={u.repoId} projects={[projectId]} onChange={reload} />}
       <StatusCard story={story} tone={tone} reload={reload} />
-      <StateMap moves={story.moves} state={u.state} tone={tone} working={!!story.running} label={live} picked={picked} onPick={pick} />
-      <div className="hub-tabs" role="tablist" aria-label="Unit details">
+      <div className="hub-tabs sticky" role="tablist" aria-label="Unit details">
         {tabs.map(([k, label]) => (
           <Link
             key={k}
             role="tab"
             aria-selected={tab === k}
-            className={tab === k ? "on" : ""}
+            keepScroll
+            className={`${tab === k ? "on" : ""}${k === "deps" && !story.dependencies.length ? " none" : ""}`}
             to={`/p/${projectId}/u/${u.seq}${k === "timeline" ? "" : `?tab=${k}`}`}
           >
             {label}
           </Link>
         ))}
-        {(tab === "timeline" || tab === "agents") && (
+        {((tab === "timeline" && story.entries.length > 2) || (tab === "agents" && story.agents.length > 1)) && (
           <button
             type="button"
             className="hub-sort"
@@ -582,6 +615,7 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
           </button>
         )}
       </div>
+      {tab === "timeline" && <StateMap moves={story.moves} state={u.state} tone={tone} working={!!story.running} label={live} picked={picked} onPick={pick} />}
       {tab === "timeline" && <Timeline story={story} picked={picked} onPick={pick} reload={reload} order={order} />}
       {tab === "code" && <CodeTab story={story} />}
       {tab === "agents" && <AgentsTab story={story} order={order} />}

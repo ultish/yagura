@@ -161,7 +161,7 @@ export function Home() {
   }, []);
   const items = bell.data ?? [];
   return (
-    <main>
+    <main className="home">
       {collapsed && projects.data && (
         <div style={{ position: "sticky", top: 0, zIndex: 5 }}>
           <WatchStrip projects={projects.data} now={now} />

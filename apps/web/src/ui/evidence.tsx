@@ -153,6 +153,7 @@ function FileDiff({ file, sideBySide, selection }: { file: DiffFile; sideBySide:
       scrollBeyondLastLine: false,
       renderOverviewRuler: false,
       hideUnchangedRegions: { enabled: true, contextLineCount: 4 },
+      wordWrap: "on",
       fontFamily: '"JetBrains Mono", ui-monospace, monospace',
       fontSize: 12.5,
       contextmenu: false,

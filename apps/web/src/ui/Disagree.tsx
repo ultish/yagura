@@ -16,7 +16,7 @@ const field = { background: "var(--bg)", border: "1px solid var(--btnline)", bor
 
 export function DisagreeButton({ onClick, disabled, title }: { onClick: () => void; disabled?: boolean; title?: string }) {
   return (
-    <button className="btn sm story-disagree" type="button" onClick={onClick} disabled={disabled} title={title}>
+    <button className="btn sm story-disagree quiet" type="button" onClick={onClick} disabled={disabled} title={title}>
       Disagree…
     </button>
   );
