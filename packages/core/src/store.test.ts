@@ -252,15 +252,19 @@ describe("settings", () => {
       "max_attempts cannot be set per environment; it can be set globally or per project or repo",
     );
     setSetting(db, "environment", "dev", "timebox.judge_seconds", 600);
-    expect(describeSettings(db, { environmentId: "dev" as never }, "environment").map((s) => [s.key, s.source])).toEqual([
-      ["role.doctor.harness", "default"],
-      ["role.doctor.model", "default"],
-      ["timebox.doctor_seconds", "default"],
-      ["timebox.judge_seconds", "environment"],
-      ["skills.scaffold", "default"],
-      ["skills.work", "default"],
+    expect(
+      describeSettings(db, { environmentId: "dev" as never }, "environment")
+        .map((s) => [s.key, s.source])
+        .sort(([a], [b]) => a!.localeCompare(b!)),
+    ).toEqual([
       ["lease.keep", "default"],
       ["lease.keep_hours", "default"],
+      ["role.doctor.harness", "default"],
+      ["role.doctor.model", "default"],
+      ["skills.scaffold", "default"],
+      ["skills.work", "default"],
+      ["timebox.doctor_seconds", "default"],
+      ["timebox.judge_seconds", "environment"],
     ]);
     expect(() => importSettings(db, "project:\n  p:\n    watchman.context_tokens: 9000\n")).toThrow(
       "project.p.watchman.context_tokens: watchman.context_tokens cannot be set per project; it is global only",
@@ -279,13 +283,15 @@ describe("settings", () => {
   it("describes every setting with its default and a plain description", () => {
     setSetting(db, "global", "", "max_parallel_agents", 6);
     const info = describeSettings(db);
-    expect(info.find((s) => s.key === "max_parallel_agents")).toEqual({
+    expect(info.find((s) => s.key === "max_parallel_agents")).toMatchObject({
       key: "max_parallel_agents",
       value: 6,
       source: "global",
       default: 4,
       description: "Most agents running at once, across every project",
       layers: [],
+      group: "Capacity",
+      title: "Agents running at once, everywhere",
     });
     expect(info.filter((s) => !s.description)).toEqual([]);
   });

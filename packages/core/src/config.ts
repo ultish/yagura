@@ -1,3 +1,4 @@
+import { SETTING_DOCS, SETTING_GROUPS, type SettingGroup } from "./settings-docs.js";
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -338,17 +339,28 @@ export interface SettingInfo {
   default: unknown;
   description: string;
   layers: readonly OverrideScope[];
+  group: SettingGroup;
+  title: string;
+  help: string;
+  example?: string;
+  advanced?: true;
+  lines?: true;
+  options?: readonly string[];
 }
 
 export function describeSettings(db: Db, ctx: SettingsContext = {}, scope: OverrideScope | null = null): SettingInfo[] {
+  const written = Object.keys(SETTING_DOCS);
+  const order = (key: SettingKey) => SETTING_GROUPS.indexOf(SETTING_DOCS[key].group) * 1000 + written.indexOf(key);
   return (Object.keys(SETTINGS) as SettingKey[])
     .filter((key) => !scope || SETTING_LAYERS[key].includes(scope))
+    .sort((a, b) => order(a) - order(b))
     .map((key) => ({
       key,
       ...resolveSetting(db, key, ctx),
       default: SETTINGS[key].parse(undefined),
       description: SETTINGS[key].description ?? "",
       layers: SETTING_LAYERS[key],
+      ...SETTING_DOCS[key],
     }));
 }
 

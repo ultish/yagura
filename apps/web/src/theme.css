@@ -2136,3 +2136,45 @@ b .role-icon,
   color: var(--on-accent);
   border-color: var(--amber);
 }
+
+.setting {
+  padding-block: 14px;
+}
+.setting-help {
+  font-size: 13.5px;
+  color: var(--muted);
+  margin-top: 2px;
+  max-width: 70ch;
+}
+.setting-eg {
+  font-size: 12.5px;
+  color: var(--faint);
+  margin-top: 3px;
+}
+.setting-eg span {
+  color: var(--amber-text);
+}
+.setting-group {
+  margin-top: 8px;
+}
+.setting-group-title {
+  margin: 18px 0 2px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.setting-advanced {
+  margin-top: 4px;
+}
+.setting-advanced summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  padding: 8px 0;
+}
+.setting-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 12px 0 4px;
+  font-size: 13.5px;
+}

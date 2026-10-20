@@ -608,3 +608,44 @@ describe("tour", () => {
     expect(tourSeen(storage)).toBe(true);
   });
 });
+
+describe("list settings", () => {
+  it("take names separated by spaces, commas, or both", async () => {
+    const { settingParsed } = await import("./setting-text");
+    const parsed = (_: unknown, text: string) => settingParsed([], text);
+    const list = null;
+    expect(parsed(list, "ultish alice")).toEqual(["ultish", "alice"]);
+    expect(parsed(list, "ultish,alice")).toEqual(["ultish", "alice"]);
+    expect(parsed(list, " ultish, alice ,bob ")).toEqual(["ultish", "alice", "bob"]);
+    expect(parsed(list, "")).toEqual([]);
+  });
+});
+
+describe("settings lists", () => {
+  const mk = (key: string, group: string, extra: object = {}) => ({ key, title: key.toUpperCase(), help: `about ${key}`, group, ...extra });
+  const all = [mk("a", "One"), mk("b", "One", { advanced: true }), mk("c", "Two", { example: "ultish alice" })];
+
+  it("gathers settings by group in order, with the rarely changed ones apart", async () => {
+    const { groupSettings } = await import("./setting-groups");
+    expect(groupSettings(all).map((g) => [g.title, g.main.map((s) => s.key), g.advanced.map((s) => s.key)])).toEqual([
+      ["One", ["a"], ["b"]],
+      ["Two", ["c"], []],
+    ]);
+  });
+
+  it("filters on every word, across title, help, key, example and group", async () => {
+    const { filterSettings } = await import("./setting-groups");
+    expect(filterSettings(all, "")).toHaveLength(3);
+    expect(filterSettings(all, "alice").map((s) => s.key)).toEqual(["c"]);
+    expect(filterSettings(all, "about two").map((s) => s.key)).toEqual(["c"]);
+    expect(filterSettings(all, "about nothing")).toEqual([]);
+    expect(filterSettings(all, "one about").map((s) => s.key)).toEqual(["a", "b"]);
+  });
+
+  it("types a list with spaces in its entries one per line", async () => {
+    const { settingParsed, settingShown } = await import("./setting-text");
+    const tools = ["Bash(yagura show:*)", "Skill"];
+    expect(settingShown(tools, true)).toBe("Bash(yagura show:*)\nSkill");
+    expect(settingParsed([], "Bash(yagura show:*)\n Skill \n", true)).toEqual(tools);
+  });
+});

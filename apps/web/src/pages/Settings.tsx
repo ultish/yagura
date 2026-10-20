@@ -2,14 +2,7 @@ import { useRef, useState } from "react";
 import { api, streamUrl, useApi, type SettingsOverview } from "../api";
 import { Link } from "../ui/Link";
 import { useAction } from "../ui/rows";
-import { SettingRow } from "../ui/settings";
-
-const GROUPS: { title: string; test: (key: string) => boolean }[] = [
-  { title: "Limits", test: (k) => k.startsWith("max_") || k === "project.max_in_flight" || k === "verify.max_retries" },
-  { title: "Time limits", test: (k) => k.startsWith("timebox.") || k.startsWith("gates.") },
-  { title: "Agents and models", test: (k) => k.startsWith("role.") || k.startsWith("harness.") || k.startsWith("watchman.") || k.startsWith("method.") },
-  { title: "Git and links", test: (k) => k.startsWith("git.") || k.startsWith("yagura.") },
-];
+import { SettingsList } from "../ui/settings";
 
 function Transfer({ onImported }: { onImported: () => void }) {
   const file = useRef<HTMLInputElement>(null);
@@ -78,7 +71,8 @@ export function Settings() {
         Settings
       </h1>
       <div className="muted" style={{ fontSize: 14, marginTop: -12 }}>
-        These are the global values. Some can be overridden on a project, repo, or environment page; the narrowest layer wins.
+        These are the global values, used wherever nothing narrower is set. Where a setting says it can also be set on a project, repo or environment, that page
+        can override it, and the narrowest one wins.
       </div>
       <div style={{ fontSize: 14, marginTop: -12 }}>
         <Link to="/prompts">Prompts: the guidance each agent role follows, the watchman's included →</Link>
@@ -102,20 +96,22 @@ export function Settings() {
           </div>
         </section>
       )}
-      {data &&
-        GROUPS.map((g) => {
-          const list = data.settings.filter((s) => g.test(s.key));
-          return (
-            <section key={g.title}>
-              <div className="gh">
-                <h2 className="h2">{g.title}</h2>
-              </div>
-              {list.map((s) => (
-                <SettingRow key={`${s.key}:${JSON.stringify(s.value)}:${s.source}`} s={s} scope="global" scopeId="" cap={capText[s.key]} onSaved={reload} />
-              ))}
-            </section>
-          );
-        })}
+      {data && (
+        <SettingsList
+          settings={data.settings}
+          scope="global"
+          scopeId=""
+          caps={capText}
+          onSaved={reload}
+          heading={(title, n) => (
+            <div className="gh">
+              <h2 className="h2">
+                {title} <span className="muted">{n}</span>
+              </h2>
+            </div>
+          )}
+        />
+      )}
     </main>
   );
 }
