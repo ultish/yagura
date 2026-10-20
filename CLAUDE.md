@@ -4,8 +4,10 @@ Agent orchestration for long-running engineering projects: a deterministic daemo
 
 ## Read first
 
-- `docs/DESIGN.md` is the agreed spec. Build to it; if the code needs to diverge, update the design in the same change.
-- `docs/STATUS.md` is where the build is: a handoff block, what is left, what was decided not to build, and known limits. Keep it short: when something is finished and no longer needed to act, move it to `docs/STATUS-ARCHIVE.md` (phase checklists, real-run findings, build notes), which is read only for history. Update STATUS whenever a phase or task lands.
+- `.claude/docs/DESIGN.md` is the agreed spec. Build to it; if the code needs to diverge, update the design in the same change.
+- `.claude/docs/STATUS.md` is where the build is: a handoff block, what is left, what was decided not to build, and known limits. Keep it short: when something is finished and no longer needed to act, move it to `.claude/docs/STATUS-ARCHIVE.md` (phase checklists, real-run findings, build notes), which is read only for history. Update STATUS whenever a phase or task lands.
+
+`.claude/docs/` is private and gitignored: the design, status, and prototypes live only on this machine. Never link to them from the README, a commit message, or anything else that is pushed.
 
 ## Layout
 

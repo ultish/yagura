@@ -4,3 +4,4 @@ dist/
 *.log
 .env
 .lavish/
+.claude/docs/
