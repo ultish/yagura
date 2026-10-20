@@ -9,7 +9,20 @@
 
 Yagura runs coding agents on long engineering projects while you stay in charge. You give a project a goal. A daemon splits it into small units, runs an agent on each one in its own git worktree, and has a fresh agent judge the result against test runs the daemon recorded itself. Each unit ends as one pull request, and nothing merges until the judge approves it and, by default, you do too.
 
-It runs as one daemon per developer, with no cloud service. The target is a developer's own RHEL 9 VM on an air-gapped network. You drive it from a web dashboard. The full design is in [`docs/DESIGN.md`](docs/DESIGN.md).
+It runs as one daemon per developer, with no cloud service. The target is a developer's own RHEL 9 VM on an air-gapped network. You drive it from a web dashboard.
+
+## How it works
+
+You set yagura up once, then each project runs the same loop:
+
+1. **You describe a goal** and how anyone can tell it is done. The planner splits it into units, each a small change to one repo.
+2. **A worker builds each unit** on its own branch, in its own checkout of the repo.
+3. **A judge checks it.** A fresh agent reruns the tests and records what it saw. The daemon keeps its own record of every run, so a ✓ in the dashboard means yagura saw the command pass.
+4. **You decide.** A unit that the judge approves shows up as a question on the Gates page. Merge it, hold it, or send it back. Merging is your call unless you set the project to merge by itself.
+
+The dashboard has a page for each stage. The Projects page shows the loop for a project, Unit pages show what happened and why, and Gates is where your decisions wait.
+
+<img src="docs/img/project.png" alt="A project with two units, both approved and waiting at the merge step" width="720" />
 
 ## Install
 
@@ -55,11 +68,14 @@ Yagura starts `claude` as a program, without a shell. If `claude` is a function 
 
 An environment tells agents how things run: how tests run, where libraries are published, what must never happen. You describe it in plain words, and a doctor agent turns the description into commands and proves them.
 
-You can fill one in on the Environments page, or let an LLM session do it. In the session that's working on your project, say:
+You can fill one in on the Environments page, or let a Claude session do it. Install the yagura skills once, inside `claude`:
 
-> Read `<this repo>/plugins/yagura/skills/yagura-environment/SKILL.md` and create a yagura environment for this project.
+```
+/plugin marketplace add ultish/yagura
+/plugin install yagura-skills@yagura
+```
 
-It reads your project, then creates the environment with the `yagura` command, so `yagura` has to be on its PATH.
+With no internet, give `/plugin marketplace add` the path to this repo on disk. Then, in the session that's working on your project, say "create a yagura environment for this project". The skill reads your project, then creates the environment with the `yagura` command, so `yagura` has to be on its PATH.
 
 ### GitLab
 
@@ -97,6 +113,20 @@ Go to Projects, then New project. Write the goal and how anyone can tell it is d
 
 ### 4. Watch it run
 
-The Projects page lists units as they move. Gates shows the questions agents have for you. On Agents you can read a running agent's work, steer it, or stop it. A stuck unit can be retried or cancelled, and the andon button on a project stops everything.
+Open the project. Each unit is a line that moves from plan to work to judge to merge, and a red bell means a unit is waiting for you. The questions agents have for you are on the Gates page, with the same buttons.
+
+<img src="docs/img/gates.png" alt="The Gates page with two approved units waiting for a merge decision" width="720" />
+
+Click a unit to see what happened. The timeline lists each agent's work with the test runs yagura recorded, and a ✓ means yagura saw that command pass. A choice or note is the agent's own judgment, which nobody checked. The Code tab shows the change, and Agents lists what each agent cost. Merge, Hold, Ask the unit lead and Drop are at the top.
+
+<img src="docs/img/unit.png" alt="A unit approved by the judge, with the merge buttons above its timeline" width="720" />
+
+On Agents you can read a running agent's work, steer it, or stop it. A stuck unit can be retried or cancelled, and the andon button on a project stops everything.
+
+### 5. Add a verification guide to each repo
+
+A repo can carry a verification guide: a skill in `.claude/skills/verify-<app>/` that says how to run the app and check each feature. With one, the planner names the page that proves each acceptance line, and the judge has to drive that page before it can approve. Without one, units are proved with the environment's tests only.
+
+A unit page says when its repo has no guide. Press Create the guide, say how to start the app and what to avoid, and yagura adds one unit to the project that writes it. The agent can't ask you questions while it works, so put what only you know in that box. You can also start it with `yagura verify create <repo> --project <id>`, or from the Repos page.
 
 Logging in to `claude`, `gh` and `glab`, `yagura project set` and `yagura unit requeue` are CLI only for now.
