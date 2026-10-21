@@ -121,6 +121,9 @@ import {
   guideCreationUnder,
   createGuideUnit,
   requestUpkeep,
+  openRequestUnits,
+  setRepoForge,
+  setRepoUrl,
   setProjectRefs,
   setProjectStanding,
   setProjectEnvironment,
@@ -666,6 +669,32 @@ export function createApp(opts: ServerOptions): Hono {
   app.get("/api/settings", (c) =>
     c.json(effectiveSettings(db, { projectId: (c.req.query("project") as ProjectId) ?? null, repoId: (c.req.query("repo") as never) ?? null })),
   );
+  // How a repo is reached and how its work lands, which are not tunable settings.
+  app.post("/api/repos/:id/options", async (c) => {
+    const id = c.req.param("id") as RepoId;
+    const b = (await c.req.json()) as { url?: string; route?: string };
+    const repo = getRepo(db, id);
+    if (b.route !== undefined && b.route !== "gh" && b.route !== "glab" && b.route !== "push") return c.json({ error: "route must be gh, glab, or push" }, 400);
+    const now = repo.forge === "none" ? "push" : repo.forge;
+    if (b.route !== undefined && b.route !== now) {
+      const open = openRequestUnits(db, id);
+      if (open.length)
+        return c.json(
+          {
+            error: `${open.map((u) => `${u.projectId} U${u.seq}`).join(", ")} still ${open.length === 1 ? "has" : "have"} an open pull request here; merge or drop ${open.length === 1 ? "it" : "them"} before changing how this repo lands`,
+          },
+          409,
+        );
+      if (b.route === "push") setRepoForge(db, id, "none", true);
+      else setRepoForge(db, id, b.route);
+    }
+    if (b.url !== undefined) {
+      const url = b.url.trim();
+      if (!url) return c.json({ error: "the URL cannot be empty" }, 400);
+      setRepoUrl(db, id, url);
+    }
+    return c.json({ repo: getRepo(db, id) });
+  });
   // The project's own choices that are not tunable settings: how it merges, where it runs, whether it ever closes, and the issues it answers.
   app.post("/api/projects/:id/options", async (c) => {
     const id = c.req.param("id") as ProjectId;

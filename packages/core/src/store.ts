@@ -538,7 +538,21 @@ export function setProjectEnvironment(db: Db, projectId: ProjectId, environmentI
 }
 
 export function setRepoUrl(db: Db, repoId: RepoId, url: string): void {
+  const before = (db.prepare("SELECT url FROM repos WHERE id = ?").get(repoId) as { url: string } | undefined)?.url;
   db.prepare("UPDATE repos SET url = ? WHERE id = ?").run(url, repoId);
+  if (before !== url) recordEvent(db, "repo.url", {}, { repo: repoId, from: before ?? null, to: url });
+}
+
+// Units that still have a pull or merge request open on the repo: changing how it lands would strand them.
+export function openRequestUnits(db: Db, repoId: RepoId): { projectId: ProjectId; seq: number }[] {
+  return (
+    db
+      .prepare(
+        `SELECT u.project_id, u.seq FROM units u JOIN merge_requests m ON m.unit_id = u.id
+         WHERE u.repo_id = ? AND u.state NOT IN ('merged', 'dropped') ORDER BY u.id`,
+      )
+      .all(repoId) as { project_id: ProjectId; seq: number }[]
+  ).map((r) => ({ projectId: r.project_id, seq: r.seq }));
 }
 
 export function setRepoForge(db: Db, repoId: RepoId, forge: Forge, pushConfirmed = false): void {

@@ -17,6 +17,7 @@ import {
   openStore,
   putArtifact,
   parseClaudeLine,
+  saveMergeRequest,
   transitionUnit,
   updateAttempt,
   type AttemptId,
@@ -221,6 +222,33 @@ describe("daemon API", () => {
     expect((await post("/api/projects/orders/options", { merge: "whenever" })).status).toBe(400);
     expect((await post("/api/projects/orders/options", { environmentId: "nowhere" })).status).toBe(400);
     expect(await (await post("/api/projects/orders/options", { environmentId: null })).json()).toMatchObject({ project: { environmentId: null } });
+  });
+
+  it("changes a repo's address and how it lands, but not while a unit has an open pull request", async () => {
+    const changed = await post("/api/repos/testbed/options", { route: "gh", url: " https://github.com/acme/tb.git " });
+    expect(await changed.json()).toMatchObject({ repo: { forge: "gh", url: "https://github.com/acme/tb.git" } });
+    expect(db.prepare("SELECT data_json FROM events WHERE type = 'repo.url'").all()).toHaveLength(1);
+
+    const unit = (db.prepare("SELECT id FROM units WHERE project_id = 'orders' ORDER BY id LIMIT 1").get() as { id: number }).id;
+    saveMergeRequest(db, {
+      unitId: unit as never,
+      forge: "gh",
+      forgeRepo: "acme/tb",
+      number: 7,
+      url: "https://github.com/acme/tb/pull/7",
+      branch: "b",
+      headSha: "a" as never,
+      baseSha: "c" as never,
+    });
+    const refused = await post("/api/repos/testbed/options", { route: "push" });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()) as { error: string }).toMatchObject({ error: expect.stringContaining("orders U1") });
+    expect(await (await post("/api/repos/testbed/options", { route: "gh", url: "https://github.com/acme/tb2.git" })).json()).toMatchObject({
+      repo: { forge: "gh", url: "https://github.com/acme/tb2.git" },
+    });
+
+    expect((await post("/api/repos/testbed/options", { route: "svn" })).status).toBe(400);
+    expect((await post("/api/repos/testbed/options", { url: "  " })).status).toBe(400);
   });
 
   it("lists what waits for an answer with each gate's deadline, and what was resolved", async () => {

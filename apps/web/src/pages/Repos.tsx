@@ -5,6 +5,7 @@ import { clock, plural, sha } from "../lib/format";
 import { GuideNotice } from "../ui/GuideNotice";
 import { Link } from "../ui/Link";
 import { Row, useAction } from "../ui/rows";
+import { RepoOptions } from "../ui/RepoOptions";
 import { ScopedSettings } from "../ui/settings";
 
 const field = { background: "var(--bg)", border: "1px solid var(--btnline)", borderRadius: 4, padding: "7px 10px" } as const;
@@ -217,7 +218,14 @@ export function Repos() {
                       </button>
                     </>
                   }
-                  below={settings === v.repo.id ? <ScopedSettings scope="repo" id={v.repo.id} /> : null}
+                  below={
+                    settings === v.repo.id ? (
+                      <>
+                        <RepoOptions key={`${v.repo.url}${v.repo.forge}`} repo={v.repo} onSaved={reload} />
+                        <ScopedSettings scope="repo" id={v.repo.id} />
+                      </>
+                    ) : null
+                  }
                   extra={
                     <>
                       <GuideNotice repoId={v.repo.id} projects={v.projects.filter((p) => p.state === "active").map((p) => p.id)} />
