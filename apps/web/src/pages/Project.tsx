@@ -6,6 +6,7 @@ import { Inline } from "../lib/markdown";
 import { Beacons } from "../scene/Beacons";
 import { Link } from "../ui/Link";
 import { NoteForm, Row, useAction } from "../ui/rows";
+import { ProjectOptions } from "../ui/ProjectOptions";
 import { ScopedSettings } from "../ui/settings";
 
 const GROUPS: { key: Group; title: string; bell?: boolean; collapsed?: boolean }[] = [
@@ -166,7 +167,7 @@ function ProjectGates({ d }: { d: ProjectDetail }) {
 
 export function Project({ id }: { id: string }) {
   const now = useNow(1000);
-  const { data: d, error } = useApi<ProjectDetail>(`/api/projects/${id}`);
+  const { data: d, error, reload } = useApi<ProjectDetail>(`/api/projects/${id}`);
   const action = useAction();
   const [andon, setAndon] = useState(false);
   const [open, setOpen] = useState<Record<string, boolean>>({});
@@ -209,6 +210,7 @@ export function Project({ id }: { id: string }) {
             );
           })}
           <span>{facts.join(" · ")}</span>
+          <a href="#project-options">change</a>
         </div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
           <h1 className="serif" style={{ margin: 0, fontSize: 42, fontWeight: 600 }}>
@@ -332,6 +334,12 @@ export function Project({ id }: { id: string }) {
             </div>
           </div>
         )}
+        <div id="project-options">
+          <div className="gh">
+            <h2 className="h2">Options</h2>
+          </div>
+          <ProjectOptions key={`${p.mergePolicy}${p.environmentId}${p.standing}${p.refs.join()}`} p={p} onSaved={reload} />
+        </div>
         <div>
           <div className="gh">
             <h2 className="h2">Settings</h2>

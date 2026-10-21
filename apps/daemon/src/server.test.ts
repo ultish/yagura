@@ -208,6 +208,21 @@ describe("daemon API", () => {
     expect(await (await get("/api/settings?project=orders")).json()).toMatchObject({ "project.max_in_flight": { value: 1, source: "project" } });
   });
 
+  it("changes a project's own options, and records a change of merge policy", async () => {
+    await post("/api/environments", { id: "dev", provider: "local-process", capacity: 1 });
+    const changed = await post("/api/projects/orders/options", { merge: "auto", environmentId: "dev", standing: true, refs: ["testbed#5", "gitlab#7"] });
+    expect(await changed.json()).toMatchObject({ project: { mergePolicy: "auto", environmentId: "dev", standing: true, refs: ["testbed#5", "gitlab#7"] } });
+    const events = db.prepare("SELECT data_json FROM events WHERE type = 'project.merge_policy'").all() as { data_json: string }[];
+    expect(events.map((e) => JSON.parse(e.data_json))).toEqual([{ from: "human", to: "auto" }]);
+
+    await post("/api/projects/orders/options", { merge: "auto" });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'project.merge_policy'").get()).toEqual({ n: 1 });
+
+    expect((await post("/api/projects/orders/options", { merge: "whenever" })).status).toBe(400);
+    expect((await post("/api/projects/orders/options", { environmentId: "nowhere" })).status).toBe(400);
+    expect(await (await post("/api/projects/orders/options", { environmentId: null })).json()).toMatchObject({ project: { environmentId: null } });
+  });
+
   it("lists what waits for an answer with each gate's deadline, and what was resolved", async () => {
     const planner = addGate(db, {
       projectId: project,

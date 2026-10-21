@@ -577,7 +577,9 @@ export function setAndon(db: Db, projectId: ProjectId, reason: string | null): v
 }
 
 export function setMergePolicy(db: Db, projectId: ProjectId, policy: Project["mergePolicy"]): void {
+  const before = getProject(db, projectId).mergePolicy;
   db.prepare("UPDATE projects SET merge_policy = ? WHERE id = ?").run(policy, projectId);
+  if (before !== policy) recordEvent(db, "project.merge_policy", { projectId }, { from: before, to: policy });
 }
 
 export function setProjectState(db: Db, projectId: ProjectId, state: Project["state"]): void {

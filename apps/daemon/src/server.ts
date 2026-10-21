@@ -121,6 +121,10 @@ import {
   guideCreationUnder,
   createGuideUnit,
   requestUpkeep,
+  setProjectRefs,
+  setProjectStanding,
+  setProjectEnvironment,
+  setMergePolicy,
   setValue,
   artifactContentType,
   artifactName,
@@ -662,6 +666,22 @@ export function createApp(opts: ServerOptions): Hono {
   app.get("/api/settings", (c) =>
     c.json(effectiveSettings(db, { projectId: (c.req.query("project") as ProjectId) ?? null, repoId: (c.req.query("repo") as never) ?? null })),
   );
+  // The project's own choices that are not tunable settings: how it merges, where it runs, whether it ever closes, and the issues it answers.
+  app.post("/api/projects/:id/options", async (c) => {
+    const id = c.req.param("id") as ProjectId;
+    const b = (await c.req.json()) as { merge?: string; environmentId?: string | null; standing?: boolean; refs?: string[] };
+    getProject(db, id);
+    if (b.merge !== undefined && b.merge !== "auto" && b.merge !== "human") return c.json({ error: "merge must be auto or human" }, 400);
+    try {
+      if (b.merge !== undefined) setMergePolicy(db, id, b.merge);
+      if (b.environmentId !== undefined) setProjectEnvironment(db, id, (b.environmentId || null) as EnvironmentId | null);
+      if (b.standing !== undefined) setProjectStanding(db, id, b.standing);
+      if (b.refs !== undefined) setProjectRefs(db, id, b.refs);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
+    return c.json({ project: getProject(db, id) });
+  });
   app.get("/api/settings/overview", (c) => {
     const scope = c.req.query("scope") as SettingScope | undefined;
     const id = c.req.query("id") ?? "";
