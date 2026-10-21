@@ -251,6 +251,14 @@ describe("daemon API", () => {
     expect((await post("/api/repos/testbed/options", { url: "  " })).status).toBe(400);
   });
 
+  it("reports what yagura has spent, in total and today", async () => {
+    db.prepare("UPDATE attempts SET cost_usd = 1.25, started_at = ?").run(new Date().toISOString());
+    const cost = (await (await get("/api/cost")).json()) as Record<string, number>;
+    expect(Object.keys(cost).sort()).toEqual(["agents", "doctor", "today", "total", "watchman", "week"]);
+    expect(cost.total).toBeGreaterThanOrEqual(1.25);
+    expect(cost.today).toBeCloseTo(cost.total);
+  });
+
   it("closes and reopens a conversation", async () => {
     const thread = createThread(db, { title: "Copy button" });
     expect(await (await post(`/api/threads/${thread.id}/state`, { state: "closed" })).json()).toMatchObject({ state: "closed" });

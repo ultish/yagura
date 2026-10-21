@@ -121,6 +121,7 @@ import {
   guideCreationUnder,
   createGuideUnit,
   requestUpkeep,
+  costSummary,
   setThreadState,
   openRequestUnits,
   setRepoForge,
@@ -712,6 +713,7 @@ export function createApp(opts: ServerOptions): Hono {
     }
     return c.json({ project: getProject(db, id) });
   });
+  app.get("/api/cost", (c) => c.json(costSummary(db)));
   app.get("/api/settings/overview", (c) => {
     const scope = c.req.query("scope") as SettingScope | undefined;
     const id = c.req.query("id") ?? "";

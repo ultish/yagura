@@ -25,6 +25,8 @@ import markLight from "./assets/mark-light.png";
 import { Link } from "./ui/Link";
 import { BellAlert } from "./ui/BellAlert";
 import { SearchBox } from "./ui/SearchBox";
+import type { CostSummary } from "@yagura/core";
+import { usd } from "./lib/format";
 import { markTourSeen, startTour, tourSeen } from "./lib/tour";
 
 type Theme = "night" | "day";
@@ -50,6 +52,30 @@ const NAV = [
   { to: "/environments", label: "Environments", match: (p: string) => p === "/environments" || p.startsWith("/e/") || p.startsWith("/d/") },
   { to: "/settings", label: "Settings", match: (p: string) => p === "/settings" || p === "/prompts" },
 ];
+
+function CostPill() {
+  const { data } = useApi<CostSummary>("/api/cost", { poll: 30_000 });
+  if (!data) return null;
+  return (
+    <Link
+      to="/agents"
+      className="mono"
+      aria-label={`Spent in total ${usd(data.total)}`}
+      title={`Spent in total: ${usd(data.total)}\nAgents ${usd(data.agents)} · watchman ${usd(data.watchman)} · doctor ${usd(data.doctor)}\nToday ${usd(data.today)} · last 7 days ${usd(data.week)}`}
+      style={{
+        fontSize: 12,
+        border: "1px solid var(--btnline)",
+        borderRadius: 999,
+        padding: "6px 12px",
+        color: "var(--muted)",
+        textDecoration: "none",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {usd(data.total)} spent
+    </Link>
+  );
+}
 
 function Header() {
   const path = usePath();
@@ -89,6 +115,7 @@ function Header() {
         {health.error ? "daemon unreachable" : `${location.host}`}
       </div>
       <BellAlert />
+      <CostPill />
       <button
         type="button"
         data-tour="help"
