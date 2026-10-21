@@ -41,6 +41,7 @@ import {
   listGates,
   setAndon,
   setMergePolicy,
+  setThreadState,
   registerRepo,
   addUnitNote,
   evidenceCli,
@@ -169,7 +170,7 @@ const USAGE = `yagura — agent orchestration
   yagura project skills <id>                       checks the project's skills.* are installed where agents run
   yagura talk [--thread <id>] [--go] <message>   talk to the watchman (a new thread unless --thread)
   yagura steer <project>/U<n> <message>          tell a unit's running agent something; it reads it after its current step
-  yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go | clear <id>
+  yagura thread list | show <id> | search [--thread <id>] <words> | set <id> --autonomy propose|go | clear <id> | close <id> | reopen <id>
   yagura thread mentions <@project | @project/U3 | @project/A7 | @thread:4 | @repo:id>   conversations that mention it
   yagura proposal apply|discard <id>
   yagura trace <commit sha | issue ref>  who and what produced a commit, or everything behind an issue
@@ -1061,6 +1062,11 @@ async function main() {
             `\nproposal ${p.id} [${p.state}]\n${body.success ? describeProposal(body.data) : JSON.stringify(p.body)}${p.result ? `\n→ ${JSON.stringify(p.result)}` : ""}`,
           );
         }
+        return;
+      }
+      if ((sub === "close" || sub === "reopen") && more[0]) {
+        setThreadState(db, Number(more[0]), sub === "close" ? "closed" : "open");
+        console.log(`thread ${more[0]} ${sub === "close" ? "closed: it stays as history until someone writes in it" : "reopened"}`);
         return;
       }
       if (sub === "search" && more.length) {

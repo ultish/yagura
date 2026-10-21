@@ -588,6 +588,19 @@ export function Talk({ threadId }: { threadId: number | null }) {
                   >
                     New session
                   </button>
+                  <button
+                    type="button"
+                    className="btn sm"
+                    disabled={busy || session.busy}
+                    title={
+                      v.thread.state === "open"
+                        ? "Move this conversation to Closed. It stays as history, and writing in it again reopens it."
+                        : "Move this conversation back to Open."
+                    }
+                    onClick={() => session.run(() => api(`/api/threads/${threadId}/state`, { body: { state: v.thread.state === "open" ? "closed" : "open" } }))}
+                  >
+                    {v.thread.state === "open" ? "Close" : "Reopen"}
+                  </button>
                   <Link
                     to="/prompts?role=watchman"
                     className="mono"

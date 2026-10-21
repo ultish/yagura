@@ -668,3 +668,16 @@ describe("what a proposal started", () => {
     for (const r of [null, undefined, "x", { units: "no" }, { units: { p: ["nope"] } }]) expect(hasStarted(startedBy(r))).toBe(false);
   });
 });
+
+describe("environment choices", () => {
+  it("reads the environments from the API's rows, and always offers the current one", async () => {
+    const { environmentChoices } = await import("./environment-choices");
+    const rows = [{ environment: { id: "differ", name: "differ" } }, { environment: { id: "local", name: "This machine" } }];
+    expect(environmentChoices(rows, "local")).toEqual([
+      { id: "differ", label: "differ" },
+      { id: "local", label: "This machine (local)" },
+    ]);
+    expect(environmentChoices(rows, "gone").at(-1)).toEqual({ id: "gone", label: "gone (not found)" });
+    expect(environmentChoices([], null)).toEqual([]);
+  });
+});

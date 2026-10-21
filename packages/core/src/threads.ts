@@ -89,6 +89,14 @@ export function setThreadAutonomy(db: Db, id: number, autonomy: ThreadAutonomy):
   db.prepare("UPDATE threads SET autonomy = ?, updated_at = ? WHERE id = ?").run(autonomy, now(), id);
 }
 
+// A closed conversation is read-only history until someone writes in it again.
+export function setThreadState(db: Db, id: number, state: ThreadState): void {
+  const before = getThread(db, id).state;
+  if (before === state) return;
+  db.prepare("UPDATE threads SET state = ?, updated_at = ? WHERE id = ?").run(state, now(), id);
+  recordEvent(db, "thread.state", {}, { thread: id, state });
+}
+
 export function setThreadReported(db: Db, id: number, reported: Record<string, string>): void {
   db.prepare("UPDATE threads SET reported_json = ? WHERE id = ?").run(JSON.stringify(reported), id);
 }
@@ -122,6 +130,7 @@ export function addMessage(db: Db, m: { threadId: number; role: MessageRole; bod
   indexMentions(db, id, m.body);
   db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(at, m.threadId);
   recordEvent(db, "thread.message", {}, { thread: m.threadId, message: id, role: m.role });
+  if (m.role === "human") setThreadState(db, m.threadId, "open");
   return getMessage(db, id);
 }
 

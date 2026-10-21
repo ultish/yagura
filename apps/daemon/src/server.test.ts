@@ -251,6 +251,14 @@ describe("daemon API", () => {
     expect((await post("/api/repos/testbed/options", { url: "  " })).status).toBe(400);
   });
 
+  it("closes and reopens a conversation", async () => {
+    const thread = createThread(db, { title: "Copy button" });
+    expect(await (await post(`/api/threads/${thread.id}/state`, { state: "closed" })).json()).toMatchObject({ state: "closed" });
+    expect(await (await post(`/api/threads/${thread.id}/state`, { state: "open" })).json()).toMatchObject({ state: "open" });
+    expect((await post(`/api/threads/${thread.id}/state`, { state: "archived" })).status).toBe(400);
+    expect((await post("/api/threads/999/state", { state: "closed" })).status).toBeGreaterThanOrEqual(400);
+  });
+
   it("lists what waits for an answer with each gate's deadline, and what was resolved", async () => {
     const planner = addGate(db, {
       projectId: project,

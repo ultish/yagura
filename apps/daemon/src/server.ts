@@ -121,6 +121,7 @@ import {
   guideCreationUnder,
   createGuideUnit,
   requestUpkeep,
+  setThreadState,
   openRequestUnits,
   setRepoForge,
   setRepoUrl,
@@ -925,6 +926,15 @@ export function createApp(opts: ServerOptions): Hono {
     getThread(db, id);
     if (!clearSession(id)) return c.json({ error: `thread ${id} is waiting on the watchman; stop it or wait before starting a new session` }, 409);
     return c.json(threadView(id));
+  });
+  app.post("/api/threads/:id/state", async (c) => {
+    const id = Number(c.req.param("id"));
+    const b = await body(c);
+    if (b.state !== "open" && b.state !== "closed") return c.json({ error: "state must be open or closed" }, 400);
+    getThread(db, id);
+    if (b.state === "closed" && runningTurn(db, id)) return c.json({ error: `thread ${id} is waiting on the watchman; stop it or wait before closing` }, 409);
+    setThreadState(db, id, b.state);
+    return c.json(getThread(db, id));
   });
   app.post("/api/threads/:id/autonomy", async (c) => {
     const id = Number(c.req.param("id"));

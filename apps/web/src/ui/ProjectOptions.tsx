@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { api, useApi, type ProjectDetail } from "../api";
+import { environmentChoices, type EnvironmentRow } from "../lib/environment-choices";
 import { useAction } from "./rows";
 
 type Project = ProjectDetail["project"];
@@ -27,7 +28,7 @@ const refsOf = (text: string) => text.split(/[\s,]+/).filter(Boolean);
 // The choices a project makes about itself, which are not tunable settings: how it merges, where it runs, whether it ever closes,
 // and the issues it answers.
 export function ProjectOptions({ p, onSaved }: { p: Project; onSaved: () => void }) {
-  const environments = useApi<{ id: string; name?: string }[]>("/api/environments");
+  const environments = useApi<EnvironmentRow[]>("/api/environments");
   const [merge, setMerge] = useState<string>(p.mergePolicy);
   const [env, setEnv] = useState<string>(p.environmentId ?? "");
   const [standing, setStanding] = useState(p.standing);
@@ -76,9 +77,9 @@ export function ProjectOptions({ p, onSaved }: { p: Project; onSaved: () => void
       <Option title="Environment" help="Where its agents run and how its tests are run. The environment's answers and actions come from the Environments page.">
         <select aria-label="Environment" value={env} onChange={(e) => setEnv(e.target.value)} style={field}>
           <option value="">none</option>
-          {(environments.data ?? []).map((e) => (
+          {environmentChoices(environments.data ?? [], p.environmentId).map((e) => (
             <option key={e.id} value={e.id}>
-              {e.name && e.name !== e.id ? `${e.name} (${e.id})` : e.id}
+              {e.label}
             </option>
           ))}
         </select>
