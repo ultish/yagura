@@ -127,7 +127,10 @@ export function addMessage(db: Db, m: { threadId: number; role: MessageRole; bod
       .run(m.threadId, m.role, m.body, m.turnLog ?? null, at).lastInsertRowid,
   );
   db.prepare("INSERT INTO search (body, kind, ref_id, project_id) VALUES (?, 'message', ?, NULL)").run(m.body, String(id));
-  indexMentions(db, id, m.body);
+  const mentions = indexMentions(db, id, m.body);
+  // Naming a project, one of its units, or one of its agents is saying the conversation is about it, so the watchman may propose changes to it.
+  if (m.role === "human")
+    for (const projectId of new Set(mentions.flatMap((x) => (x.projectId ? [x.projectId] : [])))) linkThreadProject(db, m.threadId, projectId);
   db.prepare("UPDATE threads SET updated_at = ? WHERE id = ?").run(at, m.threadId);
   recordEvent(db, "thread.message", {}, { thread: m.threadId, message: id, role: m.role });
   if (m.role === "human") setThreadState(db, m.threadId, "open");
