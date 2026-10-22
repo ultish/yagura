@@ -253,7 +253,7 @@ Reply to the developer in plain prose. Then end your final message with exactly 
       "spec": "# kafka-diff\\n\\n## Scope\\n…", "units": [],
       "skills": { "scaffold": ["setup-gradle"], "work": [] }, "references": ["billing"]
     }],
-    "amend": [{ "project": "kafka-diff", "units": [{ "key": "ignore-ts", "repo": "kafka-diff", "goal": "…", "acceptance": ["…"], "context": ["…"], "refs": ["kafka-diff#12"] }] }]
+    "amend": [{ "project": "kafka-diff", "units": [{ "key": "ignore-ts", "repo": "kafka-diff", "title": "short name, under 100 characters", "goal": "…", "acceptance": ["…"], "context": ["…"], "refs": ["kafka-diff#12"] }] }]
   }
 }
 \`\`\`

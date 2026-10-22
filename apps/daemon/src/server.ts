@@ -121,6 +121,7 @@ import {
   guideCreationUnder,
   createGuideUnit,
   requestUpkeep,
+  renameUnit,
   setUnitTag,
   costSummary,
   setThreadState,
@@ -364,7 +365,7 @@ export function createApp(opts: ServerOptions): Hono {
       const u = getUnit(db, a.unitId);
       return {
         ...a,
-        unit: { id: u.id, seq: u.seq, type: u.type, goal: u.goal, projectId: u.projectId, state: u.state },
+        unit: { id: u.id, seq: u.seq, type: u.type, title: u.title, goal: u.goal, projectId: u.projectId, state: u.state },
       };
     });
     return c.json({
@@ -713,6 +714,15 @@ export function createApp(opts: ServerOptions): Hono {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
     }
     return c.json({ project: getProject(db, id) });
+  });
+  app.post("/api/projects/:id/units/:seq/title", async (c) => {
+    const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
+    const b = (await c.req.json().catch(() => ({}))) as { title?: unknown };
+    try {
+      return c.json(renameUnit(db, unit.id, String(b.title ?? "")));
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
   });
   app.post("/api/projects/:id/units/:seq/tag", async (c) => {
     const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));

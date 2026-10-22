@@ -118,6 +118,7 @@ export async function scheduleUpkeep(
       projectId,
       type: "work",
       repoId,
+      title: `Update ${repoId}'s verification guide`,
       goal: `Bring ${repoId}'s verification guide back in line with the app`,
       acceptance: ACCEPTANCE,
       context: [

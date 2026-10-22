@@ -99,9 +99,9 @@ export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[]
   if (unitRef) {
     const units = db
       .prepare(
-        "SELECT id, seq, type, state, goal FROM units WHERE project_id = ? AND type IN ('work', 'pack') AND CAST(seq AS TEXT) LIKE ? ORDER BY seq DESC LIMIT ?",
+        "SELECT id, seq, type, state, title FROM units WHERE project_id = ? AND type IN ('work', 'pack') AND CAST(seq AS TEXT) LIKE ? ORDER BY seq DESC LIMIT ?",
       )
-      .all(unitRef[1], `${unitRef[2] ?? ""}%`, limit) as { id: number; seq: number; type: string; state: string; goal: string }[];
+      .all(unitRef[1], `${unitRef[2] ?? ""}%`, limit) as { id: number; seq: number; type: string; state: string; title: string }[];
     for (const u of units) {
       if (unitRef[3] !== undefined) {
         const attempts = db.prepare("SELECT n, agent_no AS agentNo, state FROM attempts WHERE unit_id = ? ORDER BY n").all(u.id) as {
@@ -110,7 +110,7 @@ export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[]
           state: string;
         }[];
         for (const a of attempts) out.push({ token: `${unitRef[1]}/A${a.agentNo}`, kind: "attempt", label: `agent A${a.agentNo} for U${u.seq} · ${a.state}` });
-      } else out.push({ token: `${unitRef[1]}/U${u.seq}`, kind: "unit", label: `${u.type} · ${u.state} · ${u.goal}` });
+      } else out.push({ token: `${unitRef[1]}/U${u.seq}`, kind: "unit", label: `${u.type} · ${u.state} · ${u.title}` });
     }
     return out.slice(0, limit);
   }
@@ -124,9 +124,9 @@ export function suggestMentions(db: Db, query: string, limit = 20): Suggestion[]
   }[])
     out.push({ token: p.id, kind: "project", label: `project · ${p.state} · ${p.goal}` });
   for (const u of db
-    .prepare(`SELECT project_id, seq, state, goal FROM units WHERE type = 'work' AND goal LIKE ? ORDER BY updated_at DESC LIMIT ?`)
-    .all(like, q.length >= 3 ? limit : 0) as { project_id: string; seq: number; state: string; goal: string }[])
-    out.push({ token: `${u.project_id}/U${u.seq}`, kind: "unit", label: `${u.state} · ${u.goal}` });
+    .prepare(`SELECT project_id, seq, state, title FROM units WHERE type = 'work' AND (title LIKE ? OR goal LIKE ?) ORDER BY updated_at DESC LIMIT ?`)
+    .all(like, like, q.length >= 3 ? limit : 0) as { project_id: string; seq: number; state: string; title: string }[])
+    out.push({ token: `${u.project_id}/U${u.seq}`, kind: "unit", label: `${u.state} · ${u.title}` });
   for (const t of db
     .prepare("SELECT id, title FROM threads WHERE title LIKE ? OR CAST(id AS TEXT) = ? ORDER BY updated_at DESC LIMIT ?")
     .all(like, q.replace(/^thread:?/, ""), limit) as {
@@ -150,7 +150,7 @@ function describeUnit(db: Db, boot: Bootstrap, unit: Unit, onlyAttempt: number |
     .prepare("SELECT data_json FROM events WHERE unit_id = ? AND type = 'unit.state' AND json_extract(data_json, '$.to') = 'stuck' ORDER BY id DESC LIMIT 1")
     .get(unit.id) as { data_json: string } | undefined;
   const lines = [
-    `- ${unit.type} · ${unit.state}${unit.mergedSha ? ` · merged ${unit.mergedSha.slice(0, 10)}` : ""} · repo ${unit.repoId ?? "-"} · goal: ${unit.goal}`,
+    `- ${unit.type} · ${unit.state}${unit.mergedSha ? ` · merged ${unit.mergedSha.slice(0, 10)}` : ""} · repo ${unit.repoId ?? "-"} · ${unit.title}\n- goal: ${unit.goal}`,
     `- accept: ${unit.acceptance.join(" / ")}`,
   ];
   if (unit.state === "stuck" && blocked) lines.push(`- stuck: ${JSON.stringify(JSON.parse(blocked.data_json).reason ?? "no reason recorded")}`);

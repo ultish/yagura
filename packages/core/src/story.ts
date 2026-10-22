@@ -242,7 +242,7 @@ export function unitStory(db: Db, _boot: Bootstrap, unit: Unit): UnitStory {
       ...placed(0),
       at: (planner.attempt.startedAt ?? unit.createdAt) as IsoTime,
       actor: "planner",
-      who: `Project lead · ${planner.unit.goal.toLowerCase()}`,
+      who: `Project lead · ${planner.unit.title.toLowerCase()}`,
       attempt: attemptOf(planner.unit, planner.attempt),
       status: null,
       body: finished ? ((JSON.parse(finished.data_json) as { reason?: string }).reason ?? null) : null,

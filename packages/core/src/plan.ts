@@ -1,3 +1,4 @@
+import { TITLE_MAX } from "./title.js";
 import { z } from "zod";
 import { resolveSetting } from "./config.js";
 import { listDisagreements, markPlanned } from "./disagreements.js";
@@ -43,6 +44,7 @@ export const PlanUnit = z
     key: z.string().regex(/^[a-z][a-z0-9-]*$/, "keys are lowercase words, e.g. discount-create"),
     repo: z.string(),
     base: z.string().min(1).optional(),
+    title: z.string().trim().min(1).max(TITLE_MAX),
     goal: z.string().min(1),
     acceptance: z.array(AcceptanceItem).min(1),
     context: z.array(z.string()).default([]),
@@ -65,6 +67,7 @@ export const PlanDelta = z
         z
           .object({
             unit: UnitRef,
+            title: z.string().trim().min(1).max(TITLE_MAX).optional(),
             goal: z.string().min(1).optional(),
             acceptance: z.array(AcceptanceItem).min(1).optional(),
             context: z.array(z.string()).optional(),
@@ -141,6 +144,7 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
         type: "work",
         repoId: a.repo as RepoId,
         base: a.base ?? null,
+        title: a.title,
         goal: a.goal,
         ...normalizeAcceptance(a.acceptance),
         context: [...a.context, ...(because ? [because] : [])],
@@ -175,7 +179,7 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
     for (const m of delta.amend) {
       const u = unitRef(m.unit, "amend");
       if (u.state !== "waiting" || listAttempts(db, u.id).length) throw new PlanRejected(`amend: ${m.unit} has already started (${u.state})`);
-      amendUnit(db, u.id, { goal: m.goal, ...(m.acceptance ? normalizeAcceptance(m.acceptance) : {}), context: m.context });
+      amendUnit(db, u.id, { title: m.title, goal: m.goal, ...(m.acceptance ? normalizeAcceptance(m.acceptance) : {}), context: m.context });
       if (m.after) {
         db.prepare("DELETE FROM unit_deps WHERE unit_id = ?").run(u.id);
         after(u, m.unit, m.after);

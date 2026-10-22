@@ -275,6 +275,7 @@ export interface Unit {
   repoId: RepoId | null;
   // The branch the unit starts from and merges into; null means the repo's default branch.
   base: string | null;
+  title: string;
   goal: string;
   acceptance: string[];
   // For each acceptance line, the verification-guide page(s) that prove it, or null; always as long as `acceptance`.

@@ -14,7 +14,14 @@ beforeEach(() => {
   addProject(db, { id: project, name: "P", goal: "g", predicate: "x", repos: ["svc" as RepoId] });
 });
 
-const unit = (key: string, extra: Record<string, unknown> = {}) => ({ key, repo: "svc", goal: `do ${key}`, acceptance: [`${key} works`], ...extra });
+const unit = (key: string, extra: Record<string, unknown> = {}) => ({
+  key,
+  repo: "svc",
+  title: `do ${key}`,
+  goal: `do ${key}`,
+  acceptance: [`${key} works`],
+  ...extra,
+});
 
 const delta = (d: Record<string, unknown>): PlanDelta => PlanDelta.parse(d);
 
@@ -51,6 +58,8 @@ describe("PlanDelta", () => {
       return r.success ? null : r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
     };
     expect(why({ add: [{ key: "a", repo: "svc", goal: "g", acceptance: [] }] })).toMatch(/add\.0\.acceptance/);
+    expect(why({ add: [{ key: "a", repo: "svc", goal: "g", acceptance: ["x"] }] })).toMatch(/add\.0\.title/);
+    expect(why({ add: [unit("a", { title: "x".repeat(101) })] })).toMatch(/add\.0\.title/);
     expect(why({ surprise: 1 })).toMatch(/surprise/);
     expect(why({ add: [{ ...unit("a"), write: ["app/**"] }] })).toMatch(/write/);
     expect(why({ add: [{ ...unit("a"), verify: "make test" }] })).toMatch(/verify/);
@@ -70,7 +79,13 @@ describe("applyDelta", () => {
       [1, "waiting", "feature", "release-1"],
       [2, "waiting", "feature", null],
     ]);
-    expect(getUnitBySeq(db, project, 1)).toMatchObject({ goal: "do a", acceptance: ["a works"], context: ["why: checkout needs a total"], refs: ["svc#12"] });
+    expect(getUnitBySeq(db, project, 1)).toMatchObject({
+      title: "do a",
+      goal: "do a",
+      acceptance: ["a works"],
+      context: ["why: checkout needs a total"],
+      refs: ["svc#12"],
+    });
   });
 
   it("stores which guide page proves each acceptance line, from the object form or the text form", () => {
@@ -138,8 +153,8 @@ describe("applyDelta", () => {
 
   it("amends only units that have not started, and retries stuck ones with a note and a fresh attempt", () => {
     applyDelta(db, project, delta({ add: [unit("a"), unit("b")] }), null);
-    applyDelta(db, project, delta({ amend: [{ unit: "U1", goal: "sharper goal", acceptance: ["a sharper"] }] }), null);
-    expect(getUnitBySeq(db, project, 1)).toMatchObject({ goal: "sharper goal", acceptance: ["a sharper"] });
+    applyDelta(db, project, delta({ amend: [{ unit: "U1", title: "Sharper", goal: "sharper goal", acceptance: ["a sharper"] }] }), null);
+    expect(getUnitBySeq(db, project, 1)).toMatchObject({ title: "Sharper", goal: "sharper goal", acceptance: ["a sharper"] });
     const u2 = getUnitBySeq(db, project, 2);
     transitionUnit(db, u2.id, "stuck");
     applyDelta(db, project, delta({ retry: [{ unit: "U2", note: "split the migration out first" }] }), null);

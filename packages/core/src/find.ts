@@ -37,7 +37,7 @@ const unitHit = (u: Unit, text: string, meta?: string): FindHit => ({
   kind: "unit",
   ref: `${u.projectId}/U${u.seq}`,
   href: `/p/${u.projectId}/u/${u.seq}`,
-  title: u.goal,
+  title: u.title,
   meta: meta ?? `${u.type} · ${u.state}${u.mergedSha ? ` · merged ${u.mergedSha.slice(0, 7)}` : ""}`,
   text,
 });
@@ -76,7 +76,7 @@ export function find(db: Db, query: string): FindResult {
     }
   }
 
-  const goals = wordsClause("goal", words);
+  const goals = wordsClause("(title || ' ' || goal)", words);
   for (const r of db.prepare(`SELECT project_id, seq FROM units WHERE ${goals.sql} ORDER BY updated_at DESC LIMIT ${PER_KIND}`).all(...goals.args) as Row[]) {
     const u = listUnits(db, r.project_id as never).find((x) => x.seq === r.seq)!;
     if (isBuild(u)) addUnit(u, u.goal);

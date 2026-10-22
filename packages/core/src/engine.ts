@@ -212,7 +212,7 @@ export class Engine {
     const startable = new Set(r.ready.filter((u) => this.mayStart(project, u)).map((u) => u.id));
     for (const u of listUnits(this.db, project.id)) {
       if (!isBuild(u) || this.inflight.has(`unit:${u.id}`)) continue;
-      const label = `U${u.seq}: ${u.goal.slice(0, 80)}`;
+      const label = `U${u.seq}: ${u.title}`;
       const wake = u.state === "stuck" || u.state === "ready" ? pendingWake(this.db, u) : null;
       if (wake) {
         if (this.slotFree(project, resolveSetting(this.db, "role.lead.harness", at(u)).value))

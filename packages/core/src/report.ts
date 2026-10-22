@@ -32,10 +32,10 @@ export async function renderReport(ctx: { db: Db; boot: Bootstrap }, threadId: n
   const landed = work
     .filter((u) => u.state === "merged")
     .map((u) => {
-      return `- U${u.seq} ${u.goal} — merged \`${u.mergedSha?.slice(0, 10) ?? "?"}\` on ${u.repoId} · \`yagura trace ${u.mergedSha?.slice(0, 10) ?? `${projectId}`}\``;
+      return `- U${u.seq} ${u.title} — merged \`${u.mergedSha?.slice(0, 10) ?? "?"}\` on ${u.repoId} · \`yagura trace ${u.mergedSha?.slice(0, 10) ?? `${projectId}`}\``;
     });
-  const blocked = work.filter((u) => u.state === "stuck").map((u) => `- U${u.seq} ${u.goal}: ${blockedReason(db, u)}`);
-  const open = work.filter((u) => !["merged", "dropped", "stuck"].includes(u.state)).map((u) => `- U${u.seq} ${u.goal} (${u.state})`);
+  const blocked = work.filter((u) => u.state === "stuck").map((u) => `- U${u.seq} ${u.title}: ${blockedReason(db, u)}`);
+  const open = work.filter((u) => !["merged", "dropped", "stuck"].includes(u.state)).map((u) => `- U${u.seq} ${u.title} (${u.state})`);
 
   const run: string[] = [];
   for (const repo of projectRepos(db, projectId)) {

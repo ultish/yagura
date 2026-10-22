@@ -1,3 +1,4 @@
+import { TITLE_MAX, titleFromGoal } from "./title.js";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import Database from "better-sqlite3";
@@ -238,6 +239,7 @@ export interface NewUnit {
   type: UnitType;
   repoId: RepoId | null;
   base?: string | null;
+  title?: string;
   goal: string;
   acceptance: string[];
   proof?: (UnitProof | null)[];
@@ -273,8 +275,8 @@ export function addUnit(db: Db, u: NewUnit): Unit {
     const t = now();
     const result = db
       .prepare(
-        `INSERT INTO units (project_id, seq, type, repo_id, base, goal, acceptance_json, proof_json, context_json, playbook, tag, scaffold, timebox_seconds, max_attempts, refs_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO units (project_id, seq, type, repo_id, base, title, goal, acceptance_json, proof_json, context_json, playbook, tag, scaffold, timebox_seconds, max_attempts, refs_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         u.projectId,
@@ -282,6 +284,7 @@ export function addUnit(db: Db, u: NewUnit): Unit {
         u.type,
         u.repoId,
         u.base ?? null,
+        u.title?.trim() || titleFromGoal(u.goal),
         u.goal,
         JSON.stringify(u.acceptance),
         JSON.stringify(proof),
@@ -318,6 +321,7 @@ function toUnit(r: Record<string, unknown>, after: UnitId[]): Unit {
     state: r.state as UnitState,
     repoId: (r.repo_id as RepoId | null) ?? null,
     base: (r.base as string | null) ?? null,
+    title: r.title as string,
     goal: r.goal as string,
     acceptance: JSON.parse(r.acceptance_json as string),
     proof: parseProof(r),
@@ -708,9 +712,14 @@ export function setUnitProof(db: Db, unitId: UnitId, proof: (UnitProof | null)[]
   db.prepare("UPDATE units SET proof_json = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(alignedProof(unit.acceptance, proof)), now(), unitId);
 }
 
-export function amendUnit(db: Db, unitId: UnitId, patch: { goal?: string; acceptance?: string[]; proof?: (UnitProof | null)[]; context?: string[] }): void {
+export function amendUnit(
+  db: Db,
+  unitId: UnitId,
+  patch: { title?: string; goal?: string; acceptance?: string[]; proof?: (UnitProof | null)[]; context?: string[] },
+): void {
   const sets: string[] = [];
   const values: unknown[] = [];
+  if (patch.title !== undefined) (sets.push("title = ?"), values.push(patch.title));
   if (patch.goal !== undefined) (sets.push("goal = ?"), values.push(patch.goal));
   if (patch.acceptance !== undefined) {
     sets.push("acceptance_json = ?", "proof_json = ?");
@@ -728,6 +737,18 @@ export function setProjectRefs(db: Db, projectId: ProjectId, refs: string[]): vo
 
 export function setMergedSha(db: Db, unitId: UnitId, sha: string): void {
   db.prepare("UPDATE units SET merged_sha = ?, updated_at = ? WHERE id = ?").run(sha, now(), unitId);
+}
+
+// A title is only a label, so the developer may change it in any state; the goal the worker was given is never touched.
+export function renameUnit(db: Db, unitId: UnitId, title: string): Unit {
+  const unit = getUnit(db, unitId);
+  const next = title.trim();
+  if (!next) throw new Error("a title cannot be empty");
+  if (next.length > TITLE_MAX) throw new Error(`a title is at most ${TITLE_MAX} characters; the goal is the place for detail`);
+  if (next === unit.title) return unit;
+  amendUnit(db, unitId, { title: next });
+  recordEvent(db, "unit.renamed", { projectId: unit.projectId, unitId }, { from: unit.title, to: next });
+  return getUnit(db, unitId);
 }
 
 // Asks for a tag on the commit that merged the unit. Allowed on a unit that has not merged, or one that has merged and not yet been tagged.

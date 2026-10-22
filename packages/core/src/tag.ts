@@ -55,7 +55,7 @@ export async function pushUnitTag(ctx: RunContext, unitId: Unit["id"]): Promise<
   const at = { projectId: unit.projectId, repoId: repo.id };
   const { requestedBy, approvedBy } = approvalsOf(db, unit);
   const message = [
-    `${project.id}/U${unit.seq}: ${commitSubject(unit.goal)}`,
+    `${project.id}/U${unit.seq}: ${commitSubject(unit.title)}`,
     "",
     `Tagged by yagura after the unit merged as ${sha.slice(0, 10)}.`,
     ...(requestedBy ? [`Requested-by: ${requestedBy}`] : []),

@@ -70,7 +70,7 @@ beforeEach(async () => {
   setProjectEnvironment(db, project, "local" as EnvironmentId);
   setMergePolicy(db, project, "auto");
   process.env.FAKE_MODE = "engine";
-  const unit = (key: string, repo: string, after: string[] = []) => ({ key, repo, goal: `write ${key}`, acceptance: ["a"], after });
+  const unit = (key: string, repo: string, after: string[] = []) => ({ key, repo, title: `write ${key}`, goal: `write ${key}`, acceptance: ["a"], after });
   applyDelta(db, project, PlanDelta.parse({ add: [unit("lib", "lib"), unit("app", "app", ["lib"])] }), null);
 });
 

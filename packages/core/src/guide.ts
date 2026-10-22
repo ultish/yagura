@@ -43,6 +43,7 @@ export function createGuideUnit(db: Db, input: { projectId: ProjectId; repoId: R
     projectId,
     type: "work",
     repoId: getRepo(db, repoId).id,
+    title: `Create ${repoId}'s verification guide`,
     goal: `Create ${repoId}'s verification guide`,
     acceptance: ACCEPTANCE,
     context: [

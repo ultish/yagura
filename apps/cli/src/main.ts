@@ -41,6 +41,7 @@ import {
   listGates,
   setAndon,
   setMergePolicy,
+  renameUnit,
   setUnitTag,
   setThreadState,
   registerRepo,
@@ -139,7 +140,7 @@ const USAGE = `yagura — agent orchestration
   yagura repo add <git URL> [--id <id>] [--forge gh|glab | --land push]   mirror an existing repo; github.com lands through pull requests, hosts in forge.glab_hosts through merge requests; any other remote needs --forge or --land push
   yagura project new <id> --goal <text> (--predicate <text> | --standing) --repo <id>... [--name <text>] [--issue <ref>...]
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
-  yagura unit add <project> --repo <id> --goal <text> --accept <text>...
+  yagura unit add <project> --repo <id> [--title <text>] --goal <text> --accept <text>...
                   [--context <text>...] [--base <branch>] [--after <unit#>...] [--playbook <name>] [--timebox <seconds>] [--issue <ref>...] [--tag <tag>]
   yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab merge through pull/merge requests (forge.repo names the repo on the forge)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
@@ -189,6 +190,7 @@ const USAGE = `yagura — agent orchestration
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
   yagura unit requeue|drop <project> <unit#> [--note <text>]   requeue puts a stuck unit back to waiting; drop gives it up
+  yagura unit title <project> <unit#> <text>   rename a unit (the goal the worker has is unchanged)
   yagura unit tag <project> <unit#> <tag>   yagura tags the commit that merged the unit and pushes the tag to the forge (a worker cannot push a tag)
   yagura unit wake <project> <unit#> --note <text>          wake a stuck or ready unit's lead now, with your note
   yagura run <project> <unit#>           run one worker round of a unit (debugging; the daemon does this)
@@ -506,6 +508,7 @@ async function main() {
     case "unit": {
       const { positionals, values } = args({
         repo: { type: "string" },
+        title: { type: "string" },
         goal: { type: "string" },
         accept: { type: "string", multiple: true },
         tag: { type: "string" },
@@ -523,6 +526,15 @@ async function main() {
         const refused = askLead(db, u, values.note ?? "Look at this unit now.");
         if (refused) fail(refused);
         console.log(`U${u.seq}'s unit lead is woken; it reads your note first`);
+        return;
+      }
+      if (positionals[0] === "title" && projectId && positionals[2] && positionals[3]) {
+        const u = getUnitBySeq(db, projectId, Number(positionals[2]));
+        try {
+          console.log(`U${u.seq} is now called: ${renameUnit(db, u.id, positionals[3]).title}`);
+        } catch (e) {
+          fail(e instanceof Error ? e.message : String(e));
+        }
         return;
       }
       if (positionals[0] === "tag" && projectId && positionals[2] && positionals[3]) {
@@ -550,6 +562,7 @@ async function main() {
         type: "work",
         repoId: values.repo as RepoId,
         base: (values.base as string | undefined) ?? null,
+        title: values.title as string | undefined,
         goal: fields.goal,
         acceptance: fields.acceptance,
         context: many(values.context),
@@ -560,14 +573,14 @@ async function main() {
         timeboxSeconds: values.timebox ? Number(values.timebox) : resolveSetting(db, "timebox.work_seconds", { projectId }).value,
         maxAttempts: resolveSetting(db, "max_attempts", { projectId }).value,
       });
-      console.log(`U${u.seq} waiting: ${u.goal}`);
+      console.log(`U${u.seq} waiting: ${u.title}`);
       return;
     }
     case "run": {
       const [projectId, seq] = rest;
       if (!projectId || !seq) fail(USAGE);
       const unit = getUnitBySeq(db, projectId as ProjectId, Number(seq));
-      console.log(`running ${projectId}/U${unit.seq}: ${unit.goal}`);
+      console.log(`running ${projectId}/U${unit.seq}: ${unit.title}`);
       await reapLeases(db, boot);
       if (unit.state === "waiting") transitionUnit(db, unit.id, "building", { round: { kind: "first" } });
       await runWorkerRound(agentCtx(), unit.id);
@@ -614,7 +627,7 @@ async function main() {
       if (byRef.projects.length) console.log(`${target} is referenced by project(s): ${byRef.projects.map((p) => p.id).join(", ")}`);
       for (const unit of units) {
         const t = traceUnit(db, boot, unit);
-        console.log(`\n${t.project.id}/U${unit.seq} [${unit.state}] ${unit.goal}`);
+        console.log(`\n${t.project.id}/U${unit.seq} [${unit.state}] ${unit.title}`);
         if (unit.mergedSha) console.log(`  merged as ${unit.mergedSha}`);
         if (unit.refs.length || t.project.refs.length) console.log(`  refs: ${[...new Set([...t.project.refs, ...unit.refs])].join(", ")}`);
         for (const a of t.attempts)
@@ -887,7 +900,7 @@ async function main() {
         const units = listUnits(db, project.id);
         for (const u of units.filter(isBuild)) {
           const own = costs.get(u.id) ?? 0;
-          console.log(`  U${u.seq}  ${u.state.padEnd(10)} ${u.type.padEnd(6)} ${`$${own.toFixed(2)}`.padStart(6)}  ${u.goal}`);
+          console.log(`  U${u.seq}  ${u.state.padEnd(10)} ${u.type.padEnd(6)} ${`$${own.toFixed(2)}`.padStart(6)}  ${u.title}`);
         }
         const agents = db
           .prepare(
@@ -912,7 +925,7 @@ async function main() {
       }
       const u = getUnitBySeq(db, project.id, Number(seq));
       console.log(
-        `U${u.seq} [${u.state}] ${u.goal}\n  accept: ${u.acceptance.map((a, i) => `${a}${u.proof[i] ? ` (proof: ${u.proof[i]!.isNew ? "new " : ""}${u.proof[i]!.pages.join(", ")})` : ""}`).join(" / ")}${u.after.length ? `\n  after: ${u.after.length} unit(s)` : ""}`,
+        `U${u.seq} [${u.state}] ${u.title}\n  goal: ${u.goal}\n  accept: ${u.acceptance.map((a, i) => `${a}${u.proof[i] ? ` (proof: ${u.proof[i]!.isNew ? "new " : ""}${u.proof[i]!.pages.join(", ")})` : ""}`).join(" / ")}${u.after.length ? `\n  after: ${u.after.length} unit(s)` : ""}`,
       );
       if (u.notes.length) console.log(`  notes:\n${u.notes.map((n) => `    - ${n}`).join("\n")}`);
       const moves = db.prepare("SELECT json_extract(data_json, '$.to') AS to_ FROM events WHERE type = 'unit.state' AND unit_id = ? ORDER BY id").all(u.id) as {

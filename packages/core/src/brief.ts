@@ -142,7 +142,8 @@ ${recordInstructions(
     {
       "key": "discount-on-create",
       "repo": "${p.repos[0]?.id ?? "repo-id"}",
-      "goal": "one sentence a stranger could execute",
+      "title": "a short name a person scans in a list, under 100 characters",
+      "goal": "what must be true when the unit is done, as detailed as a stranger needs to execute it",
       "acceptance": [{ "outcome": "checkable outcome", "proof": "page-name" }, "another"],
       "context": ["why this comes now, decisions already made, files or docs to read first"],
       "playbook": "feature",

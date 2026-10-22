@@ -64,6 +64,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
     projectId,
     type: "plan",
     repoId: null,
+    title: `Planning round ${drainId}`,
     goal: `Planning round ${drainId}`,
     acceptance: ["a valid plan delta"],
     timeboxSeconds: setting("timebox.plan_seconds"),

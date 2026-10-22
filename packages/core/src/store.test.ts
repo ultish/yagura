@@ -26,6 +26,7 @@ import {
   getUnit,
   listUnits,
   openStore,
+  renameUnit,
   schemaVersion,
   transitionUnit,
   updateAttempt,
@@ -57,6 +58,29 @@ const newUnit = () =>
   });
 
 describe("store", () => {
+  it("renames a unit in any state, records it, and leaves the goal alone", () => {
+    const u = newUnit();
+    expect(u.title).toBe("Implement apply_discount");
+    const renamed = renameUnit(db, u.id, "  Apply discount codes  ");
+    expect(renamed).toMatchObject({ title: "Apply discount codes", goal: "Implement apply_discount" });
+    transitionUnit(db, u.id, "building", { round: { kind: "first" } });
+    expect(renameUnit(db, u.id, "Discounts").title).toBe("Discounts");
+    const events = db.prepare("SELECT data_json FROM events WHERE type = 'unit.renamed' AND unit_id = ? ORDER BY id").all(u.id) as { data_json: string }[];
+    expect(events.map((e) => JSON.parse(e.data_json))).toEqual([
+      { from: "Implement apply_discount", to: "Apply discount codes" },
+      { from: "Apply discount codes", to: "Discounts" },
+    ]);
+    expect(renameUnit(db, u.id, "Discounts").title).toBe("Discounts");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'unit.renamed'").get()).toEqual({ n: 2 });
+  });
+
+  it("refuses an empty title and one past the length a title may have", () => {
+    const u = newUnit();
+    expect(() => renameUnit(db, u.id, "   ")).toThrow(/cannot be empty/);
+    expect(() => renameUnit(db, u.id, "x".repeat(101))).toThrow(/at most 100 characters/);
+    expect(getUnit(db, u.id).title).toBe("Implement apply_discount");
+  });
+
   it("refuses a proof list that is not as long as the acceptance list", () => {
     expect(() =>
       addUnit(db, {
@@ -124,6 +148,34 @@ describe("store", () => {
     })();
     expect(Date.now() - started).toBeGreaterThan(400);
     expect(mine.prepare("SELECT id FROM repos ORDER BY id").all()).toEqual([{ id: "r" }, { id: "z" }]);
+  });
+
+  it("names units that predate titles by their goal's first sentence, clipped", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "yagura-db-")), "yagura.db");
+    const old = openStore(path);
+    addRepo(old, { id: "r", url: "file:///r", defaultBranch: "main" });
+    addProject(old, { id: "p", name: "p", goal: "g", predicate: "x", repos: ["r" as RepoId] });
+    const long = `Sync everything from upstream ${"and keep every local change ".repeat(6)}done.`;
+    addUnit(old, { projectId: "p" as ProjectId, type: "work", repoId: "r" as RepoId, goal: long, acceptance: ["a"], timeboxSeconds: 60, maxAttempts: 1 });
+    addUnit(old, {
+      projectId: "p" as ProjectId,
+      type: "work",
+      repoId: "r" as RepoId,
+      goal: "Short goal",
+      acceptance: ["a"],
+      timeboxSeconds: 60,
+      maxAttempts: 1,
+    });
+    old.exec("ALTER TABLE units DROP COLUMN title");
+    old.prepare("UPDATE schema_version SET version = 5").run();
+    old.close();
+    const upgraded = openStore(path);
+    const titles = (upgraded.prepare("SELECT title FROM units ORDER BY seq").all() as { title: string }[]).map((r) => r.title);
+    const stem = titles[0]!.slice(0, -1);
+    expect(titles[0]!.length).toBeLessThanOrEqual(80);
+    expect(titles[0]!.endsWith("…")).toBe(true);
+    expect(long.startsWith(stem) && long[stem.length] === " ").toBe(true);
+    expect(titles[1]).toBe("Short goal");
   });
 
   it("brings a fresh database to the latest schema version", () => {

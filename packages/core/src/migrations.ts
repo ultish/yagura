@@ -1,4 +1,5 @@
 import type BetterSqlite3 from "better-sqlite3";
+import { titleFromGoal } from "./title.js";
 
 // A migration that rebuilds a table (SQLite cannot change a CHECK in place) runs with foreign keys off, then checks them.
 export interface Migration {
@@ -17,6 +18,20 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 4, sql: "ALTER TABLE projects ADD COLUMN standing INTEGER NOT NULL DEFAULT 0 CHECK (standing IN (0, 1));" },
   // A release tag yagura puts on the commit that merged the unit and pushes to the forge itself; a worker's push is limited to its own branch.
   { version: 5, sql: "ALTER TABLE units ADD COLUMN tag TEXT; ALTER TABLE units ADD COLUMN tag_pushed_at TEXT;" },
+  // A short human-readable name for a unit, apart from its goal, which may be as long and detailed as the work needs. Existing units get a clipped goal.
+  {
+    version: 6,
+    sql: "ALTER TABLE units ADD COLUMN title TEXT NOT NULL DEFAULT ''; UPDATE units SET title = CASE WHEN length(goal) <= 80 THEN goal ELSE substr(goal, 1, 79) || '…' END;",
+  },
+  // Version 6 cut a long goal at 80 characters, mid-word; cut at a word instead.
+  {
+    version: 7,
+    rebuild: (db) => {
+      const rows = db.prepare("SELECT id, goal FROM units WHERE length(title) = 80 AND title LIKE '%…'").all() as { id: number; goal: string }[];
+      const set = db.prepare("UPDATE units SET title = ? WHERE id = ?");
+      for (const r of rows) set.run(titleFromGoal(r.goal), r.id);
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

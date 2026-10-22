@@ -408,7 +408,7 @@ describe("watchman turns", () => {
     expect(buildWatchmanBrief(ctx, t.id, listMessages(db, t.id).at(-1)!).text).toContain("- environment templates: box-shape (asks FLAG_URL)");
     expect(propose({ summary: "s", environments: [{ id: "box2", template: "box-shape" }] })).toThrow(/needs a value for FLAG_URL/);
     expect(propose({ summary: "s", projects: [{ id: "p2", goal: "g", predicate: "p", repos: ["box-repo"] }], environments: [{ ...box, id: "xx" }] })).toThrow(
-      /several environments exist \(box, xx\); name one/,
+      /environment is empty and several exist \(box, xx\); ask the developer which one to set/,
     );
   });
 

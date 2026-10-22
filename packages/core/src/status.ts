@@ -27,7 +27,7 @@ export function generateStatus(db: Db, boot: Bootstrap, projectId: ProjectId, si
       .filter((x) => x.unitId === u.id)
       .map((x) => `U${bySeq.get(x.dependsOn)}`)
       .join(", ");
-    return `| U${u.seq} | ${u.type} | ${u.state}${waiting.has(u.id) ? ` (${waiting.get(u.id)})` : ""} | ${u.repoId ?? "-"} | ${cell(u.goal)} | ${d || "-"} | ${attempts.length}/${u.maxAttempts} | ${outcome} |`;
+    return `| U${u.seq} | ${u.type} | ${u.state}${waiting.has(u.id) ? ` (${waiting.get(u.id)})` : ""} | ${u.repoId ?? "-"} | ${cell(u.title)} | ${d || "-"} | ${attempts.length}/${u.maxAttempts} | ${outcome} |`;
   });
 
   const notes = units.filter((u) => u.notes.length).map((u) => `- U${u.seq}: ${u.notes.map(cell).join(" / ")}`);

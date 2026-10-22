@@ -251,6 +251,13 @@ describe("daemon API", () => {
     expect((await post("/api/repos/testbed/options", { url: "  " })).status).toBe(400);
   });
 
+  it("renames a unit and refuses an empty or over-long title", async () => {
+    expect(await (await post("/api/projects/orders/units/1/title", { title: " Create orders " })).json()).toMatchObject({ seq: 1, title: "Create orders" });
+    expect((await post("/api/projects/orders/units/1/title", { title: "" })).status).toBe(400);
+    expect((await post("/api/projects/orders/units/1/title", { title: "x".repeat(101) })).status).toBe(400);
+    expect((await post("/api/projects/orders/units/1/title", {})).status).toBe(400);
+  });
+
   it("asks for a release tag on a unit, and refuses a name that is not one", async () => {
     expect(await (await post("/api/projects/orders/units/1/tag", { tag: "v1.2.0" })).json()).toMatchObject({ seq: 1, tag: "v1.2.0", tagPushedAt: null });
     expect((await post("/api/projects/orders/units/1/tag", { tag: "-f" })).status).toBe(400);
@@ -389,7 +396,7 @@ describe("daemon API", () => {
     );
     db.prepare("INSERT INTO leases (environment_id, attempt_id, state, requested_at) VALUES ('dev', ?, 'queued', 't3')").run(attemptId);
     db.prepare("UPDATE projects SET environment_id = 'dev' WHERE id = 'orders'").run();
-    const unit = { projectId: "orders", seq: 1, type: "work", goal: "Implement create" };
+    const unit = { projectId: "orders", seq: 1, type: "work", title: "Implement create" };
     expect(await (await post("/api/environments/dev", { name: "Dev box", capacity: 3 })).json()).toMatchObject({
       environment: { name: "Dev box", capacity: 3 },
       active: [{ attemptId, slot: "slot-1", since: "t2", unit }],

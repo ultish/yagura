@@ -228,7 +228,15 @@ async function engine(role) {
   if (role === "planner") {
     const workRows = [...brief.matchAll(/^\| U\d+ \| work \| (\w+)/gm)].map((m) => m[1]);
     const repo = /^## CODE[^\n]*\n- ([\w-]+):/m.exec(brief)[1];
-    const unit = (key, extra = {}) => ({ key, repo, goal: `write ${key}`, acceptance: [`${key} file exists`], playbook: "feature", ...extra });
+    const unit = (key, extra = {}) => ({
+      key,
+      repo,
+      title: `write ${key}`,
+      goal: `write ${key}`,
+      acceptance: [`${key} file exists`],
+      playbook: "feature",
+      ...extra,
+    });
     const disagreed = [...brief.matchAll(/^- D(\d+) on U\d+/gm)].map((m) => Number(m[1]));
     const delta = disagreed.length
       ? { add: disagreed.map((n) => ({ ...unit(`fix-d${n}`), disagreement: n })), summary: "fix forward" }
@@ -360,6 +368,7 @@ function watchman(sessionId) {
       const unit = {
         key: `issue-${n}`,
         repo,
+        title: `write issue-${n}.txt`,
         goal: `write issue-${n}.txt`,
         acceptance: [`issue-${n}.txt exists`],
       };

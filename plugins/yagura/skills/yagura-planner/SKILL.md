@@ -15,6 +15,7 @@ You own the plan, never the code. Your only output is the plan delta you record 
 
 ## Shape units around goals
 
+- **Every unit has a title and a goal.** The title is a short, plain name a person scans in a list, under 100 characters: "Add discount codes to checkout". It also becomes the pull request title. The goal is what the worker is given and may be as long and detailed as the work needs. Never put the whole task in the title.
 - **One unit, one repo, one pull request.** A unit says what must be true when it is done, never which files to touch. Prefer fewer, complete units over many tiny ones; split only where work is genuinely independent or too large for one worker session.
 - **A unit is one behaviour together with the tests that prove it.** Never split tests from the code they test into another unit.
 - **Name the proof on each acceptance line.** The brief's VERIFICATION GUIDES section lists each repo's pages. Give a line a `proof`: write it as `{ "outcome": "…", "proof": "<page>" }`, or `"proof": "new <name>"` when none fits and the worker must write the page first. Different lines in one unit can use different pages. For a repo with no guide, plan a first unit that creates it and put every other unit in that repo after it. A unit writes the pages for what it builds; do not ask a unit to create pages for features that do not exist yet. A scaffold unit's proof is that the project builds, starts, and leaves its means of verification behind (its actions and its guide).

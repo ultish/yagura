@@ -117,7 +117,7 @@ export async function checkRetroWatch(ctx: { db: Db; boot: Bootstrap }, w: Retro
   }
   const fix = queueTrunkFix(db, unit, w.sha, failing);
   settle(db, unit, "failed", `trunk CI failed on ${w.sha.slice(0, 10)}: ${failing.map((r) => r.name).join(", ") || "a failing check"}`, fix.id);
-  return `U${unit.seq}: trunk CI failed again; queued U${fix.seq}: ${fix.goal}`;
+  return `U${unit.seq}: trunk CI failed again; queued U${fix.seq}: ${fix.title}`;
 }
 
 // A broken trunk becomes ordinary work, judged and merged like any unit: a fix, or a revert when the project allows it.
@@ -130,9 +130,10 @@ function queueTrunkFix(db: Db, broke: Unit, sha: Sha, failing: { name: string; l
     type: "work",
     repoId: broke.repoId,
     base: broke.base,
+    title: revert ? `Revert U${broke.seq} on trunk` : `Fix trunk after U${broke.seq}`,
     goal: revert
       ? `Revert U${broke.seq} (${sha.slice(0, 10)}) on trunk: ${jobs} fails after it landed`
-      : `Fix trunk: ${jobs} fails on ${sha.slice(0, 10)} after U${broke.seq} landed (${broke.goal})`,
+      : `Fix trunk: ${jobs} fails on ${sha.slice(0, 10)} after U${broke.seq} landed (${broke.title})`,
     acceptance: revert
       ? [`trunk no longer contains U${broke.seq}'s change: \`git revert --no-edit ${sha}\` and nothing else`, `${jobs} passes`]
       : [`${jobs} passes on trunk`, ...broke.acceptance],

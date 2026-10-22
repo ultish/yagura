@@ -10,8 +10,8 @@ import { getProject, getUnit, listAttempts, listUnits, type Db } from "./store.j
 
 const SUBJECT_MAX = 72;
 
-export function commitSubject(goal: string): string {
-  const firstSentence = goal
+export function commitSubject(text: string): string {
+  const firstSentence = text
     .split(/(?<=[.!?])\s/)[0]!
     .replace(/\s+/g, " ")
     .trim();
@@ -151,7 +151,7 @@ export function mergeMessage(db: Db, unit: Unit, pr: number | null, url: string 
   const link = resolveSetting(db, "yagura.link_in_commits", { projectId: project.id, repoId: unit.repoId }).value ? unitLink(url, project, unit) : null;
   const { requestedBy, approvedBy } = approvalsOf(db, unit);
   return {
-    subject: `${project.id}/U${unit.seq}: ${commitSubject(unit.goal)}${pr ? ` (#${pr})` : ""}`,
+    subject: `${project.id}/U${unit.seq}: ${commitSubject(unit.title)}${pr ? ` (#${pr})` : ""}`,
     body: [
       `Workers: ${workers.map((a) => `A${a.agentNo}${a.model ? ` (${a.model})` : ""}`).join(", ") || "none"}`,
       ...(judge && approval?.verdict === "approve"

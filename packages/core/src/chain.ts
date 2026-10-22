@@ -6,7 +6,7 @@ export type EdgeTone = "pine" | "amber" | "bell" | "muted";
 // One `after` link, seen from one unit: it comes after `other` (`needs`), or `other` comes after it (`feeds`).
 export interface DepEdge {
   direction: "needs" | "feeds";
-  other: { id: UnitId; seq: number; repoId: string | null; goal: string; state: UnitState };
+  other: { id: UnitId; seq: number; repoId: string | null; title: string; state: UnitState };
   state: { text: string; tone: EdgeTone };
 }
 
@@ -30,7 +30,7 @@ export function dependencyEdges(db: Db, unit: Unit): DepEdge[] {
     const other = d.unitId === unit.id ? earlier : later;
     edges.push({
       direction: d.unitId === unit.id ? "needs" : "feeds",
-      other: { id: other.id, seq: other.seq, repoId: other.repoId, goal: other.goal, state: other.state },
+      other: { id: other.id, seq: other.seq, repoId: other.repoId, title: other.title, state: other.state },
       state: edgeState(db, later, earlier),
     });
   }

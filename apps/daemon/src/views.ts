@@ -95,7 +95,7 @@ export type BellItem =
       kind: "gate";
       id: string;
       projectId: string;
-      unit: { seq: number; goal: string } | null;
+      unit: { seq: number; title: string } | null;
       gate: { id: number; kind: string; question: string; options: string[]; defaultOption: string | null; deadline: string | null };
       at: string;
     }
@@ -103,7 +103,7 @@ export type BellItem =
       kind: "blocked";
       id: string;
       projectId: string;
-      unit: { seq: number; goal: string };
+      unit: { seq: number; title: string };
       reason: string | null;
       attempts: number;
       maxAttempts: number;
@@ -119,7 +119,7 @@ export function bell(db: Db): BellItem[] {
       kind: "gate",
       id: `gate:${g.id}`,
       projectId: g.projectId,
-      unit: unit ? { seq: unit.seq, goal: unit.goal } : null,
+      unit: unit ? { seq: unit.seq, title: unit.title } : null,
       gate: { id: g.id, kind: g.kind, question: g.question, options: g.options, defaultOption: g.defaultOption, deadline: gateDeadline(db, g) },
       at: g.createdAt,
     });
@@ -130,7 +130,7 @@ export function bell(db: Db): BellItem[] {
       kind: "blocked",
       id: `blocked:${unit.id}`,
       projectId: unit.projectId,
-      unit: { seq: unit.seq, goal: unit.goal },
+      unit: { seq: unit.seq, title: unit.title },
       reason: blockedReason(db, unit.id),
       attempts: listAttempts(db, unit.id).length,
       maxAttempts: unit.maxAttempts,
@@ -196,10 +196,10 @@ export async function repoView(db: Db, boot: Bootstrap, repoId: RepoId) {
     .all(repoId) as { id: string; state: string }[];
   const units = db
     .prepare(
-      `SELECT project_id, seq, goal, state, merged_sha, updated_at FROM units WHERE repo_id = ? AND type = 'work' AND state IN ('ready', 'merged') ORDER BY updated_at DESC`,
+      `SELECT project_id, seq, title, state, merged_sha, updated_at FROM units WHERE repo_id = ? AND type = 'work' AND state IN ('ready', 'merged') ORDER BY updated_at DESC`,
     )
     .all(repoId) as Row[];
-  const ref = (u: Row) => ({ projectId: u.project_id as string, seq: u.seq as number, goal: u.goal as string, at: u.updated_at as string });
+  const ref = (u: Row) => ({ projectId: u.project_id as string, seq: u.seq as number, title: u.title as string, at: u.updated_at as string });
   const landed = units.filter((u) => u.state === "merged");
   return {
     repo,
@@ -217,7 +217,7 @@ export function environmentView(db: Db, id: EnvironmentId) {
   const env = getEnvironment(db, id);
   const leases = db
     .prepare(
-      `SELECT l.state, l.slot, l.attempt_id, l.requested_at, l.granted_at, a.agent_no, u.project_id, u.seq, u.type, u.goal
+      `SELECT l.state, l.slot, l.attempt_id, l.requested_at, l.granted_at, a.agent_no, u.project_id, u.seq, u.type, u.title
        FROM leases l JOIN attempts a ON a.id = l.attempt_id JOIN units u ON u.id = a.unit_id
        WHERE l.environment_id = ? AND l.state IN ('active', 'queued') ORDER BY l.id`,
     )
@@ -225,7 +225,7 @@ export function environmentView(db: Db, id: EnvironmentId) {
   const holder = (l: Row) => ({
     attemptId: l.attempt_id as number,
     agentNo: l.agent_no as number,
-    unit: { projectId: l.project_id as string, seq: l.seq as number, type: l.type as string, goal: l.goal as string },
+    unit: { projectId: l.project_id as string, seq: l.seq as number, type: l.type as string, title: l.title as string },
   });
   return {
     environment: env,
@@ -243,7 +243,7 @@ export function keptSlots(db: Db, where: { environmentId?: EnvironmentId; attemp
   return (
     db
       .prepare(
-        `SELECT l.id, l.slot, l.vars_json, l.kept_until, l.kept_reason, l.attempt_id, a.agent_no, u.project_id, u.seq, u.type, u.goal
+        `SELECT l.id, l.slot, l.vars_json, l.kept_until, l.kept_reason, l.attempt_id, a.agent_no, u.project_id, u.seq, u.type, u.title
          FROM leases l JOIN attempts a ON a.id = l.attempt_id JOIN units u ON u.id = a.unit_id
          WHERE l.kept_until IS NOT NULL AND (? IS NULL OR l.environment_id = ?) AND (? IS NULL OR l.attempt_id = ?) ORDER BY l.id`,
       )
@@ -254,7 +254,7 @@ export function keptSlots(db: Db, where: { environmentId?: EnvironmentId; attemp
       leaseId: l.id as number,
       attemptId: l.attempt_id as number,
       agentNo: l.agent_no as number,
-      unit: { projectId: l.project_id as string, seq: l.seq as number, type: l.type as string, goal: l.goal as string },
+      unit: { projectId: l.project_id as string, seq: l.seq as number, type: l.type as string, title: l.title as string },
       until: l.kept_until as string,
       reason: (l.kept_reason as string) ?? "",
       namespace: vars.YAGURA_NAMESPACE ?? null,
@@ -301,7 +301,7 @@ export function capCounts(db: Db) {
 export function resolvedGates(db: Db) {
   return recentlyResolvedGates(db).map((g) => {
     const unit = g.unitId ? getUnit(db, g.unitId) : null;
-    return { ...g, unit: unit ? { seq: unit.seq, goal: unit.goal } : null };
+    return { ...g, unit: unit ? { seq: unit.seq, title: unit.title } : null };
   });
 }
 

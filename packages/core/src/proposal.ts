@@ -82,7 +82,7 @@ function defaultEnvironment(db: Db, proposed: string[]): string {
   const envs = [...(db.prepare("SELECT id FROM environments ORDER BY id").all() as { id: string }[]).map((e) => e.id), ...proposed];
   if (envs.length === 1) return envs[0]!;
   if (envs.length === 0) return DEFAULT_ENVIRONMENT;
-  throw new ProposalInvalid(`several environments exist (${envs.join(", ")}); name one`);
+  throw new ProposalInvalid(`environment is empty and several exist (${envs.join(", ")}); ask the developer which one to set`);
 }
 
 function draftOf(db: Db, e: ProposedEnvironment): EnvironmentDraft {
@@ -360,8 +360,8 @@ export function describeProposal(body: ProposalBody): string {
       p.references.length ? `references ${p.references.join(", ")}` : "",
     ];
     lines.push(`- project ${p.id}: ${p.goal}`, `  done when: ${p.predicate}`, `  ${facts.filter(Boolean).join(" · ")}`);
-    for (const u of p.units) lines.push(`  - unit ${u.key}: ${u.goal}`);
+    for (const u of p.units) lines.push(`  - unit ${u.key}: ${u.title}`);
   }
-  for (const a of body.amend) for (const u of a.units) lines.push(`- ${a.project} + unit ${u.key}: ${u.goal}`);
+  for (const a of body.amend) for (const u of a.units) lines.push(`- ${a.project} + unit ${u.key}: ${u.title}`);
   return lines.join("\n");
 }

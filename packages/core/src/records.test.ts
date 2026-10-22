@@ -172,7 +172,7 @@ describe("agent records", () => {
   it("checks a plan the way applying it would, while the planner can still fix it, and leaves nothing behind", async () => {
     const planner = session(unitOf("plan"), "planner");
     const before = (db.prepare("SELECT COUNT(*) AS n FROM units").get() as { n: number }).n;
-    const unitIn = (repo: string) => ({ key: "a", repo, goal: "g", acceptance: ["works"], playbook: "feature" });
+    const unitIn = (repo: string) => ({ key: "a", repo, title: "t", goal: "g", acceptance: ["works"], playbook: "feature" });
     const refused = await planner.call("plan", "--json", JSON.stringify({ add: [unitIn("elsewhere")] }));
     expect(refused.code).toBe(1);
     expect(refused.output).toMatch(/^yagura plan was not recorded: .*elsewhere/);
