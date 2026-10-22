@@ -485,7 +485,7 @@ export function Agent({ attemptId }: { attemptId: number }) {
         </div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 16, flexWrap: "wrap" }}>
           <h1 className="serif" style={{ margin: 0, fontSize: 28, fontWeight: 600, flex: "1 1 480px", minWidth: 0, lineHeight: 1.3 }}>
-            <Inline text={u.goal} />
+            <Inline text={u.title} />
           </h1>
           {a.state === "running" && !stopping && (
             <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
@@ -712,7 +712,7 @@ export function UnitAgent({ projectId, seq, n }: { projectId: string; seq: numbe
     return (
       <main style={{ padding: 36 }}>
         <h1 className="serif">
-          U{seq}: <Inline text={unit.goal} />
+          U{seq}: <Inline text={unit.title} />
         </h1>
         <p className="muted">No agent has run for this unit yet ({unit.state}).</p>
         <Link to={`/p/${projectId}`}>Back to {projectId}</Link>

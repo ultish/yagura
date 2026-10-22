@@ -380,7 +380,7 @@ describe("the bell outside the page", () => {
     kind: "gate",
     id: "gate:2",
     projectId: "demo",
-    unit: { seq: 2, goal: "write app" },
+    unit: { seq: 2, title: "write app" },
     gate: { id: 2, kind: "land", question: "U2 is verified. Land it on app?", options: ["land", "hold"], defaultOption: "hold", deadline: null },
     at: "2026-10-03T09:00:00Z",
   };
@@ -388,7 +388,7 @@ describe("the bell outside the page", () => {
     kind: "blocked",
     id: "blocked:3",
     projectId: "demo",
-    unit: { seq: 3, goal: "write docs" },
+    unit: { seq: 3, title: "write docs" },
     reason: null,
     attempts: 2,
     maxAttempts: 2,
@@ -679,5 +679,26 @@ describe("environment choices", () => {
     ]);
     expect(environmentChoices(rows, "gone").at(-1)).toEqual({ id: "gone", label: "gone (not found)" });
     expect(environmentChoices([], null)).toEqual([]);
+  });
+});
+
+describe("a project's status line", () => {
+  const base = { project: { id: "p", state: "active", andonReason: null, closedAt: null, after: [] }, running: 0, planning: false, openGates: 0, blocked: 0 };
+  const status = async (over: object) => {
+    const { projectStatus } = await import("./project-status");
+    return projectStatus({ ...base, ...over } as never);
+  };
+
+  it("says what needs you, with the right grammar, before anything else", async () => {
+    expect(await status({ openGates: 1 })).toEqual({ text: "1 needs you", tone: "bell" });
+    expect(await status({ openGates: 1, blocked: 2, running: 3 })).toEqual({ text: "3 need you", tone: "bell" });
+    expect(await status({ project: { ...base.project, andonReason: "bad deploy" } })).toEqual({ text: "Andon: bad deploy", tone: "bell" });
+  });
+
+  it("is amber only while agents work, and quiet otherwise", async () => {
+    expect(await status({ running: 1 })).toEqual({ text: "1 agent at work", tone: "lamp" });
+    expect(await status({ running: 2, planning: true })).toEqual({ text: "2 agents at work, planning", tone: "lamp" });
+    expect(await status({})).toEqual({ text: "Idle", tone: "muted" });
+    expect(await status({ project: { ...base.project, state: "framing", after: ["a", "b"] } })).toEqual({ text: "Starts after a, b", tone: "muted" });
   });
 });

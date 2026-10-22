@@ -276,7 +276,7 @@ function DependenciesTab({ story }: { story: UnitStory }) {
                   U{e.other.seq}
                   {e.other.repoId ? ` · ${e.other.repoId}` : ""}
                 </Link>
-                <div className="muted">{clip(e.other.goal, 70)}</div>
+                <div className="muted">{clip(e.other.title, 70)}</div>
               </td>
               <td>{e.direction === "needs" ? `U${story.unit.seq} needs it merged first` : `waits for U${story.unit.seq}`}</td>
               <td>
@@ -464,20 +464,53 @@ function useLiveStep(running: UnitStory["running"]): string | null {
   return `A${running.agentNo} · ${took}${step?.kind === "tool" ? ` · ${clip(`${step.name}: ${step.summary}`, 52)}` : ""}`;
 }
 
-function Goal({ goal }: { goal: string }) {
-  const [open, setOpen] = useState(false);
-  const long = goal.length > 200;
-  return (
-    <div className="story-goal">
-      <h1 className={`serif story-title${long && !open ? " clamp" : ""}`}>
-        <Inline text={goal} />
-      </h1>
-      {long && (
-        <button type="button" className="story-more" onClick={() => setOpen(!open)}>
-          {open ? "Show less" : "Show the whole task"}
+const TITLE_MAX = 100;
+
+function Title({ projectId, seq, title, onSaved }: { projectId: string; seq: number; title: string; onSaved: () => void }) {
+  const [text, setText] = useState<string | null>(null);
+  const action = useAction();
+  const save = () =>
+    action.run(async () => {
+      await api(`/api/projects/${projectId}/units/${seq}/title`, { body: { title: text } });
+      setText(null);
+      onSaved();
+    });
+  if (text === null)
+    return (
+      <div className="story-titlebar">
+        <h1 className="serif story-title">
+          <Inline text={title} />
+        </h1>
+        <button type="button" className="story-rename mono" onClick={() => setText(title)}>
+          rename
         </button>
-      )}
-    </div>
+      </div>
+    );
+  return (
+    <form
+      className="story-titlebar"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+    >
+      <input
+        className="serif story-title story-title-input"
+        aria-label="Unit title"
+        value={text}
+        maxLength={TITLE_MAX}
+        autoFocus
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && setText(null)}
+      />
+      <button type="submit" className="btn sm lamp" disabled={action.busy || !text.trim() || text.trim() === title}>
+        Save
+      </button>
+      <button type="button" className="btn sm" onClick={() => setText(null)}>
+        Cancel
+      </button>
+      {action.error && <span className="s-bell">{action.error}</span>}
+    </form>
   );
 }
 
@@ -525,117 +558,129 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
         {u.repoId ? ` · ${u.repoId}` : ` · ${u.type}`}
         {u.playbook === "guide-upkeep" && <span className="upkeep-tag"> · guide upkeep</span>}
       </div>
-      <Goal goal={u.goal} />
-      <dl className="unit-facts">
-        <div className="wide">
-          <dt>Acceptance</dt>
-          <dd>
-            {u.acceptance.length ? (
-              <ul>
-                {u.acceptance.map((a, i) => (
-                  <li key={i}>
-                    <Inline text={a} />
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <span className="muted">none written</span>
+      <Title projectId={projectId} seq={u.seq} title={u.title} onSaved={reload} />
+      <div className="story-split">
+        <div className="story-main">
+          {u.repoId && u.playbook !== "guide-create" && <GuideNotice repoId={u.repoId} projects={[projectId]} onChange={reload} />}
+          <StatusCard story={story} tone={tone} reload={reload} />
+          <div className="hub-tabs sticky" role="tablist" aria-label="Unit details">
+            {tabs.map(([k, label]) => (
+              <Link
+                key={k}
+                role="tab"
+                aria-selected={tab === k}
+                keepScroll
+                className={`${tab === k ? "on" : ""}${k === "deps" && !story.dependencies.length ? " none" : ""}`}
+                to={`/p/${projectId}/u/${u.seq}${k === "timeline" ? "" : `?tab=${k}`}`}
+              >
+                {label}
+              </Link>
+            ))}
+            {((tab === "timeline" && story.entries.length > 2) || (tab === "agents" && story.agents.length > 1)) && (
+              <button
+                type="button"
+                className="hub-sort"
+                onClick={flip}
+                title={order === "oldest" ? "Showing the oldest first; click for the newest first" : "Showing the newest first; click for the oldest first"}
+              >
+                {order === "oldest" ? "Oldest first ↑" : "Newest first ↓"}
+              </button>
             )}
-          </dd>
+          </div>
+          {tab === "timeline" && (
+            <StateMap moves={story.moves} state={u.state} tone={tone} working={!!story.running} label={live} picked={picked} onPick={pick} />
+          )}
+          {tab === "timeline" && <Timeline story={story} picked={picked} onPick={pick} reload={reload} order={order} />}
+          {tab === "code" && <CodeTab story={story} />}
+          {tab === "agents" && <AgentsTab story={story} order={order} />}
+          {tab === "deps" && <DependenciesTab story={story} />}
         </div>
-        {story.proof.length > 0 && (
+        <dl className="unit-facts">
+          <div>
+            <dt>Goal</dt>
+            <dd className="unit-goal">
+              <Inline text={u.goal} />
+            </dd>
+          </div>
           <div className="wide">
-            <dt>Proof</dt>
-            <dd className="proof-rows">
-              {story.proof.map((row) => {
-                const line = proofLine(row);
-                return (
-                  <div key={row.page} className={`proof-row tone-${line.tone}`}>
-                    <span className="mono proof-page">
-                      {row.isNew && <span className="proof-new">new </span>}
-                      {row.page}
-                    </span>
-                    <span className="proof-result">{line.text}</span>
-                    <span className="mono proof-runs">{line.runs}</span>
-                  </div>
-                );
-              })}
-            </dd>
-          </div>
-        )}
-        <div>
-          <dt>Pull request</dt>
-          <dd>
-            {story.pr ? (
-              <a href={story.pr.url} target="_blank" rel="noreferrer">
-                #{story.pr.number} on {story.pr.repo}
-                {story.pr.draft ? " · draft" : ""}
-              </a>
-            ) : (
-              <span className="muted">none yet</span>
-            )}
-          </dd>
-        </div>
-        {u.tag && (
-          <div>
-            <dt>Tag</dt>
-            <dd className="mono">
-              {u.tag} · {u.tagPushedAt ? "on the forge" : u.state === "merged" ? "yagura is pushing it" : "yagura tags the merge"}
-            </dd>
-          </div>
-        )}
-        {story.origin && (
-          <div>
-            <dt>From</dt>
+            <dt>Acceptance</dt>
             <dd>
-              <Link to={`/talk/${story.origin.threadId}`}>{story.origin.title}</Link>
+              {u.acceptance.length ? (
+                <ul>
+                  {u.acceptance.map((a, i) => (
+                    <li key={i}>
+                      <Inline text={a} />
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <span className="muted">none written</span>
+              )}
             </dd>
           </div>
-        )}
-        <div>
-          <dt>Branch</dt>
-          <dd className="mono">{u.branch ? `${u.branch} → ${story.base ?? "base"}` : <span className="muted">not started</span>}</dd>
-        </div>
-        <div>
-          <dt>Spent</dt>
-          <dd>
-            ${story.costUsd.toFixed(2)} · {own.length} agent{own.length === 1 ? "" : "s"}
-            {story.started &&
-              (story.ended ? ` · ${clock(story.started).slice(0, 5)} to ${clock(story.ended).slice(0, 5)}` : ` · since ${clock(story.started).slice(0, 5)}`)}
-          </dd>
-        </div>
-      </dl>
-      {u.repoId && u.playbook !== "guide-create" && <GuideNotice repoId={u.repoId} projects={[projectId]} onChange={reload} />}
-      <StatusCard story={story} tone={tone} reload={reload} />
-      <div className="hub-tabs sticky" role="tablist" aria-label="Unit details">
-        {tabs.map(([k, label]) => (
-          <Link
-            key={k}
-            role="tab"
-            aria-selected={tab === k}
-            keepScroll
-            className={`${tab === k ? "on" : ""}${k === "deps" && !story.dependencies.length ? " none" : ""}`}
-            to={`/p/${projectId}/u/${u.seq}${k === "timeline" ? "" : `?tab=${k}`}`}
-          >
-            {label}
-          </Link>
-        ))}
-        {((tab === "timeline" && story.entries.length > 2) || (tab === "agents" && story.agents.length > 1)) && (
-          <button
-            type="button"
-            className="hub-sort"
-            onClick={flip}
-            title={order === "oldest" ? "Showing the oldest first; click for the newest first" : "Showing the newest first; click for the oldest first"}
-          >
-            {order === "oldest" ? "Oldest first ↑" : "Newest first ↓"}
-          </button>
-        )}
+          {story.proof.length > 0 && (
+            <div className="wide">
+              <dt>Proof</dt>
+              <dd className="proof-rows">
+                {story.proof.map((row) => {
+                  const line = proofLine(row);
+                  return (
+                    <div key={row.page} className={`proof-row tone-${line.tone}`}>
+                      <span className="mono proof-page">
+                        {row.isNew && <span className="proof-new">new </span>}
+                        {row.page}
+                      </span>
+                      <span className="proof-result">{line.text}</span>
+                      <span className="mono proof-runs">{line.runs}</span>
+                    </div>
+                  );
+                })}
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt>Pull request</dt>
+            <dd>
+              {story.pr ? (
+                <a href={story.pr.url} target="_blank" rel="noreferrer">
+                  #{story.pr.number} on {story.pr.repo}
+                  {story.pr.draft ? " · draft" : ""}
+                </a>
+              ) : (
+                <span className="muted">none yet</span>
+              )}
+            </dd>
+          </div>
+          {u.tag && (
+            <div>
+              <dt>Tag</dt>
+              <dd className="mono">
+                {u.tag} · {u.tagPushedAt ? "on the forge" : u.state === "merged" ? "yagura is pushing it" : "yagura tags the merge"}
+              </dd>
+            </div>
+          )}
+          {story.origin && (
+            <div>
+              <dt>From</dt>
+              <dd>
+                <Link to={`/talk/${story.origin.threadId}`}>{story.origin.title}</Link>
+              </dd>
+            </div>
+          )}
+          <div>
+            <dt>Branch</dt>
+            <dd className="mono">{u.branch ? `${u.branch} → ${story.base ?? "base"}` : <span className="muted">not started</span>}</dd>
+          </div>
+          <div>
+            <dt>Spent</dt>
+            <dd>
+              ${story.costUsd.toFixed(2)} · {own.length} agent{own.length === 1 ? "" : "s"}
+              {story.started &&
+                (story.ended ? ` · ${clock(story.started).slice(0, 5)} to ${clock(story.ended).slice(0, 5)}` : ` · since ${clock(story.started).slice(0, 5)}`)}
+            </dd>
+          </div>
+        </dl>
       </div>
-      {tab === "timeline" && <StateMap moves={story.moves} state={u.state} tone={tone} working={!!story.running} label={live} picked={picked} onPick={pick} />}
-      {tab === "timeline" && <Timeline story={story} picked={picked} onPick={pick} reload={reload} order={order} />}
-      {tab === "code" && <CodeTab story={story} />}
-      {tab === "agents" && <AgentsTab story={story} order={order} />}
-      {tab === "deps" && <DependenciesTab story={story} />}
     </main>
   );
 }

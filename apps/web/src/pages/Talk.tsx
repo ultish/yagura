@@ -31,9 +31,9 @@ interface ProposalBody {
     minTier?: string;
     after?: string[];
     environment?: string | null;
-    units?: { key: string; goal: string }[];
+    units?: { key: string; title?: string; goal: string }[];
   }[];
-  amend?: { project: string; units: { key: string; goal: string }[] }[];
+  amend?: { project: string; units: { key: string; title?: string; goal: string }[] }[];
 }
 
 function Outcome({ result }: { result: unknown }) {
@@ -140,7 +140,7 @@ function ProposalCard({ p, onEdit }: { p: Proposal & { routes?: Record<string, {
         {body.amend?.map((a) =>
           a.units.map((u) => (
             <li key={`a${a.project}${u.key}`}>
-              {a.project} + <Inline text={u.goal} />
+              {a.project} + <Inline text={u.title ?? u.goal} />
             </li>
           )),
         )}
@@ -257,7 +257,7 @@ function ThreadList({ current }: { current: number | null }) {
     <nav
       aria-label="Conversations"
       style={{
-        width: 250,
+        width: 300,
         flexShrink: 0,
         borderRight: "1px solid var(--line)",
         padding: "18px 16px",
@@ -299,7 +299,7 @@ function Ledger({ v }: { v: ThreadView }) {
     <aside
       aria-label="Thread records"
       style={{
-        width: 360,
+        width: 300,
         flexShrink: 0,
         borderLeft: "1px solid var(--line)",
         padding: "18px 22px 48px",
@@ -438,7 +438,7 @@ function Composer({
       onSent();
     });
   return (
-    <div style={{ padding: "14px 32px 20px", borderTop: "1px solid var(--line)", position: "sticky", bottom: 0, background: "var(--bg2)" }}>
+    <div style={{ padding: "14px var(--talk-pad) 20px", borderTop: "1px solid var(--line)", position: "sticky", bottom: 0, background: "var(--bg2)" }}>
       {busy && (
         <div className="mono" style={{ fontSize: 12, color: "var(--amber)", display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
           <span className="pulse" style={{ width: 8, height: 8, borderRadius: 4, background: "var(--lamp)" }} />
@@ -514,11 +514,11 @@ export function Talk({ threadId }: { threadId: number | null }) {
   const older = target !== null && v !== null && !v.messages.slice(-SHOWN).some((m) => m.id === target);
   const messages = v ? (all || older ? v.messages : v.messages.slice(-SHOWN)) : [];
   return (
-    <main style={{ display: "flex", minHeight: "calc(100vh - 61px)" }}>
+    <main className="talk" style={{ display: "flex", minHeight: "calc(100vh - 61px)" }}>
       <ThreadList current={threadId} />
       <section style={{ flexGrow: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--bg2)" }}>
         {threadId === null ? (
-          <div style={{ padding: "28px 32px", flexGrow: 1 }}>
+          <div style={{ padding: "28px var(--talk-pad)", flexGrow: 1 }}>
             <h1 className="serif" style={{ margin: 0, fontSize: 28, fontWeight: 600 }}>
               Talk to the watch
             </h1>
@@ -530,7 +530,14 @@ export function Talk({ threadId }: { threadId: number | null }) {
         ) : (
           <>
             <div
-              style={{ padding: "18px 32px 12px", display: "flex", alignItems: "baseline", gap: 14, borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}
+              style={{
+                padding: "18px var(--talk-pad) 12px",
+                display: "flex",
+                alignItems: "baseline",
+                gap: 14,
+                borderBottom: "1px solid var(--line)",
+                flexWrap: "wrap",
+              }}
             >
               <h1 className="serif" style={{ margin: 0, fontSize: 26, fontWeight: 600 }}>
                 {v?.thread.title ?? "…"}
@@ -612,7 +619,7 @@ export function Talk({ threadId }: { threadId: number | null }) {
                 </span>
               )}
             </div>
-            <div ref={column} style={{ flexGrow: 1, padding: "0 32px" }}>
+            <div ref={column} style={{ flexGrow: 1, padding: "0 var(--talk-pad)" }}>
               {view.error && (
                 <div className="s-bell" style={{ padding: "12px 0" }}>
                   {view.error}
@@ -667,7 +674,7 @@ export function Talk({ threadId }: { threadId: number | null }) {
           }}
         />
       </section>
-      {v && <Ledger v={v} />}
+      {v ? <Ledger v={v} /> : <aside aria-hidden style={{ width: 300, flexShrink: 0, borderLeft: "1px solid var(--line)" }} />}
     </main>
   );
 }

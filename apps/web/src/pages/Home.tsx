@@ -107,7 +107,7 @@ function Lanterns({ now }: { now: number }) {
             </span>
             <span className="mono muted" style={{ display: "block", fontSize: 12 }}>
               {a.startedAt ? duration(now - Date.parse(a.startedAt)) : "starting"}
-              {a.contextPeak ? ` · ctx ${tokens(a.contextPeak)}` : ""} · {a.unit.goal.slice(0, 48)}
+              {a.contextPeak ? ` · ctx ${tokens(a.contextPeak)}` : ""} · {a.unit.title.slice(0, 48)}
             </span>
           </span>
         </Link>

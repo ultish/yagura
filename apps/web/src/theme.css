@@ -112,6 +112,8 @@ main {
   margin-inline: auto;
 }
 main.home,
+main.talk,
+main.story,
 main.repo:not(.embedded) {
   max-width: none;
 }
@@ -239,10 +241,12 @@ textarea {
   padding: 14px 0;
   border-top: 1px solid var(--line2);
 }
-.item:has(> .item-below) {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: start;
+@supports not (grid-template-columns: subgrid) {
+  .item:has(> .item-below) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+  }
 }
 .item-below {
   grid-column: 2 / -1;
@@ -552,28 +556,37 @@ textarea {
   font-weight: 600;
   line-height: 1.25;
   margin: 6px 0 4px;
-  max-width: 62ch;
   text-wrap: balance;
 }
-.story-title.clamp {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
+.story-titlebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
 }
-.story-goal {
-  margin-bottom: 12px;
+.story-titlebar .story-title {
+  margin: 6px 0 4px;
 }
-.story-more {
+.story-rename {
   border: 0;
   background: none;
   padding: 0;
-  font-size: 12.5px;
-  color: var(--amber-text);
+  font-size: 12px;
+  color: var(--amber);
   cursor: pointer;
 }
-.story-more:hover {
+.story-rename:hover {
   color: var(--amber-hover);
+}
+.story-title-input {
+  flex: 1 1 480px;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--btnline);
+  border-radius: 4px;
+  padding: 4px 10px;
+  color: var(--text);
+  font-family: inherit;
 }
 .story-legend {
   display: flex;
@@ -752,19 +765,30 @@ textarea {
   align-items: baseline;
   font-size: 13.5px;
 }
+.story-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 0 32px;
+  align-items: start;
+  margin-top: 12px;
+}
+.story-main {
+  min-width: 0;
+}
 .unit-facts {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 14px 24px;
-  margin: 0 0 20px;
-  padding: 14px 0;
-  border-block: 1px solid var(--line);
+  gap: 16px;
+  align-content: start;
+  margin: 0;
+  padding: 0 0 0 24px;
+  border-left: 1px solid var(--line);
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
 }
 .unit-facts > div {
   min-width: 0;
-}
-.unit-facts .wide {
-  grid-column: span 2;
 }
 .unit-facts dt {
   font-size: 12px;
@@ -776,6 +800,9 @@ textarea {
   margin: 4px 0 0;
   font-size: 14px;
   overflow-wrap: anywhere;
+}
+.unit-facts .unit-goal {
+  white-space: pre-line;
 }
 .unit-facts ul {
   margin: 0;
@@ -939,6 +966,7 @@ textarea {
   width: 100%;
   min-width: 600px;
   max-width: 920px;
+  margin-inline: auto;
   height: auto;
   overflow: visible;
 }
@@ -1216,9 +1244,6 @@ button.story-time:hover {
   }
   .story-round span:first-child {
     display: none;
-  }
-  .unit-facts .wide {
-    grid-column: auto;
   }
 }
 
@@ -2198,4 +2223,161 @@ b .role-icon,
 .setting-panel-title .mono {
   color: var(--amber-text);
   font-weight: 500;
+}
+
+.tbl-scroll {
+  overflow-x: auto;
+}
+.tbl {
+  width: 100%;
+  min-width: 900px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.tbl th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 8px 18px 8px 0;
+  border-bottom: 1px solid var(--line2);
+  white-space: nowrap;
+}
+.tbl th.tbl-num,
+.tbl td.tbl-num {
+  text-align: right;
+}
+.tbl-row.go {
+  cursor: pointer;
+}
+.tbl-row td {
+  padding: 13px 18px 13px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.tbl-row:hover td {
+  background: var(--bg2);
+}
+.tbl-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 600;
+}
+.tbl-name a {
+  color: var(--text);
+}
+.tbl-tag {
+  margin-left: 10px;
+  padding: 0 7px;
+  border: 1px solid var(--btnline);
+  border-radius: 10px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.tbl-main {
+  min-width: 0;
+}
+.tbl-main div {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--soft);
+}
+.tbl-status {
+  color: var(--muted);
+}
+.tbl-dim {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tbl-status.tone-bell {
+  color: var(--bell-text);
+}
+.tbl-status.tone-lamp {
+  color: var(--amber-text);
+}
+.tbl-status.tone-pine {
+  color: var(--pine);
+}
+.tbl-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+td.tbl-num {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.gates-page .item .seq {
+  font-weight: 600;
+}
+.gates-page .item .seq a {
+  color: var(--text);
+}
+
+/* Every row of a list shares one name column, sized by the widest name in that list (up to 18rem), so the text beside the names lines up. */
+@supports (grid-template-columns: subgrid) {
+  :has(> .item:not(.setting)) {
+    display: grid;
+    grid-template-columns: fit-content(18rem) minmax(0, 1fr) auto;
+    column-gap: 20px;
+  }
+  :has(> .item:not(.setting)) > :not(.item) {
+    grid-column: 1 / -1;
+  }
+  .item:not(.setting) {
+    display: grid;
+    grid-template-columns: subgrid;
+    grid-column: 1 / -1;
+    align-items: start;
+  }
+}
+.item.picked {
+  background: var(--line2);
+}
+.tbl-ref {
+  margin-right: 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.tbl-name.wrap {
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+/* The conversation's text keeps a comfortable line length, centred in the middle pane between two side panels of the same width. */
+main.talk {
+  --talk-pad: max(32px, calc((100% - 900px) / 2));
+}
+
+@media (max-width: 1000px) {
+  .story-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .unit-facts {
+    order: -1;
+    position: static;
+    max-height: none;
+    padding: 0 0 12px;
+    border-left: 0;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
+  }
 }

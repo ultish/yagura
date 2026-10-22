@@ -146,111 +146,112 @@ export function Repos() {
           {data.map((v) => {
             const s = repoStatus(v);
             return (
-              <div key={v.repo.id} id={`repo-${v.repo.id}`} style={hash === v.repo.id ? { background: "var(--line2)" } : undefined}>
-                <Row
-                  seq={<Link to={`/r/${v.repo.id}`}>{v.repo.id}</Link>}
-                  goal={
-                    <span className="mono" style={{ fontSize: 14, overflowWrap: "anywhere" }}>
-                      {v.repo.url}
+              <Row
+                key={v.repo.id}
+                id={`repo-${v.repo.id}`}
+                highlight={hash === v.repo.id}
+                seq={<Link to={`/r/${v.repo.id}`}>{v.repo.id}</Link>}
+                goal={
+                  <span className="mono" style={{ fontSize: 14, overflowWrap: "anywhere" }}>
+                    {v.repo.url}
+                  </span>
+                }
+                status={s.text}
+                tone={s.tone}
+                facts={
+                  <>
+                    <span>
+                      {v.repo.defaultBranch}
+                      {v.trunk ? ` at ${sha(v.trunk)}` : ""}
                     </span>
-                  }
-                  status={s.text}
-                  tone={s.tone}
-                  facts={
-                    <>
+                    <span className={v.route.confirmed ? undefined : "s-bell"}>
+                      {v.route.text}
+                      {v.route.confirmed ? "" : `: choose with yagura repo set ${v.repo.id} --forge gh|glab or --land push`}
+                    </span>
+                    <span>{v.landedCount} landed</span>
+                    <Link to={`/r/${v.repo.id}`}>Browse the code</Link>
+                    {v.lastLanded && (
                       <span>
-                        {v.repo.defaultBranch}
-                        {v.trunk ? ` at ${sha(v.trunk)}` : ""}
+                        last {sha(v.lastLanded.sha)} ·{" "}
+                        <Link to={`/p/${v.lastLanded.projectId}/u/${v.lastLanded.seq}`}>
+                          {v.lastLanded.projectId} U{v.lastLanded.seq}
+                        </Link>{" "}
+                        · {clock(v.lastLanded.at)}
                       </span>
-                      <span className={v.route.confirmed ? undefined : "s-bell"}>
-                        {v.route.text}
-                        {v.route.confirmed ? "" : `: choose with yagura repo set ${v.repo.id} --forge gh|glab or --land push`}
+                    )}
+                    {v.projects.length ? (
+                      <span>
+                        {v.projects.map((p, i) => (
+                          <span key={p.id}>
+                            {i ? ", " : ""}
+                            <Link to={`/p/${p.id}`}>{p.id}</Link>
+                            {p.state === "closed" ? " (closed)" : ""}
+                          </span>
+                        ))}
                       </span>
-                      <span>{v.landedCount} landed</span>
-                      <Link to={`/r/${v.repo.id}`}>Browse the code</Link>
-                      {v.lastLanded && (
-                        <span>
-                          last {sha(v.lastLanded.sha)} ·{" "}
-                          <Link to={`/p/${v.lastLanded.projectId}/u/${v.lastLanded.seq}`}>
-                            {v.lastLanded.projectId} U{v.lastLanded.seq}
-                          </Link>{" "}
-                          · {clock(v.lastLanded.at)}
-                        </span>
-                      )}
-                      {v.projects.length ? (
-                        <span>
-                          {v.projects.map((p, i) => (
-                            <span key={p.id}>
-                              {i ? ", " : ""}
-                              <Link to={`/p/${p.id}`}>{p.id}</Link>
-                              {p.state === "closed" ? " (closed)" : ""}
-                            </span>
-                          ))}
-                        </span>
-                      ) : (
-                        <span>no projects</span>
-                      )}
-                    </>
-                  }
-                  actions={
+                    ) : (
+                      <span>no projects</span>
+                    )}
+                  </>
+                }
+                actions={
+                  <>
+                    <button
+                      className="btn"
+                      type="button"
+                      title="Check this repo's verification guide against the app"
+                      disabled={upkeep.busy}
+                      onClick={() =>
+                        void upkeep.run(async () => {
+                          const a = await api<UpkeepAnswer>(`/api/repos/${v.repo.id}/upkeep`, { body: {} });
+                          setUpkeepSaid({ repo: v.repo.id, ...upkeepMessage(a) });
+                        })
+                      }
+                    >
+                      Run upkeep
+                    </button>
+                    <button
+                      className="btn"
+                      type="button"
+                      aria-expanded={settings === v.repo.id}
+                      onClick={() => setSettings(settings === v.repo.id ? null : v.repo.id)}
+                    >
+                      {settings === v.repo.id ? "Hide settings" : "Settings"}
+                    </button>
+                  </>
+                }
+                below={
+                  settings === v.repo.id ? (
                     <>
-                      <button
-                        className="btn"
-                        type="button"
-                        title="Check this repo's verification guide against the app"
-                        disabled={upkeep.busy}
-                        onClick={() =>
-                          void upkeep.run(async () => {
-                            const a = await api<UpkeepAnswer>(`/api/repos/${v.repo.id}/upkeep`, { body: {} });
-                            setUpkeepSaid({ repo: v.repo.id, ...upkeepMessage(a) });
-                          })
-                        }
-                      >
-                        Run upkeep
-                      </button>
-                      <button
-                        className="btn"
-                        type="button"
-                        aria-expanded={settings === v.repo.id}
-                        onClick={() => setSettings(settings === v.repo.id ? null : v.repo.id)}
-                      >
-                        {settings === v.repo.id ? "Hide settings" : "Settings"}
-                      </button>
+                      <RepoOptions key={`${v.repo.url}${v.repo.forge}`} repo={v.repo} onSaved={reload} />
+                      <ScopedSettings scope="repo" id={v.repo.id} />
                     </>
-                  }
-                  below={
-                    settings === v.repo.id ? (
-                      <>
-                        <RepoOptions key={`${v.repo.url}${v.repo.forge}`} repo={v.repo} onSaved={reload} />
-                        <ScopedSettings scope="repo" id={v.repo.id} />
-                      </>
-                    ) : null
-                  }
-                  extra={
-                    <>
-                      <GuideNotice repoId={v.repo.id} projects={v.projects.filter((p) => p.state === "active").map((p) => p.id)} />
-                      {upkeepSaid?.repo === v.repo.id && (
-                        <div className={`s-${upkeepSaid.tone}`} style={{ fontSize: 13.5 }}>
-                          {upkeepSaid.text}
-                        </div>
-                      )}
-                      {v.landingQueue.length > 0 && (
-                        <div className="s-lamp" style={{ fontSize: 13.5 }}>
-                          {plural(v.landingQueue.length, "verified unit")} waiting to land:{" "}
-                          {v.landingQueue.map((u, i) => (
-                            <span key={`${u.projectId}-${u.seq}`}>
-                              {i ? ", " : ""}
-                              <Link to={`/p/${u.projectId}/u/${u.seq}`}>
-                                {u.projectId} U{u.seq}
-                              </Link>
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  }
-                />
-              </div>
+                  ) : null
+                }
+                extra={
+                  <>
+                    <GuideNotice repoId={v.repo.id} projects={v.projects.filter((p) => p.state === "active").map((p) => p.id)} />
+                    {upkeepSaid?.repo === v.repo.id && (
+                      <div className={`s-${upkeepSaid.tone}`} style={{ fontSize: 13.5 }}>
+                        {upkeepSaid.text}
+                      </div>
+                    )}
+                    {v.landingQueue.length > 0 && (
+                      <div className="s-lamp" style={{ fontSize: 13.5 }}>
+                        {plural(v.landingQueue.length, "verified unit")} waiting to land:{" "}
+                        {v.landingQueue.map((u, i) => (
+                          <span key={`${u.projectId}-${u.seq}`}>
+                            {i ? ", " : ""}
+                            <Link to={`/p/${u.projectId}/u/${u.seq}`}>
+                              {u.projectId} U{u.seq}
+                            </Link>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                }
+              />
             );
           })}
         </section>

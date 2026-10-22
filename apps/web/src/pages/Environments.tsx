@@ -15,7 +15,12 @@ function occupancy(v: EnvironmentView): { text: string; tone: string } {
   const { capacity } = v.environment;
   const waiting = v.queued.length ? `, ${v.queued.length} waiting` : "";
   if (capacity === 0) return { text: `No slots: capacity is 0, so nothing can verify here${waiting}.`, tone: v.queued.length ? "bell" : "muted" };
-  return { text: `${v.active.length} of ${plural(capacity, "slot")} in use${waiting}.`, tone: v.active.length ? "lamp" : "muted" };
+  const line = v.active.length === 0 ? "Nothing is running here" : `${plural(v.active.length, "agent")} running here`;
+  const queued = v.queued.length ? `; ${plural(v.queued.length, "agent")} waiting for a free slot` : "";
+  return {
+    text: `${v.active.length} of ${plural(capacity, "slot")} in use. ${line}. Each slot runs one agent at a time, so up to ${capacity} can run here at once${queued}.`,
+    tone: v.active.length ? "lamp" : "muted",
+  };
 }
 
 function AddEnvironment({ onAdded }: { onAdded: () => void }) {
@@ -80,7 +85,7 @@ function AddEnvironment({ onAdded }: { onAdded: () => void }) {
           ))}
         </select>
         <label htmlFor="env-capacity" className="muted" style={{ fontSize: 13 }}>
-          slots
+          slots (agents at once)
         </label>
         <input
           id="env-capacity"
@@ -133,9 +138,10 @@ function AddEnvironment({ onAdded }: { onAdded: () => void }) {
         </div>
       )}
       <div className="muted" style={{ fontSize: 13 }}>
-        Agents run inside a slot of the project's environment. local-process gives each slot a private directory and a free port on this machine. kube-namespace
-        gives each slot its own namespace labelled yagura=1 (or one from your pool, where only yagura-labelled resources are deleted). Open an environment to
-        say how it works in your own words; the doctor turns that into actions agents and yagura run.
+        A slot is one agent's own workspace on an environment, where it builds and runs its tests without touching anyone else's. An environment's slot count is
+        how many agents can use it at the same time, across every project on it; the rest wait their turn. local-process gives each slot a private directory and
+        a free port on this machine. kube-namespace gives each slot its own namespace labelled yagura=1 (or one from your pool, where only yagura-labelled
+        resources are deleted). Open an environment to say how it works in your own words; the doctor turns that into actions agents and yagura run.
       </div>
       {action.error && (
         <div className="s-bell" style={{ fontSize: 13 }}>
@@ -192,7 +198,7 @@ function EditEnvironment({ v, onDone }: { v: EnvironmentView; onDone: () => void
         style={{ ...field, flexGrow: 1, minWidth: 180 }}
       />
       <label htmlFor={`cap-${v.environment.id}`} className="muted" style={{ fontSize: 13 }}>
-        slots
+        slots (agents at once)
       </label>
       <input
         id={`cap-${v.environment.id}`}

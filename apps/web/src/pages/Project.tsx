@@ -42,7 +42,7 @@ function UnitRow({ d, u, now }: { d: ProjectDetail; u: UnitView; now: number }) 
   return (
     <Row
       seq={<Link to={`/p/${d.project.id}/u/${u.seq}`}>U{u.seq}</Link>}
-      goal={<Inline text={u.goal} />}
+      goal={<Inline text={u.title} />}
       to={`/p/${d.project.id}/u/${u.seq}`}
       tag={
         d.repos.length > 1 && u.repoId ? (
@@ -210,7 +210,9 @@ export function Project({ id }: { id: string }) {
             );
           })}
           <span>{facts.join(" · ")}</span>
-          <a href="#project-options">change</a>
+          <a href="#project-options" onClick={() => setOpen((o) => ({ ...o, options: true }))}>
+            change
+          </a>
         </div>
         <div style={{ display: "flex", alignItems: "flex-end", gap: 20, flexWrap: "wrap" }}>
           <h1 className="serif" style={{ margin: 0, fontSize: 42, fontWeight: 600 }}>
@@ -337,8 +339,17 @@ export function Project({ id }: { id: string }) {
         <div id="project-options">
           <div className="gh">
             <h2 className="h2">Options</h2>
+            <button
+              type="button"
+              className="mono"
+              onClick={() => setOpen((o) => ({ ...o, options: !o.options }))}
+              style={{ fontSize: 12, background: "none", border: 0, color: "var(--amber)", cursor: "pointer" }}
+              aria-expanded={!!open.options}
+            >
+              {open.options ? "hide" : "show"}
+            </button>
           </div>
-          <ProjectOptions key={`${p.mergePolicy}${p.environmentId}${p.standing}${p.refs.join()}`} p={p} onSaved={reload} />
+          {open.options && <ProjectOptions key={`${p.mergePolicy}${p.environmentId}${p.standing}${p.refs.join()}`} p={p} onSaved={reload} />}
         </div>
         <div>
           <div className="gh">

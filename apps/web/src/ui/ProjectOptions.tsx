@@ -95,13 +95,13 @@ export function ProjectOptions({ p, onSaved }: { p: Project; onSaved: () => void
       </Option>
       <Option
         title="Issues it answers"
-        help="Issues this project's work is for, written repo#number. A unit whose ref is an issue in its own repo closes that issue when it merges."
+        help="The issues this project is for, written repo#number, for example rakko#19. They show on the project, and yagura trace rakko#19 finds the project and its units from the issue. This does not close the issue: a pull request closes it when its own unit was started from that issue or given --issue."
       >
         <input
           aria-label="Issues it answers"
           className="mono"
           value={refs}
-          placeholder="rakko#19"
+          placeholder="none"
           onChange={(e) => setRefs(e.target.value)}
           style={{ ...field, width: 260 }}
         />

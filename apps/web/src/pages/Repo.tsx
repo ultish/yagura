@@ -311,7 +311,7 @@ function Rail({
     <aside className="repo-rail">
       <div className="repo-rail-who">{mode === "change" ? "This change is" : "Selected line written by"}</div>
       <h4 className="serif">
-        {known ? `${commit.projectId}/U${commit.seq}` : short(commit.sha)} · <Inline text={story?.unit.goal.split(/[.;]\s/)[0] ?? commit.subject} />
+        {known ? `${commit.projectId}/U${commit.seq}` : short(commit.sha)} · <Inline text={story?.unit.title ?? commit.subject} />
       </h4>
       {commit.verdict ? (
         <div className="s-pine repo-small">✓ {commit.verdict}</div>

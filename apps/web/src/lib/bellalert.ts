@@ -10,13 +10,13 @@ export function announce(item: BellItem): { title: string; body: string; href: s
     case "gate":
       return {
         title: "yagura · needs your answer",
-        body: `${item.unit ? `U${item.unit.seq} ${item.unit.goal}: ` : ""}${item.gate.question}`,
+        body: `${item.unit ? `U${item.unit.seq} ${item.unit.title}: ` : ""}${item.gate.question}`,
         href: item.unit ? `/p/${item.projectId}/u/${item.unit.seq}` : "/gates",
       };
     case "blocked":
       return {
         title: "yagura · blocked",
-        body: `U${item.unit.seq} ${item.unit.goal}: ${item.reason ?? "no reason recorded"}`,
+        body: `U${item.unit.seq} ${item.unit.title}: ${item.reason ?? "no reason recorded"}`,
         href: `/p/${item.projectId}/u/${item.unit.seq}`,
       };
     case "proposal":

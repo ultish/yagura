@@ -59,6 +59,8 @@ export function Row({
   actions,
   extra,
   below,
+  id,
+  highlight,
 }: {
   seq: ReactNode;
   goal: ReactNode;
@@ -72,9 +74,12 @@ export function Row({
   extra?: ReactNode;
   // Full width under the whole row, for a panel that needs more room than the middle column.
   below?: ReactNode;
+  // Lets a page link to one row, and mark it as the one it was sent to.
+  id?: string;
+  highlight?: boolean;
 }) {
   return (
-    <div className="item">
+    <div className={`item${highlight ? " picked" : ""}`} id={id}>
       <span className="seq">{seq}</span>
       <div className="body">
         <div className="goal">
@@ -187,7 +192,7 @@ export function BellRow({ item, showProject }: { item: BellItem; showProject: bo
     return (
       <Row
         seq={<Link to={`/p/${item.projectId}/u/${item.unit.seq}`}>{where(item.projectId, item.unit.seq)}</Link>}
-        goal={<Inline text={item.unit.goal} />}
+        goal={<Inline text={item.unit.title} />}
         status={<Inline text={`Blocked. ${item.reason ?? "No reason recorded."}`} />}
         tone="bell"
         facts={
@@ -242,7 +247,7 @@ export function BellRow({ item, showProject }: { item: BellItem; showProject: bo
   return (
     <Row
       seq={seq}
-      goal={<Inline text={item.unit?.goal ?? g.question} />}
+      goal={<Inline text={item.unit?.title ?? g.question} />}
       status={item.unit ? g.question : g.kind === "report" ? "Report posted in the conversation." : undefined}
       tone={g.kind === "report" ? "pine" : "bell"}
       facts={unanswered && <span>{unanswered}</span>}

@@ -72,9 +72,9 @@ export interface RepoView {
   route: { text: string; confirmed: boolean };
   pack: { ok: true; checks: { name: string; tier: string }[] } | { ok: false; reason: string } | null;
   projects: { id: string; state: string }[];
-  landingQueue: { projectId: string; seq: number; goal: string; at: string }[];
+  landingQueue: { projectId: string; seq: number; title: string; at: string }[];
   landedCount: number;
-  lastLanded: { projectId: string; seq: number; goal: string; at: string; sha: string } | null;
+  lastLanded: { projectId: string; seq: number; title: string; at: string; sha: string } | null;
   notes?: string[];
 }
 
@@ -82,14 +82,14 @@ interface SlotHolder {
   attemptId: number;
   agentNo: number;
   since: string;
-  unit: { projectId: string; seq: number; type: string; goal: string };
+  unit: { projectId: string; seq: number; type: string; title: string };
 }
 
 export interface KeptSlot {
   leaseId: number;
   attemptId: number;
   agentNo: number;
-  unit: { projectId: string; seq: number; type: string; goal: string };
+  unit: { projectId: string; seq: number; type: string; title: string };
   until: string;
   reason: string;
   namespace: string | null;
@@ -158,7 +158,7 @@ export interface ProjectDetail extends ProjectSummary {
 }
 
 export interface AgentRow extends Attempt {
-  unit: { id: number; seq: number; type: string; goal: string; projectId: string; state: string };
+  unit: { id: number; seq: number; type: string; title: string; goal: string; projectId: string; state: string };
   // The unit a verifier, triage, or rebase worked for.
 }
 
@@ -207,7 +207,7 @@ export type BellItem =
       kind: "gate";
       id: string;
       projectId: string;
-      unit: { seq: number; goal: string } | null;
+      unit: { seq: number; title: string } | null;
       gate: { id: number; kind: string; question: string; options: string[]; defaultOption: string | null; deadline: string | null };
       at: string;
     }
@@ -215,7 +215,7 @@ export type BellItem =
       kind: "blocked";
       id: string;
       projectId: string;
-      unit: { seq: number; goal: string };
+      unit: { seq: number; title: string };
       reason: string | null;
       attempts: number;
       maxAttempts: number;

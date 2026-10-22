@@ -2,11 +2,14 @@ import { useApi, type BellItem, type Gate } from "../api";
 import { clock } from "../lib/format";
 import { Inline } from "../lib/markdown";
 import { Link } from "../ui/Link";
-import { BellRow, Row } from "../ui/rows";
+import { BellRow } from "../ui/rows";
+import { ClampCell, StatusCell, Table, TableRow, type Col } from "../ui/Table";
+
+const RESOLVED: Col[] = [{ label: "Where", width: 260 }, { label: "The question" }, { label: "Outcome", width: 200 }, { label: "When", width: 120, num: true }];
 
 interface Inbox {
   waiting: BellItem[];
-  resolved: (Gate & { unit: { seq: number; goal: string } | null })[];
+  resolved: (Gate & { unit: { seq: number; title: string } | null })[];
 }
 
 const GROUPS: { title: string; test: (i: BellItem) => boolean }[] = [
@@ -19,7 +22,7 @@ const GROUPS: { title: string; test: (i: BellItem) => boolean }[] = [
 export function Gates() {
   const { data, error } = useApi<Inbox>("/api/inbox");
   return (
-    <main style={{ padding: "26px 36px 48px", display: "flex", flexDirection: "column", gap: 24 }}>
+    <main className="gates-page" style={{ padding: "26px 36px 48px", display: "flex", flexDirection: "column", gap: 24 }}>
       <h1 className="serif" style={{ margin: 0, fontSize: 34, fontWeight: 600 }}>
         Gates
       </h1>
@@ -51,28 +54,27 @@ export function Gates() {
             <h2 className="h2">Resolved recently</h2>
             <span className="n">{data.resolved.length}</span>
           </div>
-          {data.resolved.map((g) => (
-            <Row
-              key={g.id}
-              seq={
-                g.unit ? (
-                  <Link to={`/p/${g.projectId}/u/${g.unit.seq}`}>{`${g.projectId} · U${g.unit.seq}`}</Link>
-                ) : (
-                  <Link to={`/p/${g.projectId}`}>{g.projectId}</Link>
-                )
-              }
-              goal={<Inline text={g.question} />}
-              status={
-                g.state === "defaulted"
-                  ? `Nobody answered, so it took the default: ${g.answer}.`
-                  : g.state === "cancelled"
-                    ? "Cancelled."
-                    : `Answered: ${g.answer}.`
-              }
-              tone={g.state === "defaulted" ? "lamp" : "muted"}
-              facts={<span>{clock(g.resolvedAt)}</span>}
-            />
-          ))}
+          <Table cols={RESOLVED}>
+            {data.resolved.map((g) => {
+              const to = g.unit ? `/p/${g.projectId}/u/${g.unit.seq}` : `/p/${g.projectId}`;
+              return (
+                <TableRow key={g.id} to={to}>
+                  <td className="tbl-name">
+                    <Link to={to} onClick={(e) => e.stopPropagation()}>
+                      {g.unit ? `${g.projectId} · U${g.unit.seq}` : g.projectId}
+                    </Link>
+                  </td>
+                  <ClampCell title={g.question}>
+                    <Inline text={g.question} />
+                  </ClampCell>
+                  <StatusCell tone={g.state === "defaulted" ? "lamp" : g.state === "answered" ? "pine" : "muted"}>
+                    {g.state === "defaulted" ? `Took the default: ${g.answer}` : g.state === "cancelled" ? "Cancelled" : `Answered: ${g.answer}`}
+                  </StatusCell>
+                  <td className="tbl-num">{clock(g.resolvedAt)}</td>
+                </TableRow>
+              );
+            })}
+          </Table>
         </section>
       )}
     </main>
