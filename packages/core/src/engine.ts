@@ -11,6 +11,7 @@ import { currentRound, runWorkerRound } from "./runner.js";
 import { runJudgeRound } from "./judge.js";
 import { pendingWake, runLeadRound } from "./lead.js";
 import { checkReady, syncWithBase, unitsOnBase } from "./merge.js";
+import { pushUnitTag } from "./tag.js";
 import { ensureMirror, resolveRef } from "./git.js";
 import { readiness, runningAttempts } from "./schedule.js";
 import { defaultExpiredGates, gateResolved } from "./gates.js";
@@ -81,6 +82,8 @@ export class Engine {
   private lastSweep = 0;
   private lastRevertScan = 0;
   private readonly issuesPolledAt = new Map<string, number>();
+  private readonly tagTriedAt = new Map<UnitId, number>();
+  private readonly tagConflicts = new Set<UnitId>();
   private readonly readyCheckedAt = new Map<UnitId, number>();
   private readonly basePolledAt = new Map<string, number>();
   private readonly baseSeen = new Map<string, string>();
@@ -263,6 +266,32 @@ export class Engine {
       }
   }
 
+  // A merged unit that asked for a tag gets it from yagura, never from a worker: the tag goes on the commit that merged it and is pushed alone.
+  // Tried again at the forge poll rate until the forge has it, since the merge may not have reached the forge's branch yet.
+  private tags(project: Project): void {
+    const poll = resolveSetting(this.db, "forge.poll_seconds").value * 1000;
+    for (const u of listUnits(this.db, project.id)) {
+      if (u.state !== "merged" || !u.tag || u.tagPushedAt) continue;
+      const key = `tag:${u.id}`;
+      if (this.inflight.has(key) || Date.now() - (this.tagTriedAt.get(u.id) ?? 0) < poll) continue;
+      this.tagTriedAt.set(u.id, Date.now());
+      this.start(
+        key,
+        `tag U${u.seq} ${u.tag}`,
+        async () => {
+          const outcome = await pushUnitTag(this.ctx, u.id);
+          if (outcome === "pushed") this.log(`✔ ${u.tag} pushed for ${project.id}/U${u.seq}`);
+          if (outcome === "conflict" && !this.tagConflicts.has(u.id)) {
+            this.tagConflicts.add(u.id);
+            this.log(`✗ ${project.id}/U${u.seq}: the forge already has ${u.tag} on another commit, and yagura will not move it`);
+          }
+        },
+        (e) => this.log(`✗ tag ${project.id}/U${u.seq}: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`),
+        true,
+      );
+    }
+  }
+
   // A merged library that units after it build on is published from its merge commit; a failed try is tried again once its actions change.
   private publishes(project: Project): void {
     for (const u of publishDue(this.db, project.id)) {
@@ -433,7 +462,10 @@ export class Engine {
     if (expired) this.log(`  deleted ${expired} kept slot(s) past their time`);
     for (const g of defaultExpiredGates(this.db)) this.log(`  gate ${g.id} (${g.kind}) timed out: ${g.answer}`);
     for (const project of this.scope().filter((p) => p.state === "framing")) this.activate(project);
-    for (const project of this.scope()) this.retro(project);
+    for (const project of this.scope()) {
+      this.retro(project);
+      this.tags(project);
+    }
     if (!this.opts.projectId)
       for (const u of await scheduleUpkeep(this.db, this.ctx.boot).catch((e: unknown) => {
         this.log(`✗ guide upkeep: ${e instanceof Error ? e.message.split("\n")[0] : String(e)}`);

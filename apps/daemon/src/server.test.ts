@@ -251,6 +251,12 @@ describe("daemon API", () => {
     expect((await post("/api/repos/testbed/options", { url: "  " })).status).toBe(400);
   });
 
+  it("asks for a release tag on a unit, and refuses a name that is not one", async () => {
+    expect(await (await post("/api/projects/orders/units/1/tag", { tag: "v1.2.0" })).json()).toMatchObject({ seq: 1, tag: "v1.2.0", tagPushedAt: null });
+    expect((await post("/api/projects/orders/units/1/tag", { tag: "-f" })).status).toBe(400);
+    expect(await (await post("/api/projects/orders/units/1/tag", { tag: null })).json()).toMatchObject({ tag: null });
+  });
+
   it("reports what yagura has spent, in total and today", async () => {
     db.prepare("UPDATE attempts SET cost_usd = 1.25, started_at = ?").run(new Date().toISOString());
     const cost = (await (await get("/api/cost")).json()) as Record<string, number>;

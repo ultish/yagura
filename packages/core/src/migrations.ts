@@ -15,6 +15,8 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: 3, sql: "ALTER TABLE evidence_runs ADD COLUMN page TEXT;" },
   // A standing project has no end: it is never closed, and the developer adds work to it whenever they like.
   { version: 4, sql: "ALTER TABLE projects ADD COLUMN standing INTEGER NOT NULL DEFAULT 0 CHECK (standing IN (0, 1));" },
+  // A release tag yagura puts on the commit that merged the unit and pushes to the forge itself; a worker's push is limited to its own branch.
+  { version: 5, sql: "ALTER TABLE units ADD COLUMN tag TEXT; ALTER TABLE units ADD COLUMN tag_pushed_at TEXT;" },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

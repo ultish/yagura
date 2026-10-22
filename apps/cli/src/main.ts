@@ -41,6 +41,7 @@ import {
   listGates,
   setAndon,
   setMergePolicy,
+  setUnitTag,
   setThreadState,
   registerRepo,
   addUnitNote,
@@ -139,7 +140,7 @@ const USAGE = `yagura — agent orchestration
   yagura project new <id> --goal <text> (--predicate <text> | --standing) --repo <id>... [--name <text>] [--issue <ref>...]
                   [--after <project>...] [--phase-gate] [--merge auto|human] [--env <id>]
   yagura unit add <project> --repo <id> --goal <text> --accept <text>...
-                  [--context <text>...] [--base <branch>] [--after <unit#>...] [--playbook <name>] [--timebox <seconds>] [--issue <ref>...]
+                  [--context <text>...] [--base <branch>] [--after <unit#>...] [--playbook <name>] [--timebox <seconds>] [--issue <ref>...] [--tag <tag>]
   yagura repo set <id> [--url <url>] [--forge gh|glab | --land push]   gh and glab merge through pull/merge requests (forge.repo names the repo on the forge)
   yagura env add <id> --provider local-process|kube-namespace [--capacity 1] [--name <text>]
                [--context <kube context>] [--pool <ns,ns>] [--base-url http://{namespace}.apps]
@@ -188,6 +189,7 @@ const USAGE = `yagura — agent orchestration
   yagura gates [project]                 open questions for a human
   yagura gate answer <id> <option>
   yagura unit requeue|drop <project> <unit#> [--note <text>]   requeue puts a stuck unit back to waiting; drop gives it up
+  yagura unit tag <project> <unit#> <tag>   yagura tags the commit that merged the unit and pushes the tag to the forge (a worker cannot push a tag)
   yagura unit wake <project> <unit#> --note <text>          wake a stuck or ready unit's lead now, with your note
   yagura run <project> <unit#>           run one worker round of a unit (debugging; the daemon does this)
   yagura evidence run [--label <name>] [--at base] -- <command>   (inside an agent session: a recorded run on its commit)
@@ -506,6 +508,7 @@ async function main() {
         repo: { type: "string" },
         goal: { type: "string" },
         accept: { type: "string", multiple: true },
+        tag: { type: "string" },
         context: { type: "string", multiple: true },
         base: { type: "string" },
         after: { type: "string", multiple: true },
@@ -520,6 +523,12 @@ async function main() {
         const refused = askLead(db, u, values.note ?? "Look at this unit now.");
         if (refused) fail(refused);
         console.log(`U${u.seq}'s unit lead is woken; it reads your note first`);
+        return;
+      }
+      if (positionals[0] === "tag" && projectId && positionals[2] && positionals[3]) {
+        const u = getUnitBySeq(db, projectId as ProjectId, Number(positionals[2]));
+        setUnitTag(db, u.id, positionals[3]);
+        console.log(`U${u.seq} will be tagged ${positionals[3]} ${u.state === "merged" ? "by the daemon within a minute" : "once it has merged"}`);
         return;
       }
       if ((positionals[0] === "requeue" || positionals[0] === "drop") && projectId && positionals[2]) {
@@ -546,6 +555,7 @@ async function main() {
         context: many(values.context),
         after: many(values.after).map((n) => getUnitBySeq(db, projectId!, Number(n.replace(/^U/i, ""))).id),
         playbook: (values.playbook as string) ?? null,
+        tag: (values.tag as string | undefined) ?? null,
         refs: many(values.issue),
         timeboxSeconds: values.timebox ? Number(values.timebox) : resolveSetting(db, "timebox.work_seconds", { projectId }).value,
         maxAttempts: resolveSetting(db, "max_attempts", { projectId }).value,

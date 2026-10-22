@@ -50,6 +50,8 @@ export const PlanUnit = z
     refs: z.array(z.string().min(1)).default([]),
     playbook: z.enum(WORK_PLAYBOOKS).default("feature"),
     scaffold: z.boolean().default(false),
+    // A tag yagura puts on the commit that merges this unit and pushes to the forge; a worker never tags.
+    tag: z.string().min(1).optional(),
     timeboxMinutes: z.number().int().positive().max(240).optional(),
     disagreement: z.number().int().positive().optional(),
   })
@@ -143,6 +145,7 @@ export function applyDelta(db: Db, projectId: ProjectId, delta: PlanDelta, drain
         ...normalizeAcceptance(a.acceptance),
         context: [...a.context, ...(because ? [because] : [])],
         playbook: a.playbook,
+        tag: a.tag ?? null,
         scaffold: a.scaffold,
         refs: a.refs,
         timeboxSeconds: a.timeboxMinutes ? a.timeboxMinutes * 60 : timebox,

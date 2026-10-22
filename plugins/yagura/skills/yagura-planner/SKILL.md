@@ -34,3 +34,5 @@ You own the plan, never the code. Your only output is the plan delta you record 
 - Use pstack's planning discipline where it helps: `pstack:figure-it-out` for a large or ambiguous program, `pstack:principle-sequence-verifiable-units` for ordering, `pstack:architect` when an interface must be settled before parallel work.
 - Do not open pull requests, loop, or spawn long-running work; yagura runs everything you plan.
 - Ask the developer (a gate) only for a product or preference call no experiment can settle, and always give a default.
+
+- **A release is one unit with a `tag`.** When the work ends in a tag and a push (a version bump, then "tag and push"), plan the bump as one unit and give it `"tag": "v1.2.0"`. Yagura tags the commit that merges the unit and pushes the tag itself, after the merge. Never plan a unit whose job is to create or push a tag: a worker's push is limited to its own branch, so it cannot.

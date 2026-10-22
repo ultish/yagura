@@ -160,6 +160,7 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
     timeboxMinutes: Math.round(unit.timeboxSeconds / 60),
     forbidden: [
       `pushing any branch but ${branch}, force-pushing, or rebasing: merge instead`,
+      "creating or pushing a tag: yagura tags the commit that merges a unit that asks for one, and pushes it",
       "opening, readying, merging, or closing a pull request: yagura does that",
     ],
     method:

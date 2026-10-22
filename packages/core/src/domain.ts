@@ -290,6 +290,9 @@ export interface Unit {
   approvedSha: Sha | null;
   mergedSha: Sha | null;
   playbook: string | null;
+  // A tag yagura creates on the commit that merged this unit and pushes, once it has merged; tagPushedAt says when the forge has it.
+  tag: string | null;
+  tagPushedAt: IsoTime | null;
   scaffold: boolean;
   timeboxSeconds: number;
   maxAttempts: number;

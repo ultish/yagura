@@ -245,9 +245,19 @@ export interface NewUnit {
   after?: UnitId[];
   refs?: string[];
   playbook?: string | null;
+  tag?: string | null;
   scaffold?: boolean;
   timeboxSeconds: number;
   maxAttempts: number;
+}
+
+// A tag name git accepts and no one could mistake for an option or a path: letters, digits, dot, dash, underscore, slash.
+export const TAG_NAME = /^[A-Za-z0-9_][A-Za-z0-9._/-]{0,98}$/;
+
+export function checkTagName(tag: string): string {
+  if (!TAG_NAME.test(tag) || tag.includes("..") || tag.endsWith("/") || tag.endsWith(".lock") || tag.includes("//"))
+    throw new Error(`"${tag}" is not a tag name yagura will push: use letters, digits, ., -, _ and /, for example v1.2.0`);
+  return tag;
 }
 
 function alignedProof(acceptance: string[], proof: (UnitProof | null)[] | undefined): (UnitProof | null)[] {
@@ -263,8 +273,8 @@ export function addUnit(db: Db, u: NewUnit): Unit {
     const t = now();
     const result = db
       .prepare(
-        `INSERT INTO units (project_id, seq, type, repo_id, base, goal, acceptance_json, proof_json, context_json, playbook, scaffold, timebox_seconds, max_attempts, refs_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO units (project_id, seq, type, repo_id, base, goal, acceptance_json, proof_json, context_json, playbook, tag, scaffold, timebox_seconds, max_attempts, refs_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         u.projectId,
@@ -277,6 +287,7 @@ export function addUnit(db: Db, u: NewUnit): Unit {
         JSON.stringify(proof),
         JSON.stringify(u.context ?? []),
         u.playbook ?? null,
+        u.tag ? checkTagName(u.tag) : null,
         u.scaffold ? 1 : 0,
         u.timeboxSeconds,
         u.maxAttempts,
@@ -318,6 +329,8 @@ function toUnit(r: Record<string, unknown>, after: UnitId[]): Unit {
     approvedSha: (r.approved_sha as Unit["approvedSha"]) ?? null,
     mergedSha: (r.merged_sha as Unit["mergedSha"]) ?? null,
     playbook: (r.playbook as string | null) ?? null,
+    tag: (r.tag as string | null) ?? null,
+    tagPushedAt: (r.tag_pushed_at as IsoTime | null) ?? null,
     scaffold: r.scaffold === 1,
     timeboxSeconds: r.timebox_seconds as number,
     maxAttempts: r.max_attempts as number,
@@ -715,6 +728,24 @@ export function setProjectRefs(db: Db, projectId: ProjectId, refs: string[]): vo
 
 export function setMergedSha(db: Db, unitId: UnitId, sha: string): void {
   db.prepare("UPDATE units SET merged_sha = ?, updated_at = ? WHERE id = ?").run(sha, now(), unitId);
+}
+
+// Asks for a tag on the commit that merged the unit. Allowed on a unit that has not merged, or one that has merged and not yet been tagged.
+export function setUnitTag(db: Db, unitId: UnitId, tag: string | null): Unit {
+  const unit = getUnit(db, unitId);
+  if (tag !== null) checkTagName(tag);
+  if (unit.tagPushedAt) throw new Error(`U${unit.seq} already has ${unit.tag} on the forge`);
+  if (tag !== null && unit.type !== "work") throw new Error("only a work unit can carry a tag");
+  if (tag !== null && unit.state === "dropped") throw new Error(`U${unit.seq} was dropped, so there is no merge to tag`);
+  db.prepare("UPDATE units SET tag = ?, updated_at = ? WHERE id = ?").run(tag, now(), unitId);
+  recordEvent(db, "unit.tag", { projectId: unit.projectId, unitId }, { tag });
+  return getUnit(db, unitId);
+}
+
+export function markTagPushed(db: Db, unitId: UnitId, sha: string): void {
+  const unit = getUnit(db, unitId);
+  db.prepare("UPDATE units SET tag_pushed_at = ?, updated_at = ? WHERE id = ?").run(now(), now(), unitId);
+  recordEvent(db, "unit.tagged", { projectId: unit.projectId, unitId }, { tag: unit.tag, sha });
 }
 
 export function setApprovedSha(db: Db, unitId: UnitId, sha: string | null): void {

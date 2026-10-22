@@ -576,6 +576,14 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
             )}
           </dd>
         </div>
+        {u.tag && (
+          <div>
+            <dt>Tag</dt>
+            <dd className="mono">
+              {u.tag} · {u.tagPushedAt ? "on the forge" : u.state === "merged" ? "yagura is pushing it" : "yagura tags the merge"}
+            </dd>
+          </div>
+        )}
         {story.origin && (
           <div>
             <dt>From</dt>

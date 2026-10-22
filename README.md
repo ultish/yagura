@@ -155,6 +155,10 @@ A repo can carry a verification guide: a skill in `.claude/skills/verify-<app>/`
 
 A unit page says when its repo has no guide. Press Create the guide, say how to start the app and what to avoid, and yagura adds one unit to the project that writes it. The agent can't ask you questions while it works, so put what only you know in that box. You can also start it with `yagura verify create <repo> --project <id>`, or from the Repos page.
 
+### Releases and tags
+
+A worker can push only its own unit's branch, so it can't push a tag. For a release, give the unit that bumps the version a tag: `yagura unit add <project> --repo <id> --goal … --accept … --tag v1.2.0`, or ask the planner for a release and it sets `tag` on that unit. After the unit merges, yagura creates an annotated tag on the merge commit and pushes that one tag, which is what starts a repo's release workflow. It refuses to move a tag the forge already has on a different commit. To tag a unit that has already merged, run `yagura unit tag <project> <unit#> <tag>`.
+
 ### Tracing a commit back to yagura
 
 A merge commit names the unit (`rakko/U1`), the agents and models that built and judged it, the runs the approval rests on, who asked for the work (a trusted user's yes on an issue, or the Talk conversation), and who allowed the merge (`Approved-by`, with the merge gate and the time). The pull request description has the same, plus the commands yagura recorded and the judgment calls the agents made that nobody checked.

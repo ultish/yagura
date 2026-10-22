@@ -121,6 +121,7 @@ import {
   guideCreationUnder,
   createGuideUnit,
   requestUpkeep,
+  setUnitTag,
   costSummary,
   setThreadState,
   openRequestUnits,
@@ -712,6 +713,15 @@ export function createApp(opts: ServerOptions): Hono {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
     }
     return c.json({ project: getProject(db, id) });
+  });
+  app.post("/api/projects/:id/units/:seq/tag", async (c) => {
+    const unit = getUnitBySeq(db, c.req.param("id") as ProjectId, Number(c.req.param("seq")));
+    const b = (await c.req.json()) as { tag?: string | null };
+    try {
+      return c.json(setUnitTag(db, unit.id, b.tag ? b.tag : null));
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
   });
   app.get("/api/cost", (c) => c.json(costSummary(db)));
   app.get("/api/settings/overview", (c) => {
