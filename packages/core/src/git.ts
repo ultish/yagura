@@ -75,6 +75,29 @@ async function updateMirror(url: string, gitDir: string): Promise<void> {
     await new Promise((r) => setTimeout(r, 500));
     await fetch();
   });
+  await advanceDefaultBranch(gitDir);
+}
+
+// A worker's checkout is a clone of the mirror, so it reads the mirror's own branch as its origin/<branch>; a fetch only moves the mirror's
+// origin/* copy, which left the default branch frozen at the day the mirror was cloned. It is moved to match, forward only: a repo that lands
+// by pushing merges into the mirror's branch first, and that must not be wound back.
+async function advanceDefaultBranch(gitDir: string): Promise<void> {
+  const head = await git(["symbolic-ref", "-q", "HEAD"], { gitDir }).catch(() => "");
+  if (!head.startsWith("refs/heads/")) return;
+  const branch = head.slice("refs/heads/".length);
+  const remote = await resolveRef(gitDir, `refs/remotes/origin/${branch}`).catch(() => null);
+  if (!remote) return;
+  const local = await resolveRef(gitDir, `refs/heads/${branch}`).catch(() => null);
+  if (local === remote) return;
+  if (
+    local &&
+    !(await git(["merge-base", "--is-ancestor", local, remote], { gitDir }).then(
+      () => true,
+      () => false,
+    ))
+  )
+    return;
+  await git(["update-ref", `refs/heads/${branch}`, remote, local ?? ""], { gitDir }).catch(() => undefined);
 }
 
 export async function readFileAt(gitDir: string, ref: string, path: string): Promise<string | null> {
