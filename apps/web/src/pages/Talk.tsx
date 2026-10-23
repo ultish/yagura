@@ -1,11 +1,14 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { MessagesSquare, PanelRight } from "lucide-react";
 import { api, navigate, useApi, useQuery, type Proposal, type ProjectSummary, type Thread, type ThreadMessage, type ThreadView } from "../api";
 import { atEnd } from "../lib/follow";
 import { clock } from "../lib/format";
 import { Inline, Markdown } from "../lib/markdown";
 import { needsYou } from "../lib/scene";
 import { hasStarted, startedBy } from "../lib/proposal-result";
+import { PANELS, useMediaQuery } from "../lib/media";
 import { Link } from "../ui/Link";
+import { Slideout } from "../ui/Slideout";
 import { MentionInput } from "../ui/MentionInput";
 import { LiveTurnCalls, TurnCallsFor } from "../ui/TurnCalls";
 import { useAction } from "../ui/rows";
@@ -192,15 +195,14 @@ function Message({
   return (
     <div
       id={`m${m.id}`}
+      className="talk-msg"
       style={{
-        display: "flex",
-        gap: 16,
         padding: "14px 0",
         borderTop: "1px solid var(--line2)",
         ...(target ? { boxShadow: "inset 3px 0 0 var(--lamp)", paddingLeft: 12, background: "var(--mention-bg)" } : {}),
       }}
     >
-      <div className="mono" style={{ width: 86, flexShrink: 0, fontSize: 12, color: r.color, paddingTop: 3 }}>
+      <div className="mono talk-msg-who" style={{ fontSize: 12, color: r.color, paddingTop: 3 }}>
         {r.label}
         <div className="muted" style={{ fontSize: 11, marginTop: 3 }}>
           {clock(m.createdAt)}
@@ -211,7 +213,7 @@ function Message({
           </div>
         )}
       </div>
-      <div style={{ flexGrow: 1, minWidth: 0, fontSize: 15, lineHeight: 1.55, color: m.role === "system" ? "var(--soft)" : "var(--text)" }}>
+      <div className="talk-msg-body" style={{ fontSize: 15, lineHeight: 1.55, color: m.role === "system" ? "var(--soft)" : "var(--text)" }}>
         {m.role === "watchman" && m.turnLog && <TurnCallsFor messageId={m.id} />}
         <Markdown text={m.body} known={known} />
         {proposals.map((p) => (
@@ -241,7 +243,7 @@ function StateDot({ open }: { open: boolean }) {
   );
 }
 
-function ThreadList({ current }: { current: number | null }) {
+function ThreadList({ current, bare }: { current: number | null; bare?: boolean }) {
   const threads = useApi<(Thread & { busy: boolean })[]>("/api/threads");
   const list = threads.data ?? [];
   const section = (title: string, items: typeof list) =>
@@ -276,7 +278,7 @@ function ThreadList({ current }: { current: number | null }) {
       </>
     );
   return (
-    <nav aria-label="Conversations" className="talk-side talk-list">
+    <nav aria-label="Conversations" className={bare ? "talk-bare" : "talk-side talk-list"}>
       <button className="btn lamp" type="button" onClick={() => navigate("/talk")} style={{ marginBottom: 6 }}>
         New conversation
       </button>
@@ -393,7 +395,7 @@ function ThreadControls({ threadId, v, busy, onChanged }: { threadId: number; v:
   );
 }
 
-function Ledger({ v, controls }: { v: ThreadView; controls: ReactNode }) {
+function Ledger({ v, controls, bare }: { v: ThreadView; controls: ReactNode; bare?: boolean }) {
   const active = v.decisions.filter((d) => d.supersededBy === null).length;
   const open = v.questions.filter((q) => q.answer === null);
   const started = v.proposals
@@ -403,7 +405,7 @@ function Ledger({ v, controls }: { v: ThreadView; controls: ReactNode }) {
   const dot = (s: ProjectSummary) =>
     needsYou(s) ? "var(--bell)" : s.running || s.planning ? "var(--lamp)" : s.project.state === "closed" ? "var(--pine)" : "var(--beacon-off-line)";
   return (
-    <aside aria-label="Thread records" className="talk-side talk-ledger">
+    <aside aria-label="Thread records" className={bare ? "talk-bare talk-bare-ledger" : "talk-side talk-ledger"}>
       {controls}
       <div>
         <h2 className="h2">Projects</h2>
@@ -561,6 +563,9 @@ export function Talk({ threadId }: { threadId: number | null }) {
   const query = useQuery();
   const say = query.get("say") ?? "";
   const view = useApi<ThreadView>(threadId === null ? null : `/api/threads/${threadId}`);
+  const narrow = useMediaQuery(PANELS);
+  const [panel, setPanel] = useState<"list" | "records" | null>(null);
+  useEffect(() => setPanel(null), [threadId, narrow]);
   const busy = view.data?.busy ?? false;
   const projects = useApi<ProjectSummary[]>("/api/projects");
   const known = useMemo(() => new Set((projects.data ?? []).map((p) => p.project.id as string)), [projects.data]);
@@ -605,8 +610,22 @@ export function Talk({ threadId }: { threadId: number | null }) {
   const messages = v ? (all || older ? v.messages : v.messages.slice(-SHOWN)) : [];
   return (
     <main className="talk">
-      <ThreadList current={threadId} />
+      {!narrow && <ThreadList current={threadId} />}
       <section style={{ flexGrow: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--bg2)" }}>
+        {narrow && (
+          <div className="talk-bar">
+            <button type="button" className="btn sm talk-bar-btn" aria-haspopup="dialog" onClick={() => setPanel("list")}>
+              <MessagesSquare size={16} strokeWidth={1.75} aria-hidden="true" />
+              Conversations
+            </button>
+            {v && (
+              <button type="button" className="btn sm talk-bar-btn" aria-haspopup="dialog" onClick={() => setPanel("records")}>
+                <PanelRight size={16} strokeWidth={1.75} aria-hidden="true" />
+                Records
+              </button>
+            )}
+          </div>
+        )}
         {threadId === null ? (
           <div style={{ padding: "28px var(--talk-pad)", flexGrow: 1 }}>
             <h1 className="serif" style={{ margin: 0, fontSize: 28, fontWeight: 600 }}>
@@ -713,10 +732,23 @@ export function Talk({ threadId }: { threadId: number | null }) {
           }}
         />
       </section>
-      {v ? (
-        <Ledger v={v} controls={<ThreadControls threadId={threadId!} v={v} busy={busy} onChanged={view.reload} />} />
-      ) : (
-        <aside aria-hidden className="talk-side talk-ledger talk-placeholder" />
+      {!narrow &&
+        (v ? (
+          <Ledger v={v} controls={<ThreadControls threadId={threadId!} v={v} busy={busy} onChanged={view.reload} />} />
+        ) : (
+          <aside aria-hidden className="talk-side talk-ledger" />
+        ))}
+      {narrow && (
+        <>
+          <Slideout open={panel === "list"} onClose={() => setPanel(null)} label="Conversations" side="left">
+            <ThreadList current={threadId} bare />
+          </Slideout>
+          {v && (
+            <Slideout open={panel === "records"} onClose={() => setPanel(null)} label="Records" side="right">
+              <Ledger v={v} controls={<ThreadControls threadId={threadId!} v={v} busy={busy} onChanged={view.reload} />} bare />
+            </Slideout>
+          )}
+        </>
       )}
     </main>
   );

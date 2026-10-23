@@ -1,10 +1,13 @@
+import { FolderTree, PanelRight } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DiffPanel, type DiffData } from "../ui/evidence";
 import { useApi, useQuery, type CommitUnit, type FileView, type StoryEntry, type UnitStory } from "../api";
 import { clock } from "../lib/format";
 import { Inline } from "../lib/markdown";
 import { followTheme, languageOf, monaco } from "../lib/monaco";
+import { PANELS, useMediaQuery } from "../lib/media";
 import { Link } from "../ui/Link";
+import { Slideout } from "../ui/Slideout";
 import { DisagreeButton, DisagreeForm, type DisagreeOption } from "../ui/Disagree";
 
 type Tab = { kind: "file"; path: string } | { kind: "change"; sha: string; label: string; base?: string };
@@ -400,6 +403,9 @@ export default function Repo({ id, at, embedded = false }: { id: string; at?: Re
   const { data: tree, error } = useApi<{ head: string; branch: string; files: string[] }>(`/api/repos/${id}/tree${ref ? `?ref=${ref}` : ""}`);
   const { data: repos } = useApi<{ repo: { id: string }; projects: { id: string }[] }[]>("/api/repos");
   const [side, setSide] = useState<"explorer" | "history">("explorer");
+  const narrow = useMediaQuery(PANELS) && !embedded;
+  const [panel, setPanel] = useState<"files" | "story" | null>(null);
+  useEffect(() => setPanel(null), [narrow]);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [picked, setPicked] = useState<CommitUnit | null>(null);
@@ -447,6 +453,43 @@ export default function Repo({ id, at, embedded = false }: { id: string; at?: Re
     );
   const showingChange = current?.kind === "change" || (picked === null && arrivedAt !== null);
   const railCommit = current?.kind === "change" ? (changeCommit?.commit ?? null) : (picked ?? changeCommit?.commit ?? null);
+  const closeThen =
+    <T extends unknown[]>(f: (...a: T) => void) =>
+    (...a: T) => {
+      setPanel(null);
+      f(...a);
+    };
+  const sideNav = (
+    <nav className="repo-side">
+      <div className="repo-switch" role="tablist" aria-label="Side panel">
+        {(["explorer", "history"] as const).map((v) => (
+          <button key={v} type="button" role="tab" aria-selected={side === v} className={side === v ? "on" : ""} onClick={() => setSide(v)}>
+            {v === "explorer" ? "Explorer" : "History"}
+          </button>
+        ))}
+      </div>
+      {side === "explorer" ? (
+        <Tree files={tree.files} open={current?.kind === "file" ? current.path : null} onOpen={closeThen((path: string) => open({ kind: "file", path }))} />
+      ) : (
+        <History
+          repoId={id}
+          projectOf={projectOf}
+          path={filePath}
+          active={current?.kind === "change" ? current.sha : null}
+          onPick={closeThen((c: Parameters<typeof projectOf>[0]) => open({ kind: "change", sha: c.sha, label: projectOf(c) }))}
+        />
+      )}
+    </nav>
+  );
+  const rail = (
+    <Rail
+      commit={railCommit}
+      mode={showingChange ? "change" : "line"}
+      lineAt={showingChange ? null : pickedLine}
+      cameFrom={from ? { projectId: from[1]!, seq: Number(from[2]) } : null}
+      onShowChange={closeThen((c: Parameters<typeof projectOf>[0]) => open({ kind: "change", sha: c.sha, label: projectOf(c) }))}
+    />
+  );
   return (
     <main className={embedded ? "repo embedded" : "repo"}>
       <div className="repo-bar">
@@ -461,28 +504,21 @@ export default function Repo({ id, at, embedded = false }: { id: string; at?: Re
           </span>
         )}
         <span style={{ marginLeft: "auto" }}>{tree.files.length} files</span>
+        {narrow && (
+          <span className="repo-bar-btns">
+            <button type="button" className="btn sm" aria-haspopup="dialog" onClick={() => setPanel("files")}>
+              <FolderTree size={16} strokeWidth={1.75} aria-hidden="true" />
+              Files
+            </button>
+            <button type="button" className="btn sm" aria-haspopup="dialog" onClick={() => setPanel("story")}>
+              <PanelRight size={16} strokeWidth={1.75} aria-hidden="true" />
+              Story
+            </button>
+          </span>
+        )}
       </div>
       <div className="repo-body">
-        <nav className="repo-side">
-          <div className="repo-switch" role="tablist" aria-label="Side panel">
-            {(["explorer", "history"] as const).map((v) => (
-              <button key={v} type="button" role="tab" aria-selected={side === v} className={side === v ? "on" : ""} onClick={() => setSide(v)}>
-                {v === "explorer" ? "Explorer" : "History"}
-              </button>
-            ))}
-          </div>
-          {side === "explorer" ? (
-            <Tree files={tree.files} open={current?.kind === "file" ? current.path : null} onOpen={(path) => open({ kind: "file", path })} />
-          ) : (
-            <History
-              repoId={id}
-              projectOf={projectOf}
-              path={filePath}
-              active={current?.kind === "change" ? current.sha : null}
-              onPick={(c) => open({ kind: "change", sha: c.sha, label: projectOf(c) })}
-            />
-          )}
-        </nav>
+        {!narrow && sideNav}
         <section className="repo-main">
           <div className="repo-tabs">
             {tabs.map((t) => (
@@ -530,16 +566,18 @@ export default function Repo({ id, at, embedded = false }: { id: string; at?: Re
           )}
           {!current && <div className="muted repo-pad">Open a file from the explorer, or a change from the history.</div>}
         </section>
-        {!embedded && (
-          <Rail
-            commit={railCommit}
-            mode={showingChange ? "change" : "line"}
-            lineAt={showingChange ? null : pickedLine}
-            cameFrom={from ? { projectId: from[1]!, seq: Number(from[2]) } : null}
-            onShowChange={(c) => open({ kind: "change", sha: c.sha, label: projectOf(c) })}
-          />
-        )}
+        {!embedded && !narrow && rail}
       </div>
+      {narrow && (
+        <>
+          <Slideout open={panel === "files"} onClose={() => setPanel(null)} label="Files" side="left">
+            {sideNav}
+          </Slideout>
+          <Slideout open={panel === "story"} onClose={() => setPanel(null)} label="Story" side="right">
+            {rail}
+          </Slideout>
+        </>
+      )}
     </main>
   );
 }

@@ -1526,23 +1526,32 @@ button.story-time:hover {
 .yg-c4 {
   border-left-color: var(--bronze);
 }
+/* Below PANELS (lib/media.ts) the code takes the width and the files and the story open from the toolbar in slideouts. */
 @media (max-width: 900px) {
   .repo-body {
     grid-template-columns: minmax(0, 1fr);
     height: auto;
   }
-  .repo-side {
-    border-right: 0;
-    border-bottom: 1px solid var(--line2);
-    max-height: 220px;
-  }
   .repo-main {
-    height: 60vh;
+    height: max(360px, calc(100dvh - 200px));
   }
-  .repo-rail {
-    border-left: 0;
-    border-top: 1px solid var(--line2);
-  }
+}
+.repo-bar-btns {
+  display: inline-flex;
+  gap: 8px;
+}
+.repo-bar-btns .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-block-size: 40px;
+}
+.slideout .repo-side,
+.slideout .repo-rail {
+  border: 0;
+  padding: 0;
+  max-height: none;
+  overflow: visible;
 }
 
 /* The unit hub: Story, Agents, and Code as tabs of one unit. */
@@ -2398,45 +2407,84 @@ main.talk {
     padding-inline: 16px;
   }
 }
-/* Too narrow for three columns: the conversations, the thread, and its records stack, each at full width. */
+/* Too narrow for three columns: the conversation fills the width and its two side panels open from the toolbar (ui/Slideout.tsx). */
 @media (max-width: 900px) {
   main.talk {
-    flex-direction: column;
     --talk-pad: 16px;
   }
-  .talk-side {
-    width: auto;
-    position: static;
-    align-self: stretch;
-    max-height: none;
-    border: 0;
-    border-bottom: 1px solid var(--line);
+}
+.talk-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--bg2);
+  border-block-end: 1px solid var(--line);
+}
+.talk-bar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-block-size: 40px;
+}
+.talk-msg {
+  display: flex;
+  gap: 16px;
+}
+.talk-msg-who {
+  inline-size: 86px;
+  flex-shrink: 0;
+}
+.talk-msg-body {
+  flex-grow: 1;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+  .talk-msg {
+    flex-direction: column;
+    gap: 4px;
   }
-  .talk-list {
-    max-height: 260px;
+  .talk-msg-who {
+    inline-size: auto;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
   }
-  .talk-ledger {
-    border-bottom: 0;
-    border-top: 1px solid var(--line);
-  }
-  .talk-placeholder {
-    display: none;
+  .talk-msg-who > div {
+    margin-block-start: 0;
   }
 }
+.talk-bare {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.talk-bare-ledger {
+  gap: 22px;
+}
 
+/* Below FACTS (lib/media.ts) the facts leave the page and open from a button in a slideout, so the story takes the whole width. */
 @media (max-width: 1000px) {
   .story-split {
     grid-template-columns: minmax(0, 1fr);
   }
-  .unit-facts {
-    order: -1;
-    position: static;
-    max-height: none;
-    padding: 0 0 12px;
-    border-left: 0;
-    border-bottom: 1px solid var(--line);
-    margin-bottom: 16px;
-  }
+}
+.story-details {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-block-size: 40px;
+  margin-block: 4px 8px;
+}
+.slideout .unit-facts {
+  position: static;
+  max-block-size: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
 }
 
 /* The top bar: one row on a wide screen, tighter on a laptop, and below NARROW (lib/media.ts) a logo and a menu button. */
