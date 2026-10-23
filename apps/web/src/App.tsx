@@ -1,3 +1,4 @@
+import { Menu } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { LiveContext, useApi, useLiveVersion, usePath } from "./api";
 import { Agent, AgentByNo, UnitAgent } from "./pages/Agent";
@@ -25,6 +26,8 @@ import markLight from "./assets/mark-light.png";
 import { Link } from "./ui/Link";
 import { BellAlert } from "./ui/BellAlert";
 import { SearchBox } from "./ui/SearchBox";
+import { Slideout } from "./ui/Slideout";
+import { NARROW, useMediaQuery } from "./lib/media";
 import type { CostSummary } from "@yagura/core";
 import { usd } from "./lib/format";
 import { markTourSeen, startTour, tourSeen } from "./lib/tour";
@@ -77,9 +80,40 @@ function CostPill() {
   );
 }
 
+function Brand({ theme }: { theme: Theme }) {
+  return (
+    <Link to="/" aria-label="yagura, the watch" style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text)", textDecoration: "none" }}>
+      <img src={theme === "night" ? markDark : markLight} alt="" width={36} height={37} style={{ display: "block" }} />
+      <span className="serif" style={{ fontSize: 17, letterSpacing: ".12em" }}>
+        yagura
+      </span>
+    </Link>
+  );
+}
+
+function NavLinks({ path, tour }: { path: string; tour?: boolean }) {
+  return (
+    <>
+      {NAV.map((n) => (
+        <Link
+          key={n.to}
+          to={n.to}
+          data-tour={tour ? n.to.slice(1) || "watch" : undefined}
+          aria-current={n.match(path) ? "page" : undefined}
+          className="hdr-link"
+        >
+          {n.label}
+        </Link>
+      ))}
+    </>
+  );
+}
+
 function Header() {
   const path = usePath();
   const [theme, toggle] = useTheme();
+  const narrow = useMediaQuery(NARROW);
+  const [menu, setMenu] = useState(false);
   const health = useApi<{ ok: boolean; home: string }>("/api/health");
   useEffect(() => {
     if (tourSeen(localStorage)) return;
@@ -87,55 +121,72 @@ function Header() {
     const t = setTimeout(startTour, 800);
     return () => clearTimeout(t);
   }, []);
-  return (
-    <header
-      style={{ minHeight: 60, display: "flex", alignItems: "center", gap: 36, padding: "0 36px", borderBottom: "1px solid var(--line)", flexWrap: "wrap" }}
+  useEffect(() => setMenu(false), [path, narrow]);
+  const host = (
+    <span className="mono hdr-host" style={{ fontSize: 12, color: health.error ? "var(--bell-text)" : "var(--muted)" }}>
+      {health.error ? "daemon unreachable" : location.host}
+    </span>
+  );
+  const help = (
+    <button
+      type="button"
+      data-tour="help"
+      onClick={startTour}
+      aria-label="Show the tour of how yagura works"
+      title="How yagura works"
+      className="mono hdr-round"
     >
-      <Link to="/" aria-label="yagura, the watch" style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text)", textDecoration: "none" }}>
-        <img src={theme === "night" ? markDark : markLight} alt="" width={36} height={37} style={{ display: "block" }} />
-        <span className="serif" style={{ fontSize: 17, letterSpacing: ".12em" }}>
-          yagura
-        </span>
-      </Link>
-      <nav aria-label="Main" style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", flex: "1 1 180px", minWidth: 0 }}>
-        {NAV.map((n) => (
-          <Link
-            key={n.to}
-            to={n.to}
-            data-tour={n.to.slice(1) || "watch"}
-            aria-current={n.match(path) ? "page" : undefined}
-            style={{ color: n.match(path) ? "var(--text)" : "var(--muted)", fontWeight: n.match(path) ? 700 : 400, textDecoration: "none", fontSize: 14.5 }}
-          >
-            {n.label}
-          </Link>
-        ))}
+      ?
+    </button>
+  );
+  const themeButton = (
+    <button
+      type="button"
+      onClick={toggle}
+      aria-label={theme === "night" ? "Switch to daybreak theme" : "Switch to night theme"}
+      className="mono hdr-pill hdr-theme"
+    >
+      {theme === "night" ? "☾" : "☀"}
+      <span className="hdr-theme-label">{theme === "night" ? " night · daybreak" : " daybreak · night"}</span>
+    </button>
+  );
+  if (narrow)
+    return (
+      <header className="hdr hdr-narrow">
+        <Brand theme={theme} />
+        <span style={{ flex: 1 }} />
+        <BellAlert />
+        <button type="button" className="hdr-burger" aria-label="Open the menu" aria-expanded={menu} aria-controls="main-menu" onClick={() => setMenu(true)}>
+          <Menu size={22} strokeWidth={1.75} aria-hidden="true" />
+        </button>
+        <Slideout id="main-menu" open={menu} onClose={() => setMenu(false)} label="Menu">
+          <nav aria-label="Main" className="menu-nav">
+            <NavLinks path={path} tour />
+          </nav>
+          <SearchBox />
+          <div className="menu-tools">
+            {host}
+            <CostPill />
+          </div>
+          <div className="menu-tools">
+            {help}
+            {themeButton}
+          </div>
+        </Slideout>
+      </header>
+    );
+  return (
+    <header className="hdr">
+      <Brand theme={theme} />
+      <nav aria-label="Main" className="hdr-nav">
+        <NavLinks path={path} tour />
       </nav>
       <SearchBox />
-      <div className="mono" style={{ fontSize: 12, color: health.error ? "var(--bell-text)" : "var(--muted)" }}>
-        {health.error ? "daemon unreachable" : `${location.host}`}
-      </div>
+      {host}
       <BellAlert />
       <CostPill />
-      <button
-        type="button"
-        data-tour="help"
-        onClick={startTour}
-        aria-label="Show the tour of how yagura works"
-        title="How yagura works"
-        className="mono"
-        style={{ fontSize: 12, border: "1px solid var(--btnline)", background: "transparent", borderRadius: 999, width: 30, height: 30, cursor: "pointer" }}
-      >
-        ?
-      </button>
-      <button
-        type="button"
-        onClick={toggle}
-        aria-label={theme === "night" ? "Switch to daybreak theme" : "Switch to night theme"}
-        className="mono"
-        style={{ fontSize: 12, border: "1px solid var(--btnline)", background: "transparent", borderRadius: 999, padding: "6px 12px", cursor: "pointer" }}
-      >
-        {theme === "night" ? "☾ night · daybreak" : "☀ daybreak · night"}
-      </button>
+      {help}
+      {themeButton}
     </header>
   );
 }

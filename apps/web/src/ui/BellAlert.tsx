@@ -66,23 +66,13 @@ export function BellAlert() {
   return (
     <button
       type="button"
-      className="mono"
+      className="mono hdr-pill bell-notify"
+      aria-label="Notify me when something needs me"
       title="Show a desktop notification when something needs you and this tab is in the background"
       onClick={() => void Notification.requestPermission().then(setPermission)}
-      style={{
-        display: "inline-flex",
-        gap: 6,
-        alignItems: "center",
-        fontSize: 12,
-        border: "1px solid var(--btnline)",
-        background: "transparent",
-        borderRadius: 999,
-        padding: "6px 12px",
-        cursor: "pointer",
-      }}
     >
       <Bell size={13} strokeWidth={1.75} aria-hidden="true" />
-      notify me
+      <span className="bell-label">notify me</span>
     </button>
   );
 }

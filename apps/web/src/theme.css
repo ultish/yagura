@@ -1779,7 +1779,8 @@ button.story-time:hover {
 .search-key {
   position: absolute;
   right: 8px;
-  top: 6px;
+  top: 50%;
+  translate: 0 -50%;
   font: 11px var(--mono, monospace);
   color: var(--muted);
   border: 1px solid var(--line2);
@@ -2435,5 +2436,242 @@ main.talk {
     border-left: 0;
     border-bottom: 1px solid var(--line);
     margin-bottom: 16px;
+  }
+}
+
+/* The top bar: one row on a wide screen, tighter on a laptop, and below NARROW (lib/media.ts) a logo and a menu button. */
+html {
+  scrollbar-gutter: stable;
+}
+html:has(dialog:modal) {
+  overflow: hidden;
+}
+.hdr {
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 36px;
+  padding-inline: 36px;
+  border-bottom: 1px solid var(--line);
+}
+.hdr-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  flex: 1 1 180px;
+  min-inline-size: 0;
+}
+.hdr-link {
+  color: var(--muted);
+  font-size: 14.5px;
+  text-decoration: none;
+}
+.hdr-link[aria-current="page"] {
+  color: var(--text);
+  font-weight: 700;
+}
+.hdr-pill,
+.hdr-round {
+  font-size: 12px;
+  border: 1px solid var(--btnline);
+  background: transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.hdr-pill {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+.hdr-round {
+  inline-size: 30px;
+  block-size: 30px;
+}
+.hdr-burger {
+  display: grid;
+  place-items: center;
+  inline-size: 44px;
+  block-size: 44px;
+  border: 1px solid var(--btnline);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.hdr-narrow {
+  flex-wrap: nowrap;
+  gap: 12px;
+  padding-inline: 16px;
+}
+@media (max-width: 1499px) {
+  .hdr {
+    gap: 20px;
+    padding-inline: 24px;
+  }
+  .hdr-host,
+  .hdr-theme-label {
+    display: none;
+  }
+  .hdr .search {
+    flex-basis: 220px;
+  }
+}
+@media (max-width: 640px) {
+  .bell-label {
+    display: none;
+  }
+}
+
+/* A panel that slides in from an edge: a modal <dialog> (ui/Slideout.tsx), so the browser handles focus, Escape and the dimmed page. */
+.slideout {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  inset-block: 0;
+  block-size: 100dvh;
+  max-block-size: 100dvh;
+  inline-size: min(22rem, calc(100vw - 2.5rem));
+  max-inline-size: none;
+  background: var(--bg2);
+  color: var(--text);
+  overflow: clip;
+  opacity: 0;
+  transition:
+    opacity 0.2s ease-out,
+    display 0.2s allow-discrete,
+    overlay 0.2s allow-discrete;
+}
+.slideout-right {
+  inset-inline: auto 0;
+  border-inline-start: 1px solid var(--line);
+}
+.slideout-left {
+  inset-inline: 0 auto;
+  border-inline-end: 1px solid var(--line);
+}
+.slideout[open] {
+  opacity: 1;
+}
+.slideout::backdrop {
+  background: color-mix(in oklch, black 55%, transparent);
+  opacity: 0;
+  transition:
+    opacity 0.2s ease-out,
+    display 0.2s allow-discrete,
+    overlay 0.2s allow-discrete;
+}
+.slideout[open]::backdrop {
+  opacity: 1;
+}
+@starting-style {
+  .slideout[open],
+  .slideout[open]::backdrop {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .slideout {
+    transition:
+      opacity 0.2s ease-out,
+      translate 0.25s ease-out,
+      display 0.25s allow-discrete,
+      overlay 0.25s allow-discrete;
+  }
+  .slideout-right {
+    translate: 100% 0;
+  }
+  .slideout-left {
+    translate: -100% 0;
+  }
+  .slideout[open] {
+    translate: 0 0;
+  }
+  @starting-style {
+    .slideout-right[open] {
+      translate: 100% 0;
+    }
+    .slideout-left[open] {
+      translate: -100% 0;
+    }
+  }
+}
+.slideout-panel {
+  display: flex;
+  flex-direction: column;
+  block-size: 100%;
+}
+.slideout-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 8px 16px;
+  border-block-end: 1px solid var(--line);
+}
+.slideout-title {
+  font-size: 18px;
+}
+.slideout-close {
+  display: grid;
+  place-items: center;
+  inline-size: 44px;
+  block-size: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.slideout-body {
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+}
+.menu-nav {
+  display: flex;
+  flex-direction: column;
+}
+.menu-nav .hdr-link {
+  font-size: 16px;
+  padding: 12px 4px;
+  border-block-end: 1px solid var(--line);
+}
+.menu-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.slideout .hdr-host,
+.slideout .hdr-theme-label {
+  display: inline;
+}
+.slideout .search {
+  flex: none;
+  inline-size: 100%;
+}
+.slideout .search input {
+  font-size: 16px;
+  padding-block: 10px;
+}
+.slideout .search-key {
+  display: none;
+}
+.slideout .search-drop {
+  position: static;
+  inline-size: auto;
+  max-block-size: 50dvh;
+  margin-block-start: 8px;
+  box-shadow: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .hdr-link:hover {
+    color: var(--text);
   }
 }
