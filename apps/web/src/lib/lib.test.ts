@@ -609,6 +609,20 @@ describe("tour", () => {
   });
 });
 
+describe("tour on a narrow screen", () => {
+  it("keeps every step, and shows the ones whose target is hidden as a centred note that says where it is", async () => {
+    const { TOUR_STEPS, stepsFor } = await import("./tour");
+    const all = stepsFor(() => true);
+    expect(all).toEqual(TOUR_STEPS);
+    const hidden = stepsFor((selector) => selector === '[data-tour="gates"]');
+    expect(hidden).toHaveLength(TOUR_STEPS.length);
+    expect(hidden.filter((s) => s.element).map((s) => s.element)).toEqual(['[data-tour="gates"]']);
+    const repos = hidden.find((s) => s.popover?.title === "1. Add your repos")!;
+    expect(repos.element).toBeUndefined();
+    expect(repos.popover?.description).toMatch(/Paste a git URL.*It is in the menu at the top\.$/);
+  });
+});
+
 describe("list settings", () => {
   it("take names separated by spaces, commas, or both", async () => {
     const { settingParsed } = await import("./setting-text");

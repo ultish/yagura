@@ -252,8 +252,8 @@ export function Prompts({ projectId }: { projectId: string | null }) {
           />
         </div>
       )}
-      <div style={{ display: "grid", gridTemplateColumns: "230px minmax(0, 1fr)", border: "1px solid var(--line)", borderRadius: 6 }}>
-        <nav aria-label="Roles" style={{ borderRight: "1px solid var(--line)", padding: 10, display: "flex", flexDirection: "column", gap: 2 }}>
+      <div className="prompts-grid">
+        <nav aria-label="Roles" className="prompts-roles">
           {view.data.roles.map((x) => (
             <button
               key={x.role}

@@ -63,7 +63,16 @@ export function markTourSeen(storage: Pick<Storage, "setItem">): void {
   } catch {}
 }
 
+// A step whose target is on screen points at it. One whose target is hidden (the links sit in the menu on a narrow screen) keeps its text as a centred note.
+export function stepsFor(shown: (selector: string) => boolean): DriveStep[] {
+  return TOUR_STEPS.map((s) => {
+    if (!s.element || shown(s.element as string)) return s;
+    const { element: _gone, ...rest } = s;
+    return { ...rest, popover: { ...s.popover, description: `${s.popover?.description ?? ""} It is in the menu at the top.` } };
+  });
+}
+
 export function startTour(): void {
-  const present = TOUR_STEPS.filter((s) => !s.element || document.querySelector(s.element as string));
-  driver({ showProgress: true, allowClose: true, overlayOpacity: 0.55, popoverClass: "yagura-tour", steps: present }).drive();
+  const shown = (selector: string) => (document.querySelector(selector)?.getClientRects().length ?? 0) > 0;
+  driver({ showProgress: true, allowClose: true, overlayOpacity: 0.55, popoverClass: "yagura-tour", steps: stepsFor(shown) }).drive();
 }

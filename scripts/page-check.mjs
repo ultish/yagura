@@ -2,6 +2,7 @@
 //   READY=<css selector> node scripts/page-check.mjs shot <url> <night|day> <out.png> [width]   full-page shot once the selector exists
 //   FILL='[["#sel","text"],...]' sets those inputs before the shot (React-safe); CLICK='["#sel","sel|2",...]' clicks them after (sel|n is the nth match)
 //   node scripts/page-check.mjs paint <url> <runs>   ms until the unit page's first timeline entry exists, per load, and the median
+//   WIDTHS=390,700,1000 node scripts/page-check.mjs widths <origin> [/path,/path]   each page at each width: how far it scrolls sideways and which elements stick out (exit 1 if any does)
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -92,6 +93,56 @@ if (mode === "shot") {
   }
   const sorted = [...times].sort((x, y) => x - y);
   console.log(JSON.stringify({ times, median: sorted[Math.floor(sorted.length / 2)] }));
+} else if (mode === "widths") {
+  const widths = (process.env.WIDTHS ?? "390,700,1000").split(",").map(Number);
+  const api = (path) => fetch(new URL(path, url)).then((r) => r.json());
+  const found = [];
+  if (!a) {
+    const projects = await api("/api/projects").catch(() => []);
+    const first = projects[0]?.project?.id;
+    if (first) found.push(`/p/${first}`, `/p/${first}/prompts`, `/p/${first}/spec`);
+    const unit = first ? (await api(`/api/projects/${first}`).catch(() => ({ units: [] }))).units?.find((u) => u.type === "work") : null;
+    if (unit) found.push(`/p/${first}/u/${unit.seq}`);
+    const repos = await api("/api/repos").catch(() => []);
+    const repo = repos[0]?.repo?.id ?? repos[0]?.id;
+    if (repo) found.push(`/r/${repo}`);
+    const envs = await api("/api/environments").catch(() => []);
+    const env = envs[0]?.environment?.id ?? envs[0]?.id;
+    if (env) found.push(`/e/${env}`);
+    const threads = await api("/api/threads").catch(() => []);
+    if (threads[0]) found.push(`/talk/${threads[0].id}`);
+  }
+  const paths = a
+    ? a.split(",")
+    : ["/", "/talk", "/projects", "/projects/new", "/agents", "/gates", "/repos", "/environments", "/settings", "/prompts", "/search?q=a", ...found];
+  const probe = `(() => {
+    const iw = document.documentElement.clientWidth;
+    const out = [];
+    document.querySelectorAll("body *").forEach((e) => {
+      const b = e.getBoundingClientRect();
+      if (!(b.width > 0 && b.right > iw + 2)) return;
+      for (let p = e.parentElement; p && p !== document.body; p = p.parentElement) if (["auto", "scroll", "hidden", "clip"].includes(getComputedStyle(p).overflowX)) return;
+      const c = typeof e.className === "string" && e.className ? "." + e.className.split(" ")[0] : "";
+      out.push(e.tagName.toLowerCase() + c + ":" + Math.round(b.right));
+    });
+    return { over: document.documentElement.scrollWidth - iw, sticking: [...new Set(out)].slice(0, 4) };
+  })()`;
+  let bad = 0;
+  for (const width of widths) {
+    await send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
+    for (const path of paths) {
+      await load(new URL(path, url).href);
+      await sleep(1800);
+      const r = await evaluate(probe);
+      if (r.over > 0) bad++;
+      console.log(
+        `${String(width).padStart(5)}  ${r.over > 0 ? "OVER " + String(r.over).padStart(4) : "ok       "}  ${path}${r.over > 0 ? "  " + r.sticking.join(" ") : ""}`,
+      );
+    }
+  }
+  ws.close();
+  chrome.kill();
+  process.exit(bad ? 1 : 0);
 }
 ws.close();
 chrome.kill();

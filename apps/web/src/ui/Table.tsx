@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { navigate } from "../api";
 
 export interface Col {
@@ -13,9 +13,14 @@ export type Tone = "bell" | "lamp" | "pine" | "muted";
 // A list of things, one line each. Columns keep their widths from one table to the next, so a page with several lists lines up.
 export function Table({ cols, children }: { cols: Col[]; children: ReactNode }) {
   const min = cols.reduce((n, c) => n + (c.width ?? 320), 0);
+  const table = useRef<HTMLTableElement>(null);
+  // On a phone a row is a card and each cell names its column; the cells are the pages' own, so the labels are written onto them here.
+  useLayoutEffect(() => {
+    table.current?.querySelectorAll("tbody tr").forEach((tr) => [...tr.children].forEach((td, i) => td.setAttribute("data-label", cols[i]?.label ?? "")));
+  });
   return (
     <div className="tbl-scroll">
-      <table className="tbl" style={{ minWidth: min }}>
+      <table ref={table} className="tbl" style={{ minWidth: min }}>
         <colgroup>
           {cols.map((c) => (
             <col key={c.label} style={c.width ? { width: c.width } : undefined} />

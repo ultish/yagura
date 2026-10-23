@@ -2723,3 +2723,142 @@ html:has(dialog:modal) {
     color: var(--text);
   }
 }
+
+/* A row of a list: on a phone its actions drop under the text, and the rows that share a name column stack instead. */
+@media (max-width: 640px) {
+  .item {
+    flex-wrap: wrap;
+    gap: 6px 14px;
+  }
+  .item .actions {
+    flex-shrink: 1;
+    flex-basis: 100%;
+    min-inline-size: 0;
+    justify-content: flex-start;
+  }
+  .item .actions :is(input, select, textarea) {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+  @supports (grid-template-columns: subgrid) {
+    :has(> .item:not(.setting)) {
+      display: block;
+    }
+    .item:not(.setting) {
+      display: flex;
+    }
+  }
+}
+
+/* Prompts: the roles beside the editor, and on a phone a row of tabs above it. */
+.prompts-grid {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.prompts-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  border-inline-end: 1px solid var(--line);
+}
+@media (max-width: 700px) {
+  .prompts-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .prompts-roles {
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 6px;
+    border-inline-end: 0;
+    border-block-end: 1px solid var(--line);
+  }
+  .prompts-roles > * {
+    flex: none;
+    white-space: nowrap;
+  }
+}
+
+/* A table on a phone is a stack of cards: the first cell is the card's title and every other cell carries its column's name. */
+@media (max-width: 640px) {
+  .tbl-scroll {
+    overflow-x: visible;
+  }
+  .tbl {
+    min-inline-size: 0 !important;
+  }
+  .tbl,
+  .tbl tbody,
+  .tbl tr,
+  .tbl td {
+    display: block;
+  }
+  .tbl colgroup,
+  .tbl thead {
+    display: none;
+  }
+  .tbl-row {
+    margin-block: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--line2);
+    border-radius: 6px;
+  }
+  .tbl-row td {
+    padding: 3px 0;
+    border: 0;
+    text-align: start;
+  }
+  .tbl-row td:not(:first-child)::before {
+    content: attr(data-label);
+    display: inline-block;
+    min-inline-size: 7em;
+    margin-inline-end: 8px;
+    font: 11px/1.4 var(--mono, monospace);
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .tbl-row td:first-child {
+    font-size: 15px;
+    padding-block-end: 6px;
+  }
+  .tbl-row td.tbl-num {
+    text-align: start;
+  }
+  .tbl-main div {
+    -webkit-line-clamp: 3;
+  }
+}
+
+/* A finger needs about 44px: on a touch screen the small controls grow to it, and a mouse keeps the compact ones. */
+@media (pointer: coarse) {
+  .btn,
+  .btn.sm,
+  .hdr-pill,
+  .hub-tabs a,
+  .hub-tabs button,
+  .repo-switch button,
+  .prompts-roles button {
+    min-block-size: 44px;
+  }
+  .btn,
+  .btn.sm,
+  .hdr-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .hdr-round {
+    inline-size: 44px;
+    block-size: 44px;
+  }
+  .setting-jump a {
+    padding-block: 10px;
+  }
+  input:not([type="checkbox"], [type="radio"]),
+  select {
+    min-block-size: 44px;
+  }
+}
