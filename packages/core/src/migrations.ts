@@ -32,6 +32,11 @@ export const MIGRATIONS: readonly Migration[] = [
       for (const r of rows) set.run(titleFromGoal(r.goal), r.id);
     },
   },
+  // Questions the planner or a unit lead left open on projects that have since closed asked for an answer nobody needs.
+  {
+    version: 8,
+    sql: "UPDATE gates SET state = 'cancelled', resolved_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE state = 'open' AND kind IN ('planner', 'lead') AND project_id IN (SELECT id FROM projects WHERE state = 'closed');",
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

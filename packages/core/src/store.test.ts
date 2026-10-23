@@ -16,7 +16,7 @@ import {
   UnknownSetting,
   effectiveSettings,
 } from "./config.js";
-import { IllegalTransition, UNIT_STATES, UNIT_TRANSITIONS, type ProjectId, type RepoId, type UnitState } from "./domain.js";
+import { IllegalTransition, UNIT_STATES, UNIT_TRANSITIONS, type ProjectId, type RepoId, type UnitId, type UnitState } from "./domain.js";
 import {
   addGate,
   addProject,
@@ -25,8 +25,10 @@ import {
   createAttempt,
   getUnit,
   listUnits,
+  listGates,
   openStore,
   renameUnit,
+  setProjectState,
   schemaVersion,
   transitionUnit,
   updateAttempt,
@@ -58,6 +60,40 @@ const newUnit = () =>
   });
 
 describe("store", () => {
+  it("cancels the planner's and a lead's open questions when a project closes, and keeps its reports", () => {
+    const u = newUnit();
+    const ask = (kind: string, unitId: UnitId | null) => addGate(db, { projectId: project, unitId, kind, question: `a ${kind} question`, options: [] });
+    ask("planner", null);
+    ask("lead", u.id);
+    ask("report", null);
+    setProjectState(db, project, "closed");
+    expect(listGates(db, project).map((g) => [g.kind, g.state])).toEqual([
+      ["planner", "cancelled"],
+      ["lead", "cancelled"],
+      ["report", "open"],
+    ]);
+  });
+
+  it("cancels questions left open on projects that closed before gates were cancelled with them", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "yagura-db-")), "yagura.db");
+    const old = openStore(path);
+    addRepo(old, { id: "r", url: "file:///r", defaultBranch: "main" });
+    addProject(old, { id: "done", name: "d", goal: "g", predicate: "x", repos: ["r" as RepoId] });
+    addProject(old, { id: "live", name: "l", goal: "g", predicate: "x", repos: ["r" as RepoId] });
+    for (const id of ["done", "live"]) addGate(old, { projectId: id as ProjectId, kind: "planner", question: "how?", options: [] });
+    addGate(old, { projectId: "done" as ProjectId, kind: "report", question: "report", options: [] });
+    old.prepare("UPDATE projects SET state = 'closed' WHERE id = 'done'").run();
+    old.prepare("UPDATE schema_version SET version = 7").run();
+    old.close();
+    const upgraded = openStore(path);
+    const rows = upgraded.prepare("SELECT project_id, kind, state FROM gates ORDER BY id").all();
+    expect(rows).toEqual([
+      { project_id: "done", kind: "planner", state: "cancelled" },
+      { project_id: "live", kind: "planner", state: "open" },
+      { project_id: "done", kind: "report", state: "open" },
+    ]);
+  });
+
   it("renames a unit in any state, records it, and leaves the goal alone", () => {
     const u = newUnit();
     expect(u.title).toBe("Implement apply_discount");

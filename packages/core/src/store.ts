@@ -616,6 +616,14 @@ export function setMergePolicy(db: Db, projectId: ProjectId, policy: Project["me
 export function setProjectState(db: Db, projectId: ProjectId, state: Project["state"]): void {
   db.prepare("UPDATE projects SET state = ?, closed_at = CASE WHEN ? = 'closed' THEN ? ELSE closed_at END WHERE id = ?").run(state, state, now(), projectId);
   recordEvent(db, "project.state", { projectId }, { state });
+  // What the planner or a unit lead was still asking means nothing once the project is done; a report is a notice, and stays until it is seen.
+  if (state === "closed") {
+    const open = db.prepare("SELECT id FROM gates WHERE project_id = ? AND state = 'open' AND kind IN ('planner', 'lead')").all(projectId) as { id: number }[];
+    for (const g of open) {
+      db.prepare("UPDATE gates SET state = 'cancelled', resolved_at = ? WHERE id = ?").run(now(), g.id);
+      recordEvent(db, "gate.cancelled", { projectId }, { gate: g.id, reason: "the project closed" });
+    }
+  }
 }
 
 export interface UnitDepRow {
