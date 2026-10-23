@@ -25,14 +25,12 @@ interface PromptsView {
 const LABEL: Record<string, string> = {
   planner: "Project lead",
   worker: "Worker",
-  verifier: "Verifier",
-  reviewer: "Reviewer",
-  "review-triage": "Arbiter",
-  rebase: "Rebase",
-  pack: "Pack writer",
-  manager: "Unit lead",
+  judge: "Judge",
+  lead: "Unit lead",
+  doctor: "Doctor",
   watchman: "Watchman",
 };
+const labelOf = (role: string) => LABEL[role] ?? role;
 const SOURCE: Record<Source, { text: string; color: string }> = {
   default: { text: "yagura default", color: "var(--muted)" },
   global: { text: "your global", color: "var(--info)" },
@@ -89,7 +87,7 @@ function Contract({ attemptId, role }: { attemptId: number | null; role: string 
       <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
         <h2 className="h2">Contract</h2>
         <span className="mono muted" style={{ fontSize: 11.5 }}>
-          no {LABEL[role]!.toLowerCase()} has run in this project yet
+          no {labelOf(role).toLowerCase()} has run in this project yet
         </span>
       </div>
     );
@@ -278,7 +276,7 @@ export function Prompts({ projectId }: { projectId: string | null }) {
                 background: x.role === role ? "var(--panel)" : "transparent",
               }}
             >
-              {LABEL[x.role] ?? x.role} <Chip source={x.source} />
+              {labelOf(x.role)} <Chip source={x.source} />
             </button>
           ))}
         </nav>
@@ -332,7 +330,7 @@ export function Prompts({ projectId }: { projectId: string | null }) {
               )}
             </span>
           </div>
-          <textarea aria-label={`${LABEL[role]} guidance`} rows={20} value={draft} onChange={(e) => setDraft(e.target.value)} style={area} />
+          <textarea aria-label={`${labelOf(role)} guidance`} rows={20} value={draft} onChange={(e) => setDraft(e.target.value)} style={area} />
           {action.error && <div className="s-bell">{action.error}</div>}
           <details open={r.source !== "default" || dirty}>
             <summary style={{ cursor: "pointer" }}>
@@ -347,7 +345,7 @@ export function Prompts({ projectId }: { projectId: string | null }) {
           {projectId ? (
             <NotesBox
               key={role}
-              label={`Notes for ${(LABEL[role] ?? role).toLowerCase()}s`}
+              label={`Notes for ${labelOf(role).toLowerCase()}s`}
               value={r.notes}
               save={(text) => put({ scope: "project", role, kind: "notes", text })}
             />
