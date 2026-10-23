@@ -142,6 +142,8 @@ process.stdin.on("end", () => {
     return save();
   }
   if (verb === "ready") {
+    if (p.state !== "OPEN")
+      fail(`Pull request ${flag("--repo")}#${p.number} is ${p.state.toLowerCase()}. Only draft pull requests can be marked as "ready for review"`);
     p.isDraft = false;
     return save();
   }

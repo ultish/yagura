@@ -280,6 +280,14 @@ async function engine(role) {
       record([["judge", "ask", "--question", "Should the greeting end with a full stop?"]]);
       return finish("I need the developer.");
     }
+    // FAKE_PR_MERGED_BY_HAND=U2 (with FAKE_GH_BIN): while that unit's judge works, the developer marks its pull request ready and merges it.
+    if (process.env.FAKE_PR_MERGED_BY_HAND === process.env.YAGURA_UNIT) {
+      const gh = (...args) => execFileSync(process.env.FAKE_GH_BIN, ["pr", ...args, "--repo", "ultish/testbed"], { input: "by hand", env: process.env });
+      const branch = `refs/heads/yagura/${process.env.YAGURA_PROJECT}/${process.env.YAGURA_UNIT.toLowerCase()}`;
+      const head = execFileSync("git", ["--git-dir", process.env.FAKE_ORIGIN, "rev-parse", branch], { encoding: "utf8" }).trim();
+      gh("ready", "1");
+      gh("merge", "1", "--merge", "--match-head-commit", head, "--subject", "merged by hand");
+    }
     if (asks && firstRound) {
       record([["judge", "changes", "--finding", `app:1 ${process.env.YAGURA_UNIT} must say it was fixed`]]);
       return finish("Changes asked.");

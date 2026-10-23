@@ -70,7 +70,8 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  for (const k of ["FAKE_JUDGE_CHANGES", "FAKE_BASE_MOVE", "FAKE_JUDGE", "FAKE_WORKER_STUCK", "FAKE_DOCTOR"]) delete process.env[k];
+  for (const k of ["FAKE_PR_MERGED_BY_HAND", "FAKE_GH_BIN", "FAKE_JUDGE_CHANGES", "FAKE_BASE_MOVE", "FAKE_JUDGE", "FAKE_WORKER_STUCK", "FAKE_DOCTOR"])
+    delete process.env[k];
 });
 
 let ghState: string;
@@ -181,6 +182,20 @@ describe("Engine", () => {
     );
     expect(await git(["show", `main:app/a/p-U${a!.seq}.txt`], { gitDir: origin })).toBe("work");
     expect(getProject(db, project).state).toBe("closed");
+  }, 60_000);
+
+  it("adopts a pull request the developer merged by hand while the judge worked, instead of failing on it", async () => {
+    onFakeGithub();
+    process.env.FAKE_PR_MERGED_BY_HAND = "U2";
+    process.env.FAKE_GH_BIN = fixtures("fake-gh.mjs");
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+
+    const [a] = workUnits();
+    expect(states(a!.id)).toEqual(["building", "judging", "ready", "merged"]);
+    const pr = (JSON.parse(readFileSync(ghState, "utf8")).prs as { head: string; mergeCommit: string }[]).find((p) => p.head === `yagura/p/u${a!.seq}`)!;
+    expect(getUnit(db, a!.id).mergedSha).toBe(pr.mergeCommit);
+    expect(await git(["log", "-1", "--format=%s", pr.mergeCommit], { gitDir: origin })).toBe("merged by hand");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM events WHERE type = 'engine.error'").get()).toEqual({ n: 0 });
   }, 60_000);
 
   it("sends a unit back to its own worker with the judge's findings, and merges it after the second judge approves", async () => {
