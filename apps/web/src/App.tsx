@@ -1,6 +1,6 @@
-import { Menu } from "lucide-react";
+import { Menu, Search as SearchIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { LiveContext, useApi, useLiveVersion, usePath } from "./api";
+import { LiveContext, useApi, useLiveVersion, usePath, type BellItem } from "./api";
 import { Agent, AgentByNo, UnitAgent } from "./pages/Agent";
 import { Prompts } from "./pages/Prompts";
 import { Unit } from "./pages/Unit";
@@ -114,6 +114,7 @@ function Header() {
   const [theme, toggle] = useTheme();
   const narrow = useMediaQuery(NARROW);
   const [menu, setMenu] = useState(false);
+  const waiting = useApi<BellItem[]>("/api/bell").data?.length ?? 0;
   const health = useApi<{ ok: boolean; home: string }>("/api/health");
   useEffect(() => {
     if (tourSeen(localStorage)) return;
@@ -122,6 +123,21 @@ function Header() {
     return () => clearTimeout(t);
   }, []);
   useEffect(() => setMenu(false), [path, narrow]);
+  // Search lives in the menu on a narrow screen: its icon, and the / key, open the menu with the search field focused.
+  const openMenu = (search = false) => {
+    setMenu(true);
+    if (search) setTimeout(() => document.getElementById("search")?.focus(), 80);
+  };
+  useEffect(() => {
+    if (!narrow) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || (e.target as HTMLElement | null)?.closest("input, textarea, select, [contenteditable=true]")) return;
+      e.preventDefault();
+      openMenu(true);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [narrow]);
   const host = (
     <span className="mono hdr-host" style={{ fontSize: 12, color: health.error ? "var(--bell-text)" : "var(--muted)" }}>
       {health.error ? "daemon unreachable" : location.host}
@@ -156,10 +172,26 @@ function Header() {
         <Brand theme={theme} />
         <span style={{ flex: 1 }} />
         <BellAlert />
-        <button type="button" className="hdr-burger" aria-label="Open the menu" aria-expanded={menu} aria-controls="main-menu" onClick={() => setMenu(true)}>
+        <button type="button" className="hdr-burger" aria-label="Search" aria-haspopup="dialog" onClick={() => openMenu(true)}>
+          <SearchIcon size={20} strokeWidth={1.75} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="hdr-burger"
+          aria-label={waiting > 0 ? `Open the menu, ${waiting} ${waiting === 1 ? "needs" : "need"} you` : "Open the menu"}
+          aria-expanded={menu}
+          aria-controls="main-menu"
+          onClick={() => openMenu()}
+        >
           <Menu size={22} strokeWidth={1.75} aria-hidden="true" />
+          {waiting > 0 && <span className="hdr-dot" aria-hidden="true" />}
         </button>
         <Slideout id="main-menu" open={menu} onClose={() => setMenu(false)} label="Menu">
+          {waiting > 0 && (
+            <Link to="/" className="menu-needs">
+              {waiting} {waiting === 1 ? "needs" : "need"} you →
+            </Link>
+          )}
           <nav aria-label="Main" className="menu-nav">
             <NavLinks path={path} tour />
           </nav>

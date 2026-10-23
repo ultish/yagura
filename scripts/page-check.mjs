@@ -1,8 +1,9 @@
 // Headless Chrome over the DevTools protocol, for review screenshots and a page-load probe; no browser driver needed.
 //   READY=<css selector> node scripts/page-check.mjs shot <url> <night|day> <out.png> [width]   full-page shot once the selector exists
+//   INJECT="<js>" runs that script before the page's own (e.g. to fake an API answer)
 //   FILL='[["#sel","text"],...]' sets those inputs before the shot (React-safe); CLICK='["#sel","sel|2",...]' clicks them after (sel|n is the nth match)
 //   node scripts/page-check.mjs paint <url> <runs>   ms until the unit page's first timeline entry exists, per load, and the median
-//   WIDTHS=390,700,1000 node scripts/page-check.mjs widths <origin> [/path,/path]   each page at each width: how far it scrolls sideways and which elements stick out (exit 1 if any does)
+//   WIDTHS=390,700,1000 node scripts/page-check.mjs widths <origin> [/path,/path]   each page at each width: how far it scrolls sideways and which elements stick out (exit 1 if any does), and which containers scroll sideways inside it
 import { spawn } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -54,6 +55,7 @@ await send("Runtime.enable");
 if (mode === "shot") {
   const width = Number(c ?? 1280);
   await send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 2, mobile: false });
+  if (process.env.INJECT) await send("Page.addScriptToEvaluateOnNewDocument", { source: process.env.INJECT });
   const rendered = `new Promise(r => { const t = setInterval(() => { if (document.querySelector(${JSON.stringify(process.env.READY ?? ".story-entry")})) { clearInterval(t); setTimeout(r, 600); } }, 50); })`;
   await load(url);
   await evaluate(rendered);
@@ -125,7 +127,12 @@ if (mode === "shot") {
       const c = typeof e.className === "string" && e.className ? "." + e.className.split(" ")[0] : "";
       out.push(e.tagName.toLowerCase() + c + ":" + Math.round(b.right));
     });
-    return { over: document.documentElement.scrollWidth - iw, sticking: [...new Set(out)].slice(0, 4) };
+    const scrolling = [];
+    document.querySelectorAll("body *").forEach((e) => {
+      if (e.closest("pre, .repo-monaco, .monaco-editor, dialog")) return;
+      if (["auto", "scroll"].includes(getComputedStyle(e).overflowX) && e.scrollWidth > e.clientWidth + 2) scrolling.push((typeof e.className === "string" && e.className ? "." + e.className.split(" ")[0] : e.tagName.toLowerCase()) + ":" + e.scrollWidth + ">" + e.clientWidth);
+    });
+    return { over: document.documentElement.scrollWidth - iw, sticking: [...new Set(out)].slice(0, 4), scrolling: [...new Set(scrolling)].slice(0, 4) };
   })()`;
   let bad = 0;
   for (const width of widths) {
@@ -136,7 +143,7 @@ if (mode === "shot") {
       const r = await evaluate(probe);
       if (r.over > 0) bad++;
       console.log(
-        `${String(width).padStart(5)}  ${r.over > 0 ? "OVER " + String(r.over).padStart(4) : "ok       "}  ${path}${r.over > 0 ? "  " + r.sticking.join(" ") : ""}`,
+        `${String(width).padStart(5)}  ${r.over > 0 ? "OVER " + String(r.over).padStart(4) : "ok       "}  ${path}${r.over > 0 ? "  " + r.sticking.join(" ") : ""}${r.scrolling.length ? "  scrolls: " + r.scrolling.join(" ") : ""}`,
       );
     }
   }

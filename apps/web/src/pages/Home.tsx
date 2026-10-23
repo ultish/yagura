@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, navigate, useApi, useNow, type AgentRow, type BellItem, type ProjectSummary, type Thread } from "../api";
+import { PANELS, useMediaQuery } from "../lib/media";
 import { roleOf } from "../lib/units";
 import { RoleLabel } from "../ui/RoleIcon";
 import { duration, tokens } from "../lib/format";
@@ -160,6 +161,23 @@ export function Home() {
     return () => io.disconnect();
   }, []);
   const items = bell.data ?? [];
+  // On a narrow screen what needs the developer comes before the scene.
+  const narrow = useMediaQuery(PANELS);
+  const bellFirst = narrow && items.length > 0;
+  const bellSection = (
+    <section aria-labelledby="bell" style={{ flex: "1 1 520px", minWidth: 0 }}>
+      <div className="gh">
+        <h2 id="bell" className="h2" style={{ color: "var(--bell-text)" }}>
+          The bell · needs you
+        </h2>
+        <span className="n">{items.length}</span>
+      </div>
+      {items.length === 0 && <div className="empty">Nothing needs you. yagura is keeping watch.</div>}
+      {items.map((i) => (
+        <BellRow key={i.id} item={i} showProject />
+      ))}
+    </section>
+  );
   return (
     <main className="home">
       {collapsed && projects.data && (
@@ -167,6 +185,7 @@ export function Home() {
           <WatchStrip projects={projects.data} now={now} />
         </div>
       )}
+      {bellFirst && <div style={{ padding: "16px 16px 4px", background: "var(--bg2)" }}>{bellSection}</div>}
       <div ref={sceneRef} style={{ overflow: "hidden" }}>
         {projects.data ? <Watch projects={projects.data} now={now} /> : <div style={{ height: 286 }} />}
       </div>
@@ -182,18 +201,7 @@ export function Home() {
           minHeight: "60vh",
         }}
       >
-        <section aria-labelledby="bell" style={{ flex: "1 1 520px", minWidth: 0 }}>
-          <div className="gh">
-            <h2 id="bell" className="h2" style={{ color: "var(--bell-text)" }}>
-              The bell · needs you
-            </h2>
-            <span className="n">{items.length}</span>
-          </div>
-          {items.length === 0 && <div className="empty">Nothing needs you. yagura is keeping watch.</div>}
-          {items.map((i) => (
-            <BellRow key={i.id} item={i} showProject />
-          ))}
-        </section>
+        {!bellFirst && bellSection}
         <div style={{ flex: "0 1 430px", minWidth: 280, display: "flex", flexDirection: "column", gap: 28 }}>
           <TalkBox />
           <Lanterns now={now} />

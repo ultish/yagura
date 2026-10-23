@@ -2781,55 +2781,53 @@ html:has(dialog:modal) {
   }
 }
 
-/* A table on a phone is a stack of cards: the first cell is the card's title and every other cell carries its column's name. */
-@media (max-width: 640px) {
-  .tbl-scroll {
-    overflow-x: visible;
-  }
-  .tbl {
-    min-inline-size: 0 !important;
-  }
-  .tbl,
-  .tbl tbody,
-  .tbl tr,
-  .tbl td {
-    display: block;
-  }
-  .tbl colgroup,
-  .tbl thead {
-    display: none;
-  }
-  .tbl-row {
-    margin-block: 10px;
-    padding: 10px 12px;
-    border: 1px solid var(--line2);
-    border-radius: 6px;
-  }
-  .tbl-row td {
-    padding: 3px 0;
-    border: 0;
-    text-align: start;
-  }
-  .tbl-row td:not(:first-child)::before {
-    content: attr(data-label);
-    display: inline-block;
-    min-inline-size: 7em;
-    margin-inline-end: 8px;
-    font: 11px/1.4 var(--mono, monospace);
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    color: var(--faint);
-  }
-  .tbl-row td:first-child {
-    font-size: 15px;
-    padding-block-end: 6px;
-  }
-  .tbl-row td.tbl-num {
-    text-align: start;
-  }
-  .tbl-main div {
-    -webkit-line-clamp: 3;
-  }
+/* A table too narrow for its columns is a stack of cards (ui/Table.tsx adds .tbl-cards): the first cell is the title and every other cell carries its column's name. */
+.tbl-cards {
+  overflow-x: visible;
+}
+.tbl-cards .tbl {
+  min-inline-size: 0 !important;
+}
+.tbl-cards .tbl,
+.tbl-cards .tbl tbody,
+.tbl-cards .tbl tr,
+.tbl-cards .tbl td {
+  display: block;
+}
+.tbl-cards .tbl colgroup,
+.tbl-cards .tbl thead {
+  display: none;
+}
+.tbl-cards .tbl-row {
+  margin-block: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+}
+.tbl-cards .tbl-row td {
+  padding: 3px 0;
+  border: 0;
+  text-align: start;
+}
+.tbl-cards .tbl-row td:not(:first-child)::before {
+  content: attr(data-label);
+  display: inline-block;
+  min-inline-size: 7em;
+  margin-inline-end: 8px;
+  font: 11px/1.4 var(--mono, monospace);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.tbl-cards .tbl-row td:first-child {
+  font-size: 15px;
+  padding-block-end: 6px;
+}
+.tbl-cards .tbl-row td.tbl-num {
+  text-align: start;
+}
+.tbl-cards .tbl-main div {
+  -webkit-line-clamp: 3;
 }
 
 /* A finger needs about 44px: on a touch screen the small controls grow to it, and a mouse keeps the compact ones. */
@@ -2861,4 +2859,33 @@ html:has(dialog:modal) {
   select {
     min-block-size: 44px;
   }
+}
+
+.tbl th[hidden],
+.tbl td[hidden] {
+  display: none !important;
+}
+
+/* Something waits for the developer: a vermilion dot on the menu button, and the way to it first in the menu. */
+.hdr-burger {
+  position: relative;
+}
+.hdr-dot {
+  position: absolute;
+  inset-block-start: 7px;
+  inset-inline-end: 7px;
+  inline-size: 11px;
+  block-size: 11px;
+  border-radius: 50%;
+  background: var(--bell);
+  border: 2px solid var(--bg);
+}
+.menu-needs {
+  display: block;
+  padding: 12px 14px;
+  border: 1px solid var(--bell);
+  border-radius: 6px;
+  color: var(--bell-text);
+  font-weight: 700;
+  text-decoration: none;
 }

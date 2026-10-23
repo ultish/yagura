@@ -20,8 +20,8 @@ const COLS: Col[] = [
   { label: "Project", width: 300 },
   { label: "What it is for" },
   { label: "Status", width: 180 },
-  { label: "Landed", width: 100, num: true },
-  { label: "In flight", width: 100, num: true },
+  { label: "Landed", width: 100, num: true, drop: 2 },
+  { label: "In flight", width: 100, num: true, drop: 1 },
   { label: "Spent", width: 110, num: true },
 ];
 

@@ -13,10 +13,10 @@ const COLS: Col[] = [
   { label: "Who", width: 250 },
   { label: "What it was for" },
   { label: "Result", width: 230 },
-  { label: "Model", width: 110 },
+  { label: "Model", width: 110, drop: 2 },
   { label: "Cost", width: 76, num: true },
-  { label: "Context", width: 84, num: true },
-  { label: "When", width: 170, num: true },
+  { label: "Context", width: 84, num: true, drop: 1 },
+  { label: "When", width: 170, num: true, drop: 3 },
 ];
 
 export function Agents() {

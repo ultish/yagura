@@ -5,7 +5,12 @@ import { Link } from "../ui/Link";
 import { BellRow } from "../ui/rows";
 import { ClampCell, StatusCell, Table, TableRow, type Col } from "../ui/Table";
 
-const RESOLVED: Col[] = [{ label: "Where", width: 260 }, { label: "The question" }, { label: "Outcome", width: 200 }, { label: "When", width: 120, num: true }];
+const RESOLVED: Col[] = [
+  { label: "Where", width: 260 },
+  { label: "The question" },
+  { label: "Outcome", width: 200 },
+  { label: "When", width: 120, num: true, drop: 1 },
+];
 
 interface Inbox {
   waiting: BellItem[];

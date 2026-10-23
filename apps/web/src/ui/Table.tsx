@@ -1,10 +1,9 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { navigate } from "../api";
 
-export interface Col {
-  label: string;
-  // Pixels; the one column left without a width takes what the others leave.
-  width?: number;
+import { fitColumns, needed, type Fit } from "../lib/columns";
+
+export interface Col extends Fit {
   num?: boolean;
 }
 
@@ -12,23 +11,38 @@ export type Tone = "bell" | "lamp" | "pine" | "muted";
 
 // A list of things, one line each. Columns keep their widths from one table to the next, so a page with several lists lines up.
 export function Table({ cols, children }: { cols: Col[]; children: ReactNode }) {
-  const min = cols.reduce((n, c) => n + (c.width ?? 320), 0);
+  const wrap = useRef<HTMLDivElement>(null);
   const table = useRef<HTMLTableElement>(null);
-  // On a phone a row is a card and each cell names its column; the cells are the pages' own, so the labels are written onto them here.
+  // As the room shrinks the columns leave in their drop order, and once the ones that stay do not fit the rows become cards.
+  const [room, setRoom] = useState(Infinity);
   useLayoutEffect(() => {
-    table.current?.querySelectorAll("tbody tr").forEach((tr) => [...tr.children].forEach((td, i) => td.setAttribute("data-label", cols[i]?.label ?? "")));
+    const el = wrap.current;
+    if (!el) return;
+    const watch = new ResizeObserver(([e]) => setRoom(e!.contentRect.width));
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
+  const { shown, cards } = fitColumns(cols, room);
+  // The cells are the pages' own: each is labelled with its column for the card layout, and hidden when its column has left.
+  useLayoutEffect(() => {
+    table.current?.querySelectorAll("tbody tr").forEach((tr) =>
+      [...tr.children].forEach((td, i) => {
+        td.setAttribute("data-label", cols[i]?.label ?? "");
+        (td as HTMLElement).hidden = !shown.includes(cols[i]!);
+      }),
+    );
   });
   return (
-    <div className="tbl-scroll">
-      <table ref={table} className="tbl" style={{ minWidth: min }}>
+    <div ref={wrap} className={`tbl-scroll${cards ? " tbl-cards" : ""}`}>
+      <table ref={table} className="tbl" style={{ minWidth: cards ? 0 : needed(shown) }}>
         <colgroup>
-          {cols.map((c) => (
+          {shown.map((c) => (
             <col key={c.label} style={c.width ? { width: c.width } : undefined} />
           ))}
         </colgroup>
         <thead>
           <tr>
-            {cols.map((c) => (
+            {shown.map((c) => (
               <th key={c.label} className={c.num ? "tbl-num" : undefined}>
                 {c.label}
               </th>
