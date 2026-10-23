@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, navigate, useApi, useQuery, type Proposal, type ProjectSummary, type Thread, type ThreadMessage, type ThreadView } from "../api";
 import { atEnd } from "../lib/follow";
 import { clock } from "../lib/format";
@@ -222,6 +222,25 @@ function Message({
   );
 }
 
+// An open conversation is alive (a filled lamp); a closed one is history (an empty ring).
+function StateDot({ open }: { open: boolean }) {
+  return (
+    <span
+      role="img"
+      aria-label={open ? "open" : "closed"}
+      style={{
+        flexShrink: 0,
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        boxSizing: "border-box",
+        background: open ? "var(--lamp)" : "transparent",
+        border: open ? 0 : "1.5px solid var(--faint)",
+      }}
+    />
+  );
+}
+
 function ThreadList({ current }: { current: number | null }) {
   const threads = useApi<(Thread & { busy: boolean })[]>("/api/threads");
   const list = threads.data ?? [];
@@ -229,7 +248,7 @@ function ThreadList({ current }: { current: number | null }) {
     items.length > 0 && (
       <>
         <div className="mono muted" style={{ fontSize: 11.5, padding: "12px 8px 6px" }}>
-          {title}
+          {title} · {items.length}
         </div>
         {items.map((t) => (
           <Link
@@ -245,8 +264,11 @@ function ThreadList({ current }: { current: number | null }) {
               padding: "9px 10px",
             }}
           >
-            <div style={{ fontSize: 14 }}>{t.title}</div>
-            <div className="mono muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "baseline", fontSize: 14 }}>
+              <StateDot open={t.state === "open"} />
+              <span>{t.title}</span>
+            </div>
+            <div className="mono muted" style={{ fontSize: 11.5, marginTop: 2, paddingLeft: 16 }}>
               {t.busy ? "replying…" : t.projects.join(", ") || "no projects"}
             </div>
           </Link>
@@ -254,23 +276,7 @@ function ThreadList({ current }: { current: number | null }) {
       </>
     );
   return (
-    <nav
-      aria-label="Conversations"
-      style={{
-        width: 300,
-        flexShrink: 0,
-        borderRight: "1px solid var(--line)",
-        padding: "18px 16px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 2,
-        position: "sticky",
-        top: 0,
-        alignSelf: "flex-start",
-        maxHeight: "100vh",
-        overflowY: "auto",
-      }}
-    >
+    <nav aria-label="Conversations" className="talk-side talk-list">
       <button className="btn lamp" type="button" onClick={() => navigate("/talk")} style={{ marginBottom: 6 }}>
         New conversation
       </button>
@@ -286,7 +292,108 @@ function ThreadList({ current }: { current: number | null }) {
   );
 }
 
-function Ledger({ v }: { v: ThreadView }) {
+function ThreadControls({ threadId, v, busy, onChanged }: { threadId: number; v: ThreadView; busy: boolean; onChanged: () => void }) {
+  const autonomy = useAction();
+  const session = useAction();
+  const open = v.thread.state === "open";
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <h2 className="h2">Conversation</h2>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <span className="mono muted" style={{ fontSize: 12 }}>
+          autonomy
+        </span>
+        <span
+          role="radiogroup"
+          aria-label="Autonomy"
+          style={{ display: "inline-flex", border: "1px solid var(--btnline)", borderRadius: 999, overflow: "hidden" }}
+        >
+          {(["propose", "go"] as const).map((a) => (
+            <button
+              key={a}
+              type="button"
+              role="radio"
+              aria-checked={v.thread.autonomy === a}
+              title={a === "go" ? "Apply the watchman's proposals without waiting for Go" : "Nothing starts until you say Go"}
+              disabled={autonomy.busy}
+              onClick={() =>
+                autonomy.run(async () => {
+                  await api(`/api/threads/${threadId}/autonomy`, { body: { autonomy: a } });
+                  onChanged();
+                })
+              }
+              className="mono"
+              style={{
+                fontSize: 12,
+                border: 0,
+                padding: "4px 10px",
+                cursor: "pointer",
+                background: v.thread.autonomy === a ? "var(--lamp)" : "transparent",
+                color: v.thread.autonomy === a ? "#141018" : "var(--muted)",
+              }}
+            >
+              {a}
+            </button>
+          ))}
+        </span>
+      </div>
+      {v.session && (
+        <span
+          className="mono muted"
+          style={{ fontSize: 12 }}
+          title="The watchman's context at its last turn; a new session starts when it passes the roll point"
+        >
+          session · {Math.round(v.session.contextPeak / 1000)}k of {Math.round(v.session.rollAt / 1000)}k
+        </span>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button
+          type="button"
+          className="btn sm"
+          disabled={!v.session || busy || session.busy}
+          title="Start the watchman fresh from yagura's records on the next message. Decisions, questions, spec, and messages stay. Typing /clear does the same."
+          onClick={() =>
+            session.run(async () => {
+              await api(`/api/threads/${threadId}/clear`, { body: {} });
+              onChanged();
+            })
+          }
+        >
+          New session
+        </button>
+        <button
+          type="button"
+          className="btn sm"
+          disabled={busy || session.busy}
+          title={open ? "Move this conversation to Closed. It stays as history, and writing in it again reopens it." : "Move this conversation back to Open."}
+          onClick={() =>
+            session.run(async () => {
+              await api(`/api/threads/${threadId}/state`, { body: { state: open ? "closed" : "open" } });
+              onChanged();
+            })
+          }
+        >
+          {open ? "Close" : "Reopen"}
+        </button>
+      </div>
+      <Link
+        to="/prompts?role=watchman"
+        className="mono"
+        style={{ fontSize: 12 }}
+        title="The guidance the watchman follows in every conversation; edit it there"
+      >
+        watchman's guidance →
+      </Link>
+      {(autonomy.error || session.error) && (
+        <span className="s-bell" style={{ fontSize: 13 }}>
+          {autonomy.error ?? session.error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Ledger({ v, controls }: { v: ThreadView; controls: ReactNode }) {
   const active = v.decisions.filter((d) => d.supersededBy === null).length;
   const open = v.questions.filter((q) => q.answer === null);
   const started = v.proposals
@@ -296,23 +403,8 @@ function Ledger({ v }: { v: ThreadView }) {
   const dot = (s: ProjectSummary) =>
     needsYou(s) ? "var(--bell)" : s.running || s.planning ? "var(--lamp)" : s.project.state === "closed" ? "var(--pine)" : "var(--beacon-off-line)";
   return (
-    <aside
-      aria-label="Thread records"
-      style={{
-        width: 300,
-        flexShrink: 0,
-        borderLeft: "1px solid var(--line)",
-        padding: "18px 22px 48px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 22,
-        position: "sticky",
-        top: 0,
-        alignSelf: "flex-start",
-        maxHeight: "100vh",
-        overflowY: "auto",
-      }}
-    >
+    <aside aria-label="Thread records" className="talk-side talk-ledger">
+      {controls}
       <div>
         <h2 className="h2">Projects</h2>
         {v.projects.length === 0 && <div className="empty">None yet. Say Go on a proposal.</div>}
@@ -507,14 +599,12 @@ export function Talk({ threadId }: { threadId: number | null }) {
   useEffect(() => {
     setDraft({ text: say, key: Date.now() });
   }, [say, threadId]);
-  const autonomy = useAction();
-  const session = useAction();
 
   const v = view.data;
   const older = target !== null && v !== null && !v.messages.slice(-SHOWN).some((m) => m.id === target);
   const messages = v ? (all || older ? v.messages : v.messages.slice(-SHOWN)) : [];
   return (
-    <main className="talk" style={{ display: "flex", minHeight: "calc(100vh - 61px)" }}>
+    <main className="talk">
       <ThreadList current={threadId} />
       <section style={{ flexGrow: 1, minWidth: 0, display: "flex", flexDirection: "column", background: "var(--bg2)" }}>
         {threadId === null ? (
@@ -543,82 +633,31 @@ export function Talk({ threadId }: { threadId: number | null }) {
                 {v?.thread.title ?? "…"}
               </h1>
               <span className="mono muted" style={{ fontSize: 12 }}>
-                thread {threadId} · autonomy
+                thread {threadId}
               </span>
               {v && (
                 <span
-                  role="radiogroup"
-                  aria-label="Autonomy"
-                  style={{ display: "inline-flex", border: "1px solid var(--btnline)", borderRadius: 999, overflow: "hidden" }}
+                  className="mono"
+                  style={{
+                    fontSize: 11.5,
+                    padding: "1px 9px",
+                    borderRadius: 999,
+                    border: `1px solid ${v.thread.state === "open" ? "var(--lamp)" : "var(--faint)"}`,
+                    color: v.thread.state === "open" ? "var(--amber-text)" : "var(--muted)",
+                  }}
                 >
-                  {(["propose", "go"] as const).map((a) => (
-                    <button
-                      key={a}
-                      type="button"
-                      role="radio"
-                      aria-checked={v.thread.autonomy === a}
-                      title={a === "go" ? "Apply the watchman's proposals without waiting for Go" : "Nothing starts until you say Go"}
-                      disabled={autonomy.busy}
-                      onClick={() => autonomy.run(() => api(`/api/threads/${threadId}/autonomy`, { body: { autonomy: a } }))}
-                      className="mono"
-                      style={{
-                        fontSize: 12,
-                        border: 0,
-                        padding: "4px 10px",
-                        cursor: "pointer",
-                        background: v.thread.autonomy === a ? "var(--lamp)" : "transparent",
-                        color: v.thread.autonomy === a ? "#141018" : "var(--muted)",
-                      }}
-                    >
-                      {a}
-                    </button>
-                  ))}
-                </span>
-              )}
-              {v && (
-                <span style={{ marginLeft: "auto", display: "inline-flex", gap: 10, alignItems: "baseline" }}>
-                  {v.session && (
-                    <span
-                      className="mono muted"
-                      style={{ fontSize: 12 }}
-                      title="The watchman's context at its last turn; a new session starts when it passes the roll point"
-                    >
-                      session · {Math.round(v.session.contextPeak / 1000)}k of {Math.round(v.session.rollAt / 1000)}k
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    className="btn sm"
-                    disabled={!v.session || busy || session.busy}
-                    title="Start the watchman fresh from yagura's records on the next message. Decisions, questions, spec, and messages stay. Typing /clear does the same."
-                    onClick={() => session.run(() => api(`/api/threads/${threadId}/clear`, { body: {} }))}
-                  >
-                    New session
-                  </button>
-                  <button
-                    type="button"
-                    className="btn sm"
-                    disabled={busy || session.busy}
-                    title={
-                      v.thread.state === "open"
-                        ? "Move this conversation to Closed. It stays as history, and writing in it again reopens it."
-                        : "Move this conversation back to Open."
-                    }
-                    onClick={() => session.run(() => api(`/api/threads/${threadId}/state`, { body: { state: v.thread.state === "open" ? "closed" : "open" } }))}
-                  >
-                    {v.thread.state === "open" ? "Close" : "Reopen"}
-                  </button>
-                  <Link
-                    to="/prompts?role=watchman"
-                    className="mono"
-                    style={{ fontSize: 12 }}
-                    title="The guidance the watchman follows in every conversation; edit it there"
-                  >
-                    watchman's guidance →
-                  </Link>
+                  {v.thread.state === "open" ? "open" : "closed"}
                 </span>
               )}
             </div>
+            {v && v.thread.state !== "open" && (
+              <div
+                className="muted"
+                style={{ padding: "8px var(--talk-pad)", fontSize: 13, background: "var(--panel)", borderBottom: "1px solid var(--line)" }}
+              >
+                This conversation is closed and kept as history. Writing in it reopens it.
+              </div>
+            )}
             <div ref={column} style={{ flexGrow: 1, padding: "0 var(--talk-pad)" }}>
               {view.error && (
                 <div className="s-bell" style={{ padding: "12px 0" }}>
@@ -674,7 +713,11 @@ export function Talk({ threadId }: { threadId: number | null }) {
           }}
         />
       </section>
-      {v ? <Ledger v={v} /> : <aside aria-hidden style={{ width: 300, flexShrink: 0, borderLeft: "1px solid var(--line)" }} />}
+      {v ? (
+        <Ledger v={v} controls={<ThreadControls threadId={threadId!} v={v} busy={busy} onChanged={view.reload} />} />
+      ) : (
+        <aside aria-hidden className="talk-side talk-ledger talk-placeholder" />
+      )}
     </main>
   );
 }

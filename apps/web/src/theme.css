@@ -2365,6 +2365,62 @@ td.tbl-num {
 /* The conversation's text keeps a comfortable line length, centred in the middle pane between two side panels of the same width. */
 main.talk {
   --talk-pad: max(32px, calc((100% - 900px) / 2));
+  display: flex;
+  min-height: calc(100vh - 61px);
+}
+.talk-side {
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  max-height: 100vh;
+  overflow-y: auto;
+}
+.talk-list {
+  border-right: 1px solid var(--line);
+  padding: 18px 16px;
+  gap: 2px;
+}
+.talk-ledger {
+  border-left: 1px solid var(--line);
+  padding: 18px 22px 48px;
+  gap: 22px;
+}
+@media (max-width: 1180px) {
+  .talk-side {
+    width: 240px;
+  }
+  .talk-ledger {
+    padding-inline: 16px;
+  }
+}
+/* Too narrow for three columns: the conversations, the thread, and its records stack, each at full width. */
+@media (max-width: 900px) {
+  main.talk {
+    flex-direction: column;
+    --talk-pad: 16px;
+  }
+  .talk-side {
+    width: auto;
+    position: static;
+    align-self: stretch;
+    max-height: none;
+    border: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .talk-list {
+    max-height: 260px;
+  }
+  .talk-ledger {
+    border-bottom: 0;
+    border-top: 1px solid var(--line);
+  }
+  .talk-placeholder {
+    display: none;
+  }
 }
 
 @media (max-width: 1000px) {
