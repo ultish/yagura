@@ -6,6 +6,7 @@ import { git, removeWorktree } from "./git.js";
 import { layout } from "./paths.js";
 import type { Db } from "./store.js";
 
+// A unit has one checkout, `<project>-u<seq>`; its judge and base checkouts add `.judge` and `.judge.base`. Before the core loop each attempt had `<project>-u<seq>.<n>`, which still counts.
 // Every attempt checks out the repo (a verification three times: head, trunk, and the pack), and nothing reads those
 // checkouts once the unit is finished: evidence is stored as artifacts, diffs come from the mirror, and a rework that
 // finds its worktree gone starts fresh. On a real repo each one is a full checkout, so they go as soon as the unit is done.
@@ -17,7 +18,7 @@ export async function sweepWorktrees(db: Db, boot: Bootstrap): Promise<number> {
   for (const repoId of readdirSync(root)) {
     const mirror = layout(boot).mirror(repoId as RepoId);
     for (const name of readdirSync(join(root, repoId))) {
-      const m = /^(.+)-u(\d+)\.\d+(\..+)?$/.exec(name);
+      const m = /^(.+)-u(\d+)(?:\.\d+)?(?:\..+)?$/.exec(name);
       if (!m) continue;
       const row = stateOf.get(m[1], Number(m[2])) as { state: UnitState } | undefined;
       if (row && !TERMINAL_STATES.has(row.state)) continue;
