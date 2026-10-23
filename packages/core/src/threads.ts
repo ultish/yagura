@@ -86,7 +86,9 @@ export function listThreads(db: Db): Thread[] {
 }
 
 export function setThreadAutonomy(db: Db, id: number, autonomy: ThreadAutonomy): void {
+  if (getThread(db, id).autonomy === autonomy) return;
   db.prepare("UPDATE threads SET autonomy = ?, updated_at = ? WHERE id = ?").run(autonomy, now(), id);
+  recordEvent(db, "thread.autonomy", {}, { thread: id, autonomy });
 }
 
 // A closed conversation is read-only history until someone writes in it again.

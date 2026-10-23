@@ -12,6 +12,7 @@ import {
   listQuestions,
   resolveQuestion,
   searchMessages,
+  setThreadAutonomy,
 } from "./threads.js";
 
 let db: Db;
@@ -29,6 +30,24 @@ describe("thread store", () => {
     for (const s of PROPOSAL_STATES) db.prepare("UPDATE proposals SET state = ? WHERE id = ?").run(s, p.id);
     expect(() => db.prepare("UPDATE threads SET autonomy = 'yolo' WHERE id = ?").run(t.id)).toThrow(/CHECK/);
     expect(() => addMessage(db, { threadId: t.id, role: "bot" as never, body: "x" })).toThrow(/CHECK/);
+  });
+
+  it("records a change of autonomy as an event so open pages refresh, and nothing when it does not change", () => {
+    const t = createThread(db, { title: "t" });
+    const events = () =>
+      db
+        .prepare("SELECT data_json FROM events WHERE type = 'thread.autonomy' ORDER BY id")
+        .all()
+        .map((r) => JSON.parse((r as { data_json: string }).data_json));
+    setThreadAutonomy(db, t.id, "propose");
+    expect(events()).toEqual([]);
+    setThreadAutonomy(db, t.id, "go");
+    setThreadAutonomy(db, t.id, "go");
+    setThreadAutonomy(db, t.id, "propose");
+    expect(events()).toEqual([
+      { thread: t.id, autonomy: "go" },
+      { thread: t.id, autonomy: "propose" },
+    ]);
   });
 
   it("keeps decisions forever and marks superseded ones instead of changing them", () => {
