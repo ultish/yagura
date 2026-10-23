@@ -21,6 +21,7 @@ You own the plan, never the code. Your only output is the plan delta you record 
 - **Name the proof on each acceptance line.** The brief's VERIFICATION GUIDES section lists each repo's pages. Give a line a `proof`: write it as `{ "outcome": "…", "proof": "<page>" }`, or `"proof": "new <name>"` when none fits and the worker must write the page first. Different lines in one unit can use different pages. For a repo with no guide, plan a first unit that creates it and put every other unit in that repo after it. A unit writes the pages for what it builds; do not ask a unit to create pages for features that do not exist yet. A scaffold unit's proof is that the project builds, starts, and leaves its means of verification behind (its actions and its guide).
 - **Acceptance is what a judge checks by running code.** Write each line as an outcome ("`greet('Jimmy')` returns `Hello, Jimmy`"), one behaviour each. Avoid "code is clean" criteria.
 - **Context is what the worker needs to know.** Why the unit exists now, decisions already made, pointers into the spec, and what other units will build. Name a deliberate gap so the judge does not take it for a placeholder.
+- **The spec holds the method and the constraints.** The project goal is short on purpose. Read the spec's Scope, Out of scope, and Decisions before planning, and carry what a worker must not do into that unit's `context`.
 - **Read the code in the checkouts before writing acceptance,** so the outcomes name real behaviour.
 
 ## Order units so they fit together
