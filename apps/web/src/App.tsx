@@ -1,5 +1,5 @@
 import { Menu, Search as SearchIcon } from "lucide-react";
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LiveContext, useApi, useLiveVersion, usePath, type BellItem } from "./api";
 import { Agent, AgentByNo, UnitAgent } from "./pages/Agent";
 import { Prompts } from "./pages/Prompts";
@@ -27,7 +27,6 @@ import { Link } from "./ui/Link";
 import { BellAlert } from "./ui/BellAlert";
 import { SearchBox } from "./ui/SearchBox";
 import { Slideout } from "./ui/Slideout";
-import { NARROW, useMediaQuery } from "./lib/media";
 import type { CostSummary } from "@yagura/core";
 import { usd } from "./lib/format";
 import { markTourSeen, startTour, tourSeen } from "./lib/tour";
@@ -112,7 +111,30 @@ function NavLinks({ path, tour }: { path: string; tour?: boolean }) {
 function Header() {
   const path = usePath();
   const [theme, toggle] = useTheme();
-  const narrow = useMediaQuery(NARROW);
+  // The full bar if it fits on one line, then a tighter one, then the menu. What fits depends on the content (the spend, the host, whether "notify me" shows), so the bar is measured.
+  const bar = useRef<HTMLElement>(null);
+  const [mode, setMode] = useState<"full" | "compact" | "menu">("full");
+  const needs = useRef({ full: 0, compact: 0 });
+  useLayoutEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const fit = () => {
+      const over = el.scrollWidth > el.clientWidth + 1;
+      if (mode === "full" && over) {
+        needs.current.full = el.scrollWidth;
+        setMode("compact");
+      } else if (mode === "compact" && over) {
+        needs.current.compact = el.scrollWidth;
+        setMode("menu");
+      } else if (mode === "compact" && el.clientWidth >= needs.current.full) setMode("full");
+      else if (mode === "menu" && el.clientWidth >= needs.current.compact) setMode("compact");
+    };
+    const watch = new ResizeObserver(fit);
+    watch.observe(el);
+    fit();
+    return () => watch.disconnect();
+  });
+  const narrow = mode === "menu";
   const [menu, setMenu] = useState(false);
   const waiting = useApi<BellItem[]>("/api/bell").data?.length ?? 0;
   const health = useApi<{ ok: boolean; home: string }>("/api/health");
@@ -168,7 +190,7 @@ function Header() {
   );
   if (narrow)
     return (
-      <header className="hdr hdr-narrow">
+      <header ref={bar} className="hdr hdr-narrow">
         <Brand theme={theme} />
         <span style={{ flex: 1 }} />
         <BellAlert />
@@ -208,7 +230,7 @@ function Header() {
       </header>
     );
   return (
-    <header className="hdr">
+    <header ref={bar} className={mode === "compact" ? "hdr hdr-compact" : "hdr"}>
       <Brand theme={theme} />
       <nav aria-label="Main" className="hdr-nav">
         <NavLinks path={path} tour />
