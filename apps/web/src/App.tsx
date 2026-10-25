@@ -27,6 +27,7 @@ import { Link } from "./ui/Link";
 import { BellAlert } from "./ui/BellAlert";
 import { SearchBox } from "./ui/SearchBox";
 import { Slideout } from "./ui/Slideout";
+import { MOBILE, useMediaQuery } from "./lib/media";
 import type { CostSummary } from "@yagura/core";
 import { usd } from "./lib/format";
 import { markTourSeen, startTour, tourSeen } from "./lib/tour";
@@ -138,12 +139,13 @@ function Header() {
   const [menu, setMenu] = useState(false);
   const waiting = useApi<BellItem[]>("/api/bell").data?.length ?? 0;
   const health = useApi<{ ok: boolean; home: string }>("/api/health");
+  const mobile = useMediaQuery(MOBILE);
   useEffect(() => {
-    if (tourSeen(localStorage)) return;
+    if (mobile || tourSeen(localStorage)) return;
     markTourSeen(localStorage);
     const t = setTimeout(startTour, 800);
     return () => clearTimeout(t);
-  }, []);
+  }, [mobile]);
   useEffect(() => setMenu(false), [path, narrow]);
   // Search lives in the menu on a narrow screen: its icon, and the / key, open the menu with the search field focused.
   const openMenu = (search = false) => {
@@ -165,7 +167,7 @@ function Header() {
       {health.error ? "daemon unreachable" : location.host}
     </span>
   );
-  const help = (
+  const help = mobile ? null : (
     <button
       type="button"
       data-tour="help"

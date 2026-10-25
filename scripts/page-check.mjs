@@ -133,7 +133,7 @@ if (mode === "shot") {
       if (["auto", "scroll"].includes(getComputedStyle(e).overflowX) && e.scrollWidth > e.clientWidth + 2) scrolling.push((typeof e.className === "string" && e.className ? "." + e.className.split(" ")[0] : e.tagName.toLowerCase()) + ":" + e.scrollWidth + ">" + e.clientWidth);
     });
     const bar = document.querySelector("header")?.getBoundingClientRect().height ?? 0;
-    return { menu: !!document.querySelector(".hdr-narrow"), compact: !!document.querySelector(".hdr-compact"), bar: Math.round(bar), over: document.documentElement.scrollWidth - iw, sticking: [...new Set(out)].slice(0, 4), scrolling: [...new Set(scrolling)].slice(0, 4) };
+    return { tour: !!document.querySelector(".driver-popover"), menu: !!document.querySelector(".hdr-narrow"), compact: !!document.querySelector(".hdr-compact"), bar: Math.round(bar), over: document.documentElement.scrollWidth - iw, sticking: [...new Set(out)].slice(0, 4), scrolling: [...new Set(scrolling)].slice(0, 4) };
   })()`;
   let bad = 0;
   for (const width of widths) {
@@ -144,7 +144,7 @@ if (mode === "shot") {
       const r = await evaluate(probe);
       if (r.over > 0 || r.bar > 72) bad++;
       console.log(
-        `${String(width).padStart(5)}  ${r.over > 0 ? "OVER " + String(r.over).padStart(4) : r.bar > 72 ? "TALL      " : "ok       "}  ${path}${r.over > 0 ? "  " + r.sticking.join(" ") : ""}${r.bar > 72 ? "  HEADER " + r.bar + "px tall" : ""}${r.menu ? "  [menu]" : r.compact ? "  [compact]" : ""}${r.scrolling.length ? "  scrolls: " + r.scrolling.join(" ") : ""}`,
+        `${String(width).padStart(5)}  ${r.over > 0 ? "OVER " + String(r.over).padStart(4) : r.bar > 72 ? "TALL      " : "ok       "}  ${path}${r.over > 0 ? "  " + r.sticking.join(" ") : ""}${r.bar > 72 ? "  HEADER " + r.bar + "px tall" : ""}${r.menu ? "  [menu]" : r.compact ? "  [compact]" : ""}${r.tour ? "  [tour]" : ""}${r.scrolling.length ? "  scrolls: " + r.scrolling.join(" ") : ""}`,
       );
     }
   }
