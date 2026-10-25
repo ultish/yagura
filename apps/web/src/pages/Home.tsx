@@ -9,13 +9,10 @@ import { Link } from "../ui/Link";
 import { MentionInput } from "../ui/MentionInput";
 import { BellRow, useAction } from "../ui/rows";
 
-function Legend() {
+function Legend({ narrow }: { narrow: boolean }) {
   const item = { display: "inline-flex", alignItems: "center", gap: 8 } as const;
-  return (
-    <div
-      className="mono"
-      style={{ display: "flex", gap: 28, flexWrap: "wrap", alignItems: "center", padding: "8px 36px", fontSize: 11.5, color: "var(--muted)" }}
-    >
+  const items = (
+    <>
       <span style={item}>
         <span style={{ width: 8, height: 12, background: "var(--lamp)" }} />
         shōji lit: an agent at work
@@ -32,8 +29,17 @@ function Legend() {
         <span style={{ width: 8, height: 8, borderRadius: 4, background: "var(--lamp)" }} />
         ridge lamp: planner thinking
       </span>
-    </div>
+    </>
   );
+  // On a phone the four lines fold into one: they only explain the drawing.
+  if (narrow)
+    return (
+      <details className="mono legend legend-fold">
+        <summary>What the lights mean</summary>
+        <div className="legend-items">{items}</div>
+      </details>
+    );
+  return <div className="mono legend legend-items">{items}</div>;
 }
 
 function TalkBox() {
@@ -189,7 +195,7 @@ export function Home() {
       <div ref={sceneRef} style={{ overflow: "hidden" }}>
         {projects.data ? <Watch projects={projects.data} now={now} /> : <div style={{ height: 286 }} />}
       </div>
-      <Legend />
+      <Legend narrow={narrow} />
       <div
         style={{
           display: "flex",

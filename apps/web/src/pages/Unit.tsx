@@ -209,7 +209,7 @@ function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
   if (!story.agents.length) return <div className="muted">No agent has worked on U{story.unit.seq} yet.</div>;
   return (
     <div className="hub-table-wrap">
-      <table className="hub-table">
+      <table className="hub-table hub-cards">
         <thead>
           <tr>
             <th>Agent</th>
@@ -223,14 +223,14 @@ function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
         <tbody>
           {byTime(story.agents, (a) => a.startedAt, order).map((a) => (
             <tr key={a.attemptId} className={a.counted || a.outcome === "running" ? undefined : "dim"}>
-              <td>
+              <td data-label="Agent">
                 <Link className="agent-link" to={`/a/${a.attemptId}`}>
                   A{a.agentNo}
                 </Link>
                 {a.shared && <div className="muted hub-small">also planned other units</div>}
               </td>
-              <td>{a.role}</td>
-              <td>
+              <td data-label="Role">{a.role}</td>
+              <td data-label="Outcome">
                 <span className={`chip story-${a.tone}`}>
                   {a.outcome === "running" && <RunningDot />}
                   {a.counted || a.outcome === "running" ? a.outcome : `${a.outcome} · not counted`}
@@ -241,9 +241,15 @@ function AgentsTab({ story, order }: { story: UnitStory; order: TimeOrder }) {
                   </div>
                 )}
               </td>
-              <td className="mono nowrap">{a.startedAt ? clock(a.startedAt) : "—"}</td>
-              <td className="mono nowrap">{a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "—"}</td>
-              <td className="num mono">${a.costUsd.toFixed(2)}</td>
+              <td className="mono nowrap" data-label="Started">
+                {a.startedAt ? clock(a.startedAt) : "—"}
+              </td>
+              <td className="mono nowrap" data-label="Took">
+                {a.startedAt && a.endedAt ? duration(Date.parse(a.endedAt) - Date.parse(a.startedAt)) : "—"}
+              </td>
+              <td className="num mono" data-label="Cost">
+                ${a.costUsd.toFixed(2)}
+              </td>
             </tr>
           ))}
         </tbody>

@@ -1,5 +1,6 @@
 // Headless Chrome over the DevTools protocol, for review screenshots and a page-load probe; no browser driver needed.
 //   READY=<css selector> node scripts/page-check.mjs shot <url> <night|day> <out.png> [width]   full-page shot once the selector exists
+//   TOUCH=1 emulates a phone (touch, mobile viewport) in the shot and widths modes
 //   INJECT="<js>" runs that script before the page's own (e.g. to fake an API answer)
 //   FILL='[["#sel","text"],...]' sets those inputs before the shot (React-safe); CLICK='["#sel","sel|2",...]' clicks them after (sel|n is the nth match)
 //   node scripts/page-check.mjs paint <url> <runs>   ms until the unit page's first timeline entry exists, per load, and the median
@@ -55,7 +56,8 @@ if (process.env.INJECT) await send("Page.addScriptToEvaluateOnNewDocument", { so
 
 if (mode === "shot") {
   const width = Number(c ?? 1280);
-  await send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 2, mobile: false });
+  await send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 2, mobile: !!process.env.TOUCH });
+  if (process.env.TOUCH) await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
   const rendered = `new Promise(r => { const t = setInterval(() => { if (document.querySelector(${JSON.stringify(process.env.READY ?? ".story-entry")})) { clearInterval(t); setTimeout(r, 600); } }, 50); })`;
   await load(url);
   await evaluate(rendered);
@@ -132,19 +134,26 @@ if (mode === "shot") {
       if (e.closest("pre, .repo-monaco, .monaco-editor, dialog")) return;
       if (["auto", "scroll"].includes(getComputedStyle(e).overflowX) && e.scrollWidth > e.clientWidth + 2) scrolling.push((typeof e.className === "string" && e.className ? "." + e.className.split(" ")[0] : e.tagName.toLowerCase()) + ":" + e.scrollWidth + ">" + e.clientWidth);
     });
+    const textOut = [];
+    document.querySelectorAll("button, .btn, [role=tab], [role=radio], label, .tbl-tag, .chip, .hub-tabs a").forEach((e) => {
+      if (e.classList.contains("sr-only") || e.closest("dialog:not([open])") || getComputedStyle(e).display === "inline") return;
+      if (e.getBoundingClientRect().width > 0 && e.scrollWidth > e.clientWidth + 1)
+        textOut.push(((e.textContent || "").trim().slice(0, 18) || e.getAttribute("aria-label") || e.tagName.toLowerCase()) + " " + e.scrollWidth + ">" + e.clientWidth);
+    });
     const bar = document.querySelector("header")?.getBoundingClientRect().height ?? 0;
-    return { tour: !!document.querySelector(".driver-popover"), menu: !!document.querySelector(".hdr-narrow"), compact: !!document.querySelector(".hdr-compact"), bar: Math.round(bar), over: document.documentElement.scrollWidth - iw, sticking: [...new Set(out)].slice(0, 4), scrolling: [...new Set(scrolling)].slice(0, 4) };
+    return { textOut: [...new Set(textOut)].slice(0, 5), tour: !!document.querySelector(".driver-popover"), menu: !!document.querySelector(".hdr-narrow"), compact: !!document.querySelector(".hdr-compact"), bar: Math.round(bar), over: document.documentElement.scrollWidth - iw, sticking: [...new Set(out)].slice(0, 4), scrolling: [...new Set(scrolling)].slice(0, 4) };
   })()`;
   let bad = 0;
   for (const width of widths) {
-    await send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: false });
+    await send("Emulation.setDeviceMetricsOverride", { width, height: 900, deviceScaleFactor: 1, mobile: !!process.env.TOUCH });
+    if (process.env.TOUCH) await send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
     for (const path of paths) {
       await load(new URL(path, url).href);
       await sleep(1800);
       const r = await evaluate(probe);
-      if (r.over > 0 || r.bar > 72) bad++;
+      if (r.over > 0 || r.bar > 72 || r.textOut.length) bad++;
       console.log(
-        `${String(width).padStart(5)}  ${r.over > 0 ? "OVER " + String(r.over).padStart(4) : r.bar > 72 ? "TALL      " : "ok       "}  ${path}${r.over > 0 ? "  " + r.sticking.join(" ") : ""}${r.bar > 72 ? "  HEADER " + r.bar + "px tall" : ""}${r.menu ? "  [menu]" : r.compact ? "  [compact]" : ""}${r.tour ? "  [tour]" : ""}${r.scrolling.length ? "  scrolls: " + r.scrolling.join(" ") : ""}`,
+        `${String(width).padStart(5)}  ${r.over > 0 ? "OVER " + String(r.over).padStart(4) : r.bar > 72 ? "TALL      " : r.textOut.length ? "TEXT      " : "ok       "}  ${path}${r.over > 0 ? "  " + r.sticking.join(" ") : ""}${r.bar > 72 ? "  HEADER " + r.bar + "px tall" : ""}${r.menu ? "  [menu]" : r.compact ? "  [compact]" : ""}${r.tour ? "  [tour]" : ""}${r.textOut.length ? "  TEXT-OUT: " + r.textOut.join(" | ") : ""}${r.scrolling.length ? "  scrolls: " + r.scrolling.join(" ") : ""}`,
       );
     }
   }

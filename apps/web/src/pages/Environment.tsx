@@ -204,7 +204,7 @@ function ActionsTab({ envId, actions, repos, reload }: { envId: string; actions:
       {!actions.length && editing !== "new" && <p className="muted">No actions yet. Answer how this environment works, then run the doctor.</p>}
       {actions.length > 0 && (
         <div className="hub-table-wrap">
-          <table className="hub-table env-actions">
+          <table className="hub-table hub-cards env-actions">
             <thead>
               <tr>
                 <th>Action</th>
@@ -233,7 +233,7 @@ function ActionsTab({ envId, actions, repos, reload }: { envId: string; actions:
                       </button>
                       {CONTRACT.has(a.name) && <div className="env-yagura">yagura</div>}
                     </td>
-                    <td>
+                    <td data-label="When to use it">
                       <Inline text={a.use} />
                       <div className="mono env-command">{a.command}</div>
                       {a.suggestion && (
@@ -259,8 +259,10 @@ function ActionsTab({ envId, actions, repos, reload }: { envId: string; actions:
                         </div>
                       )}
                     </td>
-                    <td className="mono">{a.repoId ?? "every repo"}</td>
-                    <td>
+                    <td data-label="Applies to" className="mono">
+                      {a.repoId ?? "every repo"}
+                    </td>
+                    <td data-label="State">
                       <span className={`chip story-${a.state === "proven" ? "pine" : a.state === "broken" ? "bell" : "amber"}`}>
                         {running && <RunningDot />}
                         {running ? "running" : a.state}
