@@ -151,7 +151,7 @@ process.stdin.on("end", () => {
     if (!rest.includes("--merge")) fail("yagura merges only with a merge commit");
     if (p.isDraft) fail("Pull request is still a draft");
     const head = git("rev-parse", `refs/heads/${p.head}`);
-    if (flag("--match-head-commit") !== head) fail("head commit does not match");
+    if (flag("--match-head-commit") !== undefined && flag("--match-head-commit") !== head) fail("head commit does not match");
     const tree = execFileSync("git", ["--git-dir", origin, "merge-tree", "--write-tree", `refs/heads/${p.base}`, head], { encoding: "utf8" }).split("\n")[0];
     const env = { ...process.env, GIT_COMMITTER_NAME: "GitHub", GIT_COMMITTER_EMAIL: "noreply@github.com", GIT_COMMITTER_DATE: "2030-01-01T00:00:00Z" };
     const message = `${flag("--subject")}\n\n${stdin}`;
