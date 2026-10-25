@@ -519,6 +519,8 @@ function Composer({
 }) {
   const [text, setText] = useState(initial);
   const action = useAction();
+  // A touch screen would open its keyboard the moment the page loads.
+  const touch = useMediaQuery("(pointer: coarse)");
   useEffect(() => {
     setText(initial);
   }, [initial, draftKey]);
@@ -546,7 +548,7 @@ function Composer({
         label="Message the watchman"
         placeholder="Message the watchman"
         disabled={action.busy}
-        autoFocus
+        autoFocus={!touch}
       />
       {action.error && (
         <div className="s-bell" style={{ fontSize: 13, marginTop: 6 }}>

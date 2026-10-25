@@ -1,6 +1,7 @@
 // Headless Chrome over the DevTools protocol, for review screenshots and a page-load probe; no browser driver needed.
 //   READY=<css selector> node scripts/page-check.mjs shot <url> <night|day> <out.png> [width]   full-page shot once the selector exists
 //   TOUCH=1 emulates a phone (touch, mobile viewport) in the shot and widths modes
+//   EVAL="<js>" prints what that script returns once the page has rendered (shot mode)
 //   INJECT="<js>" runs that script before the page's own (e.g. to fake an API answer)
 //   FILL='[["#sel","text"],...]' sets those inputs before the shot (React-safe); CLICK='["#sel","sel|2",...]' clicks them after (sel|n is the nth match)
 //   node scripts/page-check.mjs paint <url> <runs>   ms until the unit page's first timeline entry exists, per load, and the median
@@ -66,6 +67,7 @@ if (mode === "shot") {
   await evaluate(
     `new Promise(r => { const t = setInterval(() => { if (document.querySelector(${JSON.stringify(process.env.READY ?? ".story-entry")})) { clearInterval(t); setTimeout(r, 600); } }, 50); })`,
   );
+  if (process.env.EVAL) console.log("EVAL", JSON.stringify(await evaluate(process.env.EVAL)));
   if (process.env.FILL) {
     await evaluate(`(${JSON.stringify(JSON.parse(process.env.FILL))}).forEach(([sel, val]) => {
       const el = document.querySelector(sel);

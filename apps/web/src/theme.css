@@ -134,6 +134,13 @@ body {
   font-size: 15px;
   line-height: 1.45;
 }
+/* WebKit (Safari and every iOS browser) measures text in a stack that starts with a font limited to one character as if it were narrower than it paints, so
+   buttons squeeze their label and lines run off the screen. There the stack starts with the real font, and Zen Kaku's own backtick stands in. */
+@supports (font: -apple-system-body) {
+  body {
+    font-family: "Zen Kaku Gothic New", system-ui, sans-serif;
+  }
+}
 a {
   color: var(--amber);
   text-decoration: none;
@@ -2998,4 +3005,13 @@ select,
 textarea,
 input:not([type="checkbox"], [type="radio"]) {
   max-inline-size: 100%;
+}
+
+/* Safari zooms the page when a field with text under 16px takes focus, and leaves it zoomed. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
