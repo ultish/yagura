@@ -41,6 +41,26 @@ describe("upkeepDue", () => {
     expect(upkeepDue(db, repo)?.reasons).toEqual(["3 units have merged into this repo since the guide was last checked."]);
   });
 
+  it("counts from the guide's creation, not from the repo's first merge, and waits while the creation is in flight", () => {
+    for (const s of ["01", "02", "03", "04"]) merged(`2026-01-01T00:00:${s}Z`);
+    const created = unit("guide-create");
+    at(created.id, "2026-01-01T00:00:10Z");
+    merged("2026-01-01T00:00:11Z");
+    merged("2026-01-01T00:00:12Z");
+    merged("2026-01-01T00:00:13Z");
+    expect(upkeepDue(db, repo)).toBeNull();
+    db.prepare("UPDATE units SET state = 'merged' WHERE id = ?").run(created.id);
+    expect(upkeepDue(db, repo)?.reasons).toEqual(["3 units have merged into this repo since the guide was last checked."]);
+  });
+
+  it("does not count the merges before the guide was created, so a new guide is not at once due", () => {
+    for (const s of ["01", "02", "03", "04", "05"]) merged(`2026-01-01T00:00:${s}Z`);
+    const created = unit("guide-create");
+    at(created.id, "2026-01-01T00:00:10Z");
+    db.prepare("UPDATE units SET state = 'merged' WHERE id = ?").run(created.id);
+    expect(upkeepDue(db, repo)).toBeNull();
+  });
+
   it("never counts merges when the setting is 0", () => {
     setSetting(db, "repo", "r", "verify.upkeep_every_merges", 0);
     for (const s of ["01", "02", "03", "04"]) merged(`2026-01-01T00:00:${s}Z`);

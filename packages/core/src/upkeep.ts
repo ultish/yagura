@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { resolveSetting, type Bootstrap } from "./config.js";
 import { TERMINAL_STATES, type ProjectId, type RepoId, type Unit } from "./domain.js";
 import { git } from "./git.js";
+import { GUIDE_CREATE_PLAYBOOK, guideCreationUnder } from "./guide.js";
 import { layout } from "./paths.js";
 import { addUnit, getRepo, listProjects, projectRepos, recordEvent, type Db } from "./store.js";
 
@@ -17,6 +18,14 @@ const upkeepUnits = (db: Db, repoId: RepoId) =>
     state: string;
     created_at: string;
   }[];
+
+// The guide was last looked at when the newest creation or upkeep began; a repo with neither has no guide to check.
+function lastGuideWork(db: Db, repoId: RepoId): string {
+  const row = db
+    .prepare("SELECT created_at FROM units WHERE repo_id = ? AND playbook IN (?, ?) ORDER BY id DESC LIMIT 1")
+    .get(repoId, GUIDE_CREATE_PLAYBOOK, UPKEEP_PLAYBOOK) as { created_at: string } | undefined;
+  return row?.created_at ?? "";
+}
 
 // A report from an upkeep unit's own judge is a finding on that unit, not a reason for another upkeep.
 const eventsAfter = (db: Db, type: string, repoId: RepoId, since: string) =>
@@ -51,7 +60,8 @@ export interface UpkeepDue {
 export function upkeepDue(db: Db, repoId: RepoId): UpkeepDue | null {
   const all = upkeepUnits(db, repoId);
   if (all.some((u) => !TERMINAL_STATES.has(u.state as never))) return null;
-  const since = all.at(-1)?.created_at ?? "";
+  if (guideCreationUnder(db, repoId)) return null;
+  const since = lastGuideWork(db, repoId);
   const reasons: string[] = [];
   const asked = eventsAfter(db, "guide.upkeep_requested", repoId, since);
   if (asked.length)
