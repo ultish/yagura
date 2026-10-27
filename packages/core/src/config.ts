@@ -1,7 +1,7 @@
 import { SETTING_DOCS, SETTING_GROUPS, type SettingGroup } from "./settings-docs.js";
-import { existsSync, readFileSync } from "node:fs";
+import { accessSync, constants, existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
@@ -297,9 +297,23 @@ function schemaFor(key: string): z.ZodTypeAny {
   return schema;
 }
 
+// The daemon may run with a different PATH than the shell that sets this, so a bare command name is saved as the path it has here.
+function absoluteBin(name: string): string {
+  if (name.includes("/")) return name;
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    const candidate = join(dir, name);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {}
+  }
+  throw new Error(`${name} is not on PATH here, so the daemon could not run it. Give the full path to it.`);
+}
+
 export function setSetting(db: Db, scope: SettingScope, scopeId: string, key: string, value: unknown): void {
   checkLayer(key, scope);
-  const parsed = schemaFor(key).parse(value);
+  const checked = key === "harness.claude.bin" && typeof value === "string" && value !== "" ? absoluteBin(value) : value;
+  const parsed = schemaFor(key).parse(checked);
   db.prepare(
     `INSERT INTO settings (scope, scope_id, key, value_json, updated_at) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT (scope, scope_id, key) DO UPDATE SET value_json = excluded.value_json, updated_at = excluded.updated_at`,

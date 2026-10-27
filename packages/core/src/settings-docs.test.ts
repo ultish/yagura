@@ -66,3 +66,25 @@ describe("setting docs", () => {
     expect(describeSettings(db).find((s) => s.key === "forge.trusted_authors")).not.toHaveProperty("inherited");
   });
 });
+
+describe("harness.claude.bin", () => {
+  it("saves a bare command name as the path found on PATH, and refuses one that is not there", async () => {
+    const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const { resolveSetting } = await import("./config.js");
+    const dir = mkdtempSync(join(tmpdir(), "yagura-bin-"));
+    writeFileSync(join(dir, "my-claude"), "#!/bin/sh\n");
+    chmodSync(join(dir, "my-claude"), 0o755);
+    const db = openStore(":memory:");
+    const path = process.env.PATH;
+    process.env.PATH = `${dir}:${path}`;
+    try {
+      setSetting(db, "global", "", "harness.claude.bin", "my-claude");
+      expect(resolveSetting(db, "harness.claude.bin").value).toBe(join(dir, "my-claude"));
+      expect(() => setSetting(db, "global", "", "harness.claude.bin", "no-such-claude")).toThrow(/not on PATH/);
+    } finally {
+      process.env.PATH = path;
+    }
+  });
+});
