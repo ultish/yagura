@@ -366,8 +366,12 @@ function ThreadControls({ threadId, v, busy, onChanged }: { threadId: number; v:
         <button
           type="button"
           className="btn sm"
-          disabled={busy || session.busy}
-          title={open ? "Move this conversation to Closed. It stays as history, and writing in it again reopens it." : "Move this conversation back to Open."}
+          disabled={session.busy}
+          title={
+            open
+              ? "Move this conversation to Closed. It stays as history, and writing in it again reopens it. A reply in progress is stopped."
+              : "Move this conversation back to Open."
+          }
           onClick={() =>
             session.run(async () => {
               await api(`/api/threads/${threadId}/state`, { body: { state: open ? "closed" : "open" } });

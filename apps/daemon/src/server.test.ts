@@ -6,6 +6,8 @@ import {
   addDecision,
   addGate,
   addMessage,
+  beginTurn,
+  runningTurn,
   createThread,
   addProject,
   addRepo,
@@ -270,6 +272,15 @@ describe("daemon API", () => {
     expect(Object.keys(cost).sort()).toEqual(["agents", "doctor", "today", "total", "watchman", "week"]);
     expect(cost.total).toBeGreaterThanOrEqual(1.25);
     expect(cost.today).toBeCloseTo(cost.total);
+  });
+
+  it("closing a conversation stops the reply in progress", async () => {
+    const thread = createThread(db, { title: "Stuck" });
+    const human = addMessage(db, { threadId: thread.id, role: "human", body: "hi" });
+    beginTurn(db, thread.id, human.id, "/nowhere/turn.jsonl");
+    expect(runningTurn(db, thread.id)).not.toBeNull();
+    expect(await (await post(`/api/threads/${thread.id}/state`, { state: "closed" })).json()).toMatchObject({ state: "closed" });
+    expect(runningTurn(db, thread.id)).toBeNull();
   });
 
   it("closes and reopens a conversation", async () => {

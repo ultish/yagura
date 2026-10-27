@@ -954,7 +954,8 @@ export function createApp(opts: ServerOptions): Hono {
     const b = await body(c);
     if (b.state !== "open" && b.state !== "closed") return c.json({ error: "state must be open or closed" }, 400);
     getThread(db, id);
-    if (b.state === "closed" && runningTurn(db, id)) return c.json({ error: `thread ${id} is waiting on the watchman; stop it or wait before closing` }, 409);
+    const turn = b.state === "closed" ? runningTurn(db, id) : null;
+    if (turn) stopTurn(db, turn.id, "you closed the conversation");
     setThreadState(db, id, b.state);
     return c.json(getThread(db, id));
   });
