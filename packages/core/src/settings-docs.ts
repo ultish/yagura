@@ -53,8 +53,9 @@ export const SETTING_DOCS: Record<SettingKey, SettingDoc> = {
   },
   "role.judge.model": {
     group: "Agents and models",
+    emptyMeans: "claude's own default model",
     title: "Judge model",
-    help: "The model that checks each unit before you are asked to merge it. It defaults to Sonnet because a Haiku judge once approved stale guide pages. Empty uses the harness default, which suits an internal endpoint that names models differently.",
+    help: "The model that checks each unit before you are asked to merge it. Empty uses claude's own default. A small model may approve work a stronger one would reject.",
     example: "claude-sonnet-5-5",
   },
   "role.lead.model": {

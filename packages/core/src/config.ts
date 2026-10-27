@@ -75,13 +75,7 @@ export const SETTINGS = {
   "role.doctor.model": z.string().nullable().default(null).describe("Model for the doctor (empty: the harness default)"),
   "timebox.doctor_seconds": z.number().int().positive().default(1200).describe("How long the doctor may run on one repo"),
   "role.judge.harness": z.string().default("claude").describe("Harness that runs judges"),
-  "role.judge.model": z
-    .string()
-    .nullable()
-    .default("claude-sonnet-5-5")
-    .describe(
-      "Model for judges (default Sonnet: a Haiku judge approved stale guide pages; set it empty for the harness default, e.g. when an internal endpoint names models differently)",
-    ),
+  "role.judge.model": z.string().nullable().default(null).describe("Model for judges (empty: the harness default)"),
   "role.lead.model": z.string().nullable().default(null).describe("Model for unit leads (empty: the harness default)"),
   "forge.trusted_authors": z
     .array(z.string())
