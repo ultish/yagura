@@ -268,6 +268,37 @@ function token(): string | null {
   }
 }
 
+let locked = false;
+const lockListeners = new Set<() => void>();
+const lock = () => {
+  if (locked) return;
+  locked = true;
+  lockListeners.forEach((l) => l());
+};
+
+export function useNeedsToken(): boolean {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const onLock = () => bump((n) => n + 1);
+    lockListeners.add(onLock);
+    return () => void lockListeners.delete(onLock);
+  }, []);
+  return locked;
+}
+
+export function hasStoredToken(): boolean {
+  return token() !== null;
+}
+
+export function saveToken(value: string): void {
+  try {
+    localStorage.setItem(TOKEN_KEY, value.trim());
+  } catch {}
+  const url = new URL(location.href);
+  url.searchParams.delete("token");
+  location.replace(url);
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -285,6 +316,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
     body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
   });
   const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (res.status === 401) lock();
   if (!res.ok) throw new ApiError(res.status, json.error ?? res.statusText);
   return json as T;
 }
@@ -292,6 +324,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
 export async function apiText(path: string): Promise<string> {
   const t = token();
   const res = await fetch(path, { headers: t ? { authorization: `Bearer ${t}` } : {} });
+  if (res.status === 401) lock();
   if (!res.ok) throw new ApiError(res.status, res.statusText);
   return res.text();
 }

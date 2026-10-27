@@ -1,6 +1,6 @@
 import { Menu, Search as SearchIcon } from "lucide-react";
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { LiveContext, useApi, useLiveVersion, usePath, type BellItem } from "./api";
+import { LiveContext, useApi, useLiveVersion, useNeedsToken, usePath, type BellItem } from "./api";
 import { Agent, AgentByNo, UnitAgent } from "./pages/Agent";
 import { Prompts } from "./pages/Prompts";
 import { Unit } from "./pages/Unit";
@@ -24,6 +24,7 @@ import { Talk } from "./pages/Talk";
 import markDark from "./assets/mark-dark.png";
 import markLight from "./assets/mark-light.png";
 import { Link } from "./ui/Link";
+import { TokenGate } from "./ui/TokenGate";
 import { BellAlert } from "./ui/BellAlert";
 import { SearchBox } from "./ui/SearchBox";
 import { Slideout } from "./ui/Slideout";
@@ -303,6 +304,7 @@ function Routes() {
 
 export function App() {
   const live = useLiveVersion();
+  if (useNeedsToken()) return <TokenGate />;
   return (
     <LiveContext.Provider value={live}>
       <Header />

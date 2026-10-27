@@ -87,7 +87,7 @@ All settings are on the Settings page. Models default to the `claude` default. T
 
 ### Reaching the dashboard from another machine
 
-The daemon listens on localhost. To open it from another machine, start it with `YAGURA_BIND=<hostname>` (or `0.0.0.0`) and `YAGURA_PORT`, and open that port in the firewall. Beyond localhost every request needs the token in `$YAGURA_HOME/token`; there is no user account. `yagura start` and `yagura status` print a sign-in link with the token in it. Open that link once and the browser remembers the token. Browser notifications need HTTPS, or Chrome's `unsafely-treat-insecure-origin-as-secure` flag for that address.
+The daemon listens on localhost. To open it from another machine, start it with `YAGURA_BIND=<hostname>` (or `0.0.0.0`) and `YAGURA_PORT`, and open that port in the firewall. Beyond localhost every request needs the token in `$YAGURA_HOME/token`; there is no user account. The dashboard shows a sign-in screen where you paste it, and the browser remembers it. `yagura start` and `yagura status` also print a link with the token in it. Browser notifications need HTTPS, or Chrome's `unsafely-treat-insecure-origin-as-secure` flag for that address.
 
 `yagura start` keeps running after you close the terminal. On a Mac, wrap it as `caffeinate -is yagura daemon` to keep the machine awake. For systemd, run `yagura daemon` in a user service.
 
