@@ -759,7 +759,7 @@ export async function runWatchmanTurn(ctx: RunContext, threadId: number, text: s
         ? (why?.r ?? "you stopped the watchman")
         : result.timedOut
           ? "the watchman ran out of time"
-          : `the watchman ended without a reply (exit ${result.exitCode ?? result.signal})`,
+          : `the watchman ended without a reply (exit ${result.exitCode ?? result.signal})${result.stderrTail.startsWith("could not run") ? `: ${result.stderrTail.split("\n")[0]}` : ""}`,
     };
   };
   const attemptStore = async (text: string, log: string): Promise<{ stored: ReturnType<typeof storeTurn> | null; body: string; problem: string | null }> => {

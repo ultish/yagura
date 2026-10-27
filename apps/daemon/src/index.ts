@@ -50,6 +50,8 @@ export async function startDaemon(cli: string[], opts: { debug?: boolean } = {})
   for (const path of templates.moved) log(`moved ${path} into the store (Environments page, Templates)`);
   for (const why of templates.refused) log(`left ${why}`);
   const engine = new Engine({ db, boot, adapters: { claude: claudeAdapter }, cli }, { log });
+  const stale = engine.recoverOrphanTurns();
+  if (stale) log(`ended ${stale} watchman turn(s) left running by a previous process`);
   const webDir = fileURLToPath(new URL("../../web/dist", import.meta.url));
   const app = createApp({ db, boot, token, cli, webDir: existsSync(join(webDir, "index.html")) ? webDir : null });
   const server = serve({ fetch: app.fetch, hostname: boot.bind, port: boot.port });

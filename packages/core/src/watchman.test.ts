@@ -25,13 +25,14 @@ import {
   assembleContext,
   clearWatchmanSession,
   parseReply,
+  queueMessage,
   renderWatchmanBrief,
   runWatchmanTurn,
   storeTurn,
   TurnRecords,
   type ContextParts,
 } from "./watchman.js";
-import { listTurns, runningTurn, stopTurn, TurnBusy } from "./turns.js";
+import { beginTurn, listTurns, runningTurn, stopTurn, TurnBusy } from "./turns.js";
 
 const fixtures = (f: string) => fileURLToPath(new URL(`./harness/fixtures/${f}`, import.meta.url));
 const fake: HarnessAdapter = {
@@ -166,6 +167,24 @@ describe("watchman turns", () => {
       ["human", "say nothing"],
       ["system", "the watchman ended without a reply (exit 0)"],
     ]);
+  });
+
+  it("reports a harness that cannot be launched as a failed turn instead of crashing", async () => {
+    ctx.adapters = { claude: { ...fake, command: () => ({ argv: [join(boot.home, "no-such-claude")], stdin: "" }) } };
+    const t = createThread(db, { title: "t" });
+    const out = await runWatchmanTurn(ctx, t.id, "hi");
+    expect(out.reply).toBeNull();
+    expect(out.problem).toContain("could not run");
+    expect(out.problem).toContain("no-such-claude");
+  });
+
+  it("ends a turn a crashed daemon left running, and says so in the thread", () => {
+    const t = createThread(db, { title: "t" });
+    const human = queueMessage(db, t.id, "hi");
+    beginTurn(db, t.id, human.id, join(boot.home, "turn.jsonl"));
+    expect(new Engine(ctx, { tickMs: 50 }).recoverOrphanTurns()).toBe(1);
+    expect(runningTurn(db, t.id)).toBeNull();
+    expect(listMessages(db, t.id).at(-1)).toMatchObject({ role: "system", body: expect.stringContaining("restarted") });
   });
 
   it("stores nothing when any record is invalid", () => {

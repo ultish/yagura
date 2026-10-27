@@ -38,7 +38,7 @@ import {
 import { activeHold } from "./limits.js";
 import { answerIssue, listIssues, pollIssues, watchedRepos } from "./issues.js";
 import { postReport, reportKey, type ReportKind } from "./report.js";
-import { listThreads } from "./threads.js";
+import { addMessage, listThreads } from "./threads.js";
 import { listTurns, stopTurn } from "./turns.js";
 import { doctorWakes, runDoctor, runningDoctorRuns, stopDoctorRun } from "./doctor.js";
 import { publishDue, publishTestBuild } from "./publish.js";
@@ -617,6 +617,15 @@ export class Engine {
         } catch {}
       }
       this.recoverCrashed(o.unit_id as UnitId, new Error("yagura restarted while this attempt was running"));
+    }
+    return orphans.length;
+  }
+
+  recoverOrphanTurns(): number {
+    const orphans = listTurns(this.db).filter((t) => t.state === "running");
+    for (const t of orphans) {
+      stopTurn(this.db, t.id, "yagura restarted while the watchman was replying; send your message again");
+      addMessage(this.db, { threadId: t.threadId, role: "system", body: "yagura restarted while the watchman was replying. Send your message again." });
     }
     return orphans.length;
   }

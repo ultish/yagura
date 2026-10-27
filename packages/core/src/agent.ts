@@ -192,6 +192,10 @@ async function runOnce(
   debug(() => `agent started: ${s.recorder.env.YAGURA_ROLE ?? "agent"}, attempt ${s.recorder.env.YAGURA_ATTEMPT ?? "?"}, ${basename(cmd)} (pid ${child.pid})`);
   child.on("close", (code) => debug(() => `agent pid ${child.pid} exited ${code} after ${Math.round((Date.now() - began) / 1000)} s`));
   child.stdin.on("error", () => {});
+  let launchError: string | null = null;
+  child.on("error", (e) => {
+    launchError = `could not run ${cmd}: ${e.message}`;
+  });
   // A harness that reads messages from stdin stays alive after its result until stdin closes. Input closes on the result even with a message unread:
   // answering it would start a new response whose text replaces the handoff.
   const inFlight: { id: number; body: string }[] = [];
@@ -280,8 +284,12 @@ async function runOnce(
   }
   const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     if (child.exitCode !== null || child.signalCode !== null) resolve({ code: child.exitCode, signal: child.signalCode });
-    else child.once("exit", (code, signal) => resolve({ code, signal }));
+    else {
+      child.once("exit", (code, signal) => resolve({ code, signal }));
+      child.once("close", (code, signal) => resolve({ code, signal }));
+    }
   });
+  if (launchError) stderr = `${launchError}\n${stderr}`.slice(0, 4000);
   clearTimeout(timer);
   if (poll) clearInterval(poll);
   for (const m of inFlight) s.recorder.steers?.undelivered(m.id, "the agent finished before reading it");
