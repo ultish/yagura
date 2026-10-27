@@ -161,7 +161,12 @@ else
       printf '#!/usr/bin/env %s\nexec %s -ic '"'"'claude "$@"'"'"' claude "$@"\n' "$SHELL_NAME" "$SHELL_NAME" > "$WRAPPER"
       chmod +x "$WRAPPER"
       note "claude is a shell $KIND in your rc file; yagura starts agents without a shell, so it cannot see that."
-      note "wrote $WRAPPER, which runs your $KIND through an interactive shell. Point yagura at it: yagura set harness.claude.bin '\"$WRAPPER\"'"
+      note "wrote $WRAPPER, which runs your $KIND through an interactive shell."
+      if "$MAIN" set harness.claude.bin "\"$WRAPPER\"" > /dev/null; then
+        ok "set harness.claude.bin to $WRAPPER"
+      else
+        note "could not set it; run: yagura set harness.claude.bin '\"$WRAPPER\"'"
+      fi
       note "if your rc file prints anything at startup, agent output gets mixed with it; then copy what the $KIND does (env vars, proxy, the real binary) into the wrapper instead."
       ;;
     *) bad "claude not found: yagura runs agents through it by default" ;;

@@ -7,6 +7,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const logPath = (boot: Bootstrap) => join(boot.home, "daemon.log");
 const urlOf = (boot: Bootstrap) => `http://${boot.bind === "0.0.0.0" || boot.bind === "::" ? "127.0.0.1" : boot.bind}:${boot.port}`;
 
+// The token file exists only when the daemon listens beyond localhost, where the API wants it; the dashboard keeps it once opened with ?token=.
+function signIn(boot: Bootstrap): string {
+  if (!existsSync(boot.tokenFile)) return "";
+  return `\nsign in: ${urlOf(boot)}/?token=${readFileSync(boot.tokenFile, "utf8").trim()}  (from another computer, replace the host with this machine's name)`;
+}
+
 async function answering(boot: Bootstrap): Promise<boolean> {
   try {
     await fetch(urlOf(boot), { signal: AbortSignal.timeout(1000) });
@@ -37,7 +43,7 @@ export async function startInBackground(boot: Bootstrap, cli: string[]): Promise
     await sleep(200);
     if (exited) break;
     if (await answering(boot)) {
-      console.log(`started (pid ${child.pid}) at ${urlOf(boot)}\nlog: ${logPath(boot)}`);
+      console.log(`started (pid ${child.pid}) at ${urlOf(boot)}\nlog: ${logPath(boot)}${signIn(boot)}`);
       return 0;
     }
   }
@@ -69,6 +75,8 @@ export async function daemonStatus(boot: Bootstrap): Promise<number> {
     console.log(`not running. Start it with: yagura start\nhome: ${boot.home}`);
     return 1;
   }
-  console.log(`running (pid ${pid}) at ${urlOf(boot)}${(await answering(boot)) ? "" : " (not answering yet)"}\nhome: ${boot.home}\nlog: ${logPath(boot)}`);
+  console.log(
+    `running (pid ${pid}) at ${urlOf(boot)}${(await answering(boot)) ? "" : " (not answering yet)"}\nhome: ${boot.home}\nlog: ${logPath(boot)}${signIn(boot)}`,
+  );
   return 0;
 }

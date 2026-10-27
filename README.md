@@ -62,7 +62,7 @@ Any other plugin or skill your work needs goes into the same `claude`, and every
 
 ### Your `claude` command
 
-Yagura starts `claude` as a program, without a shell. If `claude` is a function or alias in your `.bashrc`, as it is when a proxy is wrapped around it, yagura can't see it. `scripts/setup.sh` detects this and writes `~/.local/bin/yagura-claude`, which runs your function in an interactive shell. Set `harness.claude.bin` to that path in Settings. If your rc file prints anything at startup, that text mixes into the agent's output. In that case, copy what the function does into the wrapper instead.
+Yagura starts `claude` as a program, without a shell. If `claude` is a function or alias in your `.bashrc`, as it is when a proxy is wrapped around it, yagura can't see it. `scripts/setup.sh` detects this, writes `~/.local/bin/yagura-claude`, which runs your function in an interactive shell, and sets `harness.claude.bin` to it. If your rc file prints anything at startup, that text mixes into the agent's output. In that case, copy what the function does into the wrapper instead.
 
 ### Environments
 
@@ -87,7 +87,7 @@ All settings are on the Settings page. Models default to the `claude` default. T
 
 ### Reaching the dashboard from another machine
 
-The daemon listens on localhost. To open it from another machine, start it with `YAGURA_BIND=<hostname>` (or `0.0.0.0`) and `YAGURA_PORT`, and open that port in the firewall. Beyond localhost the dashboard asks for the token in `$YAGURA_HOME/token`. Browser notifications need HTTPS, or Chrome's `unsafely-treat-insecure-origin-as-secure` flag for that address.
+The daemon listens on localhost. To open it from another machine, start it with `YAGURA_BIND=<hostname>` (or `0.0.0.0`) and `YAGURA_PORT`, and open that port in the firewall. Beyond localhost every request needs the token in `$YAGURA_HOME/token`; there is no user account. `yagura start` and `yagura status` print a sign-in link with the token in it. Open that link once and the browser remembers the token. Browser notifications need HTTPS, or Chrome's `unsafely-treat-insecure-origin-as-secure` flag for that address.
 
 `yagura start` keeps running after you close the terminal. On a Mac, wrap it as `caffeinate -is yagura daemon` to keep the machine awake. For systemd, run `yagura daemon` in a user service.
 
