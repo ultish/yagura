@@ -108,6 +108,17 @@ fi
 if [ "$BUILD" = 1 ]; then
   say ""
   say "Installing and building"
+  if [ -z "${npm_config_nodedir:-}" ]; then
+    NODE_BIN="$(command -v node)"
+    NODE_BIN="$(readlink -f "$NODE_BIN" 2> /dev/null || echo "$NODE_BIN")"
+    NODE_PREFIX="$(dirname "$(dirname "$NODE_BIN")")"
+    if [ -f "$NODE_PREFIX/include/node/node.h" ]; then
+      export npm_config_nodedir="$NODE_PREFIX"
+      ok "building native modules against the headers in $NODE_PREFIX (no download)"
+    else
+      note "no Node headers under $NODE_PREFIX/include/node; without network access the native build fails. Install your distro's node-devel package, or set npm_config_nodedir to a Node source or prefix directory."
+    fi
+  fi
   (cd "$ROOT" && pnpm install --frozen-lockfile && pnpm -r build)
 fi
 
