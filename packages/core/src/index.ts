@@ -1,4 +1,5 @@
 export * from "./domain.js";
+export * from "./layout-move.js";
 export * from "./brief.js";
 export * from "./git.js";
 export * from "./branch.js";

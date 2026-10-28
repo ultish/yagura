@@ -16,6 +16,7 @@ import {
   importSpecFiles,
   importStandingFiles,
   importTemplateFiles,
+  moveHomeLayout,
 } from "@yagura/core";
 import { daemonLog } from "./log.js";
 import { createApp } from "./server.js";
@@ -36,6 +37,11 @@ export async function startDaemon(cli: string[], opts: { debug?: boolean } = {})
   const boot = loadBootstrap();
   const db = openStore(layout(boot).db);
   const release = acquireDaemonLock(boot);
+  for (const line of await moveHomeLayout(db, boot).catch((e) => {
+    release();
+    throw e;
+  }))
+    console.log(`moved ${line}`);
   const token = LOOPBACK.has(boot.bind) ? null : loadOrCreateToken(boot);
   const log = daemonLog(layout(boot).daemonLog);
   if (opts.debug) {

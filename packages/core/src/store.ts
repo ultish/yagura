@@ -1,9 +1,10 @@
 import { TITLE_MAX, titleFromGoal } from "./title.js";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import Database from "better-sqlite3";
+import { Database, isBusy } from "./sqlite.js";
 import { canTransition, emptyAnswers, IllegalTransition, type Answers, type Role } from "./domain.js";
 import { LATEST_VERSION, MIGRATIONS } from "./migrations.js";
+import { repoPath } from "./paths.js";
 import type {
   Attempt,
   AttemptId,
@@ -23,7 +24,7 @@ import type {
   Forge,
 } from "./domain.js";
 
-export type Db = Database.Database;
+export type Db = Database;
 
 export const now = () => new Date().toISOString() as IsoTime;
 
@@ -52,7 +53,7 @@ export function openStore(path: string): Db {
         try {
           return t.immediate(...args);
         } catch (e) {
-          if ((e as { code?: string }).code !== "SQLITE_BUSY" || db.inTransaction || attempt >= BUSY_RETRIES) throw e;
+          if (!isBusy(e) || db.inTransaction || attempt >= BUSY_RETRIES) throw e;
           sleep(BUSY_RETRY_MS * 2 ** attempt);
         }
       }
@@ -144,12 +145,13 @@ export function lastTransition(db: Db, unitId: UnitId): { ts: IsoTime; data: Rec
 }
 
 export function addRepo(db: Db, r: { id: string; url: string; defaultBranch: string; forge?: Forge; pushConfirmed?: boolean }): Repo {
-  db.prepare("INSERT INTO repos (id, url, default_branch, forge, push_confirmed, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(
+  db.prepare("INSERT INTO repos (id, url, default_branch, forge, push_confirmed, path, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     r.id,
     r.url,
     r.defaultBranch,
     r.forge ?? "none",
     r.pushConfirmed ? 1 : 0,
+    repoPath(r.id),
     now(),
   );
   return getRepo(db, r.id as RepoId);
@@ -163,6 +165,7 @@ export function getRepo(db: Db, id: RepoId): Repo {
     url: r.url as string,
     defaultBranch: r.default_branch as string,
     forge: r.forge as Forge,
+    path: r.path as string,
     pushConfirmed: r.push_confirmed === 1,
     createdAt: r.created_at as IsoTime,
   };

@@ -30,7 +30,7 @@ describe("sweepWorktrees", () => {
     transitionUnit(db, building!.id, "building", { round: { kind: "first" } });
     db.prepare("UPDATE units SET state = 'stuck' WHERE id = ?").run(stuck!.id);
 
-    const dir = join(home, "worktrees", "r");
+    const dir = join(home, "repos", "r", "worktrees");
     const names = [
       "my-proj-u1",
       "my-proj-u1.judge",

@@ -1,5 +1,5 @@
 import { LATEST_VERSION } from "./migrations.js";
-import Database from "better-sqlite3";
+import { Database } from "./sqlite.js";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

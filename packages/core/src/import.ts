@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { Database } from "./sqlite.js";
 import { existsSync } from "node:fs";
 import { SETTINGS } from "./config.js";
 import type { Db } from "./store.js";
@@ -28,11 +28,11 @@ const RENAMED: Record<string, string> = {
 };
 const PROMPT_ROLES: Record<string, string> = { planner: "planner", worker: "worker", manager: "lead", watchman: "watchman" };
 
-const columnsOf = (db: Database.Database, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
-const hasTable = (db: Database.Database, table: string) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+const columnsOf = (db: Database, table: string) => (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+const hasTable = (db: Database, table: string) => !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
 
 // Copies the rows of `table` that pass `keep`, by column name: a column the old table had and the new one dropped is left behind.
-function copy(from: Database.Database, to: Db, table: string, keep: (row: Record<string, unknown>) => Record<string, unknown> | null = (r) => r): number {
+function copy(from: Database, to: Db, table: string, keep: (row: Record<string, unknown>) => Record<string, unknown> | null = (r) => r): number {
   if (!hasTable(from, table)) return 0;
   const cols = columnsOf(to, table);
   let n = 0;
@@ -48,7 +48,7 @@ function copy(from: Database.Database, to: Db, table: string, keep: (row: Record
 
 export function importHome(db: Db, oldDbPath: string): ImportCounts {
   if (!existsSync(oldDbPath)) throw new Error(`no yagura database at ${oldDbPath}`);
-  const from = new Database(oldDbPath, { readonly: true, fileMustExist: true });
+  const from = new Database(oldDbPath, { readonly: true });
   const skipped: string[] = [];
   try {
     return db.transaction((): ImportCounts => {
@@ -63,7 +63,7 @@ export function importHome(db: Db, oldDbPath: string): ImportCounts {
       const environments = copy(from, db, "environments", (r) => ({ ...r, answers_json: JSON.stringify(r.notes ? { other: r.notes } : {}) }));
       const environmentValues = copy(from, db, "environment_values");
       const templates = copy(from, db, "env_templates");
-      const repos = copy(from, db, "repos", (r) => ({ ...r, revert_scan_sha: null }));
+      const repos = copy(from, db, "repos", (r) => ({ ...r, revert_scan_sha: null, path: `repos/${r.id}` }));
       const prompts = copy(from, db, "prompt_texts", (r) => {
         const role = r.role === "all" ? "all" : PROMPT_ROLES[r.role as string];
         return r.scope === "global" && role ? { ...r, role } : null;

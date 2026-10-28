@@ -640,6 +640,12 @@ export function Unit({ projectId, seq }: { projectId: string; seq: number }) {
         <dd className="mono">{u.branch ? `${u.branch} → ${story.base ?? "base"}` : <span className="muted">not started</span>}</dd>
       </div>
       <div>
+        <dt>Checkout</dt>
+        <dd className="mono" style={{ overflowWrap: "anywhere" }}>
+          {story.checkout ?? <span className="muted">none yet</span>}
+        </dd>
+      </div>
+      <div>
         <dt>Spent</dt>
         <dd>
           ${story.costUsd.toFixed(2)} · {own.length} agent{own.length === 1 ? "" : "s"}

@@ -203,6 +203,7 @@ export async function repoView(db: Db, boot: Bootstrap, repoId: RepoId) {
   const landed = units.filter((u) => u.state === "merged");
   return {
     repo,
+    location: mirror,
     trunk,
     route: { text: `lands ${describeRoute(repo)}`, confirmed: !(repo.forge === "none" && isRemote(repo.url) && !repo.pushConfirmed) },
     pack: null,

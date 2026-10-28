@@ -56,6 +56,8 @@ export interface UnitStory {
   unit: Unit;
   projectId: string;
   base: string | null;
+  // The folder the unit's worker edits in, from its latest attempt.
+  checkout: string | null;
   pr: { number: number; url: string; repo: string; draft: boolean } | null;
   costUsd: number;
   started: IsoTime | null;
@@ -448,6 +450,7 @@ export function unitStory(db: Db, _boot: Bootstrap, unit: Unit): UnitStory {
     unit,
     projectId: project.id,
     base,
+    checkout: [...attempts].reverse().find((a) => a.role === "worker" && a.worktreePath)?.worktreePath ?? null,
     pr: mr ? { number: mr.number, url: mr.url, repo: mr.forgeRepo, draft: mr.status?.draft ?? !["ready", "merged"].includes(unit.state) } : null,
     costUsd: attempts.reduce((s, a) => s + a.costUsd, 0),
     agents: agentsOf(db, unit, attempts, planner),

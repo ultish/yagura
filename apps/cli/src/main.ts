@@ -133,6 +133,7 @@ import {
   createGuideUnit,
   requestUpkeep,
   doctorCli,
+  moveHomeLayout,
 } from "@yagura/core";
 
 const USAGE = `yagura — agent orchestration
@@ -408,6 +409,7 @@ function printRecords(threadId: number, sinceMessageId: number) {
 }
 
 async function main() {
+  if (!daemonPid(boot)) await moveHomeLayout(db, boot).catch((e) => console.error(e instanceof Error ? e.message : String(e)));
   switch (command) {
     case "repo": {
       const { positionals, values } = args({ id: { type: "string" }, url: { type: "string" }, forge: { type: "string" }, land: { type: "string" } });
@@ -435,7 +437,9 @@ async function main() {
         throw e;
       }
       const { repo, inspection } = registered!;
-      console.log(`repo ${repo.id} → ${repo.url} (${repo.defaultBranch} at ${inspection.trunk.slice(0, 10)}); lands ${describeRoute(repo)}`);
+      console.log(
+        `repo ${repo.id} → ${repo.url} (${repo.defaultBranch} at ${inspection.trunk.slice(0, 10)}); lands ${describeRoute(repo)}; mirror ${layout(boot).mirror(repo.id)}`,
+      );
       return;
     }
     case "project": {

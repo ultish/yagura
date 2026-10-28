@@ -230,7 +230,7 @@ export async function inspectProposalRepos(p: ProposalBody, mirror?: (id: string
 }
 
 async function createLocalRepo(boot: Bootstrap, db: Db, r: z.output<typeof NewRepo>): Promise<string> {
-  const bare = layout(boot).newRepo(r.id);
+  const bare = layout(boot).upstream(r.id as RepoId);
   if (existsSync(bare)) return bare;
   const seed = mkdtempSync(join(tmpdir(), `yagura-seed-${r.id}-`));
   try {

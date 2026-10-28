@@ -242,6 +242,8 @@ export interface Repo {
   url: string;
   defaultBranch: string;
   forge: Forge;
+  // Where the repo lives, relative to the home: repos/<id>.
+  path: string;
   // A remote repo without a forge lands by pushing to trunk only when someone chose that (§23).
   pushConfirmed: boolean;
   createdAt: IsoTime;

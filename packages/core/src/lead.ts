@@ -1,3 +1,4 @@
+import { REPO_ACCESS } from "./brief.js";
 import { environmentSection } from "./actions.js";
 import { mkdirSync } from "node:fs";
 import { attemptRecorder, runAgentSession, write, type RunContext } from "./agent.js";
@@ -151,7 +152,7 @@ export const LEAD_REPORT = recordInstructions(
   ],
 );
 
-function renderLeadBrief(db: Db, unit: Unit, wake: LeadWake): string {
+function renderLeadBrief(db: Db, unit: Unit, wake: LeadWake, checkout: string | null): string {
   const project = getProject(db, unit.projectId);
   const attempts = listAttempts(db, unit.id);
   const mr = getMergeRequest(db, unit.id);
@@ -176,6 +177,8 @@ ${wake.detail}
 - acceptance:
 ${unit.acceptance.map((a) => `  - ${a}`).join("\n")}
 - state: ${unit.state}
+- repo: ${unit.repoId ?? "(none)"}${checkout ? `, the unit's checkout is ${checkout} (read it; you are started in the project folder, which holds bookkeeping and no code)` : ""}
+- ${REPO_ACCESS}
 - branch: ${unit.branch ?? "(none yet)"}
 - pull request: ${mr ? mr.url : "(none)"}
 ${unit.context.length ? `- context:\n${unit.context.map((c) => `  - ${c}`).join("\n")}` : ""}
@@ -217,7 +220,7 @@ export async function runLeadRound(ctx: RunContext, unitId: UnitId, wake: LeadWa
   if (!adapter) throw new Error(`no adapter for harness ${harnessId}`);
   const paths = layout(boot);
   const attempt = createAttempt(db, unit.id, harnessId, setting("role.lead.model"));
-  const brief = renderLeadBrief(db, unit, wake);
+  const brief = renderLeadBrief(db, unit, wake, unit.repoId ? paths.checkout(unit.repoId, project.id, unit.seq) : null);
   write(paths.brief(project.id, unit.seq, attempt.n), brief);
   updateAttempt(db, attempt.id, { state: "running", startedAt: now(), branch: unit.branch });
   recordEvent(db, "lead.woken", { projectId: project.id, unitId: unit.id, attemptId: attempt.id }, { trigger: wake.trigger });

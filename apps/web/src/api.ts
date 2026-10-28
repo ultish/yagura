@@ -68,6 +68,7 @@ export interface ProjectSummary {
 
 export interface RepoView {
   repo: Repo;
+  location: string;
   trunk: string | null;
   route: { text: string; confirmed: boolean };
   pack: { ok: true; checks: { name: string; tier: string }[] } | { ok: false; reason: string } | null;

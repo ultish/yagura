@@ -1,11 +1,11 @@
-import type BetterSqlite3 from "better-sqlite3";
+import type { Database } from "./sqlite.js";
 import { titleFromGoal } from "./title.js";
 
 // A migration that rebuilds a table (SQLite cannot change a CHECK in place) runs with foreign keys off, then checks them.
 export interface Migration {
   version: number;
   sql?: string;
-  rebuild?: (db: BetterSqlite3.Database) => void;
+  rebuild?: (db: Database) => void;
 }
 
 // schema.sql is version 1, the clean start of the core-loop build; every later change to it is one entry here.
@@ -37,6 +37,8 @@ export const MIGRATIONS: readonly Migration[] = [
     version: 8,
     sql: "UPDATE gates SET state = 'cancelled', resolved_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE state = 'open' AND kind IN ('planner', 'lead') AND project_id IN (SELECT id FROM projects WHERE state = 'closed');",
   },
+  // Where a repo lives under the home (repos/<id>), so the watchman, the dashboard, and agents can say it. Existing repos get the new layout's path; the daemon moves their folders there when it starts.
+  { version: 9, sql: "ALTER TABLE repos ADD COLUMN path TEXT NOT NULL DEFAULT ''; UPDATE repos SET path = 'repos/' || id;" },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.at(-1)?.version ?? 1;

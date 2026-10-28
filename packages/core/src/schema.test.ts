@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import Database from "better-sqlite3";
+import { Database } from "./sqlite.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   ACTION_AUTHORS,
@@ -20,7 +20,7 @@ import {
 const schema = readFileSync(new URL("./schema.sql", import.meta.url), "utf8");
 const now = "2026-09-26T00:00:00Z";
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = new Database(":memory:");

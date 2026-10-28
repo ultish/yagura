@@ -76,7 +76,8 @@ FAILED=0
 
 if command -v node > /dev/null; then
   NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-  if [ "$NODE_MAJOR" -ge 22 ]; then ok "node $(node -v)"; else bad "node $(node -v): need 22 or newer (.nvmrc pins $(cat "$ROOT/.nvmrc"))"; FAILED=1; fi
+  NODE_MINOR="$(node -p 'process.versions.node.split(".")[1]')"
+  if [ "$NODE_MAJOR" -gt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -ge 16 ]; }; then ok "node $(node -v)"; else bad "node $(node -v): need 22.16 or newer (.nvmrc pins $(cat "$ROOT/.nvmrc"))"; FAILED=1; fi
 else
   bad "node not found: install Node $(cat "$ROOT/.nvmrc") (see .nvmrc)"
   FAILED=1
@@ -108,17 +109,6 @@ fi
 if [ "$BUILD" = 1 ]; then
   say ""
   say "Installing and building"
-  if [ -z "${npm_config_nodedir:-}" ]; then
-    NODE_BIN="$(command -v node)"
-    NODE_BIN="$(readlink -f "$NODE_BIN" 2> /dev/null || echo "$NODE_BIN")"
-    NODE_PREFIX="$(dirname "$(dirname "$NODE_BIN")")"
-    if [ -f "$NODE_PREFIX/include/node/node.h" ]; then
-      export npm_config_nodedir="$NODE_PREFIX"
-      ok "building native modules against the headers in $NODE_PREFIX (no download)"
-    else
-      note "no Node headers under $NODE_PREFIX/include/node; without network access the native build fails. Install your distro's node-devel package, or set npm_config_nodedir to a Node source or prefix directory."
-    fi
-  fi
   (cd "$ROOT" && pnpm install --frozen-lockfile && pnpm -r build)
 fi
 

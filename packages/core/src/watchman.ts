@@ -214,7 +214,7 @@ ${sections.spec || "(no spec yet)"}${dropped.specSections ? `\n(${dropped.specSe
 ${b.catalog}
 
 ## LOOKING THINGS UP
-You can read, never change. Read, Grep, and Glob work in this thread's directory and in \`${b.projectsDir}/<project>/\` for each project in this thread (briefs/, handoffs/, logs/; each project's spec is in this brief). A repo's code has no folder to read: it lives in a mirror yagura manages and its checkouts are temporary, so never look for a \`repos/\` directory and read code with \`yagura git <repo> ls-tree|show|grep\`. For anything else run \`yagura show <project> [unit#]\`, \`yagura logs\`, \`yagura trace <sha|issue>\`, \`yagura gates\`, \`yagura settings\`, \`yagura thread list|show|search|mentions\`, \`yagura env values|presets|answers|actions\`, \`yagura template list\`, \`yagura project skills\`, or \`yagura git <repo> log|show|ls-tree|diff|grep|blame\` (trunk is \`origin/<default branch>\`). Every other tool and command is refused; look a fact up before you guess it or ask the developer for it.
+You can read, never change. Read, Grep, and Glob work in this thread's directory and in \`${b.projectsDir}/<project>/\` for each project in this thread (briefs/, handoffs/, logs/; each project's spec is in this brief). A repo's code is in origin.git, a bare clone yagura manages (each repo's path is under WHAT YAGURA HAS), and its checkouts are temporary, so read code with \`yagura git <repo> ls-tree|show|grep\`, never by opening a folder. For anything else run \`yagura show <project> [unit#]\`, \`yagura logs\`, \`yagura trace <sha|issue>\`, \`yagura gates\`, \`yagura settings\`, \`yagura thread list|show|search|mentions\`, \`yagura env values|presets|answers|actions\`, \`yagura template list\`, \`yagura project skills\`, or \`yagura git <repo> log|show|ls-tree|diff|grep|blame\` (trunk is \`origin/<default branch>\`). Every other tool and command is refused; look a fact up before you guess it or ask the developer for it.
 
 ## CONVERSATION (most recent, oldest first)
 ${dropped.messages ? `(${dropped.messages} older message(s) omitted; search them with \`yagura thread search --thread ${b.thread.id} "<words>"\`)\n\n` : ""}${sections.history}
@@ -283,7 +283,7 @@ function catalog(db: Db, boot: RunContext["boot"]): string {
       : [],
   );
   return [
-    `- registered repos (use them by id in a project's repos; never list them again in the proposal's repos): ${repos.map((r) => `${r.id} (${r.url}, ${r.defaultBranch}, lands ${describeRoute(r)})`).join("; ") || "(none)"}`,
+    `- registered repos (use them by id in a project's repos; never list them again in the proposal's repos): ${repos.map((r) => `${r.id} (${r.url}, ${r.defaultBranch}, lands ${describeRoute(r)}, on disk ${join(boot.home, r.path, "origin.git")})`).join("; ") || "(none)"}`,
     `- landing: set a project's "land" to "pr" when the developer wants pull or merge requests and "push" when they agree to commits straight on the default branch; yagura rejects a project whose land does not match its repo's route, and a remote repo with no confirmed route. An existing repo you register needs "forge" ("gh" or "glab") or "land": "push" unless its host is github.com or a known GitLab host; ask if unsure`,
     `- environments: ${envs.map(envLine).join("; ") || `(none; a project with environment null gets a new local-process "local")`}`,
     `- environment presets: ${PRESETS.map((p) => `${p.id} (${p.values.map((v) => v.name).join(", ")})`).join("; ")}`,

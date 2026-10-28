@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,7 +35,7 @@ import {
   type Db,
 } from "./store.js";
 import { LATEST_VERSION } from "./migrations.js";
-import Database from "better-sqlite3";
+import { Database } from "./sqlite.js";
 import { readFileSync } from "node:fs";
 
 let db: Db;
@@ -83,6 +82,7 @@ describe("store", () => {
     for (const id of ["done", "live"]) addGate(old, { projectId: id as ProjectId, kind: "planner", question: "how?", options: [] });
     addGate(old, { projectId: "done" as ProjectId, kind: "report", question: "report", options: [] });
     old.prepare("UPDATE projects SET state = 'closed' WHERE id = 'done'").run();
+    old.exec("ALTER TABLE repos DROP COLUMN path");
     old.prepare("UPDATE schema_version SET version = 7").run();
     old.close();
     const upgraded = openStore(path);
@@ -174,7 +174,7 @@ describe("store", () => {
     const path = join(mkdtempSync(join(tmpdir(), "yagura-db-")), "yagura.db");
     const mine = openStore(path);
     addRepo(mine, { id: "r", url: "file:///r", defaultBranch: "main" });
-    const script = `const D = require(${JSON.stringify(createRequire(import.meta.url).resolve("better-sqlite3"))}); const d = new D(${JSON.stringify(path)}); d.pragma("busy_timeout = 5000"); d.exec("BEGIN IMMEDIATE"); console.log("locked"); setTimeout(() => { d.exec("COMMIT"); process.exit(0); }, 700);`;
+    const script = `const { DatabaseSync } = require("node:sqlite"); const d = new DatabaseSync(${JSON.stringify(path)}); d.exec("PRAGMA busy_timeout = 5000"); d.exec("BEGIN IMMEDIATE"); console.log("locked"); setTimeout(() => { d.exec("COMMIT"); process.exit(0); }, 700);`;
     const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "inherit"] });
     await new Promise<void>((resolve) => child.stdout.once("data", () => resolve()));
     mine.pragma("busy_timeout = 50");
@@ -203,6 +203,7 @@ describe("store", () => {
       maxAttempts: 1,
     });
     old.exec("ALTER TABLE units DROP COLUMN title");
+    old.exec("ALTER TABLE repos DROP COLUMN path");
     old.prepare("UPDATE schema_version SET version = 5").run();
     old.close();
     const upgraded = openStore(path);

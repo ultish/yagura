@@ -168,6 +168,9 @@ export function Repos() {
                       {v.route.text}
                       {v.route.confirmed ? "" : `: choose with yagura repo set ${v.repo.id} --forge gh|glab or --land push`}
                     </span>
+                    <span className="mono" style={{ overflowWrap: "anywhere" }} title="yagura's bare clone, which only yagura writes">
+                      {v.location}
+                    </span>
                     <span>{v.landedCount} landed</span>
                     <Link to={`/r/${v.repo.id}`}>Browse the code</Link>
                     {v.lastLanded && (
