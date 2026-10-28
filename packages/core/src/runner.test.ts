@@ -101,7 +101,7 @@ describe("runWorkerRound", () => {
       contextPeak: 1200,
       costUsd: 0.01,
     });
-    expect(attempt.pluginVersions).toEqual({ pstack: "0.5.0" });
+    expect(attempt.pluginVersions).toEqual({ pstack: "0.5.0", yagura: "0.1.0" });
     expect(attempt.headSha).not.toBe(attempt.baseSha);
     expect(readFileSync(join(attempt.worktreePath!, "app/orders.py"), "utf8")).toContain("brief had GOAL: true");
     expect(readFileSync(paths.brief(project, 1, 1), "utf8")).toContain("## ACCEPTANCE\n- SAVE10 takes 10% off");

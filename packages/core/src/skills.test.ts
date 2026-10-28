@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { setSetting, type Bootstrap } from "./config.js";
 import type { ProjectId, RepoId } from "./domain.js";
 import { Engine } from "./engine.js";
-import { installedSkills, isInstalled, projectSkillChecks } from "./skills.js";
+import { installedSkills, isInstalled, projectSkillChecks, unavailableSkills } from "./skills.js";
 import { addProject, addRepo, getProject, openStore, type Db } from "./store.js";
 
 const skill = (dir: string, name: string) => {
@@ -72,5 +72,16 @@ describe("installed skills", () => {
     } finally {
       delete process.env.CLAUDE_CONFIG_DIR;
     }
+  });
+});
+
+describe("unavailableSkills", () => {
+  it("names the required skills whose plugin the session did not report", () => {
+    const missing = ["pstack:poteto-mode", "yagura:yagura-worker"];
+    expect(unavailableSkills(missing, { yagura: "0.1.0", other: "1" })).toEqual(["pstack:poteto-mode"]);
+  });
+
+  it("cannot tell when the session reported no plugins", () => {
+    expect(unavailableSkills(["pstack:poteto-mode"], {})).toEqual([]);
   });
 });

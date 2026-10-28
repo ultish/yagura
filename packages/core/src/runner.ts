@@ -21,7 +21,7 @@ import { describeRecords } from "./records.js";
 import { installRelay, PUSH_BRANCH_VAR } from "./relay.js";
 import { chooseResume, renderResumePrompt, roundText, type WorkerRound } from "./resume.js";
 import { failurePolicy } from "./schedule.js";
-import { requiredProjectSkills, skillMethod } from "./skills.js";
+import { requiredProjectSkills, skillMethod, unavailableSkills } from "./skills.js";
 import {
   addUnitNote,
   createAttempt,
@@ -288,12 +288,26 @@ export async function runWorkerRound(ctx: RunContext, unitId: UnitId): Promise<v
       trigger: round.kind === "conflict" ? "conflict" : "worker-stuck",
     });
   if (session.missingSkills.length && setting("method.enforce_required_skills")) {
+    const unavailable = unavailableSkills(session.missingSkills, getAttempt(db, attempt.id).pluginVersions);
+    const skipped = session.missingSkills.filter((s) => !unavailable.includes(s));
     addUnitNote(
       db,
       unit.id,
-      `Attempt ${attempt.n} skipped required skills (${session.missingSkills.join(", ")}). Load each of them with the Skill tool first.`,
+      [
+        unavailable.length
+          ? `Attempt ${attempt.n} could not load ${unavailable.join(", ")}: the plugin is not installed where agents run. Install it in the harness (claude plugin list shows what is there).`
+          : "",
+        skipped.length ? `Attempt ${attempt.n} skipped required skills (${skipped.join(", ")}). Load each of them with the Skill tool first.` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
     );
-    return transitionUnit(db, unit.id, "stuck", { attempt: attempt.n, reason: "skipped required skills", missing: session.missingSkills });
+    return transitionUnit(db, unit.id, "stuck", {
+      attempt: attempt.n,
+      reason: unavailable.length ? "required skills not installed" : "skipped required skills",
+      missing: session.missingSkills,
+      unavailable,
+    });
   }
   return afterHandoff(ctx, getUnit(db, unit.id), getAttempt(db, attempt.id));
 }

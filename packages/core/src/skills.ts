@@ -74,6 +74,12 @@ export const REQUIRED_SKILLS: Partial<Record<Role | "doctor", readonly string[]>
   doctor: ["yagura:yagura-doctor"],
 };
 
+// A required skill whose plugin the session never reported at start could not have been loaded: the plugin is not installed where the agent runs.
+export function unavailableSkills(missing: readonly string[], plugins: Record<string, string>): string[] {
+  if (!Object.keys(plugins).length) return [];
+  return missing.filter((s) => s.includes(":") && !(s.slice(0, s.indexOf(":")) in plugins));
+}
+
 export function missingSkills(role: Role | "doctor", loaded: readonly string[], project: readonly string[] = []): string[] {
   const bare = (s: string) => s.slice(s.indexOf(":") + 1);
   return [...(REQUIRED_SKILLS[role] ?? []), ...project].filter((req) => !loaded.some((l) => l === req || bare(l) === bare(req)));

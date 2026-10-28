@@ -108,7 +108,16 @@ async function main() {
   if (continuing) brief = readFileSync(limitFile(), "utf8");
   else if (resumeAt > 0) return resumed(process.argv[resumeAt + 1]);
   const sessionId = continuing ? process.argv[resumeAt + 1] : process.env.YAGURA_ROLE === "watchman" ? `w-${process.pid}-${Date.now()}` : "s1";
-  emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
+  emit({
+    type: "system",
+    subtype: "init",
+    session_id: sessionId,
+    model: "fake-model",
+    plugins: [
+      { name: "pstack", version: "0.5.0" },
+      { name: "yagura", version: "0.1.0" },
+    ],
+  });
   if (process.env.FAKE_LIMIT && !continuing && !existsSync(limitFile())) return refuse(sessionId);
   const skills =
     {
@@ -169,7 +178,16 @@ function resumed(sessionId) {
     process.stderr.write(`${error}\n`);
     process.exit(1);
   }
-  emit({ type: "system", subtype: "init", session_id: sessionId, model: "fake-model", plugins: [{ name: "pstack", version: "0.5.0" }] });
+  emit({
+    type: "system",
+    subtype: "init",
+    session_id: sessionId,
+    model: "fake-model",
+    plugins: [
+      { name: "pstack", version: "0.5.0" },
+      { name: "yagura", version: "0.1.0" },
+    ],
+  });
   if (brief.startsWith("# yagura: you have not recorded your work")) {
     const calls = existsSync(pendingFile()) ? JSON.parse(readFileSync(pendingFile(), "utf8")) : [];
     for (const c of calls) yg(...c);
