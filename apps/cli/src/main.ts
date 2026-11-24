@@ -22,6 +22,8 @@ import {
   listThreads,
   ProposalBody,
   runWatchmanTurn,
+  closeProject,
+  reopenProject,
   RouteNeeded,
   describeRoute,
   addSteer,
@@ -168,6 +170,7 @@ const USAGE = `yagura — agent orchestration
   yagura template export <name>                     print a template as YAML, to share
   yagura template import <file | ->                 add or replace a template from YAML
   yagura template rm <name>
+  yagura project close <id> | reopen <id>               close stops its running agents and keeps its history; reopen starts planning again
   yagura project set <id> --standing | --not-standing   a standing project never closes: you add work whenever you like
   yagura project set <id> [--env <env id>] [--merge auto|human] [--issue <ref>...] [--reference <repo id>...]
   yagura project skills <id>                       checks the project's skills.* are installed where agents run
@@ -489,6 +492,14 @@ async function main() {
         setProjectStanding(db, id as ProjectId, !!values.standing);
         console.log(
           `project ${id}: ${values.standing ? "standing: it never closes, and you add work whenever you like" : "no longer standing: it closes when its goal is met"}`,
+        );
+        return;
+      }
+      if ((positionals[0] === "close" || positionals[0] === "reopen") && id) {
+        if (positionals[0] === "close") closeProject(db, id as ProjectId);
+        else reopenProject(db, id as ProjectId);
+        console.log(
+          positionals[0] === "close" ? `project ${id} closed: its running agents were stopped, and its units and history stay` : `project ${id} reopened`,
         );
         return;
       }

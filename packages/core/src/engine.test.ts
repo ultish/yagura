@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { RunContext } from "./agent.js";
+import { closeProject, type RunContext } from "./agent.js";
 import { setSetting, type Bootstrap } from "./config.js";
 import type { EnvironmentId, ProjectId, RepoId } from "./domain.js";
 import { writeSpec } from "./spec.js";
@@ -28,6 +28,8 @@ import {
   setProjectEnvironment,
   setProjectStanding,
   setRepoForge,
+  setRepoUrl,
+  reopenProject,
   type Db,
 } from "./store.js";
 
@@ -270,6 +272,35 @@ describe("Engine", () => {
       data_json: JSON.stringify({ from: "building", to: "stuck", reason: "engine error: no adapter for harness missing-harness", trigger: "engine" }),
     });
   });
+
+  it("records a planning round that throws before the planner runs, retries it, and raises an andon that says why", async () => {
+    setRepoUrl(db, "testbed" as RepoId, join(root, "no-such-origin.git"));
+    const log: string[] = [];
+    await new Engine(ctx, { projectId: project, tickMs: 50, log: (l) => log.push(l) }).runUntilIdle();
+    const drains = db.prepare("SELECT applied, rejection, finished_at FROM drains WHERE project_id = ? ORDER BY id").all(project) as {
+      applied: number;
+      rejection: string | null;
+      finished_at: string | null;
+    }[];
+    expect(drains).toHaveLength(3);
+    expect(drains.every((d) => d.applied === 0 && d.finished_at && d.rejection)).toBe(true);
+    expect(listUnits(db, project).filter((u) => u.type === "plan" && u.state === "stuck")).toHaveLength(3);
+    expect(getProject(db, project).andonReason).toMatch(/^planner failed to produce a valid plan 3 times in a row; last: .*no-such-origin/);
+    expect(log.filter((l) => l.startsWith("✗ plan p: failed:")).length).toBe(3);
+  }, 30_000);
+
+  it("plans nothing for a project closed by hand, and plans again once it is reopened", async () => {
+    closeProject(db, project);
+    expect(getProject(db, project).state).toBe("closed");
+    expect(() => closeProject(db, project)).toThrow(/already closed/);
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    expect(listUnits(db, project)).toEqual([]);
+    reopenProject(db, project);
+    expect(getProject(db, project)).toMatchObject({ state: "active", closedAt: null });
+    expect(() => reopenProject(db, project)).toThrow(/not closed/);
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    expect(listUnits(db, project).length).toBeGreaterThan(0);
+  }, 60_000);
 
   it("does not start work while the project's andon is raised", async () => {
     const { setAndon } = await import("./store.js");

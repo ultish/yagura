@@ -11,7 +11,7 @@ import { activeHold, holdHarness, limitUntil } from "./limits.js";
 import { missingSkills } from "./skills.js";
 import { steerChannel, type SteerChannel } from "./steer.js";
 import { logTimesPath } from "./paths.js";
-import { getAttempt, getUnit, recordEvent, updateAttempt, type Db } from "./store.js";
+import { getAttempt, getProject, getUnit, recordEvent, setProjectState, updateAttempt, type Db } from "./store.js";
 import type { AttemptId } from "./domain.js";
 
 export interface RunContext {
@@ -308,6 +308,17 @@ export function stopAttempt(db: Db, attemptId: AttemptId, note: string | null): 
     process.kill(-attempt.pid, "SIGTERM");
   } catch {}
   return true;
+}
+
+// Closing by hand ends what is running for the project, then closes it; its units and history stay as they are.
+export function closeProject(db: Db, projectId: ProjectId): void {
+  if (getProject(db, projectId).state === "closed") throw new Error(`project ${projectId} is already closed`);
+  const running = db.prepare("SELECT a.id FROM attempts a JOIN units u ON u.id = a.unit_id WHERE u.project_id = ? AND a.state = 'running'").all(projectId) as {
+    id: AttemptId;
+  }[];
+  for (const a of running) stopAttempt(db, a.id, "the project was closed");
+  recordEvent(db, "project.closed_by_hand", { projectId }, { stopped: running.length });
+  setProjectState(db, projectId, "closed");
 }
 
 export function stopRequested(db: Db, attemptId: AttemptId): { stopped: boolean; note: string | null } {

@@ -106,6 +106,29 @@ export function ProjectOptions({ p, onSaved }: { p: Project; onSaved: () => void
           style={{ ...field, width: 260 }}
         />
       </Option>
+      <Option
+        title={p.state === "closed" ? "Closed" : "Close it"}
+        help={
+          p.state === "closed"
+            ? "Nothing runs for a closed project. Reopen it to plan and run work again; its units and history are all still here."
+            : "Stops its running agents and plans nothing more. Its units and history stay, and you can reopen it later."
+        }
+      >
+        <button
+          className="btn sm"
+          type="button"
+          disabled={action.busy}
+          onClick={() => {
+            if (p.state !== "closed" && !window.confirm(`Close ${p.name}? Its running agents are stopped.`)) return;
+            void action.run(async () => {
+              await api(`/api/projects/${p.id}/state`, { body: { state: p.state === "closed" ? "open" : "closed" } });
+              onSaved();
+            });
+          }}
+        >
+          {p.state === "closed" ? "Reopen" : "Close project"}
+        </button>
+      </Option>
       <div style={{ display: "flex", gap: 10, alignItems: "center", padding: "10px 0" }}>
         <button className="btn sm lamp" type="submit" disabled={!dirty || action.busy}>
           Save

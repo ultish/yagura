@@ -629,6 +629,12 @@ export function setProjectState(db: Db, projectId: ProjectId, state: Project["st
   }
 }
 
+export function reopenProject(db: Db, projectId: ProjectId): void {
+  if (getProject(db, projectId).state !== "closed") throw new Error(`project ${projectId} is not closed`);
+  setProjectState(db, projectId, "active");
+  db.prepare("UPDATE projects SET closed_at = NULL WHERE id = ?").run(projectId);
+}
+
 export interface UnitDepRow {
   unitId: UnitId;
   dependsOn: UnitId;

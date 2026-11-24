@@ -38,6 +38,8 @@ import {
   listQuestions,
   listThreads,
   runWatchmanTurn,
+  closeProject,
+  reopenProject,
   runQueuedTurns,
   queueMessage,
   queuedMessages,
@@ -712,6 +714,19 @@ export function createApp(opts: ServerOptions): Hono {
       if (b.refs !== undefined) setProjectRefs(db, id, b.refs);
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    }
+    return c.json({ project: getProject(db, id) });
+  });
+  app.post("/api/projects/:id/state", async (c) => {
+    const id = c.req.param("id") as ProjectId;
+    const b = (await c.req.json().catch(() => ({}))) as { state?: string };
+    getProject(db, id);
+    if (b.state !== "open" && b.state !== "closed") return c.json({ error: "state must be open or closed" }, 400);
+    try {
+      if (b.state === "closed") closeProject(db, id);
+      else reopenProject(db, id);
+    } catch (e) {
+      return c.json({ error: e instanceof Error ? e.message : String(e) }, 409);
     }
     return c.json({ project: getProject(db, id) });
   });
