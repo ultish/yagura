@@ -11,7 +11,20 @@ import { addDetachedWorktree, ensureMirror, removeWorktree, resolveRef } from ".
 import { layout } from "./paths.js";
 import { applyDelta, PlanRejected, WORK_PLAYBOOKS, type PlanDelta } from "./plan.js";
 import { generateStatus } from "./status.js";
-import { addUnit, createAttempt, getAttempt, getProject, now, projectRepos, recordEvent, setAndon, transitionUnit, updateAttempt, type Db } from "./store.js";
+import {
+  addUnit,
+  createAttempt,
+  getAttempt,
+  getProject,
+  getUnit,
+  now,
+  projectRepos,
+  recordEvent,
+  setAndon,
+  transitionUnit,
+  updateAttempt,
+  type Db,
+} from "./store.js";
 import { ensureRecorded, sessionReport } from "./finish.js";
 import { getRecord } from "./records.js";
 
@@ -75,15 +88,6 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
   db.prepare("UPDATE drains SET planner_attempt_id = ? WHERE id = ?").run(attempt.id, drainId);
 
   const checkouts: { id: string; path: string; trunkSha: string; mirror: string }[] = [];
-  for (const repo of projectRepos(db, projectId)) {
-    const mirror = paths.mirror(repo.id);
-    await ensureMirror(repo.url, mirror);
-    const trunkSha = await resolveRef(mirror, `origin/${repo.defaultBranch}`);
-    const path = join(dirname(paths.worktree(repo.id, projectId, unit.seq, attempt.n)), `${projectId}-plan${drainId}`);
-    mkdirSync(dirname(path), { recursive: true });
-    await addDetachedWorktree(mirror, path, trunkSha);
-    checkouts.push({ id: repo.id, path, trunkSha, mirror });
-  }
 
   const finish = (outcome: PlanResult["outcome"], reason: string, delta: PlanDelta | null): PlanResult => {
     db.prepare("UPDATE drains SET delta_json = ?, applied = ?, rejection = ?, finished_at = ? WHERE id = ?").run(
@@ -101,6 +105,15 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
   };
 
   try {
+    for (const repo of projectRepos(db, projectId)) {
+      const mirror = paths.mirror(repo.id);
+      await ensureMirror(repo.url, mirror);
+      const trunkSha = await resolveRef(mirror, `origin/${repo.defaultBranch}`);
+      const path = join(dirname(paths.worktree(repo.id, projectId, unit.seq, attempt.n)), `${projectId}-plan${drainId}`);
+      mkdirSync(dirname(path), { recursive: true });
+      await addDetachedWorktree(mirror, path, trunkSha);
+      checkouts.push({ id: repo.id, path, trunkSha, mirror });
+    }
     const status = generateStatus(db, boot, projectId, since);
     write(join(boot.home, "projects", projectId, "status.md"), status);
     const briefText = renderPlanBrief({
@@ -169,6 +182,15 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
       if (e instanceof PlanRejected) return finish("rejected", e.message, recorded);
       throw e;
     }
+  } catch (e) {
+    // A throw would leave no event for planNeeded to see, so the project would never plan again and nothing would say why.
+    const reason = e instanceof Error ? e.message : String(e);
+    const attemptState = getAttempt(db, attempt.id).state;
+    if (attemptState === "queued" || attemptState === "running")
+      updateAttempt(db, attempt.id, { state: "failed", endedAt: now(), failureMode: "harness-error" });
+    const state = getUnit(db, unit.id).state;
+    if (state === "waiting" || state === "building") transitionUnit(db, unit.id, "stuck", { drain: drainId, reason });
+    return finish("failed", reason, null);
   } finally {
     for (const c of checkouts) await removeWorktree(c.mirror, c.path).catch(() => undefined);
   }

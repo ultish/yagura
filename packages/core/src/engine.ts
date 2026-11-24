@@ -536,7 +536,10 @@ export class Engine {
         this.start(
           `plan:${project.id}`,
           `plan ${project.id}`,
-          () => runPlanner(this.ctx, project.id),
+          () =>
+            runPlanner(this.ctx, project.id).then((r) => {
+              if (r.outcome !== "applied") this.log(`✗ plan ${project.id}: ${r.outcome}: ${r.reason.split("\n")[0]}`);
+            }),
           () => undefined,
         );
       this.spawn(project);
