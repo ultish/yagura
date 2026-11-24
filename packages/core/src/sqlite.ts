@@ -1,4 +1,5 @@
-import { DatabaseSync, type StatementSync } from "node:sqlite";
+import { createRequire } from "node:module";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 
 export interface RunResult {
   changes: number | bigint;
@@ -20,6 +21,17 @@ export const isBusy = (e: unknown): boolean => {
   return typeof code === "number" && (code & 0xff) === 5;
 };
 
+// A static import would die at link time with a bare ERR_UNKNOWN_BUILTIN_MODULE that names neither the Node nor its path.
+const oldNode = (why: string) => `yagura needs Node 22.16+ with the built-in node:sqlite; ${process.execPath} is ${process.version} and ${why}`;
+
+const loadDatabaseSync = (): typeof DatabaseSync => {
+  try {
+    return (createRequire(import.meta.url)("node:sqlite") as typeof import("node:sqlite")).DatabaseSync;
+  } catch (e) {
+    throw new Error(oldNode(`does not have it (${e instanceof Error ? e.message : String(e)})`));
+  }
+};
+
 const statement = (s: StatementSync): Statement => {
   const binds = (params: unknown[]) => (params.length === 1 && Array.isArray(params[0]) ? (params[0] as never[]) : (params as never[]));
   return {
@@ -35,7 +47,8 @@ export class Database {
   private savepoints = 0;
 
   constructor(path: string, options: { readonly?: boolean } = {}) {
-    this.raw = new DatabaseSync(path, { readOnly: options.readonly ?? false });
+    this.raw = new (loadDatabaseSync())(path, { readOnly: options.readonly ?? false });
+    if (typeof this.raw.isTransaction !== "boolean") throw new Error(oldNode("lacks DatabaseSync.isTransaction, which nested transactions need"));
   }
 
   get inTransaction(): boolean {
