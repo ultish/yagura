@@ -55,6 +55,9 @@ Other options:
 - `--model <model>` passes `--model`. The default is no model, the same as yagura's default.
 - `--plugin-dir <dir>` adds another plugin folder.
 - `--without=<flag>` drops one of yagura's flags and its value. You can use it more than once.
+- `--claude-debug` writes Claude Code's own debug log, which includes stack traces, to `claude-debug.log` in the probe's folder. At the end it prints the log's error lines and its last 25 lines. Add it to whichever run fails: the stack trace shows which program threw the error, `claude` or something your wrapper starts. If no log appears, the wrapper does not pass `--debug-file` on to `claude`.
+- `--extra=<arg>` adds any other argument after yagura's. You can use it more than once.
+- `--brief <file>` sends a file as the prompt, for example the real brief of the round that failed. `--cwd <dir>` runs in that folder instead of a new empty repo. See [Replay a real round](#replay-a-real-round).
 
 ### Read the output
 
@@ -74,7 +77,19 @@ Each run prints:
 | 1 to 3 fail, 4 works  | One of the two dropped flags is the trigger. Run 4 again with only one `--without` to find which.                 |
 | 4 fails too           | Run your `claude` by hand with the same flags as the `argv:` line, adding them one at a time.                     |
 | No `INIT` line        | `claude` failed while starting, before any request. The flags or the wrapper are the cause.                       |
-| 1 works               | The probe does not recreate the failure. The cause is in the real brief or the daemon's environment.              |
+| 1 works               | The probe does not recreate the failure. Replay the real round next: see below.                                   |
+
+### Replay a real round
+
+If the probe works but the planner still fails, send the probe the failing round's real brief, in a copy of the project's repo:
+
+```sh
+ls -t ~/.yagura/projects/<project>/briefs/ | head
+git clone ~/.yagura/repos/<repo>/origin.git /tmp/replay
+node scripts/agent-probe.mjs $W --brief ~/.yagura/projects/<project>/briefs/u<unit>.<attempt>.md --cwd /tmp/replay --claude-debug
+```
+
+Use a clone, never a checkout yagura is working in. With a real brief the agent does real work, with `bypassPermissions`. Its `yagura` commands that record anything are refused, because the probe has no attempt token.
 
 ### Shell wrappers
 
@@ -86,5 +101,8 @@ Each run prints:
 ## Other places to look
 
 - The daemon log: `~/.yagura/logs/daemon.log`. Start the daemon with `yagura daemon --debug`, or set `YAGURA_DEBUG=1`, for git, forge and agent detail.
-- An agent's session: `~/.yagura/projects/<project>/logs/u<unit>.<attempt>.jsonl` is the raw stream-json of that run.
+- An agent's session, in `~/.yagura/projects/<project>/logs/`:
+  - `u<unit>.<attempt>.jsonl`: the raw stream-json of that run.
+  - `u<unit>.<attempt>.stderr`: everything the agent wrote to stderr. The failure reason on the dashboard shows only the tail, without the shell's job-control lines.
+  - `u<unit>.<attempt>.cmd`: a script that starts the same session again: the same folder, command and input (saved beside it in `.stdin`), and the variables yagura set. Values of environment variables and tokens are not kept, only their names. Running it starts a real session in that folder, so only run it after the unit is finished, and remember a checkout may already have been removed.
 - Which Node runs the agents: `cat ~/.yagura/bin/yagura`. Agents run `yagura` through this file, which names the Node the daemon was started with. If it is older than the Node in your shell, restart the daemon.
