@@ -10,7 +10,7 @@ import type { HarnessAdapter, HarnessRun } from "./harness/adapter.js";
 import { activeHold, holdHarness, limitUntil } from "./limits.js";
 import { missingSkills } from "./skills.js";
 import { steerChannel, type SteerChannel } from "./steer.js";
-import { logTimesPath } from "./paths.js";
+import { logCmdPath, logStderrPath, logStdinPath, logTimesPath } from "./paths.js";
 import { getAttempt, getProject, getUnit, recordEvent, setProjectState, updateAttempt, type Db } from "./store.js";
 import type { AttemptId } from "./domain.js";
 
@@ -134,6 +134,8 @@ export const LIMIT_RESUME_PROMPT = "The account's usage limit has reset. Carry o
 export async function runAgentSession(ctx: RunContext, s: SessionSpec): Promise<SessionResult> {
   write(s.logPath, "");
   write(logTimesPath(s.logPath), "");
+  write(logStderrPath(s.logPath), "");
+  write(logCmdPath(s.logPath), "");
   const usage = { contextPeak: 0, tokensOut: 0 };
   const skills: string[] = [];
   let run = s.run;
@@ -175,17 +177,17 @@ async function runOnce(
   const bin = ctx.cli.length ? installCliShim(ctx) : null;
   const { argv, stdin } = s.adapter.command(run);
   const [cmd, ...args] = argv as [string, ...string[]];
+  const added: Record<string, string> = {
+    YAGURA_HOME: ctx.boot.home,
+    ...s.recorder.env,
+    ...(bin ? { YAGURA_CLI: join(bin, "yagura"), PATH: `${bin}:${process.env.PATH ?? ""}` } : {}),
+  };
+  recordCommand(s, argv, stdin, added);
   const child = spawn(cmd, args, {
     cwd: s.cwd,
     detached: true,
     stdio: ["pipe", "pipe", "pipe"],
-    env: {
-      ...process.env,
-      ...s.env,
-      YAGURA_HOME: ctx.boot.home,
-      ...s.recorder.env,
-      ...(bin ? { YAGURA_CLI: join(bin, "yagura"), PATH: `${bin}:${process.env.PATH ?? ""}` } : {}),
-    },
+    env: { ...process.env, ...s.env, ...added },
   });
   s.recorder.started(child.pid ?? null);
   const began = Date.now();
@@ -226,6 +228,7 @@ async function runOnce(
   let refused: { resetsAt: string | null } | null = null;
   let stderr = "";
   child.stderr.on("data", (d: Buffer) => {
+    appendFileSync(logStderrPath(s.logPath), d);
     stderr = (stderr + d.toString()).slice(-4000);
   });
 
@@ -295,7 +298,26 @@ async function runOnce(
   for (const m of inFlight) s.recorder.steers?.undelivered(m.id, "the agent finished before reading it");
   for (const m of s.recorder.steers?.pending() ?? []) s.recorder.steers?.undelivered(m.id, "the agent had already finished");
 
-  return { result: { final, exitCode: exit.code, signal: exit.signal, timedOut, stderrTail: stderr, lastActivity }, sessionId, refused };
+  return { result: { final, exitCode: exit.code, signal: exit.signal, timedOut, stderrTail: withoutShellNoise(stderr), lastActivity }, sessionId, refused };
+}
+
+// An interactive shell with no terminal (the bash -ic wrapper setup.sh writes) prints these on every start; they hide the real error in a tail.
+const SHELL_NOISE = /^.*(cannot set terminal process group|no job control in this shell).*\n?/gm;
+export const withoutShellNoise = (stderr: string) => stderr.replace(SHELL_NOISE, "");
+
+// The command written as a script that starts the same session again by hand. Environment values (s.env) can be secrets, and a token
+// would let the copy record into the real attempt, so only their names are kept.
+function recordCommand(s: SessionSpec, argv: string[], stdin: string, added: Record<string, string>): void {
+  writeFileSync(logStdinPath(s.logPath), stdin);
+  const kept = Object.entries(added).filter(([k]) => !k.endsWith("_TOKEN"));
+  const unset = [...Object.keys(s.env), ...Object.keys(added).filter((k) => k.endsWith("_TOKEN"))];
+  const lines = [
+    `# started ${new Date().toISOString()}`,
+    ...(unset.length ? [`# also set, values not kept: ${unset.join(" ")}`] : []),
+    `cd ${shellQuote(s.cwd)} && env ${kept.map(([k, v]) => `${k}=${shellQuote(v)}`).join(" ")} ${argv.map(shellQuote).join(" ")} < ${shellQuote(logStdinPath(s.logPath))}`,
+    "",
+  ];
+  appendFileSync(logCmdPath(s.logPath), lines.join("\n"));
 }
 
 export function stopAttempt(db: Db, attemptId: AttemptId, note: string | null): boolean {

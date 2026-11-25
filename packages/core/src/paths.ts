@@ -6,6 +6,10 @@ export const unitRef = (seq: number) => `u${seq}`;
 export const attemptRef = (seq: number, n: number) => `u${seq}.${n}`;
 
 export const logTimesPath = (logPath: string) => logPath.replace(/\.jsonl$/, "") + ".times";
+// Beside each session log: everything the harness wrote to stderr, and the command, folder and input it was started with.
+export const logStderrPath = (logPath: string) => logPath.replace(/\.jsonl$/, "") + ".stderr";
+export const logCmdPath = (logPath: string) => logPath.replace(/\.jsonl$/, "") + ".cmd";
+export const logStdinPath = (logPath: string) => logPath.replace(/\.jsonl$/, "") + ".stdin";
 
 // Where a repo lives under the home, kept on the repo's row so the watchman and the dashboard can say it.
 export const repoPath = (r: string) => join("repos", r);
