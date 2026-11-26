@@ -39,29 +39,16 @@ process.stdin.on("end", () => {
   if (verb === "list")
     return out(state.mrs.filter((m) => m.source_branch === flag("--source-branch") && m.state === "opened").map(({ iid, web_url }) => ({ iid, web_url })));
   if (verb === "create") {
-    // Like the real glab: it reads the working directory's remotes despite --repo, and fails when none is the project's host.
+    // Like the real glab: it reads the working directory's remotes despite --repo, and fails when none is on GITLAB_HOST, as outside a checkout.
     let remotes = "";
     try {
       remotes = execFileSync("git", ["remote", "-v"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     } catch {}
-    if (remotes && !remotes.includes(process.env.GITLAB_HOST)) fail("Failed to create merge request.");
-    const iid = state.mrs.length + 1;
-    const web_url = `https://${process.env.GITLAB_HOST}/${flag("--repo")}/-/merge_requests/${iid}`;
-    state.mrs.push({
-      iid,
-      web_url,
-      source_branch: flag("--source-branch"),
-      target_branch: flag("--target-branch"),
-      title: flag("--title"),
-      description: stdin,
-      draft: rest.includes("--draft"),
-      state: "opened",
-      discussions: [],
-    });
-    save();
-    return console.log(
-      `\nCreating merge request for ${flag("--source-branch")} into ${flag("--target-branch")} in ${flag("--repo")}\n\n!${iid} ${flag("--title")}\n ${web_url}\n`,
-    );
+    if (!remotes.includes(process.env.GITLAB_HOST))
+      fail(
+        `none of the git remotes configured for this repository correspond to the GITLAB_HOST environment variable. Try adding a matching remote or unset the variable.\nGITLAB_HOST is currently set to ${process.env.GITLAB_HOST}\nConfigured remotes: .`,
+      );
+    fail("this fake opens merge requests through the API only");
   }
   const m = state.mrs.find((x) => x.iid === Number(args[0]));
   if (!m) fail(`no merge request ${args[0]}`);
@@ -92,7 +79,7 @@ process.stdin.on("end", () => {
     });
   }
   if (verb === "update") {
-    if (rest.includes("--ready")) m.draft = false;
+    if (rest.includes("--ready")) Object.assign(m, { draft: false, title: m.title.replace(/^draft:\s*/i, "") });
     if (rest.includes("--description-file")) m.description = stdin;
     return save();
   }
@@ -147,6 +134,23 @@ function api() {
   const parts = route.split("/").map(decodeURIComponent);
   // projects/<path>/...
   const mrAt = parts.indexOf("merge_requests");
+  if (mrAt > 0 && parts.length === mrAt + 1 && method === "POST") {
+    const iid = state.mrs.length + 1;
+    const web_url = `https://${process.env.GITLAB_HOST}/${parts[mrAt - 1]}/-/merge_requests/${iid}`;
+    const draft = /^(draft:|\[draft\]|\(draft\))/i.test(body.title);
+    state.mrs.push({
+      iid,
+      web_url,
+      source_branch: body.source_branch,
+      target_branch: body.target_branch,
+      title: body.title,
+      description: body.description,
+      draft,
+      state: "opened",
+      discussions: [],
+    });
+    return out({ iid, web_url, draft, title: body.title });
+  }
   if (mrAt > 0) {
     const m = state.mrs.find((x) => x.iid === Number(parts[mrAt + 1]));
     if (!m) fail(`404 merge request ${parts[mrAt + 1]}`);

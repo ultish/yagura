@@ -171,4 +171,20 @@ describe("unitStory", () => {
       "Pushed [yagura/p/u1](https://gitlab.example.com/team/testbed/-/tree/yagura/p/u1) and opened [PR #3](https://gitlab.example.com/team/testbed/-/merge_requests/3) as a draft.",
     );
   });
+
+  it("keeps the forge's whole error on a unit stuck because the pull request could not be opened", async () => {
+    const bin = join(boot.home, "..", "failing-gh");
+    writeFileSync(
+      bin,
+      `#!/bin/sh\nif [ "$1 $2" = "pr create" ]; then echo 'could not create' >&2; echo 'the reason is on this line' >&2; exit 1; fi\nexec '${process.execPath}' '${fixtures("fake-gh.mjs")}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    setSetting(db, "global", "", "forge.gh_bin", bin);
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    const stuck = listUnits(db, project).find((u) => u.type === "work" && u.state === "stuck")!;
+    const entry = unitStory(db, boot, stuck).entries.find((e) => e.status?.text === "stuck")!;
+
+    expect(entry.body).toBe(`engine error: ${bin} pr create failed: could not create`);
+    expect(entry.detail).toMatch(/\n\$ \S+failing-gh pr create --repo .*\ncould not create\nthe reason is on this line$/);
+  }, 60_000);
 });

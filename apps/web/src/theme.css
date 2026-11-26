@@ -736,6 +736,11 @@ textarea {
   margin: 4px 0 0;
   padding-left: 18px;
 }
+.story-fold pre {
+  margin: 4px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .story-disagree {
   color: var(--bell-text);
   border-color: var(--bad-border);

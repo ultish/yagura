@@ -131,6 +131,12 @@ function Entry({
             </ul>
           </details>
         )}
+        {entry.detail && (
+          <details className="story-fold">
+            <summary>The whole error</summary>
+            <pre>{entry.detail}</pre>
+          </details>
+        )}
         {entry.lines.length > 0 && entry.actor !== "yagura" && !open && (
           <div>
             <DisagreeButton onClick={() => setOpen(true)} />

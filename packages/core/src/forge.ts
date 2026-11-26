@@ -204,8 +204,10 @@ function execForge(bin: string, args: string[], stdin: string | undefined, env: 
       (err, stdout, stderr) => {
         const what = `${bin} ${args.slice(0, 2).join(" ")}`;
         if (err?.killed) return reject(new ForgeError(`${what} gave no answer in ${timeout / 1000} s`));
-        if (err) return reject(new ForgeError(`${what} failed: ${(stderr || err.message).trim().split("\n")[0]}`));
-        resolve(stdout.trim());
+        if (!err) return resolve(stdout.trim());
+        // The first line is the reason a unit shows; the command and everything the forge said follow it for whoever reads the event.
+        const said = (stderr || err.message).trim();
+        reject(new ForgeError(`${what} failed: ${said.split("\n")[0]}\n$ ${shellLine(bin, args)}\n${said.split("\n").slice(-LOG_LINES).join("\n")}`));
       },
     );
     child.stdin?.end(stdin ?? "");
@@ -504,11 +506,6 @@ export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): For
       env,
     );
   const project = `projects/${encodeURIComponent(path)}`;
-  const iidOf = (url: string) => {
-    const n = /\/merge_requests\/(\d+)/.exec(url)?.[1];
-    if (!n) throw new ForgeError(`glab did not return a merge request URL: ${url.slice(0, 200)}`);
-    return Number(n);
-  };
   const discussions = async (iid: number) =>
     JSON.parse(await api(["--paginate", `${project}/merge_requests/${iid}/discussions?per_page=100`])) as Parameters<typeof readGitlabThreads>[0];
   return {
@@ -521,19 +518,18 @@ export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): For
       }[];
       return found[0] ? { number: found[0].iid, url: found[0].web_url } : null;
     },
+    // Through the API: glab mr create looks for a git remote on GITLAB_HOST even when --repo names the project, and there is none outside a checkout.
     async openDraft(mr) {
-      const printed = await gh(
-        bin,
-        ["mr", "create", ...R, "--draft", "--source-branch", mr.branch, "--target-branch", mr.base, "--title", mr.title, "--description-file", "-", "--yes"],
-        mr.body,
-        env,
-      );
-      const url =
-        printed
-          .split("\n")
-          .find((l) => /\/merge_requests\/\d+/.test(l))
-          ?.trim() ?? printed;
-      return { number: iidOf(url), url: /(https?:\/\/\S+)/.exec(url)?.[1] ?? url };
+      const created = JSON.parse(
+        await api(["--method", "POST", `${project}/merge_requests`], {
+          source_branch: mr.branch,
+          target_branch: mr.base,
+          title: `Draft: ${mr.title}`,
+          description: mr.body,
+        }),
+      ) as { iid?: number; web_url?: string };
+      if (!created.iid || !created.web_url) throw new ForgeError(`glab did not return a merge request: ${JSON.stringify(created).slice(0, 200)}`);
+      return { number: created.iid, url: created.web_url };
     },
     async updateBody(iid, body) {
       await gh(bin, ["mr", "update", String(iid), ...R, "--description-file", "-"], body, env);

@@ -37,6 +37,8 @@ export interface StoryEntry {
   body: string | null;
   lines: StoryLine[];
   folded: { summary: string; items: string[] } | null;
+  // Text kept as written, such as the whole error behind a stuck reason, shown folded.
+  detail?: string;
   // The state the unit was in, and the worker round it belonged to (0 before the first build).
   state: UnitState | null;
   round: number;
@@ -403,9 +405,15 @@ export function unitStory(db: Db, _boot: Bootstrap, unit: Unit): UnitStory {
           ...(unit.mergedSha ? [line("merged", "landed", `Merged as ${unit.mergedSha.slice(0, 10)}.`)] : []),
         ]),
       );
-    else if (e.type === "unit.state" && (to === "stuck" || to === "dropped"))
-      entries.push(yagura(e, "yagura", { text: to, tone: "bell" }, e.data.reason ? String(e.data.reason) : null));
-    else if (e.type === "unit.state" && e.data.reason && (to === "judging" || to === "waiting") && e.data.by !== "lead")
+    else if (e.type === "unit.state" && (to === "stuck" || to === "dropped")) {
+      // An engine error gives the stuck reason its first line; the whole of it was recorded just before.
+      const prev = events[events.indexOf(e) - 1];
+      const error = prev?.type === "engine.error" ? String(prev.data.error) : null;
+      entries.push({
+        ...yagura(e, "yagura", { text: to, tone: "bell" }, e.data.reason ? String(e.data.reason) : null),
+        ...(error?.includes("\n") ? { detail: error } : {}),
+      });
+    } else if (e.type === "unit.state" && e.data.reason && (to === "judging" || to === "waiting") && e.data.by !== "lead")
       entries.push(yagura(e, "yagura", { text: to, tone: "muted" }, String(e.data.reason)));
   }
 
