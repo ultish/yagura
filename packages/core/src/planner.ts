@@ -20,6 +20,7 @@ import {
   now,
   projectRepos,
   recordEvent,
+  PLANNER_ANDON,
   setAndon,
   transitionUnit,
   updateAttempt,
@@ -100,7 +101,7 @@ export async function runPlanner(ctx: RunContext, projectId: ProjectId): Promise
     if (outcome !== "applied" && reason !== STOPPED) recordEvent(db, "plan.rejected", { projectId, unitId: unit.id }, { drain: drainId, reason });
     recordEvent(db, "plan.drain_finished", { projectId, unitId: unit.id }, { drain: drainId, outcome, reason });
     if (outcome !== "applied" && consecutiveRejections(db, projectId) >= MAX_CONSECUTIVE_REJECTIONS)
-      setAndon(db, projectId, `planner failed to produce a valid plan ${MAX_CONSECUTIVE_REJECTIONS} times in a row; last: ${reason}`);
+      setAndon(db, projectId, `${PLANNER_ANDON} ${MAX_CONSECUTIVE_REJECTIONS} times in a row; last: ${reason}`);
     return { drainId, outcome, delta, reason };
   };
 

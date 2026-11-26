@@ -30,6 +30,7 @@ import {
   setRepoForge,
   setRepoUrl,
   reopenProject,
+  retryUnit,
   type Db,
 } from "./store.js";
 
@@ -287,7 +288,19 @@ describe("Engine", () => {
     expect(listUnits(db, project).filter((u) => u.type === "plan" && u.state === "stuck")).toHaveLength(3);
     expect(getProject(db, project).andonReason).toMatch(/^planner failed to produce a valid plan 3 times in a row; last: .*no-such-origin/);
     expect(log.filter((l) => l.startsWith("✗ plan p: failed:")).length).toBe(3);
-  }, 30_000);
+
+    // Retrying a stuck planning round once the cause is fixed clears the andon and plans again.
+    const [older, , last] = listUnits(db, project).filter((u) => u.type === "plan");
+    setRepoUrl(db, "testbed" as RepoId, origin);
+    retryUnit(db, last!.id, "the origin is back");
+    expect(getUnit(db, last!.id).state).toBe("dropped");
+    expect(getProject(db, project).andonReason).toBeNull();
+    expect(() => retryUnit(db, last!.id, "")).toThrow(/is dropped; only a stuck unit/);
+    await new Engine(ctx, { projectId: project, tickMs: 50 }).runUntilIdle();
+    expect((db.prepare("SELECT applied FROM drains WHERE project_id = ? ORDER BY id DESC LIMIT 1").get(project) as { applied: number }).applied).toBe(1);
+    expect(listUnits(db, project).some((u) => u.type === "work")).toBe(true);
+    expect(getUnit(db, older!.id).state).toBe("stuck");
+  }, 60_000);
 
   it("plans nothing for a project closed by hand, and plans again once it is reopened", async () => {
     closeProject(db, project);

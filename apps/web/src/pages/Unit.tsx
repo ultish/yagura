@@ -405,8 +405,8 @@ function StatusCard({ story, tone, reload }: { story: UnitStory; tone: string; r
       ))}
       {form === "retry" && (
         <NoteForm
-          label="Retry"
-          placeholder="What should the next try do differently? (optional)"
+          label={u.type === "plan" ? "Plan again" : "Retry"}
+          placeholder={u.type === "plan" ? "Why plan again? (optional)" : "What should the next try do differently? (optional)"}
           submit={(note) => api(`${base}/retry`, { body: { note } })}
           onDone={done}
         />
@@ -445,7 +445,7 @@ function StatusCard({ story, tone, reload }: { story: UnitStory; tone: string; r
           ))}
           {actions.includes("retry") && (
             <button className="btn" type="button" onClick={() => setForm("retry")}>
-              Retry
+              {u.type === "plan" ? "Plan again" : "Retry"}
             </button>
           )}
           {actions.includes("stop") && (

@@ -156,7 +156,7 @@ export function unitActions(u: { state: string; type: string }, openGates: numbe
   if (u.state === "stuck" && !agentRunning) out.push("retry");
   if (u.type === "work" && ((u.state === "stuck" && !agentRunning) || u.state === "ready")) out.push("ask-lead");
   if (agentRunning) out.push("stop");
-  if (["waiting", "stuck", "ready"].includes(u.state) && !agentRunning) out.push("drop");
+  if (u.type !== "plan" && ["waiting", "stuck", "ready"].includes(u.state) && !agentRunning) out.push("drop");
   if (u.state === "merged") out.push("disagree");
   return out;
 }

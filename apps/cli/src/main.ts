@@ -48,6 +48,7 @@ import {
   setThreadState,
   registerRepo,
   addUnitNote,
+  retryUnit,
   evidenceCli,
   agentRefusal,
   gitRead,
@@ -560,11 +561,16 @@ async function main() {
       }
       if ((positionals[0] === "requeue" || positionals[0] === "drop") && projectId && positionals[2]) {
         const u = getUnitBySeq(db, projectId, Number(positionals[2]));
-        if (values.note) addUnitNote(db, u.id, values.note);
         if (positionals[0] === "requeue") {
-          if (u.state !== "stuck") fail(`U${u.seq} is ${u.state}; only a stuck unit can be requeued`);
-          transitionUnit(db, u.id, "waiting", { by: "operator" });
-        } else transitionUnit(db, u.id, "dropped", { by: "operator", note: values.note ?? null });
+          try {
+            retryUnit(db, u.id, values.note ?? "");
+          } catch (e) {
+            fail(e instanceof Error ? e.message : String(e));
+          }
+        } else {
+          if (values.note) addUnitNote(db, u.id, values.note);
+          transitionUnit(db, u.id, "dropped", { by: "operator", note: values.note ?? null });
+        }
         console.log(`U${u.seq} → ${getUnitBySeq(db, projectId, u.seq).state}`);
         return;
       }

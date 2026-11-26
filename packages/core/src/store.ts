@@ -724,6 +724,28 @@ export function bumpMaxAttempts(db: Db, unitId: UnitId, to: number): void {
   db.prepare("UPDATE units SET max_attempts = MAX(max_attempts, ?), updated_at = ? WHERE id = ?").run(to, now(), unitId);
 }
 
+export const PLANNER_ANDON = "planner failed to produce a valid plan";
+
+// A stuck work unit waits again with one more try. A planning round never runs twice, so a stuck one is dropped, which
+// starts a new round, and the andon its failures raised is cleared.
+export function retryUnit(db: Db, unitId: UnitId, note: string): void {
+  const unit = getUnit(db, unitId);
+  if (unit.state !== "stuck") throw new Error(`U${unit.seq} is ${unit.state}; only a stuck unit can be retried`);
+  const reason = note || "retried by the developer";
+  if (unit.type === "plan") {
+    const { andonReason } = getProject(db, unit.projectId);
+    if (andonReason && !andonReason.startsWith(PLANNER_ANDON)) throw new Error(`the project's andon is raised (${andonReason}); clear it to plan again`);
+    if (listUnits(db, unit.projectId).some((u) => u.type === "plan" && (u.state === "waiting" || u.state === "building")))
+      throw new Error("a planning round is already running");
+    transitionUnit(db, unit.id, "dropped", { by: "developer", reason: `${reason}; a new planning round starts` });
+    if (andonReason) setAndon(db, unit.projectId, null);
+    return;
+  }
+  if (note) addUnitNote(db, unit.id, `The developer: ${note}`);
+  bumpMaxAttempts(db, unit.id, listAttempts(db, unit.id).filter((a) => a.role === "worker").length + 1);
+  transitionUnit(db, unit.id, "waiting", { by: "developer", reason });
+}
+
 export function setUnitProof(db: Db, unitId: UnitId, proof: (UnitProof | null)[]): void {
   const unit = getUnit(db, unitId);
   db.prepare("UPDATE units SET proof_json = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(alignedProof(unit.acceptance, proof)), now(), unitId);
