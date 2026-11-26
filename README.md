@@ -58,7 +58,13 @@ Any other plugin or skill your work needs goes into the same `claude`, and every
 
 ### Your `claude` command
 
-Yagura starts `claude` as a program, without a shell. If `claude` is a function or alias in your `.bashrc`, as it is when a proxy is wrapped around it, yagura can't see it. `scripts/setup.sh` detects this, writes `~/.local/bin/yagura-claude`, which runs your function in an interactive shell, and sets `harness.claude.bin` to it. If your rc file prints anything at startup, that text mixes into the agent's output. In that case, copy what the function does into the wrapper instead.
+Yagura starts `claude` as a program, without a shell. If `claude` is a function or alias in your `.bashrc`, as it is when a proxy is wrapped around it, yagura can't see it. `scripts/setup.sh` detects this, writes `~/.local/bin/yagura-claude`, and sets `harness.claude.bin` to it. You then edit the wrapper to do what your function does: export the variables it sets, then `exec` the real `claude` binary, or the launcher it runs, with `"$@"`. The file shows your function's definition and refuses to run until you edit it. Running setup again keeps your edited wrapper.
+
+```sh
+#!/usr/bin/env bash
+export ANTHROPIC_BASE_URL='https://proxy.example'
+exec /opt/claude/bin/claude "$@"
+```
 
 ### Environments
 

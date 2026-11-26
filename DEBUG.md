@@ -93,10 +93,9 @@ Use a clone, never a checkout yagura is working in. With a real brief the agent 
 
 ### Shell wrappers
 
-`setup.sh` writes a wrapper that starts your `claude` function through an interactive shell (`bash -ic`), because yagura starts agents without a shell. Two things follow:
+Yagura starts agents without a shell, so it can't call a `claude` shell function. `setup.sh` writes `~/.local/bin/yagura-claude` for you to fill in: export what the function sets, then `exec` the real binary with `"$@"`. Until you edit it, it prints `edit … first` and exits 1.
 
-- `bash: cannot set terminal process group` and `bash: no job control in this shell` on stderr are expected. An interactive shell without a terminal prints them on every start, so they are not the error.
-- Everything your rc file does runs before every agent, in the agent's working directory. For the planner and workers that is a git checkout.
+Don't start the function through an interactive shell (`bash -ic 'claude "$@"'`). Older versions of `setup.sh` wrote that wrapper. It worked for the watchman but the planner failed with `Fatal error: e.toLowerCase is not a function`. Running `setup.sh` again replaces that wrapper. If you see `bash: cannot set terminal process group` or `bash: no job control in this shell` in an agent's stderr, you still have it.
 
 ## Other places to look
 

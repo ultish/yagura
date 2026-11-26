@@ -158,17 +158,32 @@ else
   KIND="$("$SHELL_NAME" -ic 'type -t claude' 2> /dev/null | tail -n 1 || true)"
   case "$KIND" in
     function | alias)
+      # Running the function through an interactive shell (bash -ic) worked for some agents and broke others, so the
+      # wrapper is a plain script that sets what the function sets and starts the real binary.
       WRAPPER="$BIN_DIR/yagura-claude"
-      printf '#!/usr/bin/env %s\nexec %s -ic '"'"'claude "$@"'"'"' claude "$@"\n' "$SHELL_NAME" "$SHELL_NAME" > "$WRAPPER"
-      chmod +x "$WRAPPER"
-      note "claude is a shell $KIND in your rc file; yagura starts agents without a shell, so it cannot see that."
-      note "wrote $WRAPPER, which runs your $KIND through an interactive shell."
+      note "claude is a shell $KIND in your rc file; yagura starts agents without a shell, so it cannot call it."
+      if [ -e "$WRAPPER" ] && ! grep -q -e 'YAGURA-CLAUDE-UNEDITED' -e "-ic 'claude \"\$@\"'" "$WRAPPER"; then
+        ok "kept your $WRAPPER"
+      else
+        {
+          printf '#!/usr/bin/env bash\n'
+          printf '# yagura starts every agent through this file. Do here what your claude %s does: export the\n' "$KIND"
+          printf '# variables it sets, then exec the real claude binary (or the launcher it runs) with "$@".\n'
+          printf '# Then delete the two YAGURA-CLAUDE-UNEDITED lines. Your %s, as your shell prints it:\n#\n' "$KIND"
+          "$SHELL_NAME" -ic 'type claude' 2> /dev/null | sed 's/^/#   /'
+          printf '#\n# export ANTHROPIC_BASE_URL=...\n'
+          printf 'echo "yagura-claude: edit $0 first: it must start claude the way your shell %s does" >&2 # YAGURA-CLAUDE-UNEDITED\n' "$KIND"
+          printf 'exit 1 # YAGURA-CLAUDE-UNEDITED\n'
+          printf 'exec /path/to/claude "$@"\n'
+        } > "$WRAPPER"
+        chmod +x "$WRAPPER"
+        bad "wrote $WRAPPER, which you must edit before agents can run: it says what to put in it"
+      fi
       if "$MAIN" set harness.claude.bin "\"$WRAPPER\"" > /dev/null; then
         ok "set harness.claude.bin to $WRAPPER"
       else
         note "could not set it; run: yagura set harness.claude.bin '\"$WRAPPER\"'"
       fi
-      note "if your rc file prints anything at startup, agent output gets mixed with it; then copy what the $KIND does (env vars, proxy, the real binary) into the wrapper instead."
       ;;
     *) bad "claude not found: yagura runs agents through it by default" ;;
   esac
