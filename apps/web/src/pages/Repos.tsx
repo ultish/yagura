@@ -32,20 +32,29 @@ export function AddRepo({ onAdded }: { onAdded: (added: RepoView) => void }) {
     return () => clearTimeout(t);
   }, [source]);
 
+  const add = () => {
+    if (action.busy || !source.trim()) return;
+    setAdded(null);
+    void action.run(async () => {
+      const chosen = route === "push" ? { land: "push" } : route ? { forge: route } : {};
+      const created = await api<RepoView>("/api/repos", { body: { source, id: id.trim() || undefined, ...chosen } });
+      setAdded(created);
+      onAdded(created);
+      setSource("");
+      setId("");
+    });
+  };
+  // Not a <form>: the new-project form holds this one, and a form inside a form submits the outer one.
+  const enter = (e: React.KeyboardEvent) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    add();
+  };
+
   return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        setAdded(null);
-        void action.run(async () => {
-          const chosen = route === "push" ? { land: "push" } : route ? { forge: route } : {};
-          const created = await api<RepoView>("/api/repos", { body: { source, id: id.trim() || undefined, ...chosen } });
-          setAdded(created);
-          onAdded(created);
-          setSource("");
-          setId("");
-        });
-      }}
+    <div
+      role="group"
+      aria-label="Add a repo"
       style={{ display: "flex", flexDirection: "column", gap: 8, padding: "14px 0", borderTop: "1px solid var(--line2)" }}
     >
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -57,6 +66,7 @@ export function AddRepo({ onAdded }: { onAdded: (added: RepoView) => void }) {
           className="mono"
           value={source}
           onChange={(e) => setSource(e.target.value)}
+          onKeyDown={enter}
           placeholder="git@gitlab:team/billing.git"
           style={{ ...field, flexGrow: 1, minWidth: 260, fontSize: 13 }}
         />
@@ -68,6 +78,7 @@ export function AddRepo({ onAdded }: { onAdded: (added: RepoView) => void }) {
           className="mono"
           value={id}
           onChange={(e) => setId(e.target.value)}
+          onKeyDown={enter}
           placeholder={suggested ? `id: ${suggested}` : "id"}
           style={{ ...field, width: 180, fontSize: 13 }}
         />
@@ -80,7 +91,7 @@ export function AddRepo({ onAdded }: { onAdded: (added: RepoView) => void }) {
           <option value="glab">Merge via: GitLab merge requests</option>
           <option value="push">Merge via: push straight to main, no review</option>
         </select>
-        <button className="btn lamp" type="submit" disabled={action.busy || !source.trim()}>
+        <button className="btn lamp" type="button" onClick={add} disabled={action.busy || !source.trim()}>
           {action.busy ? "Reading…" : "Add repo"}
         </button>
       </div>
@@ -108,7 +119,7 @@ export function AddRepo({ onAdded }: { onAdded: (added: RepoView) => void }) {
           ))}
         </div>
       )}
-    </form>
+    </div>
   );
 }
 
