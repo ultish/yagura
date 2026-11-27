@@ -206,7 +206,8 @@ function execForge(bin: string, args: string[], stdin: string | undefined, env: 
         if (err?.killed) return reject(new ForgeError(`${what} gave no answer in ${timeout / 1000} s`));
         if (!err) return resolve(stdout.trim());
         // The first line is the reason a unit shows; the command and everything the forge said follow it for whoever reads the event.
-        const said = (stderr || err.message).trim();
+        // glab api prints the status on stderr and GitLab's message (the body) on stdout.
+        const said = [stderr.trim(), stdout.trim()].filter(Boolean).join("\n") || err.message.trim();
         reject(new ForgeError(`${what} failed: ${said.split("\n")[0]}\n$ ${shellLine(bin, args)}\n${said.split("\n").slice(-LOG_LINES).join("\n")}`));
       },
     );
@@ -490,6 +491,10 @@ export function readableTrace(trace: string): string {
     .join("\n");
 }
 
+const DRAFT_PREFIX = /^\s*(\[draft\]|\(draft\)|draft:|draft)\s*/i;
+
+// Every call goes through glab api: GitLab's REST API stays the same across glab versions, and glab's own mr flags do not
+// (mr update --description-file is new, mr create looks for a git remote).
 // forge.repo for GitLab is host/group/…/name; groups nest, so the first segment is always the host.
 export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): ForgeAdapter {
   const gh = (b: string, args: string[], stdin?: string, env: Record<string, string> = {}) => runForge(b, args, stdin, env, timeoutMs);
@@ -497,7 +502,6 @@ export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): For
   const path = rest.join("/");
   // glab api --hostname refuses a host with a port (localhost:8080); GITLAB_HOST alone selects the host for every command.
   const env = { GITLAB_HOST: host! };
-  const R = ["--repo", path];
   const api = (args: string[], body?: unknown) =>
     gh(
       bin,
@@ -506,22 +510,19 @@ export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): For
       env,
     );
   const project = `projects/${encodeURIComponent(path)}`;
+  const mrs = `${project}/merge_requests`;
   const discussions = async (iid: number) =>
     JSON.parse(await api(["--paginate", `${project}/merge_requests/${iid}/discussions?per_page=100`])) as Parameters<typeof readGitlabThreads>[0];
   return {
     kind: "gitlab",
     repo,
     async find(branch) {
-      const found = JSON.parse(await gh(bin, ["mr", "list", ...R, "--source-branch", branch, "--output", "json"], undefined, env)) as {
-        iid: number;
-        web_url: string;
-      }[];
+      const found = JSON.parse(await api([`${mrs}?source_branch=${encodeURIComponent(branch)}&state=opened`])) as { iid: number; web_url: string }[];
       return found[0] ? { number: found[0].iid, url: found[0].web_url } : null;
     },
-    // Through the API: glab mr create looks for a git remote on GITLAB_HOST even when --repo names the project, and there is none outside a checkout.
     async openDraft(mr) {
       const created = JSON.parse(
-        await api(["--method", "POST", `${project}/merge_requests`], {
+        await api(["--method", "POST", mrs], {
           source_branch: mr.branch,
           target_branch: mr.base,
           title: `Draft: ${mr.title}`,
@@ -532,26 +533,24 @@ export function gitlabForge(bin: string, repo: string, timeoutMs = 120_000): For
       return { number: created.iid, url: created.web_url };
     },
     async updateBody(iid, body) {
-      await gh(bin, ["mr", "update", String(iid), ...R, "--description-file", "-"], body, env);
+      await api(["--method", "PUT", `${mrs}/${iid}`], { description: body });
     },
+    // A title without the draft prefix is how every GitLab version takes a merge request out of draft.
     async markReady(iid) {
-      await gh(bin, ["mr", "update", String(iid), ...R, "--ready"], undefined, env);
+      const { title } = JSON.parse(await api([`${mrs}/${iid}`])) as { title: string };
+      await api(["--method", "PUT", `${mrs}/${iid}`], { title: title.replace(DRAFT_PREFIX, "") });
     },
     async status(iid) {
-      return readGitlabStatus(JSON.parse(await gh(bin, ["mr", "view", String(iid), ...R, "--output", "json"], undefined, env)));
+      return readGitlabStatus(JSON.parse(await api([`${mrs}/${iid}`])));
     },
     // GitLab merges by the project's own method, which must be "Merge commit" for the unit's history to survive.
+    // Left out, merge_when_pipeline_succeeds and auto_merge are false: it merges now or fails.
     async mergeCommit(iid, headSha, message) {
-      await gh(
-        bin,
-        ["mr", "merge", String(iid), ...R, "--sha", headSha, "--auto-merge=false", "--yes", "--message", `${message.subject}\n\n${message.body}`],
-        undefined,
-        env,
-      );
+      await api(["--method", "PUT", `${mrs}/${iid}/merge`], { sha: headSha, merge_commit_message: `${message.subject}\n\n${message.body}` });
     },
     async close(iid, comment) {
-      await api(["--method", "POST", `${project}/merge_requests/${iid}/notes`], { body: marked(comment) });
-      await gh(bin, ["mr", "close", String(iid), ...R], undefined, env);
+      await api(["--method", "POST", `${mrs}/${iid}/notes`], { body: marked(comment) });
+      await api(["--method", "PUT", `${mrs}/${iid}`], { state_event: "close" });
     },
     async failedRuns(headSha) {
       const [pipeline] = JSON.parse(await api([`${project}/pipelines?sha=${headSha}&order_by=id&sort=desc&per_page=1`])) as { id: number }[];

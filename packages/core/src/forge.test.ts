@@ -87,5 +87,10 @@ describe.each(forges)("a unit's pull request on $name", ({ make }) => {
     await forge.markReady(pr.number);
     await expect(forge.mergeCommit(pr.number, "0".repeat(40) as Sha, { subject: "U1", body: "" })).rejects.toThrow(/match/i);
     expect(await forge.status(pr.number)).toMatchObject({ state: "open" });
+    expect(await forge.find(branch)).toEqual({ number: pr.number, url: pr.url });
+
+    await forge.close(pr.number, "dropped by the developer");
+    expect(await forge.status(pr.number)).toMatchObject({ state: "closed" });
+    expect(await forge.find(branch)).toBeNull();
   });
 });

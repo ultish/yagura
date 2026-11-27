@@ -33,95 +33,66 @@ process.stdin.on("data", (d) => (stdin += d));
 process.stdin.on("end", () => {
   state.calls.push([group, ...rest.filter((a) => !a.includes("\n"))].join(" "));
   if (!process.env.GITLAB_HOST) fail("GITLAB_HOST is not set");
-  if (group === "api") return api();
-  if (group !== "mr") fail(`unknown command ${group}`);
-  const [verb, ...args] = rest;
-  if (verb === "list")
-    return out(state.mrs.filter((m) => m.source_branch === flag("--source-branch") && m.state === "opened").map(({ iid, web_url }) => ({ iid, web_url })));
-  if (verb === "create") {
-    // Like the real glab: it reads the working directory's remotes despite --repo, and fails when none is on GITLAB_HOST, as outside a checkout.
-    let remotes = "";
-    try {
-      remotes = execFileSync("git", ["remote", "-v"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    } catch {}
-    if (!remotes.includes(process.env.GITLAB_HOST))
-      fail(
-        `none of the git remotes configured for this repository correspond to the GITLAB_HOST environment variable. Try adding a matching remote or unset the variable.\nGITLAB_HOST is currently set to ${process.env.GITLAB_HOST}\nConfigured remotes: .`,
-      );
-    fail("this fake opens merge requests through the API only");
-  }
-  const m = state.mrs.find((x) => x.iid === Number(args[0]));
-  if (!m) fail(`no merge request ${args[0]}`);
-  const head = () => git("rev-parse", `refs/heads/${m.source_branch}`);
-  if (verb === "view") {
-    const sha = m.state === "opened" ? head() : m.sha;
-    let status = m.detailed_merge_status;
-    if (!status) {
-      try {
-        git("merge-base", "--is-ancestor", `refs/heads/${m.target_branch}`, sha);
-        status = "mergeable";
-      } catch {
-        status = "need_rebase";
-      }
-    }
-    const pipeline = [...state.pipelines].reverse().find((p) => p.sha === sha);
-    return out({
-      iid: m.iid,
-      state: m.state,
-      draft: m.draft ?? false,
-      detailed_merge_status: status,
-      has_conflicts: status === "conflict",
-      sha,
-      merge_commit_sha: m.merge_commit_sha ?? null,
-      squash_commit_sha: null,
-      head_pipeline: pipeline ? { id: pipeline.id, status: pipeline.status } : null,
-      web_url: m.web_url,
-    });
-  }
-  if (verb === "update") {
-    if (rest.includes("--ready")) Object.assign(m, { draft: false, title: m.title.replace(/^draft:\s*/i, "") });
-    if (rest.includes("--description-file")) m.description = stdin;
-    return save();
-  }
-  if (verb === "merge") {
-    if (!rest.includes("--auto-merge=false")) fail("yagura must not leave GitLab to merge on its own");
-    if (m.draft) fail("Merge request is still a draft");
-    const sha = head();
-    if (flag("--sha") !== sha) fail("SHA does not match HEAD of source branch");
-    // A merge commit whose first parent is the target, as a GitLab project with the default merge method makes.
-    const env = {
-      ...process.env,
-      GIT_AUTHOR_NAME: "GitLab",
-      GIT_AUTHOR_EMAIL: "gitlab@example.com",
-      GIT_COMMITTER_NAME: "GitLab",
-      GIT_COMMITTER_EMAIL: "gitlab@example.com",
-    };
-    const merged = execFileSync(
-      "git",
-      [
-        "--git-dir",
-        origin,
-        "commit-tree",
-        execFileSync("git", ["--git-dir", origin, "merge-tree", "--write-tree", `refs/heads/${m.target_branch}`, sha], { encoding: "utf8" }).split("\n")[0],
-        "-p",
-        `refs/heads/${m.target_branch}`,
-        "-p",
-        sha,
-        "-m",
-        flag("--message") ?? `Merge branch '${m.source_branch}' into '${m.target_branch}'`,
-      ],
-      { encoding: "utf8", env },
-    ).trim();
-    git("update-ref", `refs/heads/${m.target_branch}`, merged);
-    Object.assign(m, { state: "merged", merge_commit_sha: merged, sha });
-    return save();
-  }
-  if (verb === "close") {
-    Object.assign(m, { state: "closed", sha: head() });
-    return save();
-  }
-  fail(`unknown verb ${verb}`);
+  // yagura talks to GitLab through glab api only, since glab's own mr flags differ between glab versions.
+  if (group !== "api") fail(`unknown command "${group}" for "glab": this fake serves glab api only`);
+  api();
 });
+
+const DRAFT = /^\s*(\[draft\]|\(draft\)|draft:|draft)\s*/i;
+
+// GET projects/:id/merge_requests/:iid, in GitLab's shape.
+function view(m) {
+  const sha = m.state === "opened" ? git("rev-parse", `refs/heads/${m.source_branch}`) : m.sha;
+  let status = m.detailed_merge_status;
+  if (!status) {
+    try {
+      git("merge-base", "--is-ancestor", `refs/heads/${m.target_branch}`, sha);
+      status = "mergeable";
+    } catch {
+      status = "need_rebase";
+    }
+  }
+  const pipeline = [...state.pipelines].reverse().find((p) => p.sha === sha);
+  return {
+    iid: m.iid,
+    title: m.title,
+    state: m.state,
+    draft: DRAFT.test(m.title),
+    detailed_merge_status: status,
+    has_conflicts: status === "conflict",
+    sha,
+    merge_commit_sha: m.merge_commit_sha ?? null,
+    squash_commit_sha: null,
+    head_pipeline: pipeline ? { id: pipeline.id, status: pipeline.status } : null,
+    web_url: m.web_url,
+  };
+}
+
+function merge(m, body) {
+  if (body.merge_when_pipeline_succeeds || body.auto_merge) fail("yagura must not leave GitLab to merge on its own");
+  if (DRAFT.test(m.title)) fail("glab: 405 Method Not Allowed: a draft merge request cannot be merged");
+  const sha = git("rev-parse", `refs/heads/${m.source_branch}`);
+  if (body.sha !== sha) fail("glab: 409 Conflict: SHA does not match HEAD of source branch");
+  // A merge commit whose first parent is the target, as a GitLab project with the default merge method makes.
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: "GitLab",
+    GIT_AUTHOR_EMAIL: "gitlab@example.com",
+    GIT_COMMITTER_NAME: "GitLab",
+    GIT_COMMITTER_EMAIL: "gitlab@example.com",
+  };
+  const tree = execFileSync("git", ["--git-dir", origin, "merge-tree", "--write-tree", `refs/heads/${m.target_branch}`, sha], { encoding: "utf8" }).split(
+    "\n",
+  )[0];
+  const message = body.merge_commit_message ?? `Merge branch '${m.source_branch}' into '${m.target_branch}'`;
+  const merged = execFileSync("git", ["--git-dir", origin, "commit-tree", tree, "-p", `refs/heads/${m.target_branch}`, "-p", sha, "-m", message], {
+    encoding: "utf8",
+    env,
+  }).trim();
+  git("update-ref", `refs/heads/${m.target_branch}`, merged);
+  Object.assign(m, { state: "merged", merge_commit_sha: merged, sha });
+  return out(view(m));
+}
 
 function api() {
   const method = (flag("--method") ?? "GET").toUpperCase();
@@ -134,10 +105,13 @@ function api() {
   const parts = route.split("/").map(decodeURIComponent);
   // projects/<path>/...
   const mrAt = parts.indexOf("merge_requests");
+  if (mrAt > 0 && parts.length === mrAt + 1 && method === "GET") {
+    const q = new URLSearchParams(query);
+    return out(state.mrs.filter((m) => m.source_branch === q.get("source_branch") && (!q.get("state") || m.state === q.get("state"))).map((m) => view(m)));
+  }
   if (mrAt > 0 && parts.length === mrAt + 1 && method === "POST") {
     const iid = state.mrs.length + 1;
     const web_url = `https://${process.env.GITLAB_HOST}/${parts[mrAt - 1]}/-/merge_requests/${iid}`;
-    const draft = /^(draft:|\[draft\]|\(draft\))/i.test(body.title);
     state.mrs.push({
       iid,
       web_url,
@@ -145,16 +119,23 @@ function api() {
       target_branch: body.target_branch,
       title: body.title,
       description: body.description,
-      draft,
       state: "opened",
       discussions: [],
     });
-    return out({ iid, web_url, draft, title: body.title });
+    return out(view(state.mrs.at(-1)));
   }
   if (mrAt > 0) {
     const m = state.mrs.find((x) => x.iid === Number(parts[mrAt + 1]));
     if (!m) fail(`404 merge request ${parts[mrAt + 1]}`);
     const tail = parts.slice(mrAt + 2);
+    if (!tail.length && method === "GET") return out(view(m));
+    if (!tail.length && method === "PUT") {
+      if (body.title !== undefined) m.title = body.title;
+      if (body.description !== undefined) m.description = body.description;
+      if (body.state_event === "close") Object.assign(m, { state: "closed", sha: git("rev-parse", `refs/heads/${m.source_branch}`) });
+      return out(view(m));
+    }
+    if (tail[0] === "merge" && method === "PUT") return merge(m, body);
     if (tail[0] === "discussions" && tail.length === 1 && method === "GET") return out(m.discussions);
     if (tail[0] === "notes" && method === "POST") {
       const note = { id: Date.now(), body: body.body, system: false, author: { username: "yagura-bot" } };
